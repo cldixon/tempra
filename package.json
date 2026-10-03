@@ -17,6 +17,7 @@
     "seed": "bun run --filter worker seed",
     "gate": "bun run --filter worker gate",
     "logs": "bun run --filter worker logs",
+    "preview": "bun run --filter worker preview",
     "admin": "bun run --filter worker admin"
   },
   "devDependencies": {

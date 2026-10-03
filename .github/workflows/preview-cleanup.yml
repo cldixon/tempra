@@ -1,0 +1,59 @@
+name: Preview cleanup
+
+# Tears down PR previews (tempra-dev library: delivery/preview-deployments): the closed PR's at
+# once, and nightly any preview whose PR is no longer open, catching teardowns that failed.
+on:
+  pull_request:
+    types: [closed]
+  schedule:
+    - cron: "17 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+env:
+  CF_SEND_TELEMETRY: "false"
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+jobs:
+  down:
+    name: Tear down the PR's preview
+    if: >-
+      github.event_name == 'pull_request' && vars.PREVIEWS == 'on' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # Shared with the preview job in ci.yml: closing the PR cancels a deploy still running.
+    concurrency:
+      group: preview-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      - working-directory: worker
+        run: bun run preview down --pr ${{ github.event.pull_request.number }}
+
+  sweep:
+    name: Tear down previews of closed PRs
+    if: github.event_name != 'pull_request' && vars.PREVIEWS == 'on'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      - name: Sweep
+        working-directory: worker
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          open=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 500 --json number --jq '[.[].number] | join(",")')
+          bun run preview sweep --keep "$open"

@@ -4,7 +4,7 @@
  * With --remote it writes to the deployed D1 instead.
  *
  *   bun run seed [--slug dev] [--actor claude-code/local] [--scope write] [--prefix notes]
- *                [--persist-to .wrangler/state] [--remote] [--json]
+ *                [--email dev@localhost] [--persist-to .wrangler/state] [--remote] [--json]
  *
  * Local runs use the state `cf dev` uses (worker/.wrangler/state) unless --persist-to says otherwise.
  */
@@ -16,6 +16,8 @@ export interface SeedOptions {
   slug?: string;
   actor?: string;
   human?: string;
+  /** The seeded account's email (default dev@localhost); previews use the operator's. */
+  email?: string;
   scope?: "read" | "write";
   prefix?: string | null;
   persistTo?: string;
@@ -45,13 +47,14 @@ export async function seed(opts: SeedOptions = {}): Promise<Seeded> {
   const human = opts.human ?? "human:dev";
   const handle = human.slice("human:".length);
   const scope = opts.scope ?? "write";
+  const email = opts.email ?? "dev@localhost";
   const now = new Date().toISOString();
   await applyMigrations(where(opts));
 
   const secret = newTokenSecret();
   const libraryId = `lib_${crypto.randomUUID()}`;
   const sql = [
-    `INSERT OR IGNORE INTO users (id, email, actor, handle, created) VALUES ('user_dev', 'dev@localhost', ${q(human)}, ${q(handle)}, ${q(now)});`,
+    `INSERT OR IGNORE INTO users (id, email, actor, handle, created) VALUES ('user_dev', ${q(email)}, ${q(human)}, ${q(handle)}, ${q(now)});`,
     `INSERT OR IGNORE INTO libraries (id, slug, owner, visibility, created, do_id) VALUES (${q(libraryId)}, ${q(slug)}, 'user_dev', 'private', ${q(now)}, ${q(libraryId)});`,
     `INSERT OR IGNORE INTO tokens (id, hash, library, actor, scope, prefix, created_by) VALUES (${q(`tok_${crypto.randomUUID()}`)}, ${q(hashToken(secret))}, (SELECT id FROM libraries WHERE owner = 'user_dev' AND slug = ${q(slug)}), ${q(actor)}, ${q(scope)}, ${q(opts.prefix ?? null)}, 'user_dev');`,
   ].join(" ");
@@ -75,6 +78,7 @@ if (import.meta.main) {
       prefix: { type: "string" },
       "persist-to": { type: "string" },
       remote: { type: "boolean" },
+      email: { type: "string" },
       json: { type: "boolean" },
     },
   });
@@ -85,6 +89,7 @@ if (import.meta.main) {
     prefix: values.prefix ?? null,
     persistTo: values["persist-to"],
     remote: values.remote,
+    email: values.email,
   });
   if (values.json) console.log(JSON.stringify(s));
   else {

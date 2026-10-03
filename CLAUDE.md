@@ -1,14 +1,17 @@
 # CLAUDE.md
 
 ## Spec
-The spec is a live Claude Doc and is the single source of truth:
-**OKF Knowledge Service — Spec** — https://claude.ai/artifact/KMuKyyFBSJHzukyEGqvUDn
+The source of truth for Tempra's design, decisions and current state is the Tempra library
+**`cl_dixon/tempra-dev`**, read and written over the Tempra MCP tools (`start` with
+`library: "cl_dixon/tempra-dev"`). Its `guide.md` says what belongs there; `v2/` is the managed
+service as built, `delivery/` is CI/CD, `decisions/` records why, `process/workflow.md` is how a
+change goes from a Linear issue to production. Read the concepts a feature touches before starting
+on it. When implementation shows a concept is wrong, update the concept first, then the code.
 
-The managed-service work (accounts, magic-link sign-in, tenancy, then sharing) is specified in a
-companion doc that builds on it: **OKF Service — v2 Spec (managed service)** —
-https://claude.ai/code/artifact/cea3e8c6-4161-4f53-aa6d-54093bc7ed75
-
-Read them with the Docs tools before starting on a feature. There is no markdown copy in this repo; do not add one. When implementation shows the spec is wrong, update the doc first, then the code.
+OKF semantics, the store, the ledger and the MCP tools are still specified in the v1 Claude Doc,
+**OKF Knowledge Service — Spec** (https://claude.ai/artifact/KMuKyyFBSJHzukyEGqvUDn), until they are
+carried over. The v2 Claude Doc is retired (carried over at rev 20). There is no markdown copy of
+either in this repo; do not add one.
 
 ## UI
 Until the design pass, every page is plain HTML with browser defaults: white background, black text, blue links. No stylesheets, inline styles or scripts (the CSP has no `style-src`), and as little text as works: headings, labels, links, short sentences. Class attributes may stay as hooks for the later design pass. This applies to every page, new or old.
@@ -30,6 +33,7 @@ Until the design pass, every page is plain HTML with browser defaults: white bac
 | `bun run deploy` | Apply D1 migrations (database ID from `cloudflare.config.ts`), then `cf deploy`; `--dry-run` builds and validates only; `--mode staging` deploys the staging Worker (its resource ids must be set first) |
 | `bun run seed` | Create a local user (`dev@localhost`, handle `dev`), library (`dev/dev`) and write token in the local D1; prints the token. From `worker/`, `bun run seed --slug x --actor y` for more |
 | `bun run admin` | Accounts on D1 (local, or `--remote`): `users`, `transfer --library <owner>/<slug> --to <email>`, `suspend --email <email> [--undo]`, `limits --email <email> [--set libraries=10] [--reset]`, `invite`/`uninvite --email <email>`, `waitlist`, `rename --email <email> --handle <handle>` (reserved handles allowed) |
+| `bun run preview` | PR previews (`tempra-pr-N` on `pr-N.tempra.dev`, own D1, R2, KV): `up --pr N [--email E]` creates what is missing, migrates, deploys, seeds the samples and runs the MCP smoke; `down --pr N` deletes it all; `sweep --keep 3,7` tears down every preview whose PR is not listed; `--dry-run` on `down`/`sweep` lists only. CI runs it; creating resources by hand needs the operator's go-ahead |
 | `bun run logs` | Recent events from Workers Observability via `cf observability telemetry query` (`--minutes`, `--errors`, `--json`) |
 | `bun run gate` | Gate: boots `cf dev` on fresh state (a throwaway project in `worker/.gate/`), round-trips Google's sample bundles over HTTP, renders every UI page for them (signed in by a dev magic link), runs the nightly export through the DO into local R2, checks a restore is refused cleanly (no PITR locally), signs up a second account that must see nothing of the first, has a fresh account go through first run, connect over OAuth with PKCE, write through MCP and delete its library, runs the daily sweep through the scheduled handler, and runs the MCP smoke flow; also runs in CI |
 
@@ -64,7 +68,7 @@ worker/src/store/        Library schema and LibraryStore (writes, ledger, snapsh
 worker/src/util/tar.ts   Tar reader and writer for import and export
 worker/src/mcp/server.ts MCP server at /mcp: stateless Streamable HTTP, tier 1 and tier 2 tools, okf:// resources
 worker/cloudflare.config.ts  The Worker for cf: bindings, Durable Object exports, compatibility
-worker/scripts/          cf.ts (runs cf, reads the config), deploy.ts, logs.ts, seed.ts (`bun run seed`), admin.ts (`bun run admin`), gate.ts (`bun run gate`), mcp-smoke.ts (MCP flow against any URL), restore-smoke.ts (PITR restore and undo against a deployed Worker)
+worker/scripts/          cf.ts (runs cf, reads the config), deploy.ts, logs.ts, seed.ts (`bun run seed`), admin.ts (`bun run admin`), gate.ts (`bun run gate`), preview.ts (`bun run preview`), mcp-smoke.ts (MCP flow against any URL), restore-smoke.ts (PITR restore and undo against a deployed Worker)
 worker/migrations/       D1 migrations (account layer)
 worker/test/             bun tests; worker/test/tsconfig.json adds bun types
 skills/okf/SKILL.md      Agent skill doc: the OKF workflow over the MCP tools
@@ -85,7 +89,7 @@ fixtures/                Google's four sample OKF bundles, vendored unchanged; d
 - Remote resources: Worker `tempra` on `app.tempra.dev` (custom domain; `workers.dev` is off), D1 `tempra-accounts` (id in `cloudflare.config.ts`), R2 bucket `tempra-blobs`, KV `tempra-oauth`. Do not create or delete remote resources without asking.
 - Tokens and libraries are managed at `/tokens` and `/` (or `/api/v1/tokens` and `/api/v1/libraries` with a `human:` token). `bun run seed --remote` (from `worker/`) still creates a library and token directly in the deployed D1.
 - KV `tempra-oauth` (binding `OAUTH_KV`) holds OAuth clients and grants. The UI signs people in by email link only (Access was removed at the A4 cut-over); `SIGNUP` (a config var: `invite` in production and staging) decides who may create an account, and `bun run admin invite` manages the list. Local dev uses `DEV_SIGNIN=1` and `SIGNUP=open` from `worker/.dev.vars` (copy `worker/.dev.vars.sample`): sign-in links show on the page for localhost.
-- `cloudflare.config.ts` is a function of `--mode`: production by default, `staging` for a separate Worker (`tempra-staging` on `staging.tempra.dev`) with its own D1 `tempra-accounts-staging`, R2 `tempra-blobs-staging` and KV `tempra-oauth-staging`. Scripts pick the mode from `TEMPRA_MODE`. With no mode (`cf dev`, `cf workers types`, a bare dry run) no custom domain is attached; `bun run deploy` defaults to `--mode production`.
+- `cloudflare.config.ts` is a function of `--mode`: production by default, `staging` for a separate Worker (`tempra-staging` on `staging.tempra.dev`) with its own D1 `tempra-accounts-staging`, R2 `tempra-blobs-staging` and KV `tempra-oauth-staging`, and `preview` for PR N (`previewDeployment`: `tempra-pr-N` on `pr-N.tempra.dev` with `-pr-N` resources, ids from `TEMPRA_PR`, `TEMPRA_PREVIEW_D1_ID`, `TEMPRA_PREVIEW_KV_ID`; no cron; metering to `tempra_usage_preview`). Scripts pick the mode from `TEMPRA_MODE`. With no mode (`cf dev`, `cf workers types`, a bare dry run) no custom domain is attached; `bun run deploy` defaults to `--mode production`.
 - Mail goes through Cloudflare Email Service: the `EMAIL` binding is added only when `mailFrom` is set for a deployment in `cloudflare.config.ts`, which needs a sending domain onboarded in Cloudflare. Production sends from `noreply@mail.tempra.dev` (`mail.tempra.dev` is onboarded); local dev with `DEV_SIGNIN=1` still shows links on the page instead of mailing them. `OPERATOR_EMAIL` (a Worker secret, so the address stays out of the repo) receives the daily digest.
 - Rate limits are `WRITE_LIMITER` (60 writes a minute per account) and `REQUEST_LIMITER` (600 requests a minute per token or app); metering writes to the Analytics Engine dataset `tempra_usage`; storage per library is `LIBRARY_STORAGE_MB`.
 - Naming: the product is Tempra (repository `cldixon/tempra`, `tempra.dev`); OKF names only the file format. The former `okf-service` Workers and their resources were moved and deleted (v2 spec: Move to tempra.dev). Don't introduce `okf-tool`/`okf-service` names.
@@ -93,3 +97,10 @@ fixtures/                Google's four sample OKF bundles, vendored unchanged; d
 
 ## CI
 `.github/workflows/ci.yml` runs on PRs and pushes to `main`: `bun run check`, `bun run gate` (cf dev, sample-bundle round-trip, UI pages, MCP smoke), and a standalone build of `worker/` copied alone (`cf deploy --dry-run`). All must pass before merging.
+
+CD (tempra-dev: `delivery/ci-cd.md`) runs after those three, each stage off until its repository variable is `on`:
+- `PREVIEWS`: the `preview` job brings up PR N's preview and comments its URL; `preview-cleanup.yml` tears it down when the PR closes and sweeps leftovers nightly.
+- `STAGING_DEPLOYS`: every push to `main` deploys staging and checks it (`/healthz`, MCP smoke with secret `STAGING_MCP_TOKEN` if set).
+- `PRODUCTION_DEPLOYS`: then production, after approval in the GitHub Environment `production` (configure its required reviewer before turning this on).
+
+Secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `PREVIEW_EMAIL` (the operator, seeded as each preview's account), optional `STAGING_MCP_TOKEN`, `PRODUCTION_MCP_TOKEN` (read-only smoke).

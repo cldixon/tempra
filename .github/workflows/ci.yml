@@ -9,10 +9,11 @@ on:
 permissions:
   contents: read
 
-# A newer push to the same branch or PR supersedes the running checks.
+# A newer push to a PR supersedes its running checks. Pushes to main run to the end, so a deploy
+# is never cut off halfway.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   check:
@@ -67,3 +68,128 @@ jobs:
           bun run typecheck
         env:
           CF_SEND_TELEMETRY: "false"
+
+  # CI/CD (tempra-dev library: delivery/ci-cd). Each stage is off until the operator turns it on
+  # with a repository variable, once its prerequisites exist: PREVIEWS, STAGING_DEPLOYS and
+  # PRODUCTION_DEPLOYS = on. Production also waits for approval in the `production` environment.
+
+  # PR #N's own Worker on pr-N.tempra.dev (delivery/preview-deployments). Not for forks: their
+  # runs get no secrets.
+  preview:
+    name: Preview deployment
+    needs: [check, gate, standalone]
+    if: >-
+      github.event_name == 'pull_request' && vars.PREVIEWS == 'on' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      pull-requests: write
+      deployments: write
+    # Shared with the teardown in preview-cleanup.yml: a newer push, or closing the PR, wins.
+    concurrency:
+      group: preview-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    environment:
+      name: preview
+      url: ${{ steps.up.outputs.url }}
+    env:
+      CF_SEND_TELEMETRY: "false"
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      TEMPRA_PREVIEW_EMAIL: ${{ secrets.PREVIEW_EMAIL }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      - id: up
+        working-directory: worker
+        run: bun run preview up --pr ${{ github.event.pull_request.number }}
+      - name: Comment the URL on the PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          URL: ${{ steps.up.outputs.url }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          marker="<!-- tempra-preview -->"
+          body="Preview: $URL (at ${SHA:0:7}). Torn down when this PR closes.
+          $marker"
+          id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
+            --jq ".[] | select(.body | contains(\"$marker\")) | .id" | head -n 1)
+          if [ -n "$id" ]; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/issues/comments/$id" -f body="$body" > /dev/null
+          else
+            gh pr comment "$PR" --repo "$GITHUB_REPOSITORY" --body "$body"
+          fi
+
+  # Every merge to main: migrations, deploy, then a check against the live staging Worker.
+  staging:
+    name: Deploy staging
+    needs: [check, gate, standalone]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.STAGING_DEPLOYS == 'on'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: deploy-staging
+      cancel-in-progress: false
+    environment:
+      name: staging
+      url: https://staging.tempra.dev
+    env:
+      CF_SEND_TELEMETRY: "false"
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      SMOKE_TOKEN: ${{ secrets.STAGING_MCP_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      - working-directory: worker
+        run: bun run deploy --mode staging --message "${{ github.sha }}"
+      - name: Check staging
+        working-directory: worker
+        run: |
+          curl -fsS --retry 10 --retry-delay 6 --retry-all-errors https://staging.tempra.dev/healthz
+          if [ -n "$SMOKE_TOKEN" ]; then
+            bun scripts/mcp-smoke.ts --url https://staging.tempra.dev --token "$SMOKE_TOKEN"
+          fi
+
+  # After staging, a person approves in the `production` environment (required reviewer).
+  production:
+    name: Deploy production
+    needs: [staging]
+    if: vars.PRODUCTION_DEPLOYS == 'on'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    environment:
+      name: production
+      url: https://app.tempra.dev
+    env:
+      CF_SEND_TELEMETRY: "false"
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      SMOKE_TOKEN: ${{ secrets.PRODUCTION_MCP_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      - working-directory: worker
+        run: bun run deploy --mode production --message "${{ github.sha }}"
+      - name: Check production
+        working-directory: worker
+        run: |
+          curl -fsS --retry 10 --retry-delay 6 --retry-all-errors https://app.tempra.dev/healthz
+          if [ -n "$SMOKE_TOKEN" ]; then
+            bun scripts/mcp-smoke.ts --url https://app.tempra.dev --token "$SMOKE_TOKEN" --read-only
+          fi

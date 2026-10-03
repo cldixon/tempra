@@ -11,7 +11,8 @@
     "seed": "bun scripts/seed.ts",
     "gate": "bun scripts/gate.ts",
     "logs": "bun scripts/logs.ts",
-    "admin": "bun scripts/admin.ts"
+    "admin": "bun scripts/admin.ts",
+    "preview": "bun scripts/preview.ts"
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "^1.2.1",
