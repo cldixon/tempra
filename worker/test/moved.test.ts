@@ -1,6 +1,7 @@
 import { describe, expect, mock, test } from "bun:test";
 
-mock.module("cloudflare:workers", () => ({ DurableObject: class {} }));
+// `cloudflare:workers` only exists inside workerd; the same stub as healthz.test.ts.
+mock.module("cloudflare:workers", () => ({ DurableObject: class {}, WorkerEntrypoint: class {} }));
 const { default: moved } = await import("../src/moved");
 
 describe("the former Worker after the move (v2 spec: Move to tempra.dev)", () => {
