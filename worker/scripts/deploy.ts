@@ -7,8 +7,10 @@
  *   bun run deploy [--mode staging] [--dry-run] [--message <text>] [...]
  */
 const args = process.argv.slice(2);
+// Production unless told otherwise; the custom domain is attached only with an explicit mode.
+if (!args.includes("--mode")) args.push("--mode", "production");
 const i = args.indexOf("--mode");
-if (i !== -1 && args[i + 1]) process.env.TEMPRA_MODE = args[i + 1];
+if (args[i + 1]) process.env.TEMPRA_MODE = args[i + 1];
 // Imported after TEMPRA_MODE is set: it reads the config for that deployment.
 const { accountsDb, applyMigrations, WORKER_DIR } = await import("./cf");
 

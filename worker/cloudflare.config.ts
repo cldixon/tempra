@@ -55,11 +55,14 @@ export const STAGING: Deployment = {
 export function parseMode(mode: string | undefined): {
   d: Deployment;
   phase: "receive" | "forward" | undefined;
+  /** No mode: local dev (`cf dev`), type generation and dry runs. */
+  local: boolean;
 } {
   const [env, phase] = (mode ?? "").split(":");
   const d = env === "staging" ? STAGING : PRODUCTION;
-  if (!phase) return { d, phase: undefined };
-  if (phase === "receive" || phase === "forward") return { d, phase };
+  const local = !env;
+  if (!phase) return { d, phase: undefined, local };
+  if (phase === "receive" || phase === "forward") return { d, phase, local };
   throw new Error(`Unknown move phase ${phase} (receive or forward).`);
 }
 
@@ -90,7 +93,7 @@ function forward(d: Deployment) {
 }
 
 export default defineConfig(({ mode }) => {
-  const { d, phase } = parseMode(mode);
+  const { d, phase, local } = parseMode(mode);
   if (!d.d1.id || !d.kv) {
     throw new Error(
       `The ${d.name} deployment's D1 and KV ids are not set in cloudflare.config.ts.`,
@@ -98,19 +101,20 @@ export default defineConfig(({ mode }) => {
   }
   // Binding types (`cf workers types`) come from the serving config below, not the forwarder's.
   if (phase === "forward") return forward(d) as unknown as ReturnType<typeof serve>;
-  return serve(d, phase !== "receive");
+  return serve(d, phase !== "receive", local);
 });
 
 /** The Worker; `serving` false is move step 2 (receive): no LIBRARY binding, cron or domain yet. */
-function serve(d: Deployment, serving: boolean) {
+function serve(d: Deployment, serving: boolean, local: boolean) {
   return {
     worker: {
       name: d.name,
       entrypoint: "src/index.ts",
       ...COMPATIBILITY,
 
-      // One host per deployment (v2 spec: Operations); no workers.dev, so no second origin.
-      domains: serving ? [d.host] : [],
+      // One host per deployment (v2 spec: Operations); no workers.dev, so no second origin. Only
+      // with an explicit --mode: `cf dev` would otherwise send local requests to the domain.
+      domains: serving && !local ? [d.host] : [],
       workersDev: false,
 
       // The daily blob sweep and operator digest (v2 spec: A3), after the libraries' 03:00 exports.
