@@ -19,7 +19,7 @@ Every write is attributed to your token's actor and recorded in a ledger. Nothin
 
 ## Reading: progressive disclosure
 
-1. `start` once per session: the root index, counts by type, open work, and house rules.
+1. `start` once per session: the root index, counts by type, open work, and house rules. If your connection reaches several libraries, `start` lists them; open one with `start` and `library` (`owner/slug`), then pass the same `library` on every call.
 2. `browse` a directory to see its concepts' titles and descriptions before opening any.
 3. `read` the concept you need. Look at the header first: trust tier, `stale`, `status`, lint, inbound links. Then read the frontmatter, then the body.
 4. Follow links to related concepts rather than guessing paths. Use `search` (ranked) or `grep` (exact text) when you do not know where something is.
@@ -101,9 +101,9 @@ Split when a concept covers more than one idea, mixes definitions with procedure
 
 ## Connecting
 
-The server speaks MCP over Streamable HTTP at `https://app.tempra.dev/mcp`. Each connection reaches one library.
+The server speaks MCP over Streamable HTTP at `https://app.tempra.dev/mcp`. An app connection reaches the libraries its approver chose (all of the account's, or a selection); a bearer token reaches one library.
 
-- **claude.ai, ChatGPT and other apps:** add the URL as a custom connector and approve it in the browser (OAuth; the approver picks the library, read or write access, and the name your changes carry).
+- **claude.ai, ChatGPT and other apps:** add the URL as a custom connector and approve it in the browser (OAuth; the approver picks all libraries or selected ones, read or write access, and the name your changes carry).
 - **Claude Code and scripts:** use a bearer token, minted by a human on the service's Tokens page (`https://app.tempra.dev/tokens`):
 
 ```sh
@@ -111,4 +111,4 @@ claude mcp add --transport http tempra https://app.tempra.dev/mcp \
   --header "Authorization: Bearer <token>"
 ```
 
-To use two libraries, add two connections.
+With a bearer token, use two libraries by adding two connections.

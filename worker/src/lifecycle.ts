@@ -25,10 +25,16 @@ export async function deleteLibrary(
   user: Pick<User, "id">,
   ref: LibraryRef,
 ): Promise<void> {
+  // A connection that selected only this library (or, before account-level access, was bound
+  // to it) has nothing left to reach. Connections to all libraries stay.
+  const remaining = new Set((await deps.accounts.libraries(user.id)).map((l) => l.id));
+  remaining.delete(ref.id);
   for (const g of await grantsOf(oauth, user.id)) {
-    if ((g.metadata as { library?: string } | undefined)?.library === ref.slug) {
-      await oauth.revokeGrant(g.id, user.id);
-    }
+    const m = g.metadata as { library?: string; libraries?: "all" | string[] } | undefined;
+    const orphaned = Array.isArray(m?.libraries)
+      ? !m.libraries.some((id) => remaining.has(id))
+      : m?.libraries === undefined && m?.library === ref.slug;
+    if (orphaned) await oauth.revokeGrant(g.id, user.id);
   }
   await deps.accounts.deleteLibrary(ref.id);
   await deps.destroyLibrary?.(ref.do_id);

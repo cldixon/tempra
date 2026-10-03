@@ -10,8 +10,13 @@ import { OkfError } from "../store/errors";
 import type { RequestContext, WriteOp, WriteResult } from "../store/store";
 
 export interface McpContext {
-  token: TokenInfo;
-  lib: LibraryClient;
+  /** The ledger actor, access and tool tier: the same in every library the caller reaches. */
+  actor: string;
+  scope: "read" | "write";
+  tiers: string;
+  /** The libraries the caller reaches now, each as the token it acts with there. */
+  libraries: TokenInfo[];
+  open(token: TokenInfo): LibraryClient;
   blobs: BlobStore;
   /** The Worker's origin, for download URLs. */
   origin: string;
@@ -25,10 +30,10 @@ export const URI_SCHEME = "okf";
 const BEYOND = "Beyond files: ";
 
 /** Compressed workflow guidance, sent as the server's instructions (most clients never load a skill). */
-export const INSTRUCTIONS = `This server is one OKF (Open Knowledge Format) library: a tree of markdown concepts with YAML frontmatter, plus attachments. Every change is attributed to your token's actor and recorded in a ledger.
+export const INSTRUCTIONS = `This server holds OKF (Open Knowledge Format) libraries: each a tree of markdown concepts with YAML frontmatter, plus attachments. Every change is attributed to your actor and recorded in the library's ledger.
 
 How to work:
-1. Call \`start\` first. Then \`browse\` a directory before reading, follow links, and \`read\` what you need. Check frontmatter (type, status, trust tier, stale) before relying on a body.
+1. Call \`start\` first. It opens your library, or lists the libraries you can reach when there are several; then pass \`library\` (owner/slug) on every call. Then \`browse\` a directory before reading, follow links, and \`read\` what you need. Check frontmatter (type, status, trust tier, stale) before relying on a body.
 2. Write conformant concepts: a non-empty \`type\` naming what kind of thing it is (Metric, Protocol, Decision; never a generic word like concept, page or note, and reuse the types \`start\` lists), a \`title\` and one-line \`description\`, absolute links like [x](/dir/x.md), footnotes [^id] keyed to \`sources[].id\`, one idea per concept.
 3. Prefer \`edit\` for small changes, \`write\` for new concepts or rewrites, \`batch\` for related changes so they land as one request. Pass \`if_match\` (the hash from your last read); on a conflict, re-read and reapply.
 4. Put a one-line \`note\` on every write. Read the \`lint\` in every write result and fix what it reports. Keep concepts under 100 KB; split big ones into linked concepts.
@@ -83,21 +88,67 @@ const BatchOpSchema = z.object({
   if_match: z.string().optional().describe("write (replace), edit, delete: the current hash."),
 });
 
+const LIBRARY_ARG =
+  "The library, as owner/slug from `start` (a bare slug works when it is unique). Needed only when you can reach more than one.";
+
+const libraryList = (libs: TokenInfo[]) =>
+  libs.map((t) => `${t.library.owner}/${t.library.slug}`).join(", ");
+
 export function buildServer(ctx: McpContext): McpServer {
-  const { token, lib } = ctx;
-  const tier2 = token.mcp_tiers !== "files";
+  const tier2 = ctx.tiers !== "files";
+  const libArg = { library: z.string().optional().describe(LIBRARY_ARG) };
   const server = new McpServer(
     { name: SERVER_NAME, version: "0.2.0" },
     { instructions: INSTRUCTIONS, capabilities: { tools: {}, resources: {} } },
   );
 
+  /** The library a call names, or the only one there is. */
+  const pick = (name?: string): { token: TokenInfo; lib: LibraryClient } => {
+    const libs = ctx.libraries;
+    if (libs.length === 0) {
+      throw new OkfError(
+        404,
+        "no_library",
+        `This connection reaches no libraries yet. Create one at ${ctx.origin}/ or reconnect and choose one.`,
+      );
+    }
+    const want = (name ?? "")
+      .trim()
+      .replace(/^\/+|\/+$/g, "")
+      .toLowerCase();
+    if (want === "" && libs.length > 1) {
+      throw new OkfError(
+        400,
+        "library_required",
+        `You can reach ${libs.length} libraries; pass library, one of: ${libraryList(libs)}.`,
+      );
+    }
+    const bySlug = libs.filter((t) => t.library.slug === want);
+    const found =
+      want === ""
+        ? libs[0]
+        : want.includes("/")
+          ? libs.find((t) => `${t.library.owner}/${t.library.slug}` === want)
+          : bySlug.length === 1
+            ? bySlug[0]
+            : undefined;
+    if (!found) {
+      throw new OkfError(
+        404,
+        "no_library",
+        `There is no library ${name} here; you can reach: ${libraryList(libs)}.`,
+      );
+    }
+    return { token: found, lib: ctx.open(found) };
+  };
+
   const request = (note?: string): RequestContext => ({
-    actor: token.actor,
+    actor: ctx.actor,
     request_id: crypto.randomUUID(),
     note: note ?? null,
   });
 
-  const checkWrite = (...paths: string[]) => {
+  const checkWrite = (token: TokenInfo, ...paths: string[]) => {
     if (token.scope !== "write") throw new OkfError(403, "read_only", "This token is read-only.");
     if (token.prefix === null) return;
     for (const p of paths) {
@@ -121,7 +172,10 @@ export function buildServer(ctx: McpContext): McpServer {
       }
     };
 
-  const downloadUrl = async (payload: Parameters<LibraryClient["signDownload"]>[0]) =>
+  const downloadUrl = async (
+    { token, lib }: ReturnType<typeof pick>,
+    payload: Parameters<LibraryClient["signDownload"]>[0],
+  ) =>
     `${ctx.origin}/dl/${encodeURIComponent(token.library.do_id)}/${await lib.signDownload(payload)}`;
 
   const readOnly = { readOnlyHint: true, openWorldHint: false };
@@ -129,27 +183,52 @@ export function buildServer(ctx: McpContext): McpServer {
 
   // ------------------------------------------------------------------ tier 1: file-equivalent
 
+  const you = () =>
+    `You are ${ctx.actor} (${ctx.scope}${ctx.libraries[0]?.prefix ? `, under ${ctx.libraries[0].prefix}/` : ""}). Tools: ${tier2 ? "file tools and beyond-files tools" : "file tools only"}.`;
+
   server.registerTool(
     "start",
     {
       title: "Start here",
       description:
-        "Call this first in every session. Returns the library's root index.md (what is here, one level down), counts by concept type, the number of open work items, and how to work in this library.",
+        "Call this first in every session. Opens a library: its root index.md (what is here, one level down), counts by concept type, the number of open work items, and how to work in it. When you can reach several libraries and pass no `library`, lists them instead.",
+      inputSchema: libArg,
       annotations: readOnly,
     },
-    guarded(async () => {
+    guarded(async ({ library }) => {
+      if (!library && ctx.libraries.length !== 1) {
+        if (ctx.libraries.length === 0) pick();
+        return text(
+          [
+            `# Your libraries (${ctx.libraries.length})`,
+            "",
+            you(),
+            "",
+            ...ctx.libraries.map((t) => `- ${t.library.owner}/${t.library.slug}`),
+            "",
+            "Call `start` with `library` to open one, and pass the same `library` on every other call.",
+          ].join("\n"),
+        );
+      }
+      const { token, lib } = pick(library);
       const [summary, root] = await Promise.all([lib.summary(), lib.read("index.md")]);
       const types = Object.entries(summary.types)
         .sort((a, b) => b[1] - a[1])
         .map(([t, n]) => `${t} ${n}`)
         .join(", ");
       const empty = summary.concepts + summary.attachments === 0;
+      const others = ctx.libraries.filter((t) => t !== token);
       const lines = [
-        `# Library ${token.library.slug} (seq ${summary.seq})`,
+        `# Library ${token.library.owner}/${token.library.slug} (seq ${summary.seq})`,
         "",
         `Concepts: ${summary.concepts} · attachments: ${summary.attachments} · open work items: ${summary.open_work}`,
         `Types: ${types || "none yet"}`,
-        `You are ${token.actor} (${token.scope}${token.prefix ? `, under ${token.prefix}/` : ""}). Tools: ${tier2 ? "file tools and beyond-files tools" : "file tools only"}.`,
+        you(),
+        ...(others.length > 0
+          ? [
+              `Other libraries you can reach: ${libraryList(others)}. Pass \`library\` on every call.`,
+            ]
+          : []),
         "",
         "## Root index.md",
         "",
@@ -182,10 +261,12 @@ export function buildServer(ctx: McpContext): McpServer {
         "One directory level, like `ls` plus `cat index.md`: subdirectories with concept counts, and concepts with their titles and descriptions. The index is synthesized by the server from the concepts' frontmatter. Omit `dir` for the root.",
       inputSchema: {
         dir: z.string().optional().describe("Directory path, e.g. `tables`. Omit for the root."),
+        ...libArg,
       },
       annotations: readOnly,
     },
-    guarded(async ({ dir }) => {
+    guarded(async ({ dir, library }) => {
+      const { lib } = pick(library);
       const d = normalizePath(dir ?? "") ?? "";
       const view = await lib.read(d ? `${d}/index.md` : "index.md");
       return text(view.kind === "derived" ? view.markdown : "");
@@ -207,6 +288,7 @@ export function buildServer(ctx: McpContext): McpServer {
             ),
         }
       : {}),
+    ...libArg,
   };
   server.registerTool(
     "read",
@@ -217,11 +299,12 @@ export function buildServer(ctx: McpContext): McpServer {
       inputSchema: readSchema,
       annotations: readOnly,
     },
-    guarded(async (args: { path: string; at?: number }) => {
-      const view = await lib.read(args.path, { at: args.at });
+    guarded(async (args: { path: string; at?: number; library?: string }) => {
+      const picked = pick(args.library);
+      const view = await picked.lib.read(args.path, { at: args.at });
       if (view.kind === "derived") return text(view.markdown);
       if (view.kind === "attachment") {
-        const url = await downloadUrl({
+        const url = await downloadUrl(picked, {
           k: "file",
           path: view.path,
           hash: view.hash,
@@ -267,11 +350,13 @@ export function buildServer(ctx: McpContext): McpServer {
           .optional()
           .describe("The current hash, to replace an existing concept."),
         note: z.string().optional().describe("One line for the ledger: why you made this change."),
+        ...libArg,
       },
       annotations: writes,
     },
-    guarded(async ({ path, content, if_match, note }) => {
-      checkWrite(path);
+    guarded(async ({ path, content, if_match, note, library }) => {
+      const { token, lib } = pick(library);
+      checkWrite(token, path);
       const res = await lib.apply(request(note), [{ op: "write", path, content, if_match }]);
       return text(writeText("Wrote", res));
     }),
@@ -288,11 +373,13 @@ export function buildServer(ctx: McpContext): McpServer {
         edits: z.array(EditSchema).min(1),
         if_match: z.string().optional(),
         note: z.string().optional().describe("One line for the ledger."),
+        ...libArg,
       },
       annotations: writes,
     },
-    guarded(async ({ path, edits, if_match, note }) => {
-      checkWrite(path);
+    guarded(async ({ path, edits, if_match, note, library }) => {
+      const { token, lib } = pick(library);
+      checkWrite(token, path);
       const res = await lib.apply(request(note), [{ op: "edit", path, edits, if_match }]);
       return text(writeText("Edited", res));
     }),
@@ -309,10 +396,12 @@ export function buildServer(ctx: McpContext): McpServer {
         regex: z.boolean().optional(),
         prefix: z.string().optional().describe("Only search under this directory."),
         limit: z.number().int().optional().describe("Maximum matches (default 100)."),
+        ...libArg,
       },
       annotations: readOnly,
     },
-    guarded(async ({ pattern, regex, prefix, limit }) => {
+    guarded(async ({ pattern, regex, prefix, limit, library }) => {
+      const { lib } = pick(library);
       const r = await lib.grep(pattern, { regex, prefix, limit });
       const lines = r.matches.map((m) => `${m.path}:${m.line}: ${m.text}`);
       if (lines.length === 0) lines.push("No matches.");
@@ -332,11 +421,13 @@ export function buildServer(ctx: McpContext): McpServer {
         from: z.string(),
         to: z.string(),
         note: z.string().optional().describe("One line for the ledger."),
+        ...libArg,
       },
       annotations: writes,
     },
-    guarded(async ({ from, to, note }) => {
-      checkWrite(from, to);
+    guarded(async ({ from, to, note, library }) => {
+      const { token, lib } = pick(library);
+      checkWrite(token, from, to);
       const res = await lib.apply(request(note), [{ op: "move", path: from, to }]);
       return text(writeText("Moved to", res));
     }),
@@ -352,11 +443,13 @@ export function buildServer(ctx: McpContext): McpServer {
         path: z.string(),
         if_match: z.string(),
         note: z.string().optional().describe("One line for the ledger."),
+        ...libArg,
       },
       annotations: { ...writes, destructiveHint: true },
     },
-    guarded(async ({ path, if_match, note }) => {
-      checkWrite(path);
+    guarded(async ({ path, if_match, note, library }) => {
+      const { token, lib } = pick(library);
+      checkWrite(token, path);
       const res = await lib.apply(request(note), [{ op: "delete", path, if_match }]);
       return text(writeText("Deleted", res));
     }),
@@ -371,10 +464,12 @@ export function buildServer(ctx: McpContext): McpServer {
       inputSchema: {
         ops: z.array(BatchOpSchema).min(1),
         note: z.string().optional().describe("One line for the ledger, for the whole request."),
+        ...libArg,
       },
       annotations: writes,
     },
-    guarded(async ({ ops, note }) => {
+    guarded(async ({ ops, note, library }) => {
+      const { token, lib } = pick(library);
       const wire: WriteOp[] = ops.map((o) => {
         switch (o.op) {
           case "write":
@@ -391,7 +486,7 @@ export function buildServer(ctx: McpContext): McpServer {
             return { op: "delete", path: o.path, if_match: o.if_match };
         }
       });
-      checkWrite(...ops.flatMap((o) => (o.to ? [o.path, o.to] : [o.path])));
+      checkWrite(token, ...ops.flatMap((o) => (o.to ? [o.path, o.to] : [o.path])));
       const res = await lib.apply(request(note), wire);
       return text(writeText("Applied", res));
     }),
@@ -409,11 +504,13 @@ export function buildServer(ctx: McpContext): McpServer {
         media: z.string().optional().describe("MIME type; guessed from the extension if omitted."),
         if_match: z.string().optional(),
         note: z.string().optional().describe("One line for the ledger."),
+        ...libArg,
       },
       annotations: writes,
     },
-    guarded(async ({ path, content_base64, media, if_match, note }) => {
-      checkWrite(path);
+    guarded(async ({ path, content_base64, media, if_match, note, library }) => {
+      const { token, lib } = pick(library);
+      checkWrite(token, path);
       let bytes: Uint8Array;
       try {
         bytes = Uint8Array.from(atob(content_base64), (c) => c.charCodeAt(0));
@@ -438,10 +535,12 @@ export function buildServer(ctx: McpContext): McpServer {
           q: z.string().describe("Words to search for; a trailing * matches a prefix."),
           prefix: z.string().optional(),
           limit: z.number().int().optional(),
+          ...libArg,
         },
         annotations: readOnly,
       },
-      guarded(async ({ q, prefix, limit }) => {
+      guarded(async ({ q, prefix, limit, library }) => {
+        const { lib } = pick(library);
         const r = await lib.search(q, { prefix, limit });
         if (r.results.length === 0) return text("No results.");
         return text(
@@ -466,11 +565,12 @@ export function buildServer(ctx: McpContext): McpServer {
           prefix: z.string().optional(),
           limit: z.number().int().optional(),
           offset: z.number().int().optional(),
+          ...libArg,
         },
         annotations: readOnly,
       },
-      guarded(async (args) => {
-        const r = await lib.concepts(args);
+      guarded(async ({ library, ...args }) => {
+        const r = await pick(library).lib.concepts(args);
         const lines = r.items.map(
           (c) =>
             `${c.path} · ${c.type || "(no type)"} · ${c.status} · ${c.trust_tier}${c.stale ? " · STALE" : ""} — ${c.title ?? ""}${c.description ? `: ${c.description}` : ""}`,
@@ -487,10 +587,10 @@ export function buildServer(ctx: McpContext): McpServer {
       {
         title: "Links and backlinks",
         description: `${BEYOND}a concept's outbound links (with current target paths), inbound links (backlinks), and broken links. \`kind\` is \`body\` for a markdown link or \`source\` for a \`sources[].resource\` inside the library.`,
-        inputSchema: { path: z.string() },
+        inputSchema: { path: z.string(), ...libArg },
         annotations: readOnly,
       },
-      guarded(async ({ path }) => text(json(await lib.links(path)))),
+      guarded(async ({ path, library }) => text(json(await pick(library).lib.links(path)))),
     );
 
     server.registerTool(
@@ -498,10 +598,10 @@ export function buildServer(ctx: McpContext): McpServer {
       {
         title: "Sources and citations",
         description: `${BEYOND}a concept's sources with how often the body cites each (\`cited\`: every [^id] reference), footnotes with no matching source, and for sources inside the library their current path, trust tier and staleness (\`broken: true\` when the path does not exist).`,
-        inputSchema: { path: z.string() },
+        inputSchema: { path: z.string(), ...libArg },
         annotations: readOnly,
       },
-      guarded(async ({ path }) => text(json(await lib.sources(path)))),
+      guarded(async ({ path, library }) => text(json(await pick(library).lib.sources(path)))),
     );
 
     server.registerTool(
@@ -513,11 +613,12 @@ export function buildServer(ctx: McpContext): McpServer {
           prefix: z.string().optional(),
           since: z.number().int().optional().describe("Only requests after this sequence number."),
           limit: z.number().int().optional(),
+          ...libArg,
         },
         annotations: readOnly,
       },
-      guarded(async ({ prefix, since, limit }) => {
-        const r = await lib.requests({ prefix, since, limit });
+      guarded(async ({ prefix, since, limit, library }) => {
+        const r = await pick(library).lib.requests({ prefix, since, limit });
         if (r.requests.length === 0) return text("No changes.");
         const out = r.requests.map((q) => {
           const seqs = q.events.map((e) => e.seq);
@@ -541,11 +642,11 @@ export function buildServer(ctx: McpContext): McpServer {
       {
         title: "A file's history",
         description: `${BEYOND}every ledger event for a concept across moves: sequence, time, actor, op and hash. Read an old version with read(path, at).`,
-        inputSchema: { path: z.string() },
+        inputSchema: { path: z.string(), ...libArg },
         annotations: readOnly,
       },
-      guarded(async ({ path }) => {
-        const h = await lib.history(path);
+      guarded(async ({ path, library }) => {
+        const h = await pick(library).lib.history(path);
         const lines = h.events.map(
           (e) =>
             `seq ${e.seq} · ${e.ts} · ${e.actor} · ${e.op} ${e.path}${e.hash ? ` · ${e.hash.slice(0, 12)}` : ""}${e.meta?.note ? ` · ${e.meta.note}` : ""}`,
@@ -563,11 +664,12 @@ export function buildServer(ctx: McpContext): McpServer {
           path: z.string(),
           from: z.number().int().optional(),
           to: z.number().int().optional(),
+          ...libArg,
         },
         annotations: readOnly,
       },
-      guarded(async ({ path, from, to }) => {
-        const d = await lib.diff(path, { from, to });
+      guarded(async ({ path, from, to, library }) => {
+        const d = await pick(library).lib.diff(path, { from, to });
         return text(d.diff || `No difference in ${d.path} between seq ${d.from} and ${d.to}.`);
       }),
     );
@@ -582,10 +684,12 @@ export function buildServer(ctx: McpContext): McpServer {
           to_seq: z.number().int().optional(),
           request_id: z.string().optional(),
           note: z.string().optional().describe("One line for the ledger: why."),
+          ...libArg,
         },
         annotations: { ...writes, destructiveHint: true },
       },
-      guarded(async ({ path, to_seq, request_id, note }) => {
+      guarded(async ({ path, to_seq, request_id, note, library }) => {
+        const { token, lib } = pick(library);
         if (request_id) {
           if (token.prefix !== null) {
             throw new OkfError(
@@ -594,13 +698,13 @@ export function buildServer(ctx: McpContext): McpServer {
               "Prefix-scoped tokens revert one path at a time.",
             );
           }
-          checkWrite();
+          checkWrite(token);
           return text(writeText("Reverted", await lib.revert(request(note), { request_id })));
         }
         if (!path || to_seq === undefined) {
           throw new OkfError(400, "bad_revert", "Pass path and to_seq, or request_id.");
         }
-        checkWrite(path);
+        checkWrite(token, path);
         return text(writeText("Reverted", await lib.revert(request(note), { path, to_seq })));
       }),
     );
@@ -613,11 +717,12 @@ export function buildServer(ctx: McpContext): McpServer {
         inputSchema: {
           kind: z.enum(["stale", "broken_link", "lint"]).optional(),
           limit: z.number().int().optional(),
+          ...libArg,
         },
         annotations: readOnly,
       },
-      guarded(async ({ kind, limit }) => {
-        const w = await lib.work({ kind, limit });
+      guarded(async ({ kind, limit, library }) => {
+        const w = await pick(library).lib.work({ kind, limit });
         if (w.items.length === 0) return text("Nothing to do.");
         const lines = w.items.map(
           (i) =>
@@ -632,28 +737,30 @@ export function buildServer(ctx: McpContext): McpServer {
       {
         title: "Export the bundle",
         description: `${BEYOND}a short-lived download URL (15 minutes) for the whole library as a conformant OKF bundle (tar), with index.md and log.md materialized. \`at\` exports an earlier sequence.`,
-        inputSchema: { at: z.number().int().optional() },
+        inputSchema: { at: z.number().int().optional(), ...libArg },
         annotations: readOnly,
       },
-      guarded(async ({ at }) => {
-        const seq = at ?? (await lib.headSeq());
+      guarded(async ({ at, library }) => {
+        const picked = pick(library);
+        const seq = at ?? (await picked.lib.headSeq());
         return text(
-          `Bundle at seq ${seq} (valid 15 minutes): ${await downloadUrl({ k: "export", at: seq })}`,
+          `Bundle at seq ${seq} (valid 15 minutes): ${await downloadUrl(picked, { k: "export", at: seq })}`,
         );
       }),
     );
 
-    if (token.actor.startsWith("process:")) {
+    if (ctx.actor.startsWith("process:")) {
       server.registerTool(
         "verify",
         {
           title: "Record a verification",
-          description: `${BEYOND}record that this process re-checked the concept against its sources and resource: adds { by: ${token.actor}, at: now } to \`verified\`. The content is unchanged. Only call it after an actual check.`,
-          inputSchema: { path: z.string() },
+          description: `${BEYOND}record that this process re-checked the concept against its sources and resource: adds { by: ${ctx.actor}, at: now } to \`verified\`. The content is unchanged. Only call it after an actual check.`,
+          inputSchema: { path: z.string(), ...libArg },
           annotations: writes,
         },
-        guarded(async ({ path }) => {
-          checkWrite(path);
+        guarded(async ({ path, library }) => {
+          const { token, lib } = pick(library);
+          checkWrite(token, path);
           return text(writeText("Verified", await lib.verify(request(), path)));
         }),
       );
@@ -664,34 +771,41 @@ export function buildServer(ctx: McpContext): McpServer {
 
   server.registerResource(
     "concept",
-    new ResourceTemplate(`${URI_SCHEME}://{library}/{+path}`, {
+    new ResourceTemplate(`${URI_SCHEME}://{owner}/{library}/{+path}`, {
       list: async () => {
-        const tree = await lib.tree();
-        return {
-          resources: tree.entries
-            .filter((e) => e.kind !== "dir")
-            .slice(0, 1000)
-            .map((e) => ({
-              uri: `${URI_SCHEME}://${token.library.slug}/${e.path}`,
+        const resources = [];
+        for (const token of ctx.libraries) {
+          if (resources.length >= 1000) break;
+          const tree = await ctx.open(token).tree();
+          for (const e of tree.entries) {
+            if (e.kind === "dir") continue;
+            if (resources.length >= 1000) break;
+            resources.push({
+              uri: `${URI_SCHEME}://${token.library.owner}/${token.library.slug}/${e.path}`,
               name: e.path,
               title: "title" in e && e.title ? e.title : undefined,
               description: "description" in e && e.description ? e.description : undefined,
               mimeType:
                 e.kind === "concept" ? "text/markdown" : ("media" in e && e.media) || undefined,
-            })),
-        };
+            });
+          }
+        }
+        return { resources };
       },
     }),
     {
       title: "Library files",
-      description: "Concepts in this library as OKF markdown, addressable by path.",
+      description:
+        "Concepts in your libraries as OKF markdown, addressable by owner, library and path.",
       mimeType: "text/markdown",
     },
     async (uri, vars) => {
-      const path = Array.isArray(vars.path) ? vars.path.join("/") : (vars.path ?? "");
-      const view = await lib.read(decodeURIComponent(path));
+      const one = (v: string | string[] | undefined) =>
+        Array.isArray(v) ? v.join("/") : (v ?? "");
+      const picked = pick(`${one(vars.owner)}/${one(vars.library)}`);
+      const view = await picked.lib.read(decodeURIComponent(one(vars.path)));
       if (view.kind === "attachment") {
-        const url = await downloadUrl({
+        const url = await downloadUrl(picked, {
           k: "file",
           path: view.path,
           hash: view.hash,

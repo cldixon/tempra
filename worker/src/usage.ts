@@ -33,12 +33,27 @@ export const WRITE_TOOLS = new Set([
   "verify",
 ]);
 
-/** Counts a request (and a write) for a token; 429 when it is over a per-minute limit. */
-export async function admit(d: UsageDeps, token: TokenInfo, write: boolean): Promise<void> {
+/** Who a request counts against: a per-token (or per-connection) key and the account. */
+export interface Admission {
+  key: string;
+  /** The account: a library owner's handle. */
+  account: string;
+  library?: string;
+}
+
+export function tokenAdmission(token: TokenInfo): Admission {
   // Grants approved before A1 carry no owner handle; their library id stands in until reconnected.
-  const account = token.library.owner || token.library.id;
-  const requestKey = `${token.id}|${token.library.id}|${token.actor}`;
-  if (d.rateLimit && !(await d.rateLimit("request", requestKey))) {
+  return {
+    key: `${token.id}|${token.library.id}|${token.actor}`,
+    account: token.library.owner || token.library.id,
+    library: token.library.id,
+  };
+}
+
+/** Counts a request (and a write); 429 when it is over a per-minute limit. */
+export async function admit(d: UsageDeps, who: Admission, write: boolean): Promise<void> {
+  const { key, account, library } = who;
+  if (d.rateLimit && !(await d.rateLimit("request", key))) {
     throw new OkfError(429, "rate_limited", "Too many requests from this token; slow down.");
   }
   if (write && d.rateLimit && !(await d.rateLimit("write", account))) {
@@ -48,8 +63,8 @@ export async function admit(d: UsageDeps, token: TokenInfo, write: boolean): Pro
       "Too many writes to this account in the last minute; slow down.",
     );
   }
-  d.meter?.({ kind: "request", account, library: token.library.id });
-  if (write) d.meter?.({ kind: "write", account, library: token.library.id });
+  d.meter?.({ kind: "request", account, library });
+  if (write) d.meter?.({ kind: "write", account, library });
 }
 
 /** Whether a JSON-RPC body (one message or a batch) calls a tool that writes. */

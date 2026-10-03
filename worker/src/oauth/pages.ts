@@ -13,7 +13,10 @@ export function page(title: string, body: string): string {
 }
 
 export interface ConsentForm {
-  library: string;
+  /** All of the account's libraries, including later ones, or the selected ones only. */
+  libraries: "all" | "selected";
+  /** Slugs of the selected libraries. */
+  selected: string[];
   newLibrary: string;
   access: "read" | "write";
   prefix: string;
@@ -35,29 +38,29 @@ export function consentPage(opts: {
   const origin = details.clientDomain
     ? `Published by <strong>${esc(details.clientDomain)}</strong>.`
     : "This app registered itself; its name is not verified.";
-  const libOptions = opts.libraries
+  const libChecks = opts.libraries
     .map(
       (l) =>
-        `<option value="${esc(l.slug)}"${l.slug === form.library ? " selected" : ""}>${esc(l.slug)}</option>`,
+        `<label><input type="checkbox" name="library" value="${esc(l.slug)}"${form.selected.includes(l.slug) ? " checked" : ""}> ${esc(l.owner)}/${esc(l.slug)}</label><br>`,
     )
     .join("");
   const radio = (field: string, value: string, current: string, label: string, hint: string) =>
     `<label><input type="radio" name="${field}" value="${value}"${value === current ? " checked" : ""}> ${label}</label>${hint ? ` <small>${hint}</small>` : ""}<br>`;
   return page(
     `Connect ${details.clientName || "an app"}`,
-    `<h1>Connect ${name} to a library</h1>
+    `<h1>Connect ${name} to your libraries</h1>
 <p>Signed in as ${esc(opts.signedInAs)}. ${origin} Access goes to <strong>${esc(details.redirectHost)}</strong>.</p>
 ${details.redirectIsLoopback ? "<p><strong>This sends access to an app on your computer. Continue only if you just started connecting from it.</strong></p>" : ""}
 ${opts.error ? `<p><strong>${esc(opts.error)}</strong></p>` : ""}
 <form method="post">
   <input type="hidden" name="handle" value="${esc(opts.handle)}">
   <fieldset>
-    <label class="field" for="library">Library</label>
-    <select id="library" name="library">
-      ${libOptions}
-      <option value=""${form.library === "" ? " selected" : ""}>New library…</option>
-    </select>
-    <input type="text" name="new_library" value="${esc(form.newLibrary)}" placeholder="name for a new library, e.g. team-notes" aria-label="New library name">
+    <legend>Libraries</legend>
+    ${radio("libraries", "all", form.libraries, "All libraries", "including ones you create later")}
+    ${radio("libraries", "selected", form.libraries, "Only selected libraries", "")}
+    ${libChecks}
+    <label class="field" for="new_library">New library (optional)</label>
+    <input type="text" id="new_library" name="new_library" value="${esc(form.newLibrary)}" placeholder="e.g. team-notes">
   </fieldset>
   <fieldset>
     <legend>Access</legend>
@@ -65,7 +68,7 @@ ${opts.error ? `<p><strong>${esc(opts.error)}</strong></p>` : ""}
     ${radio("access", "write", form.access, "Read and write", "")}
   </fieldset>
   <fieldset>
-    <label class="field" for="prefix">Limit writes to a directory (optional)</label>
+    <label class="field" for="prefix">Limit writes to a directory in each library (optional)</label>
     <input type="text" id="prefix" name="prefix" value="${esc(form.prefix)}" placeholder="e.g. notes">
   </fieldset>
   <fieldset>
@@ -85,19 +88,40 @@ ${opts.error ? `<p><strong>${esc(opts.error)}</strong></p>` : ""}
   );
 }
 
+/** What /apps shows for a grant's libraries, by their current names. */
+function grantLibraries(m: GrantMetadata, libraries: LibraryRef[]): string {
+  if (m.libraries === "all") return "All libraries";
+  if (Array.isArray(m.libraries)) {
+    const names = libraries.filter((l) => m.libraries?.includes(l.id)).map((l) => l.slug);
+    return names.length > 0 ? names.map(esc).join(", ") : "None (deleted)";
+  }
+  return esc(m.library ?? "");
+}
+
+/** Grant metadata: `libraries` since account-level access, `library` (a slug) before it. */
+type GrantMetadata = {
+  libraries?: "all" | string[];
+  library?: string;
+  actor?: string;
+  access?: string;
+  prefix?: string | null;
+  tiers?: string;
+};
+
 export function grantsPage(opts: {
   signedInAs: string;
   grants: GrantSummary[];
   clientNames: Map<string, string>;
+  libraries: LibraryRef[];
   notice?: string;
 }): string {
   const rows = opts.grants
     .map((g) => {
-      const m = (g.metadata ?? {}) as Record<string, string | null>;
+      const m = (g.metadata ?? {}) as GrantMetadata;
       const app = opts.clientNames.get(g.clientId) ?? g.clientId;
       return `<tr>
   <td>${esc(app)}<br><span class="hint">${esc(m.actor ?? "")}</span></td>
-  <td>${esc(m.library ?? "")}${m.prefix ? `<br><span class="hint">under ${esc(m.prefix)}/</span>` : ""}</td>
+  <td>${grantLibraries(m, opts.libraries)}${m.prefix ? `<br><span class="hint">under ${esc(m.prefix)}/</span>` : ""}</td>
   <td>${m.access === "write" ? "Read and write" : "Read only"}${m.tiers === "files" ? '<br><span class="hint">file tools only</span>' : ""}</td>
   <td>${new Date(g.createdAt * 1000).toISOString().slice(0, 10)}</td>
   <td><form method="post" action="/apps/revoke"><input type="hidden" name="grant" value="${esc(g.id)}"><button>Revoke</button></form></td>
@@ -112,7 +136,7 @@ ${opts.notice ? `<p>${esc(opts.notice)}</p>` : ""}
 ${
   opts.grants.length === 0
     ? "<p>None.</p>"
-    : `<table><thead><tr><th>App</th><th>Library</th><th>Access</th><th>Since</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
+    : `<table><thead><tr><th>App</th><th>Libraries</th><th>Access</th><th>Since</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
 }`,
   );
 }

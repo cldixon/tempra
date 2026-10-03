@@ -43,7 +43,7 @@ worker/src/worker.ts     Cloudflare's OAuth provider in front of the app: discov
 worker/src/app.ts        Hono app: REST routes under /api/v1/libraries/{owner}/{lib}/, with injectable deps
 worker/src/auth.ts       Bearer tokens: hash lookup in D1, scope, prefix, expiry, revocation, suspension
 worker/src/accounts.ts   Users (handles), libraries and tokens in D1, every query scoped to one account
-worker/src/tenancy.ts    authorizeLibrary: the one check that a caller may reach {owner}/{slug}; 404 otherwise
+worker/src/tenancy.ts    authorizeLibrary: the one check that a caller may reach {owner}/{slug}; 404 otherwise. grantLibraries: what an app connection reaches
 worker/src/session.ts    Magic links and sessions in D1 (hashes only), the session cookie
 worker/src/signin.ts     /sign-in, /sign-out and signedIn(); SIGNUP (open, invite, closed) decides who gets a link
 worker/src/origin.ts     fromThisSite(): the same-site check for every state-changing post (Origin, then Sec-Fetch-Site)
@@ -52,7 +52,7 @@ worker/src/limits.ts     Per-account limits (libraries, tokens) with overrides i
 worker/src/usage.ts      Rate limits (Rate Limiting bindings) and metering (Analytics Engine) for tokens and apps
 worker/src/sweep.ts      The daily cron: blob sweep (31 days unreferenced) and operator digest; free of Worker APIs
 worker/src/legal.ts      /terms (draft) and /privacy
-worker/src/oauth/        /authorize consent page and /apps (connected apps: list, revoke)
+worker/src/oauth/        /authorize consent (all or selected libraries, like GitHub repo access) and /apps (connected apps: list, revoke)
 worker/src/handles.ts    Handle rules: syntax, reserved names (routes, roles, brand), the 90-day hold on released handles
 worker/src/ui/           Built-in UI at the root (`/`, `/<handle>/<library>/…`, library pages under `/-/`; old `/app/…` URLs 308): routes, views, account.ts (welcome, connect, account, delete), markdown-to-HTML (no raw HTML, safe URLs only)
 worker/src/client.ts     Worker <-> DO boundary: one `call` RPC, errors as data, R2 blob checks
