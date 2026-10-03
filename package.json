@@ -17,8 +17,7 @@
     "seed": "bun run --filter worker seed",
     "gate": "bun run --filter worker gate",
     "logs": "bun run --filter worker logs",
-    "admin": "bun run --filter worker admin",
-    "move": "bun run --filter worker move"
+    "admin": "bun run --filter worker admin"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.14"
