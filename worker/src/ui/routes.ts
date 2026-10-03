@@ -4,6 +4,7 @@ import type { Deps } from "../app";
 import { bundleFiles, type LibraryClient } from "../client";
 import { deleteAccount, deleteLibrary } from "../lifecycle";
 import { basename, dirname } from "../okf/paths";
+import { fromThisSite } from "../origin";
 import { clearedSessionCookie, readCookie, SESSION_COOKIE, sessionId } from "../session";
 import { sendLink, signedIn } from "../signin";
 import { OkfError } from "../store/errors";
@@ -98,7 +99,7 @@ function intParam(c: C, name: string): number | undefined {
 
 /** Session cookies are SameSite=Lax; writes also insist on a same-origin request. */
 function requireSameOrigin(c: C) {
-  if (c.req.header("Origin") !== new URL(c.req.url).origin) {
+  if (!fromThisSite(c.req.raw)) {
     throw new OkfError(
       403,
       "cross_origin",

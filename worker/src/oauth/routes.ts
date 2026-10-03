@@ -11,6 +11,7 @@ import { checkSlug } from "../accounts";
 import type { Deps } from "../app";
 import type { TokenInfo } from "../auth";
 import { normalizeDir } from "../okf/paths";
+import { fromThisSite } from "../origin";
 import { signedIn } from "../signin";
 import { OkfError } from "../store/errors";
 import { type ConsentForm, consentPage, grantsPage, messagePage } from "./pages";
@@ -235,8 +236,7 @@ export function registerAppRoutes<E extends AppEnv>(
     const user = await signedIn(c.req.raw, c.env, deps(c.env));
     if (user instanceof Response) return user;
     // Session cookies are SameSite=Lax, and every post must also come from this site.
-    const origin = c.req.header("Origin");
-    if (origin !== new URL(c.req.url).origin) {
+    if (!fromThisSite(c.req.raw)) {
       return messagePage("Refused", "Revoke requests must come from this site.", 403);
     }
     const id = String((await c.req.formData()).get("grant") ?? "");

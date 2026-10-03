@@ -3,6 +3,7 @@ import { accessIdentity } from "./access";
 import type { User } from "./accounts";
 import type { Deps } from "./app";
 import { esc, messagePage, page } from "./oauth/pages";
+import { fromThisSite } from "./origin";
 import {
   clearedSessionCookie,
   LINK_MINUTES,
@@ -100,14 +101,15 @@ function html(body: string, status = 200, headers: Record<string, string> = {}):
       "X-Frame-Options": "DENY",
       "Content-Security-Policy": "default-src 'none'; form-action 'self'; frame-ancestors 'none'",
       "Cache-Control": "no-store",
-      "Referrer-Policy": "no-referrer",
+      // same-origin: the link's secret never leaves in a Referer, and form posts still carry Origin.
+      "Referrer-Policy": "same-origin",
       ...headers,
     },
   });
 }
 
 function sameOrigin(c: C): boolean {
-  return c.req.header("Origin") === new URL(c.req.url).origin;
+  return fromThisSite(c.req.raw);
 }
 
 const EMAIL = /^[^\s@]+@[^\s@]+$/;
