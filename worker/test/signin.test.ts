@@ -221,3 +221,25 @@ describe("magic-link sign-in (v2 spec: Accounts and sign-in)", () => {
     }
   });
 });
+
+describe("same-site posts, as browsers send them", () => {
+  test("sign-in pages let form posts carry Origin; Origin: null falls back to Sec-Fetch-Site", async () => {
+    const s = setup();
+    // A no-referrer page makes browsers post with Origin: null, which looked cross-site.
+    const page = await s.anon.request("/app/sign-in");
+    expect(page.headers.get("Referrer-Policy")).not.toBe("no-referrer");
+    const as = (headers: Record<string, string>) =>
+      s.anon.request("/app/sign-in", {
+        method: "POST",
+        headers,
+        body: new URLSearchParams({ email: "x@example.com", next: "/app" }),
+      });
+    expect((await as({ Origin: "null", "Sec-Fetch-Site": "same-origin" })).status).toBe(200);
+    expect((await as({ "Sec-Fetch-Site": "same-origin" })).status).toBe(200);
+    expect((await as({ Origin: "null", "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+    expect((await as({ Origin: "null" })).status).toBe(403);
+    expect(
+      (await as({ Origin: "https://evil.example", "Sec-Fetch-Site": "same-origin" })).status,
+    ).toBe(403);
+  });
+});
