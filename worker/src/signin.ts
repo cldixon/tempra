@@ -106,7 +106,7 @@ const EMAIL = /^[^\s@]+@[^\s@]+$/;
 
 function signInForm(next: string, opts: { email?: string; error?: string } = {}) {
   const err = opts.error ? `<p><strong>${esc(opts.error)}</strong></p>` : "";
-  return `<h1>Sign in to OKF</h1>
+  return `<h1>Sign in to Tempra</h1>
 <p>We email you a link. New here? The same link creates your account.</p>
 ${err}<form method="post" action="/app/sign-in">
 <input type="hidden" name="next" value="${esc(next)}">
@@ -165,8 +165,8 @@ export function registerSignInRoutes<E extends AppEnv>(
       const sent = await sendLink(c.req.raw, c.env, d, {
         to: email,
         link,
-        subject: "Your OKF sign-in link",
-        text: `Open this link to sign in to OKF:\n\n${link}\n\nIt works once, within ${LINK_MINUTES} minutes. If you did not ask for it, ignore this email.\n`,
+        subject: "Your Tempra sign-in link",
+        text: `Open this link to sign in to Tempra:\n\n${link}\n\nIt works once, within ${LINK_MINUTES} minutes. If you did not ask for it, ignore this email.\n`,
       });
       if (sent === null) {
         return html("<h1>Could not send email</h1><p>Try again in a few minutes.</p>", 502);
@@ -184,7 +184,7 @@ export function registerSignInRoutes<E extends AppEnv>(
   app.get("/app/sign-in/link", (c) => {
     const t = c.req.query("t") ?? "";
     const next = safeNext(c.req.query("next"));
-    return html(`<h1>Sign in to OKF</h1><p>Continue to finish signing in on this device.</p>
+    return html(`<h1>Sign in to Tempra</h1><p>Continue to finish signing in on this device.</p>
 <form method="post" action="/app/sign-in/link">
 <input type="hidden" name="t" value="${esc(t)}"><input type="hidden" name="next" value="${esc(next)}">
 <p><button type="submit">Continue</button></p></form>`);

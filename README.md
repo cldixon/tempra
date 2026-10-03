@@ -23,15 +23,16 @@ With [bun](https://bun.sh):
 git clone https://github.com/cldixon/tempra && cd tempra && bun install
 cd worker
 bunx cf auth login                               # or set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID
-bunx cf d1 create --name okf-accounts            # put its id in cloudflare.config.ts (DB)
-bunx cf kv namespaces create --title okf-oauth   # put its id in cloudflare.config.ts (OAUTH_KV)
-bunx cf r2 buckets create --name okf-blobs
+bunx cf d1 create --name tempra-accounts         # put its id in cloudflare.config.ts (DB)
+bunx cf kv namespaces create --title tempra-oauth # put its id in cloudflare.config.ts (OAUTH_KV)
+bunx cf r2 buckets create --name tempra-blobs
 bun run deploy                                   # applies D1 migrations, then cf deploy
 ```
 
-You get `https://<worker name>.<your-subdomain>.workers.dev` (the `name` in `cloudflare.config.ts`
-is yours to change). `https://<your-worker>/healthz` should answer `{"ok":true,...}`, and
-`https://<your-worker>/app` says "Sign-in is not set up" until step 2. `bun run deploy --dry-run`
+Before deploying, set `host` in `cloudflare.config.ts` to a hostname on a domain in your Cloudflare
+account: the Worker is published there as a custom domain, and `workers.dev` is off. The `name`
+is yours to change too. `https://<your-host>/healthz` should answer `{"ok":true,...}`, and
+`https://<your-host>/app` says "Sign-in is not set up" until step 2. `bun run deploy --dry-run`
 builds and validates without touching your account.
 
 ### 2. Email sign-in
@@ -52,9 +53,9 @@ sees only their own libraries, tokens and connected apps.
 
 ### 3. Create a library and connect an agent
 
-Open `https://<your-worker>/app` and sign in. **New library** creates one (to start from a bundle,
+Open `https://<your-host>/app` and sign in. **New library** creates one (to start from a bundle,
 use its **Import & export** page). Then connect an agent as described under
-[Agents (MCP)](#agents-mcp): add `https://<your-worker>/mcp` as a connector in claude.ai, or mint a
+[Agents (MCP)](#agents-mcp): add `https://<your-host>/mcp` as a connector in claude.ai, or mint a
 token on the **Tokens** page for Claude Code.
 
 ## Development
@@ -92,7 +93,7 @@ and short-lived `/dl/…` download links.
 
 ## Web UI
 
-`https://<your-worker>/app` is the built-in UI, for the signed-in person (see
+`https://<your-host>/app` is the built-in UI, for the signed-in person (see
 [Deploy your own](#deploy-your-own), step 2). It lists your libraries, each at
 `/app/libraries/<your handle>/<library>/`; each library page shows its directories and concepts with
 their type, trust tier and staleness. A concept page renders the body, with the frontmatter, the
@@ -127,7 +128,7 @@ Tokens page), limited to your own libraries and tokens: `GET/POST /api/v1/librar
 
 The Worker serves an MCP server at `/mcp` (Streamable HTTP). Each connection reaches one library.
 
-**claude.ai, ChatGPT and other apps (OAuth).** Add `https://<your-worker>/mcp` as a custom
+**claude.ai, ChatGPT and other apps (OAuth).** Add `https://<your-host>/mcp` as a custom
 connector. The app sends you to `/app/authorize`, where you sign in and choose what the app may do:
 which of your libraries (or a new one), read only or read and write, an optional
 directory, the name its changes carry in the ledger (e.g. `claude-ai/connector`), and all tools or
@@ -139,7 +140,7 @@ scheduled job that may verify), read or write, and optionally a directory, an ex
 only. The secret is shown once, with the command to paste:
 
 ```sh
-claude mcp add --transport http okf https://<your-worker>/mcp \
+claude mcp add --transport http tempra https://<your-host>/mcp \
   --header "Authorization: Bearer <token>"
 ```
 
@@ -183,7 +184,7 @@ teaches the workflow to agents that load skills.
   --set libraries=10` overrides). Per library: 100 MB of storage (`LIBRARY_STORAGE_MB`); past it,
   writes get `507` but reads, deletes and moves still work. Tokens and connected apps get 60 writes a
   minute per account and 600 requests a minute each (`429`). Usage is metered to the Analytics Engine
-  dataset `okf_usage`.
+  dataset `tempra_usage`.
 - **Daily sweep.** At 04:30 UTC a cron asks every library which attachment files it uses and deletes
   files no library has used for 31 days (longer than the restore window). It emails `OPERATOR_EMAIL` a
   digest when an export is stale, maintenance is overdue, a library is over 80% full, or the sweep was

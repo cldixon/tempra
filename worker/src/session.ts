@@ -7,7 +7,7 @@ import { sha256Hex } from "./okf/hash";
  * Only hashes of link and session secrets are stored, in D1.
  */
 
-export const SESSION_COOKIE = "__Host-okf_session";
+export const SESSION_COOKIE = "__Host-tempra_session";
 export const SESSION_IDLE_DAYS = 30;
 export const SESSION_MAX_DAYS = 90;
 export const LINK_MINUTES = 15;

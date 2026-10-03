@@ -856,8 +856,8 @@ export function registerUiRoutes<E extends AppEnv>(
     const sent = await sendLink(p.c.req.raw, p.c.env, p.deps, {
       to: email,
       link,
-      subject: "Confirm your new OKF email",
-      text: `Open this link to make this your OKF sign-in email:\n\n${link}\n\nIt works once, within 15 minutes. If you did not ask for it, ignore this email.\n`,
+      subject: "Confirm your new Tempra email",
+      text: `Open this link to make this your Tempra sign-in email:\n\n${link}\n\nIt works once, within 15 minutes. If you did not ask for it, ignore this email.\n`,
     });
     if (sent === null) return account(p, 502, { error: "Could not send email. Try again later." });
     return account(p, 200, { notice: `Check ${email} for a link.`, devLink: sent || undefined });
@@ -885,8 +885,8 @@ export function registerUiRoutes<E extends AppEnv>(
     await p.deps.mailer
       ?.send({
         to: old,
-        subject: "Your OKF email changed",
-        text: `Your OKF account now signs in with ${link.email}.\n`,
+        subject: "Your Tempra email changed",
+        text: `Your Tempra account now signs in with ${link.email}.\n`,
       })
       .catch((e) =>
         console.error(JSON.stringify({ mail_failed: "email change notice", error: String(e) })),

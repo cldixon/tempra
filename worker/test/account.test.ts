@@ -66,7 +66,7 @@ describe("first run (v2 spec: Onboarding)", () => {
 
     const connect = await text(app.request("/app/libraries/newbie/notes/connect"));
     expect(connect).toContain("<pre>http://localhost/mcp</pre>");
-    expect(connect).toContain("claude mcp add --transport http okf http://localhost/mcp");
+    expect(connect).toContain("claude mcp add --transport http tempra http://localhost/mcp");
     expect(connect).toContain('href="/app/tokens?library=notes"');
     expect(connect).toContain("No agent has written yet.");
     // The token form opens on that library.
@@ -234,7 +234,7 @@ describe("changing the email (v2 spec: A3)", () => {
     expect(await done.text()).toContain("Your email is now new@example.org.");
     expect(s.outbox.at(-1)).toMatchObject({
       to: "owner@example.com",
-      subject: "Your OKF email changed",
+      subject: "Your Tempra email changed",
     });
     // The account is the same; it signs in with the new address now.
     expect((await s.accounts.user("new@example.org")).id).toBe("user_1");

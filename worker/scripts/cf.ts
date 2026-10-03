@@ -13,8 +13,8 @@ export const WORKER_DIR = new URL("..", import.meta.url).pathname;
 /** Where `cf dev` keeps local state (it runs the Wrangler bundler); local D1 commands use it too. */
 export const LOCAL_STATE = join(WORKER_DIR, ".wrangler/state");
 
-/** The deployment: OKF_MODE=staging for staging, otherwise production (cloudflare.config.ts). */
-export const MODE = process.env.OKF_MODE || undefined;
+/** The deployment: TEMPRA_MODE=staging for staging, otherwise production (cloudflare.config.ts). */
+export const MODE = process.env.TEMPRA_MODE || undefined;
 const resolved = await config({ isPreview: false, mode: MODE });
 const worker = await resolved.worker;
 if (!worker) throw new Error("cloudflare.config.ts defines no worker.");
@@ -125,11 +125,19 @@ export function applyMigrations(opts: CfOptions = {}): Promise<string> {
   return cf(["d1", "migrations", "apply", accountsDb().id, "--dir", "migrations"], opts);
 }
 
+/** Runs SQL against a D1 database by id; returns the columns and rows of the last statement. */
+export async function d1Raw(
+  id: string,
+  sql: string,
+  opts: CfOptions = {},
+): Promise<{ columns: string[]; rows: unknown[][] }> {
+  type Result = { results?: { columns?: string[]; rows?: unknown[][] } };
+  const out = JSON.parse(await cf(["d1", "raw", id, "--sql", sql], opts)) as Result[] | Result;
+  const last = Array.isArray(out) ? out.at(-1) : out;
+  return { columns: last?.results?.columns ?? [], rows: last?.results?.rows ?? [] };
+}
+
 /** Runs SQL against the account database; returns the rows of the last statement. */
 export async function d1Sql(sql: string, opts: CfOptions = {}): Promise<unknown[][]> {
-  const out = JSON.parse(await cf(["d1", "raw", accountsDb().id, "--sql", sql], opts)) as
-    | { results?: { rows?: unknown[][] } }[]
-    | { results?: { rows?: unknown[][] } };
-  const last = Array.isArray(out) ? out.at(-1) : out;
-  return last?.results?.rows ?? [];
+  return (await d1Raw(accountsDb().id, sql, opts)).rows;
 }

@@ -56,7 +56,7 @@ export function connectPage(opts: { urls: Urls; mcp: string; latest: AgentWrite 
 <p>Add a custom connector with this URL, then pick ${esc(urls.slug)} when asked.</p>
 <pre>${esc(opts.mcp)}</pre>
 <h2>Claude Code</h2>
-<pre>claude mcp add --transport http okf ${esc(opts.mcp)}</pre>
+<pre>claude mcp add --transport http tempra ${esc(opts.mcp)}</pre>
 <p>Then run /mcp in Claude Code to sign in.</p>
 <h2>Other clients</h2>
 <p><a href="/app/tokens?library=${esc(encodeURIComponent(urls.slug))}">Create a token</a></p>

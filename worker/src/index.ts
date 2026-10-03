@@ -184,7 +184,7 @@ export default {
     if (result.attention.length && env.OPERATOR_EMAIL && mailer) {
       await mailer.send({
         to: env.OPERATOR_EMAIL,
-        subject: `OKF digest: ${result.attention.length} to look at`,
+        subject: `Tempra digest: ${result.attention.length} to look at`,
         text: digestText(result),
       });
     }
