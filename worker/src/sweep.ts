@@ -144,7 +144,7 @@ export function libraryProblems(
 
 export function digestText(r: SweepResult): string {
   return [
-    "OKF daily digest",
+    "Tempra daily digest",
     "",
     ...r.attention.map((a) => `- ${a}`),
     "",

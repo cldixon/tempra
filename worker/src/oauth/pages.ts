@@ -8,7 +8,7 @@ export function page(title: string, body: string): string {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(title)}</title></head>
+<title>${esc(title)} - Tempra</title></head>
 <body><main>${body}</main></body></html>`;
 }
 

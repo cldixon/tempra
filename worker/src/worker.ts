@@ -61,7 +61,7 @@ export function createWorker(deps: (env: Cloudflare.Env) => Deps): {
         resource,
         authorization_servers: [origin],
         bearer_methods_supported: ["header"],
-        resource_name: "OKF library",
+        resource_name: "Tempra",
       },
       // Bearer tokens minted for Claude Code, scripts and scheduled tasks keep working on /mcp.
       resolveExternalToken: async ({ token, env }) => {
