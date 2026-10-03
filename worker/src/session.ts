@@ -201,10 +201,10 @@ export function sessionCookie(secret: string): string {
 
 export const clearedSessionCookie = `${SESSION_COOKIE}=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Lax`;
 
-/** Where to go after signing in: only a path on this site's /app. */
+/** Where to go after signing in: only a path on this site. */
 export function safeNext(next: string | null | undefined): string {
-  if (!next?.startsWith("/app") || next.startsWith("//") || next.includes("\\")) {
-    return "/app";
+  if (!next?.startsWith("/") || next.startsWith("//") || next.includes("\\")) {
+    return "/";
   }
   return next;
 }

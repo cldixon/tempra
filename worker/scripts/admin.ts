@@ -14,8 +14,12 @@
  *   bun run admin invite --email <email> [--remote]      Lets an email sign up when SIGNUP=invite.
  *   bun run admin uninvite --email <email> [--remote]    Withdraws an invite (accounts stay).
  *   bun run admin waitlist [--remote]                    Invites and the waitlist, newest first.
+ *   bun run admin rename --email <email> --handle <handle> [--remote]
+ *       Gives an account a new handle, reserved ones included (v2 spec: Handles): an official
+ *       account, or reclaiming one that impersonates. The old handle is held for the account.
  */
 import { parseArgs } from "node:util";
+import { checkHandle, HANDLE_HOLD_DAYS } from "../src/handles";
 import { DEFAULT_LIMITS, type Limits, limitsFrom } from "../src/limits";
 import { type CfOptions, d1Sql } from "./cf";
 
@@ -25,6 +29,7 @@ const { values, positionals } = parseArgs({
     library: { type: "string" },
     to: { type: "string" },
     email: { type: "string" },
+    handle: { type: "string" },
     undo: { type: "boolean" },
     set: { type: "string" },
     reset: { type: "boolean" },
@@ -129,6 +134,35 @@ switch (positionals[0]) {
     }
     break;
   }
+  case "rename": {
+    if (!values.email || !values.handle) fail("Usage: rename --email <email> --handle <handle>");
+    const handle = checkHandle(values.handle, { reserved: "allow" });
+    const user = await one(
+      `SELECT id, handle FROM users WHERE email = ${q(values.email.toLowerCase())}`,
+    );
+    if (!user) fail(`No account for ${values.email}.`);
+    const [id, old] = [String(user[0]), String(user[1])];
+    if (old === handle) fail(`${values.email} already has the handle ${handle}.`);
+    const cutoff = new Date(Date.now() - HANDLE_HOLD_DAYS * 86_400_000).toISOString();
+    const other = await one(
+      `SELECT 'live' FROM users WHERE handle = ${q(handle)} AND id != ${q(id)}
+       UNION ALL SELECT 'held' FROM handle_holds
+       WHERE handle = ${q(handle)} AND user != ${q(id)} AND released > ${q(cutoff)}`,
+    );
+    // An impersonating account is renamed first, then its handle given here: the hold is cleared.
+    if (other?.[0] === "live") fail(`Another account has ${handle}; rename it first.`);
+    await d1Sql(
+      `UPDATE users SET handle = ${q(handle)}, actor = ${q(`human:${handle}`)} WHERE id = ${q(id)};
+       INSERT OR REPLACE INTO handle_holds (handle, user, released)
+         VALUES (${q(old)}, ${q(id)}, ${q(new Date().toISOString())});
+       DELETE FROM handle_holds WHERE handle = ${q(handle)};`,
+      where,
+    );
+    console.log(
+      `${old} is now ${handle}${other ? " (its hold on another account was cleared)" : ""}.`,
+    );
+    break;
+  }
   case "users": {
     const rows = await d1Sql(
       `SELECT u.handle, u.email, u.suspended, group_concat(l.slug, ', ')
@@ -142,6 +176,6 @@ switch (positionals[0]) {
   }
   default:
     fail(
-      "Commands: transfer, suspend, users, limits, invite, uninvite, waitlist (see scripts/admin.ts).",
+      "Commands: transfer, suspend, users, limits, invite, uninvite, waitlist, rename (see scripts/admin.ts).",
     );
 }

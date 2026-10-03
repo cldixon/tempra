@@ -164,7 +164,7 @@ export const OWNER = { id: "user_1", email: "owner@example.com", handle: "owner"
 export const LIB: LibraryRef = { id: "lib-1", slug: "demo", do_id: "lib-1", owner: "owner" };
 /** The demo library's paths. */
 export const API = "/api/v1/libraries/owner/demo";
-export const UI = "/app/libraries/owner/demo";
+export const UI = "/owner/demo";
 
 export const TOKENS: Record<string, TokenInfo> = {
   writer: {

@@ -55,10 +55,7 @@ export function bunD1(): { d1: D1Database; db: Database } {
     prepare: (sql: string) => statement(sql),
     async batch(stmts: ReturnType<typeof statement>[]) {
       return db.transaction(() =>
-        stmts.map((s) => {
-          s.sync();
-          return { results: [], success: true, meta: {} };
-        }),
+        stmts.map((s) => ({ results: [], success: true, meta: { changes: s.sync().changes } })),
       )();
     },
     async exec(sql: string) {

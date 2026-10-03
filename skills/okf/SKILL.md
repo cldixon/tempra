@@ -104,7 +104,7 @@ Split when a concept covers more than one idea, mixes definitions with procedure
 The server speaks MCP over Streamable HTTP at `https://app.tempra.dev/mcp`. Each connection reaches one library.
 
 - **claude.ai, ChatGPT and other apps:** add the URL as a custom connector and approve it in the browser (OAuth; the approver picks the library, read or write access, and the name your changes carry).
-- **Claude Code and scripts:** use a bearer token, minted by a human on the service's Tokens page (`/app/tokens`):
+- **Claude Code and scripts:** use a bearer token, minted by a human on the service's Tokens page (`https://app.tempra.dev/tokens`):
 
 ```sh
 claude mcp add --transport http tempra https://app.tempra.dev/mcp \

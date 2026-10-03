@@ -47,13 +47,13 @@ describe("tenancy (v2 spec: Tenancy and authorization)", () => {
     const other = await s.stranger();
     const routes = await libraryRoutes(s);
     // The UI's pages and the REST API, all of them.
-    expect(routes.filter((r) => r.path.startsWith("/app/")).length).toBeGreaterThan(15);
+    expect(routes.filter((r) => !r.path.startsWith("/api/")).length).toBeGreaterThan(15);
     expect(routes.filter((r) => r.path.startsWith("/api/")).length).toBeGreaterThan(20);
 
     const failures: string[] = [];
     for (const r of routes) {
       const path = fill(r.path);
-      const attempts: [string, Promise<Response>][] = path.startsWith("/app/")
+      const attempts: [string, Promise<Response>][] = !path.startsWith("/api/")
         ? [
             [
               "session",
@@ -93,7 +93,7 @@ describe("tenancy (v2 spec: Tenancy and authorization)", () => {
     const s = setup();
     await seedOwnerContent(s);
     const other = await s.stranger();
-    const theirs = await other.app.request("/app/libraries/stranger/demo/");
+    const theirs = await other.app.request("/stranger/demo/");
     expect(theirs.status).toBe(200);
     expect(await theirs.text()).not.toContain("a.md");
     const tree = await s.anon.request("/api/v1/libraries/stranger/demo/tree", {
@@ -102,7 +102,7 @@ describe("tenancy (v2 spec: Tenancy and authorization)", () => {
     expect(tree.status).toBe(200);
     expect(JSON.stringify(await tree.json())).not.toContain("a.md");
     // And the owner cannot open the stranger's.
-    expect((await s.app.request("/app/libraries/stranger/demo/")).status).toBe(404);
+    expect((await s.app.request("/stranger/demo/")).status).toBe(404);
     const ownerToken = await s.anon.request("/api/v1/libraries/stranger/demo/tree", {
       headers: { Authorization: "Bearer writer" },
     });
@@ -113,7 +113,7 @@ describe("tenancy (v2 spec: Tenancy and authorization)", () => {
     const s = setup();
     const other = await s.stranger();
     // The owner mints a token in the UI.
-    const minted = await s.app.request("/app/tokens", {
+    const minted = await s.app.request("/tokens", {
       method: "POST",
       headers: { Origin: ORIGIN },
       body: new URLSearchParams({ library: "demo", actor: "claude-code/mine", scope: "write" }),
@@ -123,15 +123,15 @@ describe("tenancy (v2 spec: Tenancy and authorization)", () => {
     const ownerTokenId = ownerTokens[0]?.id ?? "";
     expect(ownerTokenId).toStartWith("tok_");
 
-    const home = await (await other.app.request("/app")).text();
-    expect(home).toContain('href="/app/libraries/stranger/demo/"');
-    expect(home).not.toContain("/app/libraries/owner/");
-    const tokens = await (await other.app.request("/app/tokens")).text();
+    const home = await (await other.app.request("/")).text();
+    expect(home).toContain('href="/stranger/demo/"');
+    expect(home).not.toContain("/libraries/owner/");
+    const tokens = await (await other.app.request("/tokens")).text();
     expect(tokens).not.toContain("claude-code/mine");
     expect(tokens).toContain("claude-code/stranger");
 
     // Revoking the owner's token from the stranger's session, or with their human: token.
-    const ui = await other.app.request(`/app/tokens/${ownerTokenId}/revoke`, {
+    const ui = await other.app.request(`/tokens/${ownerTokenId}/revoke`, {
       method: "POST",
       headers: { Origin: ORIGIN },
     });
@@ -184,14 +184,14 @@ describe("tenancy (v2 spec: Tenancy and authorization)", () => {
       code_challenge: "x".repeat(43),
       code_challenge_method: "S256",
     });
-    const page = await (await other.app.request(`/app/authorize?${q}`)).text();
+    const page = await (await other.app.request(`/authorize?${q}`)).text();
     expect(page).toContain("stranger@example.com");
     expect(page).toContain('<option value="demo"');
     expect(page).not.toContain("private-notes");
   });
 
   test("library paths are {owner}/{slug} in the UI and the API", () => {
-    expect(UI).toBe("/app/libraries/owner/demo");
+    expect(UI).toBe("/owner/demo");
     expect(API).toBe("/api/v1/libraries/owner/demo");
   });
 });

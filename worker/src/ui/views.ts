@@ -11,7 +11,7 @@ export class Urls {
     readonly slug: string,
     readonly at?: number,
   ) {
-    this.base = `/app/libraries/${encodeURIComponent(owner)}/${encodeURIComponent(slug)}/`;
+    this.base = `/${encodeURIComponent(owner)}/${encodeURIComponent(slug)}/`;
   }
   private q(extra?: string) {
     const parts = [this.at === undefined ? "" : `at=${this.at}`, extra ?? ""].filter(Boolean);
@@ -20,60 +20,69 @@ export class Urls {
   pinned(at: number | undefined) {
     return new Urls(this.owner, this.slug, at);
   }
+  /** A library page: /{owner}/{slug}/-/{page} (v2 spec: URLs). */
+  private page(rest: string) {
+    return `${this.base}-/${rest}`;
+  }
+  /** Directories and files sit at their own path, unless it starts with the pages' `-/`. */
+  private own(path: string) {
+    return path === "-" || path.startsWith("-/") ? null : `${this.base}${enc(path)}`;
+  }
   tree(dir: string) {
-    return dir === "" ? `${this.base}${this.q()}` : `${this.base}tree/${enc(dir)}/${this.q()}`;
+    if (dir === "") return `${this.base}${this.q()}`;
+    return `${this.own(dir) ?? this.page(`tree/${enc(dir)}`)}/${this.q()}`;
   }
   file(path: string, anchor: string | null = null) {
-    return `${this.base}files/${enc(path)}${this.q()}${anchor ?? ""}`;
+    return `${this.own(path) ?? this.page(`files/${enc(path)}`)}${this.q()}${anchor ?? ""}`;
   }
   raw(path: string) {
-    return `${this.base}raw/${enc(path)}${this.q()}`;
+    return `${this.base}-/raw/${enc(path)}${this.q()}`;
   }
   download(path: string) {
-    return `${this.base}download/${enc(path)}${this.q()}`;
+    return `${this.base}-/download/${enc(path)}${this.q()}`;
   }
   /** A diff of a concept between two sequences; either end may be left to the server. */
   diff(path: string, from?: number, to?: number) {
-    return `${this.base}diff/${enc(path)}${query({ from, to })}`;
+    return `${this.base}-/diff/${enc(path)}${query({ from, to })}`;
   }
   ledger(filters: LedgerFilters = {}) {
-    return `${this.base}ledger${query({ ...filters })}`;
+    return `${this.base}-/ledger${query({ ...filters })}`;
   }
   revert(requestId: string) {
-    return `${this.base}revert/${encodeURIComponent(requestId)}`;
+    return `${this.base}-/revert/${encodeURIComponent(requestId)}`;
   }
   restore(path: string, to: number) {
-    return `${this.base}restore/${enc(path)}${query({ to })}`;
+    return `${this.base}-/restore/${enc(path)}${query({ to })}`;
   }
   verify(path: string) {
-    return `${this.base}verify/${enc(path)}`;
+    return `${this.base}-/verify/${enc(path)}`;
   }
   work(kind?: string) {
-    return `${this.base}work${query({ kind })}`;
+    return `${this.base}-/work${query({ kind })}`;
   }
   transfer() {
-    return `${this.base}transfer`;
+    return `${this.base}-/transfer`;
   }
   exportTar(at?: number) {
-    return `${this.base}export${query({ at })}`;
+    return `${this.base}-/export${query({ at })}`;
   }
   importTar() {
-    return `${this.base}import`;
+    return `${this.base}-/import`;
   }
   maintain() {
-    return `${this.base}maintain`;
+    return `${this.base}-/maintain`;
   }
   recovery() {
-    return `${this.base}recovery`;
+    return `${this.base}-/recovery`;
   }
   connect() {
-    return `${this.base}connect`;
+    return `${this.base}-/connect`;
   }
   remove() {
-    return `${this.base}delete`;
+    return `${this.base}-/delete`;
   }
   nightly(date: string, file: string) {
-    return `${this.base}exports/${encodeURIComponent(date)}/${encodeURIComponent(file)}`;
+    return `${this.base}-/exports/${encodeURIComponent(date)}/${encodeURIComponent(file)}`;
   }
 }
 
@@ -167,7 +176,7 @@ export interface LibrarySummary {
   types: Record<string, number>;
 }
 
-const NEW_LIBRARY = `<form class="inline" method="post" action="/app/libraries">
+const NEW_LIBRARY = `<form class="inline" method="post" action="/new">
 <label class="small" for="slug">New library</label>
 <input id="slug" name="slug" type="text" placeholder="team-notes" required pattern="[a-z0-9][a-z0-9-]{0,62}">
 <button type="submit">Create</button></form>`;
@@ -965,7 +974,7 @@ export function tokensPage(opts: {
       const revoke =
         t.revoked || expired
           ? ""
-          : `<form method="post" action="/app/tokens/${esc(encodeURIComponent(t.id))}/revoke"><button type="submit">Revoke</button></form>`;
+          : `<form method="post" action="/tokens/${esc(encodeURIComponent(t.id))}/revoke"><button type="submit">Revoke</button></form>`;
       return `<tr><td class="name"><strong>${esc(t.actor)}</strong><div class="small muted">${esc(t.library)}${t.prefix ? ` · ${esc(t.prefix)}/ only` : ""}${t.mcp_tiers === "files" ? " · file tools only" : ""}</div></td>
 <td>${esc(t.scope)}</td><td class="small muted">${t.expires ? `expires ${esc(when(t.expires))}` : "no expiry"}${t.created_by ? `<br>by ${esc(t.created_by)}` : ""}</td>
 <td>${state}</td><td>${revoke}</td></tr>`;
@@ -984,7 +993,7 @@ ${rows ? `<div class="table-wrap"><table class="list"><thead><tr><th>Actor</th><
 ${opts.error ? `<div class="notice">${esc(opts.error)}</div>` : ""}
 ${
   libOptions
-    ? `<form class="token" method="post" action="/app/tokens">
+    ? `<form class="token" method="post" action="/tokens">
 <p><label>Library <select name="library">${libOptions}</select></label></p>
 <p><label>Actor <input type="text" name="actor" value="${esc(f.actor)}" placeholder="claude-code/laptop" required></label>
 app/label, process:name, or ${esc(opts.human)}</p>
@@ -1010,5 +1019,5 @@ export function tokenCreatedPage(opts: {
 <pre class="src wrap">${esc(opts.secret)}</pre>
 <p class="small muted">Claude Code:</p>
 <pre class="src wrap">${esc(cmd)}</pre>
-<p><a href="/app/tokens">Back to tokens</a></p>`;
+<p><a href="/tokens">Back to tokens</a></p>`;
 }

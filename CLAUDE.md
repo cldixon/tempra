@@ -29,7 +29,7 @@ Until the design pass, every page is plain HTML with browser defaults: white bac
 | `bun run format` | Apply Biome fixes |
 | `bun run deploy` | Apply D1 migrations (database ID from `cloudflare.config.ts`), then `cf deploy`; `--dry-run` builds and validates only; `--mode staging` deploys the staging Worker (its resource ids must be set first) |
 | `bun run seed` | Create a local user (`dev@localhost`, handle `dev`), library (`dev/dev`) and write token in the local D1; prints the token. From `worker/`, `bun run seed --slug x --actor y` for more |
-| `bun run admin` | Accounts on D1 (local, or `--remote`): `users`, `transfer --library <owner>/<slug> --to <email>`, `suspend --email <email> [--undo]`, `limits --email <email> [--set libraries=10] [--reset]`, `invite`/`uninvite --email <email>`, `waitlist` |
+| `bun run admin` | Accounts on D1 (local, or `--remote`): `users`, `transfer --library <owner>/<slug> --to <email>`, `suspend --email <email> [--undo]`, `limits --email <email> [--set libraries=10] [--reset]`, `invite`/`uninvite --email <email>`, `waitlist`, `rename --email <email> --handle <handle>` (reserved handles allowed) |
 | `bun run logs` | Recent events from Workers Observability via `cf observability telemetry query` (`--minutes`, `--errors`, `--json`) |
 | `bun run gate` | Gate: boots `cf dev` on fresh state (a throwaway project in `worker/.gate/`), round-trips Google's sample bundles over HTTP, renders every UI page for them (signed in by a dev magic link), runs the nightly export through the DO into local R2, checks a restore is refused cleanly (no PITR locally), signs up a second account that must see nothing of the first, has a fresh account go through first run, connect over OAuth with PKCE, write through MCP and delete its library, runs the daily sweep through the scheduled handler, and runs the MCP smoke flow; also runs in CI |
 
@@ -45,15 +45,16 @@ worker/src/auth.ts       Bearer tokens: hash lookup in D1, scope, prefix, expiry
 worker/src/accounts.ts   Users (handles), libraries and tokens in D1, every query scoped to one account
 worker/src/tenancy.ts    authorizeLibrary: the one check that a caller may reach {owner}/{slug}; 404 otherwise
 worker/src/session.ts    Magic links and sessions in D1 (hashes only), the session cookie
-worker/src/signin.ts     /app/sign-in, /app/sign-out and signedIn(); SIGNUP (open, invite, closed) decides who gets a link
+worker/src/signin.ts     /sign-in, /sign-out and signedIn(); SIGNUP (open, invite, closed) decides who gets a link
 worker/src/origin.ts     fromThisSite(): the same-site check for every state-changing post (Origin, then Sec-Fetch-Site)
 worker/src/lifecycle.ts  Deleting a library or an account: rows, grants, then the DO and R2 exports (Deps.destroyLibrary)
 worker/src/limits.ts     Per-account limits (libraries, tokens) with overrides in users.limits; storage per library
 worker/src/usage.ts      Rate limits (Rate Limiting bindings) and metering (Analytics Engine) for tokens and apps
 worker/src/sweep.ts      The daily cron: blob sweep (31 days unreferenced) and operator digest; free of Worker APIs
 worker/src/legal.ts      /terms (draft) and /privacy
-worker/src/oauth/        /app/authorize consent page and /app/grants (list, revoke)
-worker/src/ui/           Built-in UI under /app/: routes, views, account.ts (welcome, connect, account, delete), markdown-to-HTML (no raw HTML, safe URLs only)
+worker/src/oauth/        /authorize consent page and /apps (connected apps: list, revoke)
+worker/src/handles.ts    Handle rules: syntax, reserved names (routes, roles, brand), the 90-day hold on released handles
+worker/src/ui/           Built-in UI at the root (`/`, `/<handle>/<library>/…`, library pages under `/-/`; old `/app/…` URLs 308): routes, views, account.ts (welcome, connect, account, delete), markdown-to-HTML (no raw HTML, safe URLs only)
 worker/src/client.ts     Worker <-> DO boundary: one `call` RPC, errors as data, R2 blob checks
 worker/src/library.ts    Library DO: one per OKF library, hosts the store on its SQLite; its daily alarm runs the maintainers
 worker/src/maintain.ts   Daily maintainers (nightly export to R2 with retention, usage pruning), free of Worker APIs
@@ -82,8 +83,8 @@ fixtures/                Google's four sample OKF bundles, vendored unchanged; d
 ## Cloudflare
 - `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are set in the cloud environment; cf (and wrangler) read them automatically.
 - Remote resources: Worker `tempra` on `app.tempra.dev` (custom domain; `workers.dev` is off), D1 `tempra-accounts` (id in `cloudflare.config.ts`), R2 bucket `tempra-blobs`, KV `tempra-oauth`. Do not create or delete remote resources without asking.
-- Tokens and libraries are managed at `/app/tokens` and `/app` (or `/api/v1/tokens` and `/api/v1/libraries` with a `human:` token). `bun run seed --remote` (from `worker/`) still creates a library and token directly in the deployed D1.
-- KV `tempra-oauth` (binding `OAUTH_KV`) holds OAuth clients and grants. `/app/*` signs people in by email link only (Access was removed at the A4 cut-over); `SIGNUP` (a config var: `invite` in production and staging) decides who may create an account, and `bun run admin invite` manages the list. Local dev uses `DEV_SIGNIN=1` and `SIGNUP=open` from `worker/.dev.vars` (copy `worker/.dev.vars.sample`): sign-in links show on the page for localhost.
+- Tokens and libraries are managed at `/tokens` and `/` (or `/api/v1/tokens` and `/api/v1/libraries` with a `human:` token). `bun run seed --remote` (from `worker/`) still creates a library and token directly in the deployed D1.
+- KV `tempra-oauth` (binding `OAUTH_KV`) holds OAuth clients and grants. The UI signs people in by email link only (Access was removed at the A4 cut-over); `SIGNUP` (a config var: `invite` in production and staging) decides who may create an account, and `bun run admin invite` manages the list. Local dev uses `DEV_SIGNIN=1` and `SIGNUP=open` from `worker/.dev.vars` (copy `worker/.dev.vars.sample`): sign-in links show on the page for localhost.
 - `cloudflare.config.ts` is a function of `--mode`: production by default, `staging` for a separate Worker (`tempra-staging` on `staging.tempra.dev`) with its own D1 `tempra-accounts-staging`, R2 `tempra-blobs-staging` and KV `tempra-oauth-staging`. Scripts pick the mode from `TEMPRA_MODE`. With no mode (`cf dev`, `cf workers types`, a bare dry run) no custom domain is attached; `bun run deploy` defaults to `--mode production`.
 - Mail goes through Cloudflare Email Service: the `EMAIL` binding is added only when `mailFrom` is set for a deployment in `cloudflare.config.ts`, which needs a sending domain onboarded in Cloudflare. Production sends from `noreply@mail.tempra.dev` (`mail.tempra.dev` is onboarded); local dev with `DEV_SIGNIN=1` still shows links on the page instead of mailing them. `OPERATOR_EMAIL` (a Worker secret, so the address stays out of the repo) receives the daily digest.
 - Rate limits are `WRITE_LIMITER` (60 writes a minute per account) and `REQUEST_LIMITER` (600 requests a minute per token or app); metering writes to the Analytics Engine dataset `tempra_usage`; storage per library is `LIBRARY_STORAGE_MB`.

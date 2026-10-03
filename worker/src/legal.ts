@@ -30,6 +30,7 @@ const TERMS = `<h1>Terms</h1>
 <ul>
 <li>Use it for your own knowledge and your agents. Do not store anything illegal, or other people's private data without their consent.</li>
 <li>Limits apply (libraries, tokens, storage, rate). We may suspend accounts that abuse the service.</li>
+<li>Do not pose as someone else, Tempra, or its staff. We may rename or reclaim a handle that does, or that holds a name for no use.</li>
 <li>Keep your own exports. The service is provided as is, with no warranty, and may change or end.</li>
 <li>You own your content. We store and serve it only to run the service.</li>
 </ul>

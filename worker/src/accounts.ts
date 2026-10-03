@@ -1,4 +1,5 @@
 import { hashToken, newTokenSecret } from "./auth";
+import { checkHandle, HANDLE_HOLD_DAYS, handleFromEmail } from "./handles";
 import { type Limits, limitsFrom, overLimit } from "./limits";
 import { sha256Hex } from "./okf/hash";
 import { normalizeDir } from "./okf/paths";
@@ -75,12 +76,18 @@ export interface Accounts {
   usage(userId: string): Promise<{ libraries: number; tokens: number }>;
   /** Moves the account to a new, confirmed email address; 409 if another account has it. */
   setEmail(userId: string, email: string): Promise<void>;
-  /** Changes the user's handle and, for future writes, their human: actor; 409 if taken. */
-  setHandle(userId: string, handle: string): Promise<User>;
+  /**
+   * Changes the user's handle and, for future writes, their human: actor; 409 if another account
+   * has it or holds it. The old handle is held for this account (v2 spec: Handles). The operator
+   * may assign a reserved handle (`reserved: "allow"`).
+   */
+  setHandle(userId: string, handle: string, opts?: { reserved?: "allow" }): Promise<User>;
+  /** The current handle of the account that released `handle` within the hold, if any. */
+  heldHandle(handle: string): Promise<string | null>;
   /** Removes a library's rows and its tokens. Its storage is wiped separately (lifecycle.ts). */
   deleteLibrary(libraryId: string): Promise<void>;
-  /** Removes the user's rows (they own no libraries by now) and keeps a tombstone. */
-  deleteUser(user: Pick<User, "id" | "email">): Promise<void>;
+  /** Removes the user's rows (they own no libraries by now), keeps a tombstone, holds the handle. */
+  deleteUser(user: Pick<User, "id" | "email" | "handle">): Promise<void>;
 }
 
 const AGENT_ACTOR = /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*$/;
@@ -170,32 +177,13 @@ export function signupMode(value: string | undefined): SignupMode {
   return value === "open" || value === "closed" ? value : "invite";
 }
 
-const HANDLE = /^[a-z0-9][a-z0-9_-]{0,38}$/;
-
-export function checkHandle(handle: string): string {
-  const h = handle.trim().toLowerCase();
-  if (!HANDLE.test(h)) {
-    throw new OkfError(
-      400,
-      "bad_handle",
-      "A handle uses lowercase letters, digits, - and _, up to 39 characters.",
-    );
-  }
-  return h;
-}
-
-/** A handle from an email's local part (v2 spec: Accounts); the caller makes it unique. */
-export function handleFromEmail(email: string): string {
-  const local = (email.split("@")[0] ?? "")
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, "-")
-    .replace(/^[-_]+|-+$/g, "")
-    .slice(0, 36);
-  return local || "user";
-}
-
 /** The ledger actor of a person: `human:<handle>` (spec: Auth, identity and actors). */
 export const humanActor = (handle: string) => `human:${handle}`;
+
+export { checkHandle } from "./handles";
+
+/** The oldest release time a hold still counts from. */
+const holdCutoff = () => new Date(Date.now() - HANDLE_HOLD_DAYS * 86_400_000).toISOString();
 
 export function d1Accounts(db: D1Database): Accounts {
   const limitsOf = async (userId: string) => {
@@ -223,12 +211,21 @@ export function d1Accounts(db: D1Database): Accounts {
           actor: humanActor(handle),
           handle,
         };
-        // Ignored when the email (a concurrent sign-up) or the handle is taken.
+        // Ignored when the email (a concurrent sign-up) or the handle is taken or held.
         const r = await db
           .prepare(
-            "INSERT OR IGNORE INTO users (id, email, actor, handle, created) VALUES (?, ?, ?, ?, ?)",
+            `INSERT OR IGNORE INTO users (id, email, actor, handle, created)
+             SELECT ?1, ?2, ?3, ?4, ?5
+             WHERE NOT EXISTS (SELECT 1 FROM handle_holds WHERE handle = ?4 AND released > ?6)`,
           )
-          .bind(user.id, user.email, user.actor, user.handle, new Date().toISOString())
+          .bind(
+            user.id,
+            user.email,
+            user.actor,
+            user.handle,
+            new Date().toISOString(),
+            holdCutoff(),
+          )
           .run();
         if (r.meta.changes) return user;
         const raced = await byEmail(email);
@@ -381,23 +378,52 @@ export function d1Accounts(db: D1Database): Accounts {
         .run();
       if (!r.meta.changes) throw new OkfError(404, "not_found", "No such active token.");
     },
-    async setHandle(userId, handleInput) {
-      const handle = checkHandle(handleInput);
-      const r = await db
-        .prepare(
-          `UPDATE users SET handle = ?1, actor = ?2 WHERE id = ?3
-           AND NOT EXISTS (SELECT 1 FROM users WHERE handle = ?1 AND id != ?3)`,
-        )
-        .bind(handle, humanActor(handle), userId)
-        .run();
-      if (!r.meta.changes)
+    async setHandle(userId, handleInput, opts = {}) {
+      const handle = checkHandle(handleInput, opts);
+      const byId = () =>
+        db
+          .prepare("SELECT id, email, actor, handle FROM users WHERE id = ?")
+          .bind(userId)
+          .first<User>();
+      const before = await byId();
+      if (!before) throw new OkfError(404, "not_found", "No such account.");
+      if (before.handle === handle) return before;
+      const now = new Date().toISOString();
+      const [r] = await db.batch([
+        db
+          .prepare(
+            `UPDATE users SET handle = ?1, actor = ?2 WHERE id = ?3
+             AND NOT EXISTS (SELECT 1 FROM users WHERE handle = ?1 AND id != ?3)
+             AND NOT EXISTS (SELECT 1 FROM handle_holds
+                             WHERE handle = ?1 AND user != ?3 AND released > ?4)`,
+          )
+          .bind(handle, humanActor(handle), userId, holdCutoff()),
+        // Only when the rename went through: the old handle is held, a reclaimed one released.
+        db
+          .prepare(
+            `INSERT OR REPLACE INTO handle_holds (handle, user, released)
+             SELECT ?1, ?2, ?3 WHERE EXISTS (SELECT 1 FROM users WHERE id = ?2 AND handle = ?4)`,
+          )
+          .bind(before.handle, userId, now, handle),
+        db
+          .prepare(
+            "DELETE FROM handle_holds WHERE handle = ?1 AND EXISTS (SELECT 1 FROM users WHERE id = ?2 AND handle = ?1)",
+          )
+          .bind(handle, userId),
+      ]);
+      if (!r?.meta.changes)
         throw new OkfError(409, "handle_taken", `The handle ${handle} is taken.`);
-      const user = await db
-        .prepare("SELECT id, email, actor, handle FROM users WHERE id = ?")
-        .bind(userId)
-        .first<User>();
-      if (!user) throw new OkfError(404, "not_found", "No such account.");
-      return user;
+      return (await byId()) ?? before;
+    },
+    async heldHandle(handle) {
+      const row = await db
+        .prepare(
+          `SELECT u.handle FROM handle_holds h JOIN users u ON u.id = h.user
+           WHERE h.handle = ? AND h.released > ? AND u.suspended IS NULL`,
+        )
+        .bind(handle, holdCutoff())
+        .first<{ handle: string }>();
+      return row?.handle ?? null;
     },
     async deleteLibrary(libraryId) {
       await db.batch([
@@ -411,6 +437,9 @@ export function d1Accounts(db: D1Database): Accounts {
         db.prepare("DELETE FROM sign_in_links WHERE email = ?").bind(user.email),
         db.prepare("UPDATE tokens SET created_by = NULL WHERE created_by = ?").bind(user.id),
         db.prepare("DELETE FROM users WHERE id = ?").bind(user.id),
+        db
+          .prepare("INSERT OR REPLACE INTO handle_holds (handle, user, released) VALUES (?, ?, ?)")
+          .bind(user.handle, user.id, new Date().toISOString()),
         db
           .prepare("INSERT INTO deleted_accounts (email_hash, deleted) VALUES (?, ?)")
           .bind(sha256Hex(user.email), new Date().toISOString()),

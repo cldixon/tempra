@@ -3,7 +3,7 @@ import { readTar, writeTar } from "../src/util/tar";
 import { setup } from "./harness";
 
 type S = ReturnType<typeof setup>;
-const LIB = "/app/libraries/owner/demo";
+const LIB = "/owner/demo";
 const ORIGIN = "http://localhost";
 
 async function page(s: S, path: string) {
@@ -33,25 +33,25 @@ describe("verify, work queue, import and export (Phase 3, slice 3)", () => {
   test("verify the current version from the concept page", async () => {
     const s = setup();
     await put(s, "a.md", "---\ntype: Note\n---\nChecked content.\n");
-    const before = await page(s, `${LIB}/files/a.md`);
+    const before = await page(s, `${LIB}/a.md`);
     expect(before.html).toContain("No human has verified this concept.");
-    expect(before.html).toContain(`action="${LIB}/verify/a.md"`);
+    expect(before.html).toContain(`action="${LIB}/-/verify/a.md"`);
 
     const forged = await post(
       s,
-      `${LIB}/verify/a.md`,
+      `${LIB}/-/verify/a.md`,
       new URLSearchParams(),
       "https://evil.example",
     );
     expect(forged.status).toBe(403);
 
-    const done = await post(s, `${LIB}/verify/a.md`, new URLSearchParams({ note: "read it" }));
+    const done = await post(s, `${LIB}/-/verify/a.md`, new URLSearchParams({ note: "read it" }));
     expect(done.status).toBe(303);
     const after = await page(s, done.headers.get("Location") ?? "");
     expect(after.html).toContain("Verified as human:owner");
     expect(after.html).toContain("human-reviewed</span> by human:owner");
-    expect(after.html).not.toContain(`action="${LIB}/verify/a.md"`);
-    const ledger = await page(s, `${LIB}/ledger`);
+    expect(after.html).not.toContain(`action="${LIB}/-/verify/a.md"`);
+    const ledger = await page(s, `${LIB}/-/ledger`);
     expect(ledger.html).toContain("op-verify");
     expect(ledger.html).toContain("read it");
 
@@ -63,30 +63,30 @@ describe("verify, work queue, import and export (Phase 3, slice 3)", () => {
       headers: { "Content-Type": "text/markdown", "If-Match": `"${hash.hash}"` },
       body: "---\ntype: Note\n---\nChanged.\n",
     });
-    const lapsed = await page(s, `${LIB}/files/a.md`);
+    const lapsed = await page(s, `${LIB}/a.md`);
     expect(lapsed.html).toContain("but the content has changed since");
-    expect(lapsed.html).toContain(`action="${LIB}/verify/a.md"`);
+    expect(lapsed.html).toContain(`action="${LIB}/-/verify/a.md"`);
   });
 
   test("the work queue page lists and filters items", async () => {
     const s = setup();
     await put(s, "a.md", "---\ntype: Note\n---\nSee [gone](/gone.md).\n");
     await put(s, "b.md", "---\ntitle: No type\n---\nx\n");
-    const all = await page(s, `${LIB}/work`);
+    const all = await page(s, `${LIB}/-/work`);
     expect(all.html).toContain("broken link");
     expect(all.html).toContain("links to missing /gone.md");
-    expect(all.html).toContain(`href="${LIB}/files/b.md"`);
-    const lint = await page(s, `${LIB}/work?kind=lint`);
+    expect(all.html).toContain(`href="${LIB}/b.md"`);
+    const lint = await page(s, `${LIB}/-/work?kind=lint`);
     expect(lint.html).toContain("b.md");
     expect(lint.html).not.toContain("gone.md");
     await put(s, "gone.md", "---\ntype: Note\n---\nhere\n");
-    expect((await page(s, `${LIB}/work?kind=broken_link`)).html).toContain("nothing to do");
+    expect((await page(s, `${LIB}/-/work?kind=broken_link`)).html).toContain("nothing to do");
   });
 
   test("export downloads the bundle; import adds files as one request by the human", async () => {
     const s = setup();
     await put(s, "a.md", "---\ntype: Note\n---\nA\n");
-    const exp = await s.app.request(`${LIB}/export`, { redirect: "manual" });
+    const exp = await s.app.request(`${LIB}/-/export`, { redirect: "manual" });
     expect(exp.status).toBe(302);
     const tar = await s.app.request(exp.headers.get("Location") ?? "");
     expect(tar.headers.get("Content-Disposition")).toContain("demo");
@@ -103,19 +103,19 @@ describe("verify, work queue, import and export (Phase 3, slice 3)", () => {
     form.set("bundle", new File([bundle], "pack.tar"));
     form.set("strip", "1");
     form.set("note", "bring in the pack");
-    const r = await post(s, `${LIB}/import`, form);
+    const r = await post(s, `${LIB}/-/import`, form);
     const html = await r.text();
     expect(r.status).toBe(200);
     expect(html).toContain("Imported 2 files from pack.tar");
     expect(html).toContain("1 file with lint");
     expect(s.store().read("notes/x.md").kind).toBe("concept");
-    const ledger = await page(s, `${LIB}/ledger`);
+    const ledger = await page(s, `${LIB}/-/ledger`);
     expect(ledger.html).toContain("bring in the pack");
     expect(ledger.html).toContain("human:owner");
 
     const junk = new FormData();
     junk.set("bundle", new File([enc.encode("not a tar at all")], "x.tar"));
-    const bad = await post(s, `${LIB}/import`, junk);
+    const bad = await post(s, `${LIB}/-/import`, junk);
     expect(bad.status).toBe(400);
   });
 });
@@ -123,11 +123,11 @@ describe("verify, work queue, import and export (Phase 3, slice 3)", () => {
 describe("libraries and tokens", () => {
   test("create a library from the list page", async () => {
     const s = setup();
-    const r = await post(s, "/app/libraries", new URLSearchParams({ slug: "team-notes" }));
+    const r = await post(s, "/new", new URLSearchParams({ slug: "team-notes" }));
     expect(r.status).toBe(303);
-    expect(r.headers.get("Location")).toBe("/app/libraries/owner/team-notes/");
+    expect(r.headers.get("Location")).toBe("/owner/team-notes/");
     expect((await s.accounts.libraries("user_1")).map((l) => l.slug)).toContain("team-notes");
-    const dup = await post(s, "/app/libraries", new URLSearchParams({ slug: "team-notes" }));
+    const dup = await post(s, "/new", new URLSearchParams({ slug: "team-notes" }));
     expect(dup.status).toBe(400);
     expect(await dup.text()).toContain("You already have a library named team-notes.");
   });
@@ -143,11 +143,11 @@ describe("libraries and tokens", () => {
         expires: "",
         tiers: "all",
       });
-    const bad = await post(s, "/app/tokens", form("human:someone-else"));
+    const bad = await post(s, "/tokens", form("human:someone-else"));
     expect(bad.status).toBe(400);
     expect(await bad.text()).toContain("your own actor, human:owner");
 
-    const created = await post(s, "/app/tokens", form("claude-code/laptop"));
+    const created = await post(s, "/tokens", form("claude-code/laptop"));
     const html = await created.text();
     expect(created.status).toBe(200);
     expect(html).toContain("Shown once.");
@@ -161,18 +161,18 @@ describe("libraries and tokens", () => {
       body: "---\ntype: Note\n---\nvia minted token\n",
     });
     expect(write.status).toBeLessThan(300);
-    const list = await page(s, "/app/tokens");
+    const list = await page(s, "/tokens");
     expect(list.html).toContain("claude-code/laptop");
     expect(list.html).toContain("owner@example.com");
 
-    const id = /action="\/app\/tokens\/([^/]+)\/revoke"/.exec(list.html)?.[1] ?? "";
-    const revoked = await post(s, `/app/tokens/${id}/revoke`, new URLSearchParams());
+    const id = /action="\/tokens\/([^/]+)\/revoke"/.exec(list.html)?.[1] ?? "";
+    const revoked = await post(s, `/tokens/${id}/revoke`, new URLSearchParams());
     expect(revoked.status).toBe(303);
     expect((await s.req("/files/t.md", { token: secret })).status).toBe(401);
-    expect((await page(s, "/app/tokens?done=revoke")).html).toContain("Token revoked.");
+    expect((await page(s, "/tokens?done=revoke")).html).toContain("Token revoked.");
 
     // Your own human: actor is allowed in the UI.
-    expect((await post(s, "/app/tokens", form("human:owner"))).status).toBe(200);
+    expect((await post(s, "/tokens", form("human:owner"))).status).toBe(200);
   });
 
   test("REST management routes need a human: token", async () => {

@@ -32,7 +32,7 @@ bun run deploy                                   # applies D1 migrations, then c
 Before deploying, set `host` in `cloudflare.config.ts` to a hostname on a domain in your Cloudflare
 account: the Worker is published there as a custom domain, and `workers.dev` is off. The `name`
 is yours to change too. `https://<your-host>/healthz` should answer `{"ok":true,...}`, and
-`https://<your-host>/app` says "Sign-in is not set up" until step 2. `bun run deploy --dry-run`
+`https://<your-host>/` says "Sign-in is not set up" until step 2. `bun run deploy --dry-run`
 builds and validates without touching your account.
 
 ### 2. Email sign-in
@@ -53,7 +53,7 @@ sees only their own libraries, tokens and connected apps.
 
 ### 3. Create a library and connect an agent
 
-Open `https://<your-host>/app` and sign in. **New library** creates one (to start from a bundle,
+Open `https://<your-host>/` and sign in. **New library** creates one (to start from a bundle,
 use its **Import & export** page). Then connect an agent as described under
 [Agents (MCP)](#agents-mcp): add `https://<your-host>/mcp` as a connector in claude.ai, or mint a
 token on the **Tokens** page for Claude Code.
@@ -65,7 +65,7 @@ Requires [bun](https://bun.sh).
 ```sh
 bun install
 bun run seed    # local user dev@localhost, library dev/dev and a write token (printed)
-bun run dev     # cf dev on http://localhost:8787; sign in at /app as dev@localhost
+bun run dev     # cf dev on http://localhost:8787; sign in at / as dev@localhost
 bun run check   # lint + typecheck + tests
 bun run gate    # gate: round-trip Google's sample bundles and more through cf dev
 ```
@@ -93,9 +93,9 @@ and short-lived `/dl/…` download links.
 
 ## Web UI
 
-`https://<your-host>/app` is the built-in UI, for the signed-in person (see
+`https://<your-host>/` is the built-in UI, for the signed-in person (see
 [Deploy your own](#deploy-your-own), step 2). It lists your libraries, each at
-`/app/libraries/<your handle>/<library>/`; each library page shows its directories and concepts with
+`/<your handle>/<library>/` (library pages such as the ledger sit under `/-/`, e.g. `/<handle>/<library>/-/ledger`); each library page shows its directories and concepts with
 their type, trust tier and staleness. A concept page renders the body, with the frontmatter, the
 sources (footnotes resolved, internal sources with their own trust and staleness), inbound links and
 the history beside it. Every page takes `?at=<seq>` to show the library as it was then, and a
@@ -114,9 +114,9 @@ sequence) and imports a `.tar` or `.tar.gz` as one revertible request. The **Lib
 libraries, and **Tokens** mints, lists and revokes bearer tokens. There is no editor, by design: ask an
 agent.
 
-A new account starts at `/app/welcome` (pick a handle and a first library), then lands on the
+A new account starts at `/welcome` (pick a handle and a first library), then lands on the
 library's **Connect** page: the MCP URL for claude.ai, the command for Claude Code, a token link for
-other clients, and a status line that shows the agent's first write. `/app/account` changes the
+other clients, and a status line that shows the agent's first write. `/account` changes the
 handle, lists and ends sessions, and deletes the account; a library's **Delete** tab deletes one
 library. Pages are deliberately plain HTML for now.
 
@@ -129,13 +129,13 @@ Tokens page), limited to your own libraries and tokens: `GET/POST /api/v1/librar
 The Worker serves an MCP server at `/mcp` (Streamable HTTP). Each connection reaches one library.
 
 **claude.ai, ChatGPT and other apps (OAuth).** Add `https://<your-host>/mcp` as a custom
-connector. The app sends you to `/app/authorize`, where you sign in and choose what the app may do:
+connector. The app sends you to `/authorize`, where you sign in and choose what the app may do:
 which of your libraries (or a new one), read only or read and write, an optional
 directory, the name its changes carry in the ledger (e.g. `claude-ai/connector`), and all tools or
-file tools only. `/app/grants` lists connected apps and revokes them.
+file tools only. `/apps` lists connected apps and revokes them.
 
 **Claude Code, scripts and scheduled tasks (bearer token).** Mint a token on the **Tokens** page
-(`/app/tokens`): pick the library, an actor such as `claude-code/laptop` (or `process:<name>` for a
+(`/tokens`): pick the library, an actor such as `claude-code/laptop` (or `process:<name>` for a
 scheduled job that may verify), read or write, and optionally a directory, an expiry and file tools
 only. The secret is shown once, with the command to paste:
 
@@ -203,6 +203,6 @@ teaches the workflow to agents that load skills.
   lifts it). Local D1 by default; add `--remote` for the deployed one.
 
 For local development, copy `worker/.dev.vars.sample` to `worker/.dev.vars`. It sets
-`DEV_SIGNIN=1`: on `localhost`, `/app/sign-in` shows the magic link on the page instead of mailing it.
+`DEV_SIGNIN=1`: on `localhost`, `/sign-in` shows the magic link on the page instead of mailing it.
 
 `fixtures/` holds Google's sample OKF bundles (Apache 2.0), vendored for the round-trip tests.
