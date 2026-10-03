@@ -370,7 +370,8 @@ export function setup() {
   };
   const worker = createWorker(() => deps);
   const kv = memoryKV();
-  const env = { OAUTH_KV: kv } as unknown as Env;
+  // Tests sign up new accounts freely; sign-in tests set SIGNUP to try the other modes.
+  const env = { OAUTH_KV: kv, SIGNUP: "open" } as unknown as Env;
   const ctx = {
     waitUntil() {},
     passThroughOnException() {},

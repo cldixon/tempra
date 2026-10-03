@@ -4,7 +4,7 @@
  * and the request or Durable Object call. For a live stream, `cf` has no tail yet; run
  * `bunx wrangler tail <worker>` instead.
  *
- *   bun run logs [--minutes 30] [--limit 50] [--errors] [--worker okf-service] [--json]
+ *   bun run logs [--minutes 30] [--limit 50] [--errors] [--worker <name>] [--json]
  */
 import { parseArgs } from "node:util";
 import { cf, WORKER_NAME } from "./cf";

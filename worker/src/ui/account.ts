@@ -9,7 +9,7 @@ import type { Urls } from "./views";
  * Plain HTML with browser defaults, as little text as works (v2 spec: UI rule for Phase A).
  */
 
-export const SKILL_URL = "https://github.com/cldixon/okf-tool/blob/main/skills/okf/SKILL.md";
+export const SKILL_URL = "https://github.com/cldixon/tempra/blob/main/skills/okf/SKILL.md";
 
 const err = (e?: string) => (e ? `<p><strong>${esc(e)}</strong></p>` : "");
 

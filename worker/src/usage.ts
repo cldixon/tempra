@@ -35,7 +35,8 @@ export const WRITE_TOOLS = new Set([
 
 /** Counts a request (and a write) for a token; 429 when it is over a per-minute limit. */
 export async function admit(d: UsageDeps, token: TokenInfo, write: boolean): Promise<void> {
-  const account = token.library.owner;
+  // Grants approved before A1 carry no owner handle; their library id stands in until reconnected.
+  const account = token.library.owner || token.library.id;
   const requestKey = `${token.id}|${token.library.id}|${token.actor}`;
   if (d.rateLimit && !(await d.rateLimit("request", requestKey))) {
     throw new OkfError(429, "rate_limited", "Too many requests from this token; slow down.");

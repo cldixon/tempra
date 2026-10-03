@@ -1,12 +1,9 @@
 # Copy to .dev.vars for `bun run dev`. Never commit .dev.vars.
 # (Not named .dev.vars.example: the Deploy to Cloudflare button would ask for these as secrets.)
 #
-# Local only: there is no mail provider in dev, so /app/sign-in shows the magic link on the page
-# (and logs it) instead of emailing it. Honored only for localhost requests.
-# Sign in as dev@localhost to see the libraries `bun run seed` creates.
+# Local only: /app/sign-in shows the magic link on the page (and logs it) instead of emailing it.
+# Honored only for localhost requests. Sign in as dev@localhost to see what `bun run seed` creates.
 DEV_SIGNIN=1
 #
-# Until the v2 A4 cut-over, a deployment with a Cloudflare Access application on /app/* also
-# accepts Access sign-ins; production sets these as Worker secrets:
-#   ACCESS_TEAM_DOMAIN=https://<team>.cloudflareaccess.com
-#   ACCESS_AUD=<the application's audience tag>
+# Anyone may sign up locally; deployments use invite (cloudflare.config.ts).
+SIGNUP=open

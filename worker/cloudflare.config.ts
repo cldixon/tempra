@@ -80,6 +80,10 @@ export default defineConfig(({ mode }) => {
         // Nightly exports (exports/<library id>/<date>/) older than this are deleted; the newest stays.
         EXPORT_RETENTION_DAYS: bindings.text("30"),
 
+        // Who may create an account (v2 spec: A4): open, invite or closed. Local dev and the gate
+        // override it in .dev.vars.
+        SIGNUP: bindings.text("invite"),
+
         // Storage per library, SQLite plus attachments (v2 spec: Limits).
         LIBRARY_STORAGE_MB: bindings.text("100"),
 
@@ -100,9 +104,8 @@ export default defineConfig(({ mode }) => {
           ? { EMAIL: bindings.sendEmail({ allowedSenderAddresses: [d.mailFrom] }) }
           : {}),
 
-        // Secrets, set per deployment (spec: Deployment): ACCESS_TEAM_DOMAIN and ACCESS_AUD, from the
-        // Cloudflare Access application that covers /app/*. Typed in src/env.d.ts. For local dev,
-        // copy .dev.vars.sample to .dev.vars.
+        // Secrets (typed in src/env.d.ts): OPERATOR_EMAIL. For local dev, copy .dev.vars.sample to
+        // .dev.vars.
       },
     },
   };

@@ -51,6 +51,13 @@ export interface NewToken {
 export interface Accounts {
   /** The users row for a verified email, created (with a free handle) on first sign-in. */
   user(email: string): Promise<User>;
+  /**
+   * Whether this email may sign in under the deployment's SIGNUP mode (v2 spec: A4): an existing
+   * account always may; open lets anyone in, invite only emails on the invite list.
+   */
+  mayJoin(email: string, mode: SignupMode): Promise<boolean>;
+  /** Records an email that asked to sign in without an invite. */
+  joinWaitlist(email: string, ip: string | null): Promise<void>;
   /** The libraries the user owns, by name. */
   libraries(userId: string): Promise<LibraryRef[]>;
   /** A library by its path, with its owner's users row id; null when there is none. */
@@ -156,6 +163,13 @@ export function checkSlug(slug: string): string {
   return s;
 }
 
+export type SignupMode = "open" | "invite" | "closed";
+
+/** The deployment's SIGNUP var; anything unknown counts as invite. */
+export function signupMode(value: string | undefined): SignupMode {
+  return value === "open" || value === "closed" ? value : "invite";
+}
+
 const HANDLE = /^[a-z0-9][a-z0-9_-]{0,38}$/;
 
 export function checkHandle(handle: string): string {
@@ -221,6 +235,21 @@ export function d1Accounts(db: D1Database): Accounts {
         if (raced) return raced;
       }
       throw new OkfError(500, "internal", "Could not find a free handle.");
+    },
+    async mayJoin(email, mode) {
+      if (mode === "open" || (await byEmail(email))) return true;
+      if (mode === "closed") return false;
+      const invited = await db
+        .prepare("SELECT 1 AS x FROM invites WHERE email = ?")
+        .bind(email)
+        .first();
+      return invited !== null;
+    },
+    async joinWaitlist(email, ip) {
+      await db
+        .prepare("INSERT OR IGNORE INTO waitlist (email, created, ip) VALUES (?, ?, ?)")
+        .bind(email, new Date().toISOString(), ip)
+        .run();
     },
     async libraries(userId) {
       const r = await db

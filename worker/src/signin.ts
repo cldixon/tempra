@@ -1,6 +1,5 @@
 import type { Context, Hono } from "hono";
-import { accessIdentity } from "./access";
-import type { User } from "./accounts";
+import { signupMode, type User } from "./accounts";
 import type { Deps } from "./app";
 import { esc, messagePage, page } from "./oauth/pages";
 import { fromThisSite } from "./origin";
@@ -15,8 +14,7 @@ import {
 
 /**
  * Sign-in for /app/* (v2 spec: Accounts and sign-in): email magic links and session cookies.
- * Until the A4 cut-over, a deployment that still has Cloudflare Access configured also accepts
- * a valid Access sign-in, so the live v1 deployment keeps working.
+ * Who may get a link is the deployment's SIGNUP mode (v2 spec: A4): open, invite or closed.
  */
 
 export interface Mailer {
@@ -41,20 +39,12 @@ function devSignIn(req: Request, env: Cloudflare.Env): boolean {
  */
 export async function signedIn(
   req: Request,
-  env: Cloudflare.Env,
   deps: Pick<Deps, "accounts" | "sessions">,
 ): Promise<User | Response> {
   const secret = readCookie(req, SESSION_COOKIE);
   if (secret) {
     const user = await deps.sessions.user(secret);
     if (user) return user;
-  }
-  if (env.ACCESS_TEAM_DOMAIN) {
-    const access = await accessIdentity(req, {
-      teamDomain: env.ACCESS_TEAM_DOMAIN,
-      audience: env.ACCESS_AUD,
-    });
-    if (access.ok) return deps.accounts.user(access.identity.email);
   }
   const url = new URL(req.url);
   if (req.method === "GET" || req.method === "HEAD") {
@@ -165,7 +155,9 @@ export function registerSignInRoutes<E extends AppEnv>(
       return html(`<h1>Sign-in is not set up</h1><p>This deployment cannot send email.</p>`, 503);
     }
     const ip = c.req.header("CF-Connecting-IP") ?? null;
-    const secret = await d.sessions.createLink(email, ip);
+    const allowed = await d.accounts.mayJoin(email, signupMode(c.env.SIGNUP));
+    if (!allowed) await d.accounts.joinWaitlist(email, ip);
+    const secret = allowed ? await d.sessions.createLink(email, ip) : null;
     let shown = "";
     if (secret) {
       const origin = new URL(c.req.url).origin;
@@ -181,9 +173,10 @@ export function registerSignInRoutes<E extends AppEnv>(
       }
       shown = sent;
     }
-    // The same answer whether or not the email has an account, or has asked too often.
+    // The same answer whether the email has an account, is invited, is waitlisted, or asked
+    // too often: the page reveals none of it.
     return html(`<h1>Check your email</h1>
-<p>If <strong>${esc(email)}</strong> can sign in here, a link is on its way. It works once, within ${LINK_MINUTES} minutes.</p>
+<p>If <strong>${esc(email)}</strong> can sign in here, a link is on its way. It works once, within ${LINK_MINUTES} minutes. If not, it is on the waitlist.</p>
 <p>Nothing? Check spam, or <a href="/app/sign-in?next=${esc(encodeURIComponent(next))}">try again</a> later.</p>${shown}`);
   });
 
@@ -209,6 +202,10 @@ export function registerSignInRoutes<E extends AppEnv>(
         `<h1>This link has expired</h1><p>Sign-in links work once, within ${LINK_MINUTES} minutes.</p><p><a href="/app/sign-in?next=${esc(encodeURIComponent(next))}">Get a new link</a></p>`,
         400,
       );
+    }
+    // Checked again here: an invite may have been withdrawn since the link was sent.
+    if (!(await d.accounts.mayJoin(email, signupMode(c.env.SIGNUP)))) {
+      return html("<h1>Not invited</h1><p>This address is on the waitlist.</p>", 403);
     }
     const user = await d.accounts.user(email);
     const secret = await d.sessions.create(user.id, c.req.header("User-Agent") ?? null);
