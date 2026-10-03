@@ -107,14 +107,14 @@ function authError(e: unknown): Response {
 }
 
 /**
- * /app/authorize and /app/grants, for the signed-in person (spec: Apps under Auth). Consent lists
+ * /authorize and /apps, for the signed-in person (spec: Apps under Auth). Consent lists
  * only their own libraries, and a grant belongs to their account (v2 spec: Tenancy).
  */
 export function registerAppRoutes<E extends AppEnv>(
   app: Hono<E>,
   deps: (env: Cloudflare.Env) => Deps,
 ) {
-  app.get("/app/authorize", async (c) => {
+  app.get("/authorize", async (c) => {
     const d = deps(c.env);
     const accounts = d.accounts;
     const user = await signedIn(c.req.raw, d);
@@ -140,7 +140,7 @@ export function registerAppRoutes<E extends AppEnv>(
     }
   });
 
-  app.post("/app/authorize", async (c) => {
+  app.post("/authorize", async (c) => {
     const d = deps(c.env);
     const accounts = d.accounts;
     const user = await signedIn(c.req.raw, d);
@@ -226,13 +226,13 @@ export function registerAppRoutes<E extends AppEnv>(
     }
   });
 
-  app.get("/app/grants", async (c) => {
+  app.get("/apps", async (c) => {
     const user = await signedIn(c.req.raw, deps(c.env));
     if (user instanceof Response) return user;
     return html(await renderGrants(c.env.OAUTH_PROVIDER, user, c.req.query("notice")));
   });
 
-  app.post("/app/grants/revoke", async (c) => {
+  app.post("/apps/revoke", async (c) => {
     const user = await signedIn(c.req.raw, deps(c.env));
     if (user instanceof Response) return user;
     // Session cookies are SameSite=Lax, and every post must also come from this site.
@@ -242,7 +242,7 @@ export function registerAppRoutes<E extends AppEnv>(
     const id = String((await c.req.formData()).get("grant") ?? "");
     const oauth: OAuthHelpers = c.env.OAUTH_PROVIDER;
     await oauth.revokeGrant(id, user.id);
-    return c.redirect("/app/grants?notice=Connection+revoked.", 303);
+    return c.redirect("/apps?notice=Connection+revoked.", 303);
   });
 }
 

@@ -100,7 +100,7 @@ export function grantsPage(opts: {
   <td>${esc(m.library ?? "")}${m.prefix ? `<br><span class="hint">under ${esc(m.prefix)}/</span>` : ""}</td>
   <td>${m.access === "write" ? "Read and write" : "Read only"}${m.tiers === "files" ? '<br><span class="hint">file tools only</span>' : ""}</td>
   <td>${new Date(g.createdAt * 1000).toISOString().slice(0, 10)}</td>
-  <td><form method="post" action="/app/grants/revoke"><input type="hidden" name="grant" value="${esc(g.id)}"><button>Revoke</button></form></td>
+  <td><form method="post" action="/apps/revoke"><input type="hidden" name="grant" value="${esc(g.id)}"><button>Revoke</button></form></td>
 </tr>`;
     })
     .join("");

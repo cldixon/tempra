@@ -73,18 +73,18 @@ async function waitForHealth() {
 
 /** Signs in by a dev magic link (DEV_SIGNIN=1 shows it on the page); returns the session cookie. */
 async function signIn(email: string): Promise<string> {
-  const asked = await fetch(`${base}/app/sign-in`, {
+  const asked = await fetch(`${base}/sign-in`, {
     method: "POST",
     headers: { Origin: base },
-    body: new URLSearchParams({ email, next: "/app" }),
+    body: new URLSearchParams({ email, next: "/" }),
   });
   const html = await asked.text();
   const t = /[?&]t=([0-9a-f]{64})/.exec(html.replace(/&#38;/g, "&"))?.[1];
   if (!t) throw new Error(`sign-in for ${email}: ${asked.status} ${html.slice(0, 300)}`);
-  const done = await fetch(`${base}/app/sign-in/link`, {
+  const done = await fetch(`${base}/sign-in/link`, {
     method: "POST",
     headers: { Origin: base },
-    body: new URLSearchParams({ t, next: "/app" }),
+    body: new URLSearchParams({ t, next: "/" }),
     redirect: "manual",
   });
   const cookie = done.headers.get("Set-Cookie")?.split(";")[0];
@@ -105,7 +105,7 @@ function ui(url: string, init: RequestInit = {}, cookie = devCookie) {
 /** Fetches the library page, every directory page and every concept page of a library. */
 async function uiPages(owner: string, slug: string, paths: string[]): Promise<string[]> {
   const enc = (p: string) => p.split("/").map(encodeURIComponent).join("/");
-  const lib = `${base}/app/libraries/${owner}/${slug}`;
+  const lib = `${base}/${owner}/${slug}`;
   const concepts = paths.filter((p) => p.endsWith(".md") && !/(^|\/)(index|log)\.md$/.test(p));
   const dirs = new Set<string>();
   for (const p of paths) {
@@ -114,9 +114,9 @@ async function uiPages(owner: string, slug: string, paths: string[]): Promise<st
   }
   const urls = [
     `${lib}/`,
-    `${lib}/ledger`,
-    ...[...dirs].map((d) => `${lib}/tree/${enc(d)}/`),
-    ...concepts.map((p) => `${lib}/files/${enc(p)}`),
+    `${lib}/-/ledger`,
+    ...[...dirs].map((d) => `${lib}/${enc(d)}/`),
+    ...concepts.map((p) => `${lib}/${enc(p)}`),
   ];
   const problems: string[] = [];
   for (const url of urls) {
@@ -131,19 +131,19 @@ async function uiPages(owner: string, slug: string, paths: string[]): Promise<st
 
 /** Runs the daily maintainers through the UI and reads the export back from R2. */
 async function nightlyExport(owner: string, slug: string, originals: number): Promise<string[]> {
-  const lib = `${base}/app/libraries/${owner}/${slug}`;
-  const r = await ui(`${lib}/maintain`, { method: "POST", headers: { Origin: base } });
+  const lib = `${base}/${owner}/${slug}`;
+  const r = await ui(`${lib}/-/maintain`, { method: "POST", headers: { Origin: base } });
   const html = await r.text();
   if (r.status !== 200 || !html.includes("Exported to R2")) {
     return [`export now: ${r.status} ${html.slice(0, 200)}`];
   }
   const date = new Date().toISOString().slice(0, 10);
-  const tar = await ui(`${lib}/exports/${date}/bundle.tar`);
+  const tar = await ui(`${lib}/-/exports/${date}/bundle.tar`);
   if (!tar.ok) return [`nightly bundle.tar: ${tar.status}`];
   const files = readTar(new Uint8Array(await tar.arrayBuffer()));
   // The originals' own index.md and log.md are replaced by synthesized ones, so at least as many.
   if (files.length < originals) return [`nightly bundle has ${files.length} files`];
-  const ledger = await ui(`${lib}/exports/${date}/ledger.jsonl`);
+  const ledger = await ui(`${lib}/-/exports/${date}/ledger.jsonl`);
   if (!ledger.ok || !(await ledger.text()).includes('"t":"event"')) {
     return [`nightly ledger.jsonl: ${ledger.status}`];
   }
@@ -158,13 +158,13 @@ async function nightlyExport(owner: string, slug: string, originals: number): Pr
  * fails cleanly: a 501 naming the reason, no pre-restore export, the library still answering.
  */
 async function restoreUnavailable(owner: string, slug: string): Promise<string[]> {
-  const lib = `${base}/app/libraries/${owner}/${slug}`;
-  const page = await ui(`${lib}/recovery`);
+  const lib = `${base}/${owner}/${slug}`;
+  const page = await ui(`${lib}/-/recovery`);
   if (!page.ok || !(await page.text()).includes("Restore this library to a point in time")) {
     return [`recovery page: ${page.status}`];
   }
   const to = new Date(Date.now() - 5 * 60_000).toISOString().slice(0, 19);
-  const r = await ui(`${lib}/recovery`, {
+  const r = await ui(`${lib}/-/recovery`, {
     method: "POST",
     headers: { Origin: base },
     body: new URLSearchParams({ to, confirm: slug }),
@@ -173,7 +173,7 @@ async function restoreUnavailable(owner: string, slug: string): Promise<string[]
   if (r.status !== 501 || !html.includes("point-in-time recovery")) {
     return [`restore in cf dev: ${r.status} ${html.slice(0, 200)}`];
   }
-  const transfer = await (await ui(`${lib}/transfer`)).text();
+  const transfer = await (await ui(`${lib}/-/transfer`)).text();
   if (transfer.includes("before a restore")) return ["a pre-restore export was written"];
   const home = await ui(`${lib}/`);
   if (!home.ok) return [`library after a refused restore: ${home.status}`];
@@ -188,20 +188,20 @@ async function strangers(owner: string, slug: string, token: string): Promise<st
   const problems: string[] = [];
   const cookie = await signIn("stranger@localhost");
   const created = await ui(
-    `${base}/app/libraries`,
+    `${base}/new`,
     { method: "POST", headers: { Origin: base }, body: new URLSearchParams({ slug }) },
     cookie,
   );
   const theirs = created.headers.get("Location") ?? "";
-  if (created.status !== 303 || !theirs.startsWith("/app/libraries/stranger/")) {
+  if (created.status !== 303 || !theirs.startsWith("/stranger/")) {
     problems.push(`stranger creates ${slug}: ${created.status} ${theirs}`);
   }
-  const home = await (await ui(`${base}/app`, {}, cookie)).text();
-  if (home.includes(`/app/libraries/${owner}/`)) problems.push("stranger's list shows the dev's");
-  const page = await ui(`${base}/app/libraries/${owner}/${slug}/`, {}, cookie);
+  const home = await (await ui(`${base}/`, {}, cookie)).text();
+  if (home.includes(`href="/${owner}/`)) problems.push("stranger's list shows the dev's");
+  const page = await ui(`${base}/${owner}/${slug}/`, {}, cookie);
   if (page.status !== 404) problems.push(`stranger opens the dev's ${slug}: ${page.status}`);
-  const mine = await (await ui(`${base}/app`)).text();
-  if (mine.includes("/app/libraries/stranger/")) problems.push("dev's list shows the stranger's");
+  const mine = await (await ui(`${base}/`)).text();
+  if (mine.includes(`href="/stranger/`)) problems.push("dev's list shows the stranger's");
   const cross = await fetch(`${base}/api/v1/libraries/stranger/${slug}/tree`, {
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -222,10 +222,10 @@ const b64url = (bytes: Uint8Array) =>
  */
 async function freshAccountConnects(): Promise<string[]> {
   const cookie = await signIn("newcomer@localhost");
-  const home = await ui(`${base}/app`, {}, cookie);
-  if (home.headers.get("Location") !== "/app/welcome") return [`first /app: ${home.status}`];
+  const home = await ui(`${base}/`, {}, cookie);
+  if (home.headers.get("Location") !== "/welcome") return [`first visit: ${home.status}`];
   const welcomed = await ui(
-    `${base}/app/welcome`,
+    `${base}/welcome`,
     {
       method: "POST",
       headers: { Origin: base },
@@ -234,7 +234,7 @@ async function freshAccountConnects(): Promise<string[]> {
     cookie,
   );
   const connect = `${base}${welcomed.headers.get("Location") ?? ""}`;
-  if (welcomed.status !== 303 || !connect.endsWith("/app/libraries/newcomer/notes/connect")) {
+  if (welcomed.status !== 303 || !connect.endsWith("/newcomer/notes/-/connect")) {
     return [`welcome: ${welcomed.status} ${connect}`];
   }
   if (!(await (await ui(connect, {}, cookie)).text()).includes("No agent has written yet")) {
@@ -256,7 +256,7 @@ async function freshAccountConnects(): Promise<string[]> {
   const challenge = b64url(
     new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))),
   );
-  const authorize = `${base}/app/authorize?${new URLSearchParams({
+  const authorize = `${base}/authorize?${new URLSearchParams({
     response_type: "code",
     client_id,
     redirect_uri: redirect,
@@ -313,10 +313,10 @@ async function freshAccountConnects(): Promise<string[]> {
     return ["connect page after the agent"];
 
   // Deleting the library wipes its Durable Object and ends the connection.
-  const lib = connect.replace(/\/connect$/, "");
-  await ui(`${lib}/maintain`, { method: "POST", headers: { Origin: base } }, cookie);
+  const lib = connect.replace(/\/-\/connect$/, "");
+  await ui(`${lib}/-/maintain`, { method: "POST", headers: { Origin: base } }, cookie);
   const del = await ui(
-    `${lib}/delete`,
+    `${lib}/-/delete`,
     { method: "POST", headers: { Origin: base }, body: new URLSearchParams({ confirm: "notes" }) },
     cookie,
   );

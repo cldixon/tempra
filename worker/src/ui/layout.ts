@@ -14,7 +14,7 @@ export function layout(s: Shell): string {
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${esc(s.title)} - Tempra</title></head>
-<body>${s.user ? `<header>Tempra: <a href="/app">Libraries</a> | <a href="/app/tokens">Tokens</a> | <a href="/app/grants">Connected apps</a> | <a href="/app/account">${esc(s.user)}</a></header><hr>` : ""}
+<body>${s.user ? `<header>Tempra: <a href="/">Libraries</a> | <a href="/tokens">Tokens</a> | <a href="/apps">Connected apps</a> | <a href="/account">${esc(s.user)}</a></header><hr>` : ""}
 <main>${s.body}</main></body></html>`;
 }
 

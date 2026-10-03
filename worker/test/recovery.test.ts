@@ -7,7 +7,7 @@ import { fakeRecovery, memoryBlobs, memoryBucket, setup } from "./harness";
 import { bunSqlHandle } from "./sqlite";
 
 type S = ReturnType<typeof setup>;
-const LIB = "/app/libraries/owner/demo";
+const LIB = "/owner/demo";
 const ORIGIN = "http://localhost";
 const md = (body: string) => `---\ntype: Note\n---\n${body}`;
 const ctx = () => ({ actor: "claude-code/test", request_id: crypto.randomUUID() });
@@ -22,7 +22,7 @@ async function put(s: S, path: string, content: string) {
 }
 
 function post(s: S, fields: Record<string, string>, origin = ORIGIN) {
-  return s.app.request(`${LIB}/recovery`, {
+  return s.app.request(`${LIB}/-/recovery`, {
     method: "POST",
     headers: { Origin: origin },
     body: new URLSearchParams(fields),
@@ -157,7 +157,7 @@ describe("point-in-time restore (spec: Backups and recovery)", () => {
   test("the Recovery page: confirm by name, restore, list, undo", async () => {
     const s = setup();
     await put(s, "a.md", md("A\n"));
-    const pageRes = await s.app.request(`${LIB}/recovery`);
+    const pageRes = await s.app.request(`${LIB}/-/recovery`);
     const html = await pageRes.text();
     expect(pageRes.status).toBe(200);
     expect(html).toContain("Restore this library to a point in time");
@@ -189,9 +189,9 @@ describe("point-in-time restore (spec: Backups and recovery)", () => {
       okHtml,
     )?.[1];
     expect(folder).toBeDefined();
-    const dl = await s.app.request(`${LIB}/exports/${folder}/bundle.tar`);
+    const dl = await s.app.request(`${LIB}/-/exports/${folder}/bundle.tar`);
     expect(dl.status).toBe(200);
-    const transfer = await (await s.app.request(`${LIB}/transfer`)).text();
+    const transfer = await (await s.app.request(`${LIB}/-/transfer`)).text();
     expect(transfer).toContain("before a restore");
 
     // A time outside the window is refused with the reason.

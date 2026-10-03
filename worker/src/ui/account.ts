@@ -21,7 +21,7 @@ export function welcomePage(opts: {
 }): string {
   return `<h1>Welcome</h1>
 ${err(opts.error)}
-<form method="post" action="/app/welcome">
+<form method="post" action="/welcome">
 <p><label>Handle <input type="text" name="handle" value="${esc(opts.handle)}" required></label></p>
 <p><label>First library <input type="text" name="library" value="${esc(opts.library)}" required></label></p>
 <p><label><input type="checkbox" name="starter" value="1"${opts.starter ? " checked" : ""}> Add a start-here note</label></p>
@@ -59,7 +59,7 @@ export function connectPage(opts: { urls: Urls; mcp: string; latest: AgentWrite 
 <pre>claude mcp add --transport http tempra ${esc(opts.mcp)}</pre>
 <p>Then run /mcp in Claude Code to sign in.</p>
 <h2>Other clients</h2>
-<p><a href="/app/tokens?library=${esc(encodeURIComponent(urls.slug))}">Create a token</a></p>
+<p><a href="/tokens?library=${esc(encodeURIComponent(urls.slug))}">Create a token</a></p>
 <h2>Skill</h2>
 <p><a href="${SKILL_URL}">SKILL.md</a></p>
 <h2>Status</h2>
@@ -86,17 +86,17 @@ export function accountPage(opts: {
 <td>${
         s.id === opts.current
           ? "this device"
-          : `<form method="post" action="/app/account/sessions/end"><input type="hidden" name="id" value="${esc(s.id)}"><button type="submit">Sign out</button></form>`
+          : `<form method="post" action="/account/sessions/end"><input type="hidden" name="id" value="${esc(s.id)}"><button type="submit">Sign out</button></form>`
       }</td></tr>`,
     )
     .join("");
   return `<h1>Account</h1>
 ${opts.notice ? `<p>${esc(opts.notice)}</p>` : ""}${err(opts.error)}
 ${opts.devLink ?? ""}
-<form method="post" action="/app/account/email">
+<form method="post" action="/account/email">
 <p><label>Email <input type="text" name="email" value="${esc(user.email)}" required></label> <button type="submit">Change</button></p>
 </form>
-<form method="post" action="/app/account/handle">
+<form method="post" action="/account/handle">
 <p><label>Handle <input type="text" name="handle" value="${esc(user.handle)}" required></label> <button type="submit">Change</button></p>
 </form>
 <p>Actor: ${esc(user.actor)}</p>
@@ -104,11 +104,11 @@ ${opts.devLink ?? ""}
 <p>Libraries: ${opts.usage.libraries} of ${opts.limits.libraries}. Active tokens: ${opts.usage.tokens} of ${opts.limits.tokens}.</p>
 <h2>Sessions</h2>
 <table><tr><th>Started</th><th>Last seen</th><th>Device</th><th></th></tr>${rows}</table>
-<form method="post" action="/app/sign-out"><button type="submit">Sign out</button></form>
-<form method="post" action="/app/sign-out/everywhere"><button type="submit">Sign out everywhere</button></form>
+<form method="post" action="/sign-out"><button type="submit">Sign out</button></form>
+<form method="post" action="/sign-out/everywhere"><button type="submit">Sign out everywhere</button></form>
 <h2>Delete account</h2>
 <p>Deletes every library you own. Export them first.</p>
-<form method="post" action="/app/account/delete">
+<form method="post" action="/account/delete">
 <p><label>Type ${esc(user.handle)} to confirm <input type="text" name="confirm" autocomplete="off" required></label></p>
 <p><button type="submit">Delete account</button></p>
 </form>
@@ -117,7 +117,7 @@ ${opts.devLink ?? ""}
 
 export function emailConfirmPage(t: string): string {
   return `<h1>Confirm your new email</h1>
-<form method="post" action="/app/account/email/confirm">
+<form method="post" action="/account/email/confirm">
 <input type="hidden" name="t" value="${esc(t)}">
 <p><button type="submit">Confirm</button></p>
 </form>`;

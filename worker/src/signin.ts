@@ -13,7 +13,7 @@ import {
 } from "./session";
 
 /**
- * Sign-in for /app/* (v2 spec: Accounts and sign-in): email magic links and session cookies.
+ * Sign-in for the UI (v2 spec: Accounts and sign-in): email magic links and session cookies.
  * Who may get a link is the deployment's SIGNUP mode (v2 spec: A4): open, invite or closed.
  */
 
@@ -51,7 +51,7 @@ export async function signedIn(
     const next = encodeURIComponent(url.pathname + url.search);
     return new Response(null, {
       status: 302,
-      headers: { Location: `/app/sign-in?next=${next}`, "Cache-Control": "no-store" },
+      headers: { Location: `/sign-in?next=${next}`, "Cache-Control": "no-store" },
     });
   }
   return messagePage("Not signed in", "Sign in again, then retry.", 401);
@@ -108,7 +108,7 @@ function signInForm(next: string, opts: { email?: string; error?: string } = {})
   const err = opts.error ? `<p><strong>${esc(opts.error)}</strong></p>` : "";
   return `<h1>Sign in to Tempra</h1>
 <p>We email you a link. New here? The same link creates your account.</p>
-${err}<form method="post" action="/app/sign-in">
+${err}<form method="post" action="/sign-in">
 <input type="hidden" name="next" value="${esc(next)}">
 <p><label for="email">Email</label>
 <input id="email" name="email" type="text" inputmode="email" autocomplete="email" required value="${esc(opts.email ?? "")}"></p>
@@ -122,7 +122,7 @@ export function registerSignInRoutes<E extends AppEnv>(
 ) {
   const unavailable = (c: C) => !deps(c.env).mailer && !devSignIn(c.req.raw, c.env);
 
-  app.get("/app/sign-in", async (c) => {
+  app.get("/sign-in", async (c) => {
     const next = safeNext(c.req.query("next"));
     const secret = readCookie(c.req.raw, SESSION_COOKIE);
     if (secret && (await deps(c.env).sessions.user(secret))) return c.redirect(next, 302);
@@ -135,7 +135,7 @@ export function registerSignInRoutes<E extends AppEnv>(
     return html(signInForm(next));
   });
 
-  app.post("/app/sign-in", async (c) => {
+  app.post("/sign-in", async (c) => {
     if (!sameOrigin(c as unknown as C))
       return messagePage("Refused", "Sign in from this site.", 403);
     const d = deps(c.env);
@@ -161,7 +161,7 @@ export function registerSignInRoutes<E extends AppEnv>(
     let shown = "";
     if (secret) {
       const origin = new URL(c.req.url).origin;
-      const link = `${origin}/app/sign-in/link?t=${secret}&next=${encodeURIComponent(next)}`;
+      const link = `${origin}/sign-in/link?t=${secret}&next=${encodeURIComponent(next)}`;
       const sent = await sendLink(c.req.raw, c.env, d, {
         to: email,
         link,
@@ -177,20 +177,20 @@ export function registerSignInRoutes<E extends AppEnv>(
     // too often: the page reveals none of it.
     return html(`<h1>Check your email</h1>
 <p>If <strong>${esc(email)}</strong> can sign in here, a link is on its way. It works once, within ${LINK_MINUTES} minutes. If not, it is on the waitlist.</p>
-<p>Nothing? Check spam, or <a href="/app/sign-in?next=${esc(encodeURIComponent(next))}">try again</a> later.</p>${shown}`);
+<p>Nothing? Check spam, or <a href="/sign-in?next=${esc(encodeURIComponent(next))}">try again</a> later.</p>${shown}`);
   });
 
   // Opening the link only shows a button: mail scanners that fetch links cannot use it up.
-  app.get("/app/sign-in/link", (c) => {
+  app.get("/sign-in/link", (c) => {
     const t = c.req.query("t") ?? "";
     const next = safeNext(c.req.query("next"));
     return html(`<h1>Sign in to Tempra</h1><p>Continue to finish signing in on this device.</p>
-<form method="post" action="/app/sign-in/link">
+<form method="post" action="/sign-in/link">
 <input type="hidden" name="t" value="${esc(t)}"><input type="hidden" name="next" value="${esc(next)}">
 <p><button type="submit">Continue</button></p></form>`);
   });
 
-  app.post("/app/sign-in/link", async (c) => {
+  app.post("/sign-in/link", async (c) => {
     if (!sameOrigin(c as unknown as C))
       return messagePage("Refused", "Sign in from this site.", 403);
     const d = deps(c.env);
@@ -199,7 +199,7 @@ export function registerSignInRoutes<E extends AppEnv>(
     const email = (await d.sessions.consumeLink(String(form.get("t") ?? "")))?.email;
     if (!email) {
       return html(
-        `<h1>This link has expired</h1><p>Sign-in links work once, within ${LINK_MINUTES} minutes.</p><p><a href="/app/sign-in?next=${esc(encodeURIComponent(next))}">Get a new link</a></p>`,
+        `<h1>This link has expired</h1><p>Sign-in links work once, within ${LINK_MINUTES} minutes.</p><p><a href="/sign-in?next=${esc(encodeURIComponent(next))}">Get a new link</a></p>`,
         400,
       );
     }
@@ -226,9 +226,9 @@ export function registerSignInRoutes<E extends AppEnv>(
     }
     return new Response(null, {
       status: 303,
-      headers: { Location: "/app/sign-in", "Set-Cookie": clearedSessionCookie },
+      headers: { Location: "/sign-in", "Set-Cookie": clearedSessionCookie },
     });
   };
-  app.post("/app/sign-out", (c) => signOut(c as unknown as C, false));
-  app.post("/app/sign-out/everywhere", (c) => signOut(c as unknown as C, true));
+  app.post("/sign-out", (c) => signOut(c as unknown as C, false));
+  app.post("/sign-out/everywhere", (c) => signOut(c as unknown as C, true));
 }

@@ -44,7 +44,7 @@ async function begin(app: App, clientId: string, scope = "okf:read okf:write") {
     code_challenge_method: "S256",
     resource: `${ORIGIN}/mcp`,
   });
-  const url = `/app/authorize?${query}`;
+  const url = `/authorize?${query}`;
   const page = await app.request(url);
   const html = await page.text();
   const handle = /name="handle" value="([^"]+)"/.exec(html)?.[1] ?? "";
@@ -128,7 +128,7 @@ describe("OAuth for MCP clients", () => {
     const asm = (await (
       await app.request("/.well-known/oauth-authorization-server")
     ).json()) as Record<string, unknown>;
-    expect(asm.authorization_endpoint).toBe(`${ORIGIN}/app/authorize`);
+    expect(asm.authorization_endpoint).toBe(`${ORIGIN}/authorize`);
     expect(asm.registration_endpoint).toBe(`${ORIGIN}/register`);
     expect(asm.code_challenge_methods_supported).toEqual(["S256"]);
     expect(asm.client_id_metadata_document_supported).toBe(true);
@@ -230,12 +230,12 @@ describe("OAuth for MCP clients", () => {
     const done = await submit(app, flow, approve);
     const tokens = await exchange(app, clientId, done.headers.get("Location") ?? "", flow.verifier);
 
-    const list = await (await app.request("/app/grants")).text();
+    const list = await (await app.request("/apps")).text();
     expect(list).toContain("Claude");
     expect(list).toContain("claude-ai/connector");
     const grant = /name="grant" value="([^"]+)"/.exec(list)?.[1] ?? "";
 
-    const forged = await app.request("/app/grants/revoke", {
+    const forged = await app.request("/apps/revoke", {
       method: "POST",
       headers: {
         Origin: "https://evil.example",
@@ -244,7 +244,7 @@ describe("OAuth for MCP clients", () => {
       body: new URLSearchParams({ grant }),
     });
     expect(forged.status).toBe(403);
-    const revoked = await app.request("/app/grants/revoke", {
+    const revoked = await app.request("/apps/revoke", {
       method: "POST",
       headers: { Origin: ORIGIN, "Content-Type": "application/x-www-form-urlencoded" },
       body: new URLSearchParams({ grant }),
@@ -275,9 +275,7 @@ describe("OAuth for MCP clients", () => {
         flow.verifier,
       );
       const [path, confirm] =
-        how === "library"
-          ? ["/app/libraries/owner/demo/delete", "demo"]
-          : ["/app/account/delete", "owner"];
+        how === "library" ? ["/owner/demo/-/delete", "demo"] : ["/account/delete", "owner"];
       const del = await app.request(path, {
         method: "POST",
         headers: { Origin: ORIGIN, "Content-Type": "application/x-www-form-urlencoded" },

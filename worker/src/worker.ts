@@ -50,7 +50,7 @@ export function createWorker(deps: (env: Cloudflare.Env) => Deps): {
         },
       },
       defaultHandler: { fetch: (request, env, ctx) => app.fetch(request, env, ctx) },
-      authorizeEndpoint: "/app/authorize",
+      authorizeEndpoint: "/authorize",
       tokenEndpoint: "/token",
       clientRegistrationEndpoint: "/register",
       clientIdMetadataDocumentEnabled: true,
