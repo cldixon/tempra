@@ -1,15 +1,17 @@
-# okf-tool
+# Tempra
 
 A hosted, agent-first store for Open Knowledge Format (OKF) bundles on Cloudflare.
 
-The spec lives in a Claude Doc, not in this repo:
-**OKF Knowledge Service — Spec** — https://claude.ai/artifact/KMuKyyFBSJHzukyEGqvUDn
+The spec lives in Claude Docs, not in this repo:
+**OKF Knowledge Service — Spec** — https://claude.ai/artifact/KMuKyyFBSJHzukyEGqvUDn, and the
+managed service built on it, **v2 Spec** — https://claude.ai/code/artifact/cea3e8c6-4161-4f53-aa6d-54093bc7ed75
 
 The live doc is the source of truth. Do not add a markdown copy of the spec here; read and edit the doc instead.
 
 ## Deploy your own
 
-Everything runs in your own Cloudflare account; the Workers Free plan is enough to start. The
+Everything runs in your own Cloudflare account. Sign-in emails need the Workers Paid plan (Email
+Sending) and a domain on Cloudflare. The
 project uses Cloudflare's [`cf` CLI](https://developers.cloudflare.com/cf/) (a dev dependency, so
 `bunx cf` runs the pinned version) and its typed `worker/cloudflare.config.ts`.
 
@@ -18,7 +20,7 @@ project uses Cloudflare's [`cf` CLI](https://developers.cloudflare.com/cf/) (a d
 With [bun](https://bun.sh):
 
 ```sh
-git clone https://github.com/cldixon/okf-tool && cd okf-tool && bun install
+git clone https://github.com/cldixon/tempra && cd tempra && bun install
 cd worker
 bunx cf auth login                               # or set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID
 bunx cf d1 create --name okf-accounts            # put its id in cloudflare.config.ts (DB)
@@ -27,38 +29,26 @@ bunx cf r2 buckets create --name okf-blobs
 bun run deploy                                   # applies D1 migrations, then cf deploy
 ```
 
-You get `https://okf-service.<your-subdomain>.workers.dev` (the `name` in `cloudflare.config.ts` is
-yours to change). `https://<your-worker>/healthz` should answer `{"ok":true,...}`, and
+You get `https://<worker name>.<your-subdomain>.workers.dev` (the `name` in `cloudflare.config.ts`
+is yours to change). `https://<your-worker>/healthz` should answer `{"ok":true,...}`, and
 `https://<your-worker>/app` says "Sign-in is not set up" until step 2. `bun run deploy --dry-run`
 builds and validates without touching your account.
 
-### 2. Put Cloudflare Access in front of `/app/`
+### 2. Email sign-in
 
-The web UI and the page where you approve apps need you signed in. The service is moving to email
-magic links (see the v2 spec); until a mail provider is wired in, a deployment signs people in through
-[Cloudflare Access](https://developers.cloudflare.com/cloudflare-one/access-controls/policies/).
-Access covers only `/app/`; `/mcp`, the OAuth endpoints and the REST API stay reachable by apps and
-are protected by tokens. Each person who signs in gets their own account: they see and manage only
-their own libraries, tokens and connected apps.
+The web UI and the page where you approve apps sign people in by an emailed link. `/mcp`, the OAuth
+endpoints and the REST API are protected by tokens instead. Each person gets their own account and
+sees only their own libraries, tokens and connected apps.
 
-1. In the Cloudflare dashboard, open **Zero Trust** (create the free organization if asked) and
-   make sure a login method is available: **One-time PIN** (email codes) works with no setup.
-2. **Access → Applications → Add an application → Self-hosted.** Add a public hostname: your
-   Worker's host (e.g. `okf-service.<subdomain>.workers.dev`) with path `app`. Add a policy that
-   allows the people who may use the UI and connect apps, e.g. **Include → Emails →
-   you@example.com**. Do not use the Worker's one-click **Enable Cloudflare Access** toggle: it
-   protects the whole hostname, including `/mcp`.
-3. From the application's **Overview**, copy the **Application Audience (AUD) Tag**. Your team
-   domain (`https://<team>.cloudflareaccess.com`) is shown in the Zero Trust **Settings**.
-4. Set them as two secrets on the Worker: in the dashboard under **Workers & Pages → your Worker →
-   Settings → Variables and Secrets**, add `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` as type
-   **Secret**. Or, from `worker/`:
-
-   ```sh
-   bunx cf workers secrets update ACCESS_TEAM_DOMAIN --worker okf-service --type secret_text \
-     --text https://<team>.cloudflareaccess.com
-   bunx cf workers secrets update ACCESS_AUD --worker okf-service --type secret_text --text <AUD tag>
-   ```
+1. In the dashboard, **Email Service → Email Sending**: onboard a domain on Cloudflare (a
+   subdomain such as `mail.example.com` keeps its reputation apart).
+2. Set `mailFrom` for your deployment in `cloudflare.config.ts` (e.g. `noreply@mail.example.com`)
+   and deploy again.
+3. Who may sign up is `SIGNUP` in the config: `invite` (the default; only invited emails and
+   existing accounts get links, everyone else joins a waitlist), `closed` or `open`. Invite
+   yourself: `bun run admin invite --email you@example.com --remote` (from `worker/`).
+4. Optionally, set `OPERATOR_EMAIL` for the daily digest:
+   `bunx cf workers secrets update OPERATOR_EMAIL --worker <worker name> --type secret_text --text you@example.com`.
 
 ### 3. Create a library and connect an agent
 
@@ -187,8 +177,8 @@ teaches the workflow to agents that load skills.
   home page shows the same.
 - **Logs and deployments.** From `worker/`: `bun run logs` prints recent requests, Durable Object
   calls and alarms from Workers Observability (`--minutes 60`, `--errors`, `--json`);
-  `bunx cf workers deployments list --worker okf-service` lists deployments. `cf` cannot stream
-  live logs yet, so for a live tail run `bunx wrangler tail okf-service`.
+  `bunx cf workers deployments list --worker <worker name>` lists deployments. `cf` cannot stream
+  live logs yet, so for a live tail run `bunx wrangler tail <worker name>`.
 - **Limits.** Per account: 5 libraries and 50 active tokens (`bun run admin limits --email <email>
   --set libraries=10` overrides). Per library: 100 MB of storage (`LIBRARY_STORAGE_MB`); past it,
   writes get `507` but reads, deletes and moves still work. Tokens and connected apps get 60 writes a
@@ -201,9 +191,11 @@ teaches the workflow to agents that load skills.
 - **Email.** Sign-in links, email changes and the digest go through Cloudflare Email Service, from
   `mailFrom` in `cloudflare.config.ts` (a domain onboarded for Email Sending; empty means no mailer).
   The digest address is the `OPERATOR_EMAIL` secret:
-  `bunx cf workers secrets update OPERATOR_EMAIL --worker okf-service --type secret_text --text <email>`.
-- **Staging.** `bun run deploy --mode staging` deploys `okf-service-staging` with its own D1, R2 and KV
-  (`STAGING` in `cloudflare.config.ts`). It has no Access in front: sign in by email link.
+  `bunx cf workers secrets update OPERATOR_EMAIL --worker <worker name> --type secret_text --text <email>`.
+- **Staging.** `bun run deploy --mode staging` deploys the staging Worker with its own D1, R2 and KV
+  (`STAGING` in `cloudflare.config.ts`).
+- **Who may sign up.** `bun run admin invite --email <email>`, `uninvite`, and `waitlist` (invites
+  and people who asked without one). `SIGNUP` in the config picks open, invite or closed.
 - **Accounts.** `bun run admin users` lists accounts and their libraries; `bun run admin transfer
   --library <owner>/<slug> --to <email>` gives a library to another account (who has signed in
   once); `bun run admin suspend --email <email>` refuses an account's sessions and tokens (`--undo`

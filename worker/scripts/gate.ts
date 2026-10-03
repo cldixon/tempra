@@ -43,7 +43,7 @@ for (const f of ["cloudflare.config.ts", "wrangler.config.ts", "package.json", "
 for (const d of ["src", "migrations", "node_modules"]) {
   symlinkSync(join(WORKER_DIR, d), join(project, d));
 }
-writeFileSync(join(project, ".dev.vars"), "DEV_SIGNIN=1\n");
+writeFileSync(join(project, ".dev.vars"), "DEV_SIGNIN=1\nSIGNUP=open\n");
 const state = join(project, ".wrangler/state");
 
 console.log(`project: ${project}`);

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import type { TokenInfo } from "../src/auth";
 import { DEFAULT_LIMITS, limitsFrom } from "../src/limits";
 import { ORIGIN, setup, UI } from "./harness";
 
@@ -139,5 +140,23 @@ describe("limits (v2 spec: Limits, abuse and metering)", () => {
     // People in the web UI are not metered or limited.
     await s.app.request(`${UI}/`);
     expect(s.usage).toHaveLength(3);
+  });
+});
+
+describe("grants approved before A1 (no owner handle in their props)", () => {
+  test("rate limits and metering fall back to the library id", async () => {
+    const s = setup();
+    const keys: string[] = [];
+    s.deps.rateLimit = async (kind, key) => {
+      keys.push(`${kind}:${key}`);
+      return true;
+    };
+    const { TOKENS } = await import("./harness");
+    const writer = TOKENS.writer as TokenInfo;
+    const old = { ...writer, library: { ...writer.library, owner: "" } };
+    const { admit } = await import("../src/usage");
+    await admit(s.deps, old, true);
+    expect(keys).toContain("write:lib-1");
+    expect(s.usage.at(-1)).toMatchObject({ kind: "write", account: "lib-1" });
   });
 });

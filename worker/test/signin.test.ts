@@ -203,17 +203,6 @@ describe("magic-link sign-in (v2 spec: Accounts and sign-in)", () => {
     expect(done.status).toBe(303);
   });
 
-  test("while Access is still configured, a request without a session goes to sign-in", async () => {
-    const s = setup();
-    Object.assign(s.env, {
-      ACCESS_TEAM_DOMAIN: "https://team.cloudflareaccess.com",
-      ACCESS_AUD: "aud",
-    });
-    const r = await s.anon.request("/app/grants");
-    expect(r.status).toBe(302);
-    expect((await s.app.request("/app/grants")).status).toBe(200);
-  });
-
   test("after sign-in, only a path on this site's /app", () => {
     expect(safeNext("/app/libraries/owner/demo/?at=3")).toBe("/app/libraries/owner/demo/?at=3");
     for (const bad of ["https://evil.example/app", "//evil.example", "/\\evil", "/api/v1", ""]) {
@@ -241,5 +230,64 @@ describe("same-site posts, as browsers send them", () => {
     expect(
       (await as({ Origin: "https://evil.example", "Sec-Fetch-Site": "same-origin" })).status,
     ).toBe(403);
+  });
+});
+
+describe("who may sign up: SIGNUP (v2 spec: A4)", () => {
+  const ask = (s: S, email: string) =>
+    s.anon.request("/app/sign-in", {
+      method: "POST",
+      headers: { Origin: ORIGIN },
+      body: new URLSearchParams({ email, next: "/app" }),
+    });
+
+  test("invite: existing accounts and invited emails get links; others join the waitlist", async () => {
+    const s = setup();
+    Object.assign(s.env, { SIGNUP: "invite" });
+    s.db.run("INSERT INTO invites (email, created) VALUES ('friend@example.com', 'now')");
+    const answers = new Set<string>();
+    for (const email of ["owner@example.com", "friend@example.com", "stranger@example.com"]) {
+      const r = await ask(s, email);
+      expect(r.status).toBe(200);
+      answers.add((await r.text()).replace(email, "EMAIL"));
+    }
+    // One answer for all three: the page tells nothing about lists or accounts.
+    expect(answers.size).toBe(1);
+    expect(s.outbox.map((m) => m.to)).toEqual(["owner@example.com", "friend@example.com"]);
+    expect(s.db.query("SELECT email FROM waitlist").all()).toEqual([
+      { email: "stranger@example.com" },
+    ]);
+  });
+
+  test("an invite withdrawn after the link was sent stops the account being created", async () => {
+    const s = setup();
+    Object.assign(s.env, { SIGNUP: "invite" });
+    s.db.run("INSERT INTO invites (email, created) VALUES ('friend@example.com', 'now')");
+    await ask(s, "friend@example.com");
+    const t = new URL(
+      /https?:\/\/\S+/.exec(s.outbox.at(-1)?.text ?? "")?.[0] ?? "",
+    ).searchParams.get("t");
+    s.db.run("DELETE FROM invites");
+    const r = await s.anon.request("/app/sign-in/link", {
+      method: "POST",
+      headers: { Origin: ORIGIN },
+      body: new URLSearchParams({ t: t ?? "", next: "/app" }),
+    });
+    expect(r.status).toBe(403);
+    expect(
+      s.db.query("SELECT COUNT(*) AS n FROM users WHERE email = 'friend@example.com'").get(),
+    ).toEqual({ n: 0 });
+  });
+
+  test("closed: only existing accounts; unknown values count as invite", async () => {
+    const s = setup();
+    Object.assign(s.env, { SIGNUP: "closed" });
+    s.db.run("INSERT INTO invites (email, created) VALUES ('friend@example.com', 'now')");
+    await ask(s, "owner@example.com");
+    await ask(s, "friend@example.com");
+    expect(s.outbox.map((m) => m.to)).toEqual(["owner@example.com"]);
+    Object.assign(s.env, { SIGNUP: "nonsense" });
+    await ask(s, "friend@example.com");
+    expect(s.outbox.map((m) => m.to)).toEqual(["owner@example.com", "friend@example.com"]);
   });
 });

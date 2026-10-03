@@ -145,7 +145,7 @@ function errorPage(user: User | null, status: number, message: string): Response
 function ui(deps: (env: Cloudflare.Env) => Deps, handler: (p: Page) => Promise<Response>) {
   return async (c: C) => {
     const d = deps(c.env);
-    const user = await signedIn(c.req.raw, c.env, d);
+    const user = await signedIn(c.req.raw, d);
     if (user instanceof Response) return user;
     try {
       return await handler({ c, user, deps: d });

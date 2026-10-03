@@ -1,6 +1,6 @@
 ---
 name: okf
-description: Read and maintain an OKF (Open Knowledge Format) knowledge library through the okf-tool MCP server. Use when the okf-tool MCP tools (start, browse, read, write, edit, …) are connected, or when asked to look something up in, add to, or clean up the team's knowledge base.
+description: Read and maintain an OKF (Open Knowledge Format) knowledge library through the Tempra MCP server. Use when the okf-tool MCP tools (start, browse, read, write, edit, …) are connected, or when asked to look something up in, add to, or clean up the team's knowledge base.
 ---
 
 # Working in an OKF library

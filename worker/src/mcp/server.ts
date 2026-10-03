@@ -18,7 +18,7 @@ export interface McpContext {
 }
 
 /** Name the MCP server reports; provisional until the product is named (spec: Open questions). */
-export const SERVER_NAME = "okf-tool";
+export const SERVER_NAME = "tempra";
 /** Resource URI scheme; provisional for the same reason. */
 export const URI_SCHEME = "okf";
 

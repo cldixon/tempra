@@ -117,7 +117,7 @@ export function registerAppRoutes<E extends AppEnv>(
   app.get("/app/authorize", async (c) => {
     const d = deps(c.env);
     const accounts = d.accounts;
-    const user = await signedIn(c.req.raw, c.env, d);
+    const user = await signedIn(c.req.raw, d);
     if (user instanceof Response) return user;
     const oauth: OAuthHelpers = c.env.OAUTH_PROVIDER;
     try {
@@ -143,7 +143,7 @@ export function registerAppRoutes<E extends AppEnv>(
   app.post("/app/authorize", async (c) => {
     const d = deps(c.env);
     const accounts = d.accounts;
-    const user = await signedIn(c.req.raw, c.env, d);
+    const user = await signedIn(c.req.raw, d);
     if (user instanceof Response) return user;
     const oauth: OAuthHelpers = c.env.OAUTH_PROVIDER;
     const body = await c.req.formData();
@@ -227,13 +227,13 @@ export function registerAppRoutes<E extends AppEnv>(
   });
 
   app.get("/app/grants", async (c) => {
-    const user = await signedIn(c.req.raw, c.env, deps(c.env));
+    const user = await signedIn(c.req.raw, deps(c.env));
     if (user instanceof Response) return user;
     return html(await renderGrants(c.env.OAUTH_PROVIDER, user, c.req.query("notice")));
   });
 
   app.post("/app/grants/revoke", async (c) => {
-    const user = await signedIn(c.req.raw, c.env, deps(c.env));
+    const user = await signedIn(c.req.raw, deps(c.env));
     if (user instanceof Response) return user;
     // Session cookies are SameSite=Lax, and every post must also come from this site.
     if (!fromThisSite(c.req.raw)) {

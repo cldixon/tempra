@@ -5,7 +5,7 @@
  * trails live writes by about a minute), restores and checks B is gone and A stayed, then undoes
  * and checks B is back. Takes about five minutes.
  *
- *   bun run scripts/restore-smoke.ts --url https://okf-service.example.workers.dev \
+ *   bun run scripts/restore-smoke.ts --url https://<worker>.example.workers.dev \
  *     --library dev/scratch --token <human: token for that library>
  */
 import { parseArgs } from "node:util";

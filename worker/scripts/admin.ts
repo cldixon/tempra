@@ -11,6 +11,9 @@
  *       Lists accounts with their handles and libraries.
  *   bun run admin limits --email <email> [--set libraries=10,tokens=100] [--reset] [--remote]
  *       Shows an account's limits, or overrides them (v2 spec: Limits; defaults in limits.ts).
+ *   bun run admin invite --email <email> [--remote]      Lets an email sign up when SIGNUP=invite.
+ *   bun run admin uninvite --email <email> [--remote]    Withdraws an invite (accounts stay).
+ *   bun run admin waitlist [--remote]                    Invites and the waitlist, newest first.
  */
 import { parseArgs } from "node:util";
 import { DEFAULT_LIMITS, type Limits, limitsFrom } from "../src/limits";
@@ -95,6 +98,37 @@ switch (positionals[0]) {
     console.log(JSON.stringify(limitsFrom(JSON.stringify(overrides))));
     break;
   }
+  case "invite":
+  case "uninvite": {
+    if (!values.email) fail(`Usage: ${positionals[0]} --email <email>`);
+    const email = values.email.trim().toLowerCase();
+    if (positionals[0] === "invite") {
+      await d1Sql(
+        `INSERT OR IGNORE INTO invites (email, created) VALUES (${q(email)}, ${q(new Date().toISOString())})`,
+        where,
+      );
+      console.log(`${email} is invited.`);
+    } else {
+      await d1Sql(`DELETE FROM invites WHERE email = ${q(email)}`, where);
+      console.log(`${email} is no longer invited.`);
+    }
+    break;
+  }
+  case "waitlist": {
+    for (const [email, created] of await d1Sql(
+      "SELECT email, created FROM invites ORDER BY created DESC",
+      where,
+    )) {
+      console.log(`invited   ${created}  ${email}`);
+    }
+    for (const [email, created] of await d1Sql(
+      "SELECT email, created FROM waitlist ORDER BY created DESC",
+      where,
+    )) {
+      console.log(`waiting   ${created}  ${email}`);
+    }
+    break;
+  }
   case "users": {
     const rows = await d1Sql(
       `SELECT u.handle, u.email, u.suspended, group_concat(l.slug, ', ')
@@ -107,5 +141,7 @@ switch (positionals[0]) {
     break;
   }
   default:
-    fail("Commands: transfer, suspend, users, limits (see scripts/admin.ts).");
+    fail(
+      "Commands: transfer, suspend, users, limits, invite, uninvite, waitlist (see scripts/admin.ts).",
+    );
 }

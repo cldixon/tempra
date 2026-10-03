@@ -29,7 +29,7 @@ Until the design pass, every page is plain HTML with browser defaults: white bac
 | `bun run format` | Apply Biome fixes |
 | `bun run deploy` | Apply D1 migrations (database ID from `cloudflare.config.ts`), then `cf deploy`; `--dry-run` builds and validates only; `--mode staging` deploys the staging Worker (its resource ids must be set first) |
 | `bun run seed` | Create a local user (`dev@localhost`, handle `dev`), library (`dev/dev`) and write token in the local D1; prints the token. From `worker/`, `bun run seed --slug x --actor y` for more |
-| `bun run admin` | Accounts on D1 (local, or `--remote`): `users`, `transfer --library <owner>/<slug> --to <email>`, `suspend --email <email> [--undo]`, `limits --email <email> [--set libraries=10] [--reset]` |
+| `bun run admin` | Accounts on D1 (local, or `--remote`): `users`, `transfer --library <owner>/<slug> --to <email>`, `suspend --email <email> [--undo]`, `limits --email <email> [--set libraries=10] [--reset]`, `invite`/`uninvite --email <email>`, `waitlist` |
 | `bun run logs` | Recent events from Workers Observability via `cf observability telemetry query` (`--minutes`, `--errors`, `--json`) |
 | `bun run gate` | Gate: boots `cf dev` on fresh state (a throwaway project in `worker/.gate/`), round-trips Google's sample bundles over HTTP, renders every UI page for them (signed in by a dev magic link), runs the nightly export through the DO into local R2, checks a restore is refused cleanly (no PITR locally), signs up a second account that must see nothing of the first, has a fresh account go through first run, connect over OAuth with PKCE, write through MCP and delete its library, runs the daily sweep through the scheduled handler, and runs the MCP smoke flow; also runs in CI |
 
@@ -45,8 +45,8 @@ worker/src/auth.ts       Bearer tokens: hash lookup in D1, scope, prefix, expiry
 worker/src/accounts.ts   Users (handles), libraries and tokens in D1, every query scoped to one account
 worker/src/tenancy.ts    authorizeLibrary: the one check that a caller may reach {owner}/{slug}; 404 otherwise
 worker/src/session.ts    Magic links and sessions in D1 (hashes only), the session cookie
-worker/src/signin.ts     /app/sign-in, /app/sign-out and signedIn(); Access JWTs still accepted until the A4 cut-over
-worker/src/access.ts     Cloudflare Access JWT check (transition only; removed at A4)
+worker/src/signin.ts     /app/sign-in, /app/sign-out and signedIn(); SIGNUP (open, invite, closed) decides who gets a link
+worker/src/origin.ts     fromThisSite(): the same-site check for every state-changing post (Origin, then Sec-Fetch-Site)
 worker/src/lifecycle.ts  Deleting a library or an account: rows, grants, then the DO and R2 exports (Deps.destroyLibrary)
 worker/src/limits.ts     Per-account limits (libraries, tokens) with overrides in users.limits; storage per library
 worker/src/usage.ts      Rate limits (Rate Limiting bindings) and metering (Analytics Engine) for tokens and apps
@@ -83,11 +83,11 @@ fixtures/                Google's four sample OKF bundles, vendored unchanged; d
 - `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` are set in the cloud environment; cf (and wrangler) read them automatically.
 - Remote resources: D1 `okf-accounts` (id in `cloudflare.config.ts`) and R2 bucket `okf-blobs`. Do not create or delete remote resources without asking.
 - Tokens and libraries are managed at `/app/tokens` and `/app` (or `/api/v1/tokens` and `/api/v1/libraries` with a `human:` token). `bun run seed --remote` (from `worker/`) still creates a library and token directly in the deployed D1.
-- KV `okf-oauth` (binding `OAUTH_KV`) holds OAuth clients and grants. Secrets `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` come from the Access application covering `/app/*`; until the v2 A4 cut-over, an Access sign-in is accepted alongside magic-link sessions. Never put Access on `/mcp`. Local dev uses `DEV_SIGNIN=1` from `worker/.dev.vars` (copy `worker/.dev.vars.sample`): sign-in links show on the page for localhost.
+- KV `okf-oauth` (binding `OAUTH_KV`) holds OAuth clients and grants. `/app/*` signs people in by email link only (Access was removed at the A4 cut-over); `SIGNUP` (a config var: `invite` in production and staging) decides who may create an account, and `bun run admin invite` manages the list. Local dev uses `DEV_SIGNIN=1` and `SIGNUP=open` from `worker/.dev.vars` (copy `worker/.dev.vars.sample`): sign-in links show on the page for localhost.
 - `cloudflare.config.ts` is a function of `--mode`: production by default, `staging` for a separate Worker (`okf-service-staging`) with its own D1 `okf-accounts-staging`, R2 `okf-blobs-staging` and KV `okf-oauth-staging`, and no Access in front: sign-in there is by email link only. Scripts pick the mode from `OKF_MODE`.
 - Mail goes through Cloudflare Email Service: the `EMAIL` binding is added only when `mailFrom` is set for a deployment in `cloudflare.config.ts`, which needs a sending domain onboarded in Cloudflare. Production sends from `noreply@mail.tempra.dev` (`mail.tempra.dev` is onboarded); local dev with `DEV_SIGNIN=1` still shows links on the page instead of mailing them. `OPERATOR_EMAIL` (a Worker secret, so the address stays out of the repo) receives the daily digest.
 - Rate limits are `WRITE_LIMITER` (60 writes a minute per account) and `REQUEST_LIMITER` (600 requests a minute per token or app); metering writes to the Analytics Engine dataset `okf_usage`; storage per library is `LIBRARY_STORAGE_MB`.
-- The deployed library `okf-tool` is owned by the seed user (`user_dev`). With tenancy, only its owner sees it in the UI: before deploying A1+ code, move it with `bun run admin transfer --library dev/okf-tool --to <author's email> --remote` (ask first; it changes production).
+- Naming: the repository is `cldixon/tempra` and the product is moving to `tempra.dev`. The Worker (`okf-service`, `okf-service-staging`) and its resources keep their names until that move: a Durable Object belongs to its Worker, so renaming the Worker needs a planned data move. Don't introduce new `okf-tool`/`okf-service` names; OKF stays as the name of the format.
 - `worker/` is the deployable project and must stay self-contained: its own `package.json` with every dependency, nothing imported from outside `worker/` at build time. `cloudflare.config.ts` must not import Worker code (scripts import it under bun).
 
 ## CI
