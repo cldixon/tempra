@@ -1,9 +1,10 @@
 import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { createApp, type Deps } from "./app";
-import { handleMcp } from "./mcp/server";
+import { handleMcp, type McpContext } from "./mcp/server";
 import { type GrantProps, SCOPES } from "./oauth/routes";
 import { OkfError } from "./store/errors";
-import { admit, mcpWrites } from "./usage";
+import { grantLibraries } from "./tenancy";
+import { type Admission, admit, mcpWrites, tokenAdmission } from "./usage";
 
 const HOUR = 3600;
 
@@ -31,8 +32,38 @@ export function createWorker(deps: (env: Cloudflare.Env) => Deps): {
       apiRoute: "/mcp",
       apiHandler: {
         async fetch(request, env, ctx) {
-          const { token } = (ctx as unknown as { props: GrantProps }).props;
+          const props = (ctx as unknown as { props: GrantProps }).props;
           const d = deps(env);
+          // An app connection reaches the account's libraries as of now; a bearer token (or a
+          // connection approved before account-level access) reaches its one library.
+          let who: Admission;
+          let caller: Pick<McpContext, "actor" | "scope" | "tiers" | "libraries">;
+          if (props.grant) {
+            const g = props.grant;
+            const reach = await grantLibraries(d.accounts, g);
+            if (!reach) {
+              const e = new OkfError(401, "suspended", "This account is suspended or deleted.");
+              return Response.json(e.toJSON(), { status: e.status });
+            }
+            who = { key: `grant:${g.id}|${g.actor}`, account: reach.user.handle };
+            caller = {
+              actor: g.actor,
+              scope: g.scope,
+              tiers: g.tiers,
+              libraries: reach.libraries,
+            };
+          } else if (props.token) {
+            const t = props.token;
+            who = tokenAdmission(t);
+            caller = {
+              actor: t.actor,
+              scope: t.scope,
+              tiers: t.mcp_tiers,
+              libraries: [t],
+            };
+          } else {
+            return new Response(null, { status: 401 });
+          }
           let write = false;
           if (request.method === "POST") {
             write = mcpWrites(
@@ -43,12 +74,17 @@ export function createWorker(deps: (env: Cloudflare.Env) => Deps): {
             );
           }
           try {
-            await admit(d, token, write);
+            await admit(d, who, write);
           } catch (e) {
             if (e instanceof OkfError) return Response.json(e.toJSON(), { status: e.status });
             throw e;
           }
-          return handleMcp(request, { token, lib: d.library(token), blobs: d.blobs, origin });
+          return handleMcp(request, {
+            ...caller,
+            open: (t) => d.library(t),
+            blobs: d.blobs,
+            origin,
+          });
         },
       },
       defaultHandler: { fetch: (request, env, ctx) => app.fetch(request, env, ctx) },

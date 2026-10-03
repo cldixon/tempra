@@ -154,8 +154,8 @@ describe("grants approved before A1 (no owner handle in their props)", () => {
     const { TOKENS } = await import("./harness");
     const writer = TOKENS.writer as TokenInfo;
     const old = { ...writer, library: { ...writer.library, owner: "" } };
-    const { admit } = await import("../src/usage");
-    await admit(s.deps, old, true);
+    const { admit, tokenAdmission } = await import("../src/usage");
+    await admit(s.deps, tokenAdmission(old), true);
     expect(keys).toContain("write:lib-1");
     expect(s.usage.at(-1)).toMatchObject({ kind: "write", account: "lib-1" });
   });

@@ -14,14 +14,20 @@ import { normalizeDir } from "../okf/paths";
 import { fromThisSite } from "../origin";
 import { signedIn } from "../signin";
 import { OkfError } from "../store/errors";
+import type { AccountGrant } from "../tenancy";
 import { type ConsentForm, consentPage, grantsPage, messagePage } from "./pages";
 
 /** OAuth scopes (spec: Apps under Auth). A grant never carries more than the person approved. */
 export const SCOPES = ["okf:read", "okf:write"];
 
-/** What an approved grant carries: exactly a token's fields, so every permission rule applies. */
+/**
+ * What an approved grant carries. Connections approved here belong to the account and name
+ * their libraries (`grant`); `token` is one library's token: a bearer token on /mcp, or a
+ * connection approved before account-level access, which keeps working as it was.
+ */
 export interface GrantProps {
-  token: TokenInfo;
+  token?: TokenInfo;
+  grant?: AccountGrant;
 }
 
 const AGENT_ACTOR = /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*$/;
@@ -43,7 +49,8 @@ function defaultForm(
 ): ConsentForm {
   const wantsWrite = request.scope.length === 0 || request.scope.includes("okf:write");
   return {
-    library: libs[0]?.slug ?? "",
+    libraries: "all",
+    selected: [],
     newLibrary: libs.length === 0 ? "notes" : "",
     access: wantsWrite ? "write" : "read",
     prefix: "",
@@ -55,7 +62,11 @@ function defaultForm(
 function readForm(form: FormData): ConsentForm {
   const s = (k: string) => String(form.get(k) ?? "").trim();
   return {
-    library: s("library"),
+    libraries: s("libraries") === "all" ? "all" : "selected",
+    selected: form
+      .getAll("library")
+      .map((v) => String(v).trim())
+      .filter(Boolean),
     newLibrary: s("new_library"),
     access: s("access") === "read" ? "read" : "write",
     prefix: s("prefix"),
@@ -69,7 +80,7 @@ function validate(form: ConsentForm, libs: LibraryRef[]): string | null {
   if (!AGENT_ACTOR.test(form.actor)) {
     return "The ledger name must look like app/label, e.g. claude-ai/connector: lowercase letters, digits, dots, hyphens or underscores on each side of one slash.";
   }
-  if (form.library === "") {
+  if (form.newLibrary !== "") {
     try {
       checkSlug(form.newLibrary);
     } catch (e) {
@@ -78,8 +89,14 @@ function validate(form: ConsentForm, libs: LibraryRef[]): string | null {
     if (libs.some((l) => l.slug === form.newLibrary.toLowerCase())) {
       return `You already have a library named ${form.newLibrary}; pick it from the list.`;
     }
-  } else if (!libs.some((l) => l.slug === form.library)) {
-    return "Pick a library from the list, or create a new one.";
+  }
+  if (form.libraries === "selected") {
+    if (form.selected.some((slug) => !libs.some((l) => l.slug === slug))) {
+      return "Pick libraries from the list.";
+    }
+    if (form.selected.length === 0 && form.newLibrary === "") {
+      return "Pick at least one library, or name a new one.";
+    }
   }
   if (form.prefix.includes("..")) return "The directory cannot contain '..'.";
   return null;
@@ -185,31 +202,31 @@ export function registerAppRoutes<E extends AppEnv>(
       }
       const scope = form.access === "write" ? ["okf:read", "okf:write"] : ["okf:read"];
       const approved = await oauth.approveConsent(c.req.raw, handle, { scope });
-      const library =
-        form.library === ""
-          ? await accounts.createLibrary(form.newLibrary, user)
-          : (libs.find((l) => l.slug === form.library) as LibraryRef);
+      const created = form.newLibrary ? await accounts.createLibrary(form.newLibrary, user) : null;
+      const libraries: AccountGrant["libraries"] =
+        form.libraries === "all"
+          ? "all"
+          : [
+              ...libs.filter((l) => form.selected.includes(l.slug)).map((l) => l.id),
+              ...(created ? [created.id] : []),
+            ];
       const prefix = normalizeDir(form.prefix) || null;
       const props: GrantProps = {
-        token: {
-          id: "oauth",
+        grant: {
+          id: crypto.randomUUID(),
+          userId: user.id,
           actor: form.actor,
           scope: form.access,
           prefix,
-          mcp_tiers: form.tiers,
-          library: {
-            id: library.id,
-            slug: library.slug,
-            do_id: library.do_id,
-            owner: library.owner,
-          },
+          tiers: form.tiers,
+          libraries,
         },
       };
       const { redirectTo } = await oauth.completeAuthorization({
         request: approved.request,
         userId: user.id,
         metadata: {
-          library: library.slug,
+          libraries,
           actor: form.actor,
           access: form.access,
           prefix,
@@ -229,7 +246,8 @@ export function registerAppRoutes<E extends AppEnv>(
   app.get("/apps", async (c) => {
     const user = await signedIn(c.req.raw, deps(c.env));
     if (user instanceof Response) return user;
-    return html(await renderGrants(c.env.OAUTH_PROVIDER, user, c.req.query("notice")));
+    const libs = await deps(c.env).accounts.libraries(user.id);
+    return html(await renderGrants(c.env.OAUTH_PROVIDER, user, libs, c.req.query("notice")));
   });
 
   app.post("/apps/revoke", async (c) => {
@@ -246,7 +264,7 @@ export function registerAppRoutes<E extends AppEnv>(
   });
 }
 
-async function renderGrants(oauth: OAuthHelpers, user: User, notice?: string) {
+async function renderGrants(oauth: OAuthHelpers, user: User, libs: LibraryRef[], notice?: string) {
   const grants = [];
   let cursor: string | undefined;
   do {
@@ -260,5 +278,11 @@ async function renderGrants(oauth: OAuthHelpers, user: User, notice?: string) {
     if (client?.clientName) names.set(id, client.clientName);
   }
   grants.sort((a, b) => b.createdAt - a.createdAt);
-  return grantsPage({ signedInAs: user.email, grants, clientNames: names, notice });
+  return grantsPage({
+    signedInAs: user.email,
+    grants,
+    clientNames: names,
+    libraries: libs,
+    notice,
+  });
 }

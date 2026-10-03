@@ -186,7 +186,7 @@ describe("tenancy (v2 spec: Tenancy and authorization)", () => {
     });
     const page = await (await other.app.request(`/authorize?${q}`)).text();
     expect(page).toContain("stranger@example.com");
-    expect(page).toContain('<option value="demo"');
+    expect(page).toContain('name="library" value="demo"');
     expect(page).not.toContain("private-notes");
   });
 

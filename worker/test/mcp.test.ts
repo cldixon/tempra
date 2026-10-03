@@ -60,7 +60,7 @@ describe("MCP server", () => {
 
     const { client } = await connect(app, "files");
     const read = (await client.listTools()).tools.find((t) => t.name === "read");
-    expect(Object.keys(read?.inputSchema.properties ?? {})).toEqual(["path"]);
+    expect(Object.keys(read?.inputSchema.properties ?? {})).toEqual(["path", "library"]);
     const { client: full } = await connect(app, "writer");
     const tier2Tool = (await full.listTools()).tools.find((t) => t.name === "search");
     expect(tier2Tool?.description?.startsWith("Beyond files:")).toBe(true);
@@ -222,8 +222,8 @@ describe("MCP server", () => {
     const { client, call } = await connect(app);
     await call("write", { path: "t/a.md", content: doc("A", "a\n") });
     const list = await client.listResources();
-    expect(list.resources.map((r) => [r.uri, r.title])).toEqual([["okf://demo/t/a.md", "A"]]);
-    const res = await client.readResource({ uri: "okf://demo/t/a.md" });
+    expect(list.resources.map((r) => [r.uri, r.title])).toEqual([["okf://owner/demo/t/a.md", "A"]]);
+    const res = await client.readResource({ uri: "okf://owner/demo/t/a.md" });
     expect((res.contents[0] as { text: string }).text).toContain("title: A");
   });
 

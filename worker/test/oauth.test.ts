@@ -103,6 +103,13 @@ async function mcp(app: App, token: string) {
   return { client, call };
 }
 
+/** Makes a second account with its own library; returns its handle. */
+async function setupStranger(accounts: ReturnType<typeof setup>["accounts"]): Promise<string> {
+  const user = await accounts.user("stranger@example.com");
+  await accounts.createLibrary("demo", user);
+  return user.handle;
+}
+
 const approve = {
   library: "demo",
   new_library: "",
@@ -139,7 +146,7 @@ describe("OAuth for MCP clients", () => {
     const clientId = await register(app);
     const flow = await begin(app, clientId);
     expect(flow.page.status).toBe(200);
-    expect(flow.html).toContain("Connect Claude to a library");
+    expect(flow.html).toContain("Connect Claude to your libraries");
     expect(flow.html).toContain("Signed in as owner@example.com");
     expect(flow.html).toContain("<strong>claude.ai</strong>");
     expect(flow.html).toContain('value="claude/connector"');
@@ -205,7 +212,7 @@ describe("OAuth for MCP clients", () => {
     expect(
       (await call("write", { path: "inbox/x.md", content: "---\ntype: Note\n---\n" })).isError,
     ).toBe(false);
-    expect((await call("start")).text).toContain("Library team-notes");
+    expect((await call("start")).text).toContain("Library owner/team-notes");
   });
 
   test("invalid choices re-show the page; cancelling returns access_denied", async () => {
@@ -293,6 +300,97 @@ describe("OAuth for MCP clients", () => {
       });
       expect(r.status).toBe(401);
     }
+  });
+
+  test("all libraries: every library the account owns, including later ones", async () => {
+    const { app, accounts } = setup();
+    const clientId = await register(app);
+    const flow = await begin(app, clientId);
+    expect(flow.html).toContain('name="libraries" value="all" checked');
+    const done = await submit(app, flow, { ...approve, libraries: "all", library: "" });
+    const tokens = await exchange(app, clientId, done.headers.get("Location") ?? "", flow.verifier);
+    const { client, call } = await mcp(app, tokens.access_token);
+
+    // One library: no `library` needed.
+    expect((await call("start")).text).toContain("# Library owner/demo");
+    await accounts.createLibrary("developers", { id: "user_1", handle: "owner" });
+    const listed = await call("start");
+    expect(listed.text).toContain("# Your libraries (2)");
+    expect(listed.text).toContain("- owner/developers");
+    const ambiguous = await call("read", { path: "a.md" });
+    expect(ambiguous.isError).toBe(true);
+    expect(ambiguous.text).toContain("library_required");
+
+    const note = "---\ntype: Note\n---\nhi\n";
+    expect(
+      (await call("write", { library: "owner/developers", path: "a.md", content: note })).isError,
+    ).toBe(false);
+    expect((await call("read", { library: "developers", path: "a.md" })).text).toContain(
+      "by: claude-ai/connector",
+    );
+    expect((await call("read", { library: "owner/demo", path: "a.md" })).text).toContain(
+      "not_found",
+    );
+    expect((await call("start", { library: "developers" })).text).toContain(
+      "Other libraries you can reach: owner/demo",
+    );
+    const uris = (await client.listResources()).resources.map((r) => r.uri);
+    expect(uris).toContain("okf://owner/developers/a.md");
+
+    // Another account's library is not reachable by name.
+    const other = await setupStranger(accounts);
+    const theirs = await call("read", { library: `${other}/demo`, path: "a.md" });
+    expect(theirs.text).toContain("no_library");
+
+    // Deleting one library keeps a connection to all of them.
+    const del = await app.request("/owner/developers/-/delete", {
+      method: "POST",
+      headers: { Origin: ORIGIN, "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ confirm: "developers" }),
+      redirect: "manual",
+    });
+    expect(del.status).toBeLessThan(400);
+    expect((await call("start")).text).toContain("# Library owner/demo");
+    expect(await (await app.request("/apps")).text()).toContain("All libraries");
+  });
+
+  test("selected libraries: only those, and a suspended account is cut off", async () => {
+    const { app, accounts, db } = setup();
+    await accounts.createLibrary("private", { id: "user_1", handle: "owner" });
+    const clientId = await register(app);
+    const flow = await begin(app, clientId);
+    const done = await submit(app, flow, { ...approve, libraries: "selected" });
+    const tokens = await exchange(app, clientId, done.headers.get("Location") ?? "", flow.verifier);
+    const { call } = await mcp(app, tokens.access_token);
+    expect((await call("start")).text).toContain("# Library owner/demo");
+    expect((await call("read", { library: "owner/private", path: "a.md" })).text).toContain(
+      "no_library",
+    );
+    // A library created later is not selected.
+    await accounts.createLibrary("later", { id: "user_1", handle: "owner" });
+    expect((await call("start")).text).toContain("# Library owner/demo");
+    const apps = await (await app.request("/apps")).text();
+    expect(apps).toContain("<td>demo");
+
+    db.run("UPDATE users SET suspended = ? WHERE id = ?", [new Date().toISOString(), "user_1"]);
+    const r = await app.request("/mcp", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${tokens.access_token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+    expect(r.status).toBe(401);
+  });
+
+  test("selecting nothing re-shows the page", async () => {
+    const { app } = setup();
+    const clientId = await register(app);
+    const flow = await begin(app, clientId);
+    const bad = await submit(app, flow, { ...approve, libraries: "selected", library: "" });
+    expect(bad.status).toBe(400);
+    expect(await bad.text()).toContain("Pick at least one library");
   });
 
   test("bearer tokens still work on /mcp alongside OAuth", async () => {

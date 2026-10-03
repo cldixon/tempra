@@ -59,6 +59,8 @@ export interface Accounts {
   mayJoin(email: string, mode: SignupMode): Promise<boolean>;
   /** Records an email that asked to sign in without an invite. */
   joinWaitlist(email: string, ip: string | null): Promise<void>;
+  /** The account by its users row id; null when there is none or it is suspended. */
+  account(userId: string): Promise<User | null>;
   /** The libraries the user owns, by name. */
   libraries(userId: string): Promise<LibraryRef[]>;
   /** A library by its path, with its owner's users row id; null when there is none. */
@@ -247,6 +249,12 @@ export function d1Accounts(db: D1Database): Accounts {
         .prepare("INSERT OR IGNORE INTO waitlist (email, created, ip) VALUES (?, ?, ?)")
         .bind(email, new Date().toISOString(), ip)
         .run();
+    },
+    async account(userId) {
+      return db
+        .prepare("SELECT id, email, actor, handle FROM users WHERE id = ? AND suspended IS NULL")
+        .bind(userId)
+        .first<User>();
     },
     async libraries(userId) {
       const r = await db
