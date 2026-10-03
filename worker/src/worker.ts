@@ -15,6 +15,8 @@ const HOUR = 3600;
  * The canonical resource is `<origin>/mcp`, so one provider is built per origin the Worker is
  * reached on (workers.dev, a custom domain, localhost in dev).
  */
+const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
+
 export function createWorker(deps: (env: Cloudflare.Env) => Deps): {
   fetch: NonNullable<ExportedHandler<Env>["fetch"]>;
 } {
@@ -80,7 +82,14 @@ export function createWorker(deps: (env: Cloudflare.Env) => Deps): {
 
   return {
     fetch(request, env, ctx) {
-      return providerFor(new URL(request.url).origin).fetch(request, env, ctx);
+      const url = new URL(request.url);
+      // Plain http reaches the Worker when the zone does not force https. Only https (or a
+      // loopback host in dev) is an origin: the OAuth metadata and session cookies need it.
+      if (url.protocol === "http:" && !LOOPBACK.has(url.hostname)) {
+        url.protocol = "https:";
+        return Response.redirect(url.toString(), 308);
+      }
+      return providerFor(url.origin).fetch(request, env, ctx);
     },
   };
 }

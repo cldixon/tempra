@@ -69,4 +69,12 @@ describe("the UI moved from /app to the root (v2 spec: URLs)", () => {
     expect(api.status).toBe(404);
     expect(api.headers.get("Content-Type")).toContain("json");
   });
+
+  test("plain http on a real host goes to https; loopback stays for dev", async () => {
+    const s = setup();
+    const r = await s.anon.request("http://app.example/healthz?x=1", { redirect: "manual" });
+    expect(r.status).toBe(308);
+    expect(r.headers.get("Location")).toBe("https://app.example/healthz?x=1");
+    expect((await s.anon.request("http://localhost/healthz")).status).toBe(200);
+  });
 });
