@@ -22,7 +22,7 @@ import { OkfError } from "./store/errors";
 import type { ConceptContent, RequestContext, WriteOp } from "./store/store";
 import { authorizeLibrary } from "./tenancy";
 import { registerUiRoutes } from "./ui/routes";
-import { appHref, appScript, renderView, Urls } from "./ui/spa";
+import { appHref, appScript } from "./ui/spa";
 import { admit, tokenAdmission, type UsageDeps } from "./usage";
 import { maybeGunzip, readTar } from "./util/tar";
 
@@ -225,6 +225,13 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     const path = tail(c, "/files/");
     const view = await c.var.lib.read(path, { at: num(c, "at"), computed: bool(c, "computed") });
     c.header("X-Seq", String(view.seq));
+    const wantsJson = (c.req.header("Accept") ?? "").includes("application/json");
+    if (view.kind === "attachment" && wantsJson) {
+      // A description, not the bytes: what the app shows on an attachment's page.
+      const { kind, path, seq, hash, size, media } = view;
+      c.header("ETag", `"${hash}"`);
+      return c.json({ kind, path, seq, hash, size, media: media ?? null });
+    }
     if (view.kind === "attachment") {
       c.header("ETag", `"${view.hash}"`);
       c.header("Content-Type", view.media ?? "application/octet-stream");
@@ -237,9 +244,10 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
       if (!obj) throw new OkfError(500, "blob_missing", `Bytes for ${view.path} are missing.`);
       return c.body(obj.body as ReadableStream);
     }
-    const wantsJson = (c.req.header("Accept") ?? "").includes("application/json");
     if (view.kind === "derived") {
-      if (wantsJson) return c.json({ path: view.path, seq: view.seq, markdown: view.markdown });
+      if (wantsJson) {
+        return c.json({ kind: view.kind, path: view.path, seq: view.seq, markdown: view.markdown });
+      }
       return c.body(view.markdown, 200, { "Content-Type": "text/markdown; charset=utf-8" });
     }
     c.header("ETag", `"${view.hash}"`);
@@ -492,13 +500,6 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
 
   // Counts for the library's home page: concepts, attachments, types, open work.
   app.get(`${BASE}/summary`, async (c) => c.json(await c.var.lib.summary()));
-
-  // A file as the app shows it (ui/spa.ts): its body as the server renders it, for now.
-  app.get(`${BASE}/render/*`, async (c) => {
-    const { owner, slug } = c.var.token.library;
-    const urls = new Urls(owner, slug, num(c, "at"));
-    return c.json(await renderView(c.var.lib, urls, tail(c, "/render/")));
-  });
 
   app.get(`${BASE}/work`, async (c) =>
     c.json(await c.var.lib.work({ kind: c.req.query("kind"), limit: num(c, "limit") })),

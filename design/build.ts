@@ -1,5 +1,5 @@
 /**
- * `bun run build` in design/: bundles src/*.css (tokens, base, prose, in that order) into
+ * `bun run build` in design/: bundles src/*.css (tokens, base, prose, reader, in that order) into
  * dist/tempra.css for the site, and dist/tempra.ts for the app's Worker, which serves it at a
  * content-hashed URL. Both outputs are committed; design.test.ts fails when they are stale.
  */
@@ -7,7 +7,7 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const ROOT = import.meta.dir;
-export const SOURCES = ["tokens.css", "base.css", "prose.css"];
+export const SOURCES = ["tokens.css", "base.css", "prose.css", "reader.css"];
 
 export function generate(): { css: string; ts: string } {
   const css = `${SOURCES.map((f) => readFileSync(join(ROOT, "src", f), "utf8").trim()).join("\n\n")}\n`;

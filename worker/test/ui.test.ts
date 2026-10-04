@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import * as app from "@tempra/app";
 import * as design from "@tempra/design";
-import { linkTarget, renderBody } from "../src/ui/markdown";
 import { API, setup } from "./harness";
 
 type S = ReturnType<typeof setup>;
@@ -23,68 +22,12 @@ async function page(s: S, path: string) {
 
 const LIB = "/owner/demo";
 
-describe("markdown rendering for the UI", () => {
-  const opts = {
-    url: (t: string) => {
-      const l = linkTarget("a/b.md", t);
-      if (!l) return null;
-      return l.kind === "internal" ? `/ui/${l.path}${l.anchor ?? ""}` : l.href;
-    },
-    footnote: (label: string, defined: boolean) => (defined ? `#fn-${label}` : null),
-  };
-
-  test("never renders raw HTML or unsafe URLs", () => {
-    const { html } = renderBody(
-      [
-        "<script>alert(1)</script>",
-        "",
-        'Hi <img src=x onerror="alert(1)"> [bad](javascript:alert(1)) [data](data:text/html,x)',
-        "",
-        "[ok](https://e.com) [rel](../c.md#h) ![pic](p.png)",
-      ].join("\n"),
-      opts,
-    );
-    expect(html).not.toContain("<script");
-    expect(html).not.toContain('<img src="x"');
-    expect(html).toContain("&#x3C;script>");
-    expect(html).not.toContain("javascript:");
-    expect(html).not.toContain("data:text");
-    expect(html).toContain('href="https://e.com" rel="noopener noreferrer nofollow"');
-    expect(html).toContain('href="/ui/c.md#h"');
-    expect(html).toContain('src="/ui/a/p.png"');
-  });
-
-  test("tables, heading anchors and footnotes", () => {
-    const r = renderBody(
-      "# Schema\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\n# Schema\n\nClaim.[^s] Loose.[^x]\n\n[^s]: The **standard**\n",
-      opts,
-    );
-    expect(r.html).toContain('<h1 id="schema">');
-    expect(r.html).toContain('<h1 id="schema-1">');
-    expect(r.html).toContain("<table>");
-    expect(r.html).toContain('<sup class="fnref"><a href="#fn-s">[s]</a></sup>');
-    // Without a definition GFM keeps it as text, as any renderer would; lint flags it.
-    expect(r.html).toContain("Loose.[^x]");
-    expect(r.footnotes.get("s")).toContain("<strong>standard</strong>");
-  });
-});
-
 /** The JSON the app reads, as the signed-in owner (session cookie). */
-async function get<T>(s: S, path: string): Promise<T> {
+async function get<T = unknown>(s: S, path: string): Promise<T> {
   const r = await s.app.request(`${API}${path}`, { headers: { Accept: "application/json" } });
   expect(r.status).toBe(200);
   return (await r.json()) as T;
 }
-
-type Rendered = {
-  kind: string;
-  path: string;
-  head: number;
-  html: string;
-  footnotes: Record<string, string>;
-  sources: { sources: { id?: string; cited?: number; title?: string }[] };
-  media?: string;
-};
 
 describe("the app's pages (TEMPRA-9)", () => {
   test("every rebuilt page is the app's shell, at its old URL", async () => {
@@ -148,83 +91,19 @@ describe("the app's pages (TEMPRA-9)", () => {
     expect((await page(s, "/owner/other/a.md")).status).toBe(404);
   });
 
-  test("render: a concept's body with links to UI pages and footnotes to its sources", async () => {
+  test("files as JSON describe every kind of file, as the app reads them", async () => {
     const s = setup();
-    await put(s, "policies/margin.md", "---\ntype: Policy\ntitle: Margin Standard\n---\nRules.\n");
-    await put(
-      s,
-      "metrics/gross-margin.md",
-      [
-        "---",
-        "type: Metric",
-        "title: Gross <Margin>",
-        "sources:",
-        "  - { id: std, resource: /policies/margin.md, title: Margin Standard }",
-        "  - { id: web, resource: https://e.com/doc }",
-        "---",
-        "Uses [the policy](/policies/margin.md) and [missing](/nope.md).[^std] Also [^web] and [^x].",
-        "",
-        "[^std]: FY2026 standard",
-        "",
-        "[^x]: An aside",
-        "",
-      ].join("\n"),
-    );
-    const c = await get<Rendered>(s, "/render/metrics/gross-margin.md");
-    expect(c.kind).toBe("concept");
-    expect(c.html).toContain(`href="${LIB}/policies/margin.md"`);
-    expect(c.html).toContain('<a href="#src-std">[std]</a>');
-    expect(c.html).toContain('<a href="#fn-x">[x]</a>');
-    expect(c.footnotes).toEqual({ std: "<p>FY2026 standard</p>", x: "<p>An aside</p>" });
-    expect(c.sources.sources.find((x) => x.id === "std")).toMatchObject({ cited: 1 });
-    expect(c.html).not.toContain("<script");
-
-    const links = await get<{ broken: { raw: string }[] }>(s, "/links/metrics/gross-margin.md");
-    expect(links.broken.map((b) => b.raw)).toContain("/nope.md");
-    const policy = await get<{ inbound: { path: string; kind: string }[] }>(
-      s,
-      "/links/policies/margin.md",
-    );
-    expect(policy.inbound).toContainEqual(
-      expect.objectContaining({ path: "metrics/gross-margin.md", kind: "source" }),
-    );
-  });
-
-  test("render: a leading heading that repeats the title is not shown twice", async () => {
-    const s = setup();
-    await put(
-      s,
-      "a.md",
-      "---\ntype: Note\ntitle: Alpha\n---\n# Alpha\n\nBody text.\n\n# Alpha again\n",
-    );
-    const c = await get<Rendered>(s, "/render/a.md");
-    expect(c.html).not.toContain('<h1 id="alpha">');
-    expect(c.html).toContain("Alpha again");
-    expect(c.html).toContain("Body text.");
-  });
-
-  test("render: time travel with ?at, links on a pinned page stay pinned", async () => {
-    const s = setup();
-    await put(s, "a.md", "---\ntype: Note\n---\nFirst [b](/b.md).\n");
+    await put(s, "a.md", "---\ntype: Note\ntitle: A\n---\nFirst words.\n");
     const { hash, seq } = await get<{ hash: string; seq: number }>(s, "/files/a.md");
     await s.req("/files/a.md", {
       method: "PUT",
       headers: { "Content-Type": "text/markdown", "If-Match": `"${hash}"` },
-      body: "---\ntype: Note\n---\nSecond words.\n",
+      body: "---\ntype: Note\ntitle: A\n---\nSecond words.\n",
     });
-    const now = await get<Rendered>(s, "/render/a.md");
-    expect(now.html).toContain("Second words.");
-    const then = await get<Rendered>(s, `/render/a.md?at=${seq}`);
-    expect(then.html).toContain("First");
-    expect(then.html).toContain(`href="${LIB}/b.md?at=${seq}"`);
-    expect(then.head).toBeGreaterThan(seq);
-    const raw = await s.app.request(`${LIB}/-/raw/a.md?at=${seq}`);
-    expect(raw.headers.get("Content-Type")).toContain("text/plain");
-    expect(await raw.text()).toContain("First");
-  });
-
-  test("render: attachments, synthesized files and missing files", async () => {
-    const s = setup();
+    // A concept: frontmatter and the markdown body the reader parses, at any sequence.
+    expect(await get(s, "/files/a.md")).toMatchObject({ kind: "concept", body: "Second words.\n" });
+    expect(await get(s, `/files/a.md?at=${seq}`)).toMatchObject({ body: "First words.\n" });
+    // An attachment: its description, not its bytes.
     const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
     const up = await s.req("/files/img/logo.png", {
       method: "PUT",
@@ -232,20 +111,29 @@ describe("the app's pages (TEMPRA-9)", () => {
       body: png,
     });
     expect(up.status).toBeLessThan(300);
-    expect(await get<Rendered>(s, "/render/img/logo.png")).toMatchObject({
+    expect(await get(s, "/files/img/logo.png")).toMatchObject({
       kind: "attachment",
+      path: "img/logo.png",
       media: "image/png",
       size: 8,
     });
+    const bytes = await s.app.request(`${API}/files/img/logo.png`);
+    expect(new Uint8Array(await bytes.arrayBuffer())).toEqual(png);
     const dl = await s.app.request(`${LIB}/-/download/img/logo.png`, { redirect: "manual" });
     expect(dl.status).toBe(302);
-    const bytes = await s.app.request(dl.headers.get("Location") ?? "");
-    expect(new Uint8Array(await bytes.arrayBuffer())).toEqual(png);
-
+    // A synthesized file: its markdown.
+    expect(await get(s, "/files/log.md")).toMatchObject({ kind: "derived", path: "log.md" });
+    // index.md is the directory's page; a missing file is a 404.
     const index = await s.app.request(`${LIB}/img/index.md`, { redirect: "manual" });
     expect(index.headers.get("Location")).toBe(`${LIB}/img/`);
-    expect((await get<Rendered>(s, "/render/log.md")).kind).toBe("derived");
-    expect((await s.app.request(`${API}/render/nope.md`)).status).toBe(404);
+    expect(
+      (await s.app.request(`${API}/files/nope.md`, { headers: { Accept: "application/json" } }))
+        .status,
+    ).toBe(404);
+    // The raw source, as an export writes it.
+    const raw = await s.app.request(`${LIB}/-/raw/a.md?at=${seq}`);
+    expect(raw.headers.get("Content-Type")).toContain("text/plain");
+    expect(await raw.text()).toContain("First words.");
   });
 });
 

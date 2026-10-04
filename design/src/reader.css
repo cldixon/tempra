@@ -1,0 +1,45 @@
+/*
+ * The concept reader (Wordgard, TEMPRA-11). Wordgard themes itself through --wg-* variables set
+ * on its own element; these map them to Tempra's tokens and keep the body as plain as the rest of
+ * the page. The selectors are one step more specific than Wordgard's injected theme.
+ */
+div.body > * {
+  --wg-panel-color: var(--tempra-color-bg);
+  --wg-border-color: var(--tempra-color-border);
+  --wg-highlight-color: var(--tempra-color-link);
+  --wg-dialog-font: inherit;
+  border: 0;
+}
+
+div.body wg-content {
+  padding: 0;
+}
+
+.tooltip {
+  max-width: 32rem;
+  padding: var(--tempra-space-1) var(--tempra-space-2);
+  border: 1px solid var(--tempra-color-border);
+  background: var(--tempra-color-bg);
+  color: var(--tempra-color-text);
+}
+
+.prose a.broken {
+  text-decoration-line: line-through;
+}
+
+.prose pre.raw,
+.prose code.raw {
+  color: var(--tempra-color-muted);
+}
+
+.toc {
+  padding-left: var(--tempra-space-3);
+}
+
+.toc .depth-1 {
+  margin-left: var(--tempra-space-3);
+}
+
+.toc .depth-2 {
+  margin-left: var(--tempra-space-4);
+}

@@ -119,26 +119,7 @@ export function libNav(urls: Urls, active: LibTab): string {
   return `<nav class="libnav"><span class="muted">${esc(urls.slug)}:</span> ${tabs.join(" · ")}</nav>`;
 }
 
-/**
- * The body without a leading `# Heading` that repeats the title: agents often open a body with
- * the title, and the page already shows it. Display only; the stored body is unchanged.
- */
-export function withoutTitleHeading(body: string, title: string): string {
-  const m = /^\s*#[ \t]+(.+?)[ \t]*#*[ \t]*(?:\r?\n|$)/.exec(body);
-  if (!m || m[1]?.trim().toLowerCase() !== title.trim().toLowerCase()) return body;
-  return body.slice(m[0].length);
-}
-
 const enc = (p: string) => p.split("/").map(encodeURIComponent).join("/");
-
-/** An element id for a footnote label or source id. */
-export const anchorId = (prefix: string, label: string) =>
-  `${prefix}-${label.replace(/[^\w.-]/g, "_")}`;
-
-function _dirOf(path: string) {
-  const i = path.lastIndexOf("/");
-  return i === -1 ? "" : path.slice(0, i);
-}
 
 function baseName(path: string) {
   return path.slice(path.lastIndexOf("/") + 1);
@@ -155,19 +136,6 @@ export function crumbs(urls: Urls, path: string, file: boolean): string {
     else out.push(`<a href="${esc(urls.tree(p))}">${esc(seg)}</a>`);
   });
   return `<div class="crumbs">${out.join(" / ")}</div>`;
-}
-
-export function formatSize(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
-}
-
-// ---------------------------------------------------------------- concept
-
-export interface SourcesData {
-  sources: JsonObject[];
-  unmatched_footnotes: string[];
 }
 
 /** Ops that change a file's content (or remove it), and so have a diff. */

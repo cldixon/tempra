@@ -1,5 +1,15 @@
-import { type FormEvent, useEffect, useState } from "react";
+import {
+  type LinkTarget,
+  type Parsed,
+  parse,
+  toHTML,
+  type WordDiff,
+  wordDiff,
+} from "@tempra/editor";
+import type { Hovered } from "@tempra/editor/view";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, api, useLoad } from "../api";
+import { el, Reader } from "../Reader";
 import { navigate } from "../router";
 import {
   AtNotice,
@@ -26,37 +36,30 @@ interface Sources {
   unmatched_footnotes: string[];
 }
 
-/** GET …/render/{path}: the file as the app shows it (worker/src/ui/spa.ts). */
-type Rendered =
+/** GET …/files/{path} as JSON: what each kind of file is. */
+type FileJson =
   | {
       kind: "concept";
       path: string;
-      head: number;
       seq: number;
-      html: string;
-      footnotes: Record<string, string>;
-      sources: Sources;
+      hash: string;
+      body: string;
+      frontmatter: JsonObject;
+      lint: { code: string; message: string }[];
+      trust_tier: string;
+      stale: boolean;
     }
-  | { kind: "derived"; path: string; head: number; seq: number; html: string }
+  | { kind: "derived"; path: string; seq: number; markdown: string }
   | {
       kind: "attachment";
       path: string;
-      head: number;
       seq: number;
       size: number;
       media: string | null;
       hash: string;
     };
 
-interface Concept {
-  path: string;
-  seq: number;
-  hash: string;
-  frontmatter: JsonObject;
-  lint: { code: string; message: string }[];
-  trust_tier: string;
-  stale: boolean;
-}
+type Concept = Extract<FileJson, { kind: "concept" }>;
 
 interface Links {
   inbound: { path: string; raw: string; kind: string }[];
@@ -73,6 +76,14 @@ interface HistoryEvent {
   meta: JsonObject | null;
 }
 
+interface WorkItem {
+  kind: string;
+  path: string;
+  since: string;
+  detail: string;
+  suggested_action: string;
+}
+
 /** Ops that change a file's content (or remove it), and so have a diff. */
 export const CONTENT_OPS = new Set(["put", "import", "revert", "delete", "attach"]);
 
@@ -81,18 +92,46 @@ const DONE: Record<string, (actor: string) => string> = {
   verify: (actor) => `Verified as ${actor}. The trust tier is human-reviewed until the next edit.`,
 };
 
+/** Where links and images in a body point in the app, as the server's plain pages did. */
+function bodyHref(urls: Urls) {
+  return (t: LinkTarget | null, _raw: string, kind: "link" | "image"): string | null => {
+    if (!t) return null;
+    if (t.kind !== "internal") return t.href;
+    if (t.dir || t.path === "") return urls.tree(t.path) + (t.anchor ?? "");
+    if (baseName(t.path) === "index.md") return urls.tree(dirOf(t.path)) + (t.anchor ?? "");
+    return kind === "image" ? urls.download(t.path) : urls.file(t.path, t.anchor);
+  };
+}
+
 export function File(props: { urls: Urls; path: string; done: string | null; actor: string }) {
   const { urls, path } = props;
   const loaded = useLoad(`file ${urls.file(path)}`, async () => {
-    const rendered = await api<Rendered>(urls.api(`render/${enc(path)}`, { at: urls.at }));
-    if (rendered.kind !== "concept") return { rendered } as const;
-    const p = enc(rendered.path);
-    const [concept, links, history] = await Promise.all([
-      api<Concept>(urls.api(`files/${p}`, { at: urls.at })),
+    const [file, stats] = await Promise.all([
+      api<FileJson>(urls.api(`files/${enc(path)}`, { at: urls.at })),
+      api<{ seq: number }>(urls.api("stats")),
+    ]);
+    const head = stats.seq;
+    if (file.kind !== "concept") return { file, head, extra: null };
+    const p = enc(file.path);
+    const [sources, links, history, work] = await Promise.all([
+      api<Sources>(urls.api(`sources/${p}`, { at: urls.at })),
       api<Links>(urls.api(`links/${p}`, { at: urls.at })),
       api<{ events: HistoryEvent[] }>(urls.api(`history/${p}`)),
+      urls.at === undefined
+        ? api<{ items: WorkItem[] }>(urls.api("work", { limit: 1000 }))
+        : Promise.resolve({ items: [] as WorkItem[] }),
     ]);
-    return { rendered, concept, links, history: history.events };
+    return {
+      file,
+      head,
+      extra: {
+        concept: file,
+        sources,
+        links,
+        history: history.events,
+        work: work.items.filter((w) => w.path === file.path),
+      },
+    };
   });
   // index.md is the directory's own page.
   useEffect(() => {
@@ -106,19 +145,20 @@ export function File(props: { urls: Urls; path: string; done: string | null; act
       {notice && <div className="notice ok">{notice}</div>}
       <Status loaded={loaded}>
         {(d) =>
-          d.rendered.kind === "attachment" ? (
-            <Attachment urls={urls} file={d.rendered} />
-          ) : d.rendered.kind === "derived" ? (
-            <Derived urls={urls} file={d.rendered} />
+          d.file.kind === "attachment" ? (
+            <Attachment urls={urls} file={d.file} head={d.head} />
+          ) : d.file.kind === "derived" ? (
+            <Derived urls={urls} file={d.file} head={d.head} />
           ) : (
-            "concept" in d &&
-            d.concept && (
+            d.extra && (
               <ConceptView
                 urls={urls}
-                rendered={d.rendered}
-                concept={d.concept}
-                links={d.links}
-                history={d.history}
+                concept={d.extra.concept}
+                head={d.head}
+                sources={d.extra.sources}
+                links={d.extra.links}
+                history={d.extra.history}
+                work={d.extra.work}
                 onVerified={loaded.reload}
               />
             )
@@ -129,19 +169,18 @@ export function File(props: { urls: Urls; path: string; done: string | null; act
   );
 }
 
-function Attachment({
-  urls,
-  file,
-}: {
+function Attachment(props: {
   urls: Urls;
-  file: Extract<Rendered, { kind: "attachment" }>;
+  head: number;
+  file: Extract<FileJson, { kind: "attachment" }>;
 }) {
+  const { urls, file } = props;
   useTitle(`${file.path} · ${urls.slug}`);
   return (
     <>
       <Crumbs urls={urls} path={file.path} file />
       <h1>{baseName(file.path)}</h1>
-      <AtNotice urls={urls} head={file.head} current={urls.pinned(undefined).file(file.path)} />
+      <AtNotice urls={urls} head={props.head} current={urls.pinned(undefined).file(file.path)} />
       <p className="muted">
         {file.media ?? "file"} · {formatSize(file.size)} · <code>{file.hash.slice(0, 12)}</code>
       </p>
@@ -157,42 +196,71 @@ function Attachment({
   );
 }
 
-function Derived({ urls, file }: { urls: Urls; file: Extract<Rendered, { kind: "derived" }> }) {
+function Derived(props: {
+  urls: Urls;
+  head: number;
+  file: Extract<FileJson, { kind: "derived" }>;
+}) {
+  const { urls, file } = props;
   useTitle(`${file.path} · ${urls.slug}`);
+  const parsed = useMemo(
+    () => parse(file.markdown, { path: file.path, href: bodyHref(urls), footnote: () => null }),
+    [file, urls],
+  );
   return (
     <>
       <Crumbs urls={urls} path={file.path} file />
-      <AtNotice urls={urls} head={file.head} current={urls.pinned(undefined).file(file.path)} />
+      <AtNotice urls={urls} head={props.head} current={urls.pinned(undefined).file(file.path)} />
       <p className="small muted">
         Synthesized by the server. <a href={urls.raw(file.path)}>Raw</a>
       </p>
-      <Body html={file.html} />
+      <Reader parsed={parsed} tooltip={() => null} diff={null} hideFirst={false} />
     </>
   );
 }
 
-/**
- * A body as the server rendered it: no raw HTML, safe URLs only (worker/src/ui/markdown.ts).
- * The Wordgard reader replaces this (TEMPRA-11).
- */
-function Body({ html }: { html: string }) {
-  // biome-ignore lint/security/noDangerouslySetInnerHtml: the server's sanitizing renderer made it.
-  return <article className="body prose" dangerouslySetInnerHTML={{ __html: html }} />;
-}
-
 function ConceptView(props: {
   urls: Urls;
-  rendered: Extract<Rendered, { kind: "concept" }>;
   concept: Concept;
+  head: number;
+  sources: Sources;
   links: Links;
   history: HistoryEvent[];
+  work: WorkItem[];
   onVerified(): void;
 }) {
-  const { urls, rendered: r, concept: c } = props;
+  const { urls, concept: c, head, sources, links } = props;
   const fm = c.frontmatter;
   const title = typeof fm.title === "string" && fm.title ? fm.title : baseName(c.path);
   useTitle(`${title} · ${urls.slug}`);
   const status = typeof fm.status === "string" ? fm.status : "stable";
+
+  const parsed = useMemo(() => {
+    const ids = new Set(sources.sources.map((s) => s.id).filter((id) => typeof id === "string"));
+    const broken = new Set(links.broken.map((b) => b.path));
+    return parse(c.body, {
+      path: c.path,
+      href: bodyHref(urls),
+      exists: (path) => !broken.has(path),
+      footnote: (label, defined) =>
+        ids.has(label)
+          ? `#${anchorId("src", label)}`
+          : defined
+            ? `#${anchorId("fn", label)}`
+            : null,
+    });
+  }, [c, urls, sources, links]);
+  // A leading heading that repeats the title is not shown twice (the stored body is unchanged).
+  const first = parsed.headings[0];
+  const hideFirst =
+    first?.pos === 0 && first.text.trim().toLowerCase() === title.trim().toLowerCase();
+  const footnotes = useMemo(
+    () => Object.fromEntries(parsed.footnotes.map((f) => [f.label, toHTML(f.doc)])),
+    [parsed],
+  );
+  const tooltip = useTooltips(urls, sources, footnotes);
+  const changes = useVerificationDiff(urls, c, parsed, props.history, head);
+
   return (
     <div className="layout">
       <div>
@@ -212,8 +280,9 @@ function ConceptView(props: {
           {status !== "stable" && <Chip text={status} tone="warn" />}
           {c.lint.length > 0 && <Chip text={`${c.lint.length} lint`} tone="warn" />}
         </div>
-        <AtNotice urls={urls} head={r.head} current={urls.pinned(undefined).file(c.path)} />
-        <Body html={r.html} />
+        <AtNotice urls={urls} head={head} current={urls.pinned(undefined).file(c.path)} />
+        {changes.toggle}
+        <Reader parsed={parsed} tooltip={tooltip} diff={changes.diff} hideFirst={hideFirst} />
         {c.lint.length > 0 && (
           <>
             <h2 id="lint">Lint</h2>
@@ -229,14 +298,173 @@ function ConceptView(props: {
         )}
       </div>
       <aside>
+        <Contents parsed={parsed} skipFirst={hideFirst} />
+        <Work items={props.work} />
         <Frontmatter fm={fm} />
-        <SourcesPanel urls={urls} data={r.sources} footnotes={r.footnotes} />
-        <LinksPanel urls={urls} links={props.links} head={r.head} />
-        <Verify urls={urls} concept={c} head={r.head} onVerified={props.onVerified} />
-        <History urls={urls} concept={c} head={r.head} events={props.history} />
+        <SourcesPanel urls={urls} data={sources} footnotes={footnotes} />
+        <LinksPanel urls={urls} links={links} head={head} />
+        <Verify urls={urls} concept={c} head={head} onVerified={props.onVerified} />
+        <History urls={urls} concept={c} head={head} events={props.history} />
       </aside>
     </div>
   );
+}
+
+/** A table of contents from the body's headings, when it has a few. */
+function Contents({ parsed, skipFirst }: { parsed: Parsed; skipFirst: boolean }) {
+  const headings = skipFirst ? parsed.headings.slice(1) : parsed.headings;
+  if (headings.length < 2) return null;
+  const top = Math.min(...headings.map((h) => h.depth));
+  return (
+    <section>
+      <h2>Contents</h2>
+      <ul className="toc">
+        {headings.map((h) => (
+          <li key={h.id} className={`depth-${h.depth - top}`}>
+            <a href={`#${h.id}`}>{h.text}</a>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/** The concept's open work items (lint, broken links, stale), each with what to do. */
+function Work({ items }: { items: WorkItem[] }) {
+  if (items.length === 0) return null;
+  return (
+    <section>
+      <h2>Work</h2>
+      <ul>
+        {items.map((w) => (
+          <li key={`${w.kind} ${w.detail}`}>
+            <Chip text={w.kind.replace("_", " ")} tone={w.kind === "lint" ? "warn" : "bad"} />{" "}
+            <span className="small">{w.detail}</span>
+            <div className="small">→ {w.suggested_action}</div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
+/**
+ * Tooltips over the body: a footnote reference shows the source it cites (or its note), an
+ * internal link the target's title, type, trust and staleness, an external link its URL.
+ */
+function useTooltips(urls: Urls, sources: Sources, footnotes: Record<string, string>) {
+  const targets = useRef(new Map<string, Promise<FileJson | null>>());
+  return (h: Hovered): HTMLElement | null | Promise<HTMLElement | null> => {
+    if (h.kind === "footnote") {
+      const label = h.footnote.label;
+      const s = sources.sources.find((x) => x.id === label);
+      if (!s) {
+        const note = footnotes[label];
+        if (!note) return null;
+        const box = el("div", { class: "small" });
+        box.innerHTML = note; // Escaped by Wordgard (toHTML), as in the sources panel.
+        return el("div", {}, box);
+      }
+      const internal = (s.internal ?? null) as JsonObject | null;
+      return el(
+        "div",
+        {},
+        el("strong", {}, typeof s.title === "string" ? s.title : label),
+        typeof s.resource === "string" && el("div", { class: "small muted" }, s.resource),
+        internal?.broken ? el("div", { class: "small" }, "Missing") : false,
+        internal && typeof internal.trust_tier === "string"
+          ? el(
+              "div",
+              { class: "small" },
+              `${internal.trust_tier}${internal.stale ? " · stale" : ""}`,
+            )
+          : false,
+      );
+    }
+    const link = h.link;
+    if (link.path === null) {
+      return link.href ? el("div", { class: "small" }, link.href) : null;
+    }
+    if (link.broken) return el("div", { class: "small" }, `Missing: nothing at ${link.path}`);
+    const path = link.path;
+    let target = targets.current.get(path);
+    if (!target) {
+      target = api<FileJson>(urls.api(`files/${enc(path)}`)).catch(() => null);
+      targets.current.set(path, target);
+    }
+    return target.then((t) => {
+      if (!t) return el("div", { class: "small" }, path);
+      if (t.kind !== "concept") return el("div", { class: "small" }, `${t.path} · ${t.kind}`);
+      const tfm = t.frontmatter;
+      return el(
+        "div",
+        {},
+        el("strong", {}, typeof tfm.title === "string" ? tfm.title : baseName(t.path)),
+        el(
+          "div",
+          { class: "small muted" },
+          [
+            typeof tfm.type === "string" ? tfm.type : "no type",
+            t.trust_tier,
+            t.stale ? "stale" : "",
+          ]
+            .filter(Boolean)
+            .join(" · "),
+        ),
+        typeof tfm.description === "string" && el("div", { class: "small" }, tfm.description),
+      );
+    });
+  };
+}
+
+/**
+ * "Changes since human verification" over the text: a word diff against the version a human
+ * last verified, when the content changed after it. Current version only.
+ */
+function useVerificationDiff(
+  urls: Urls,
+  c: Concept,
+  parsed: Parsed,
+  events: HistoryEvent[],
+  head: number,
+): { toggle: React.ReactNode; diff: WordDiff | null } {
+  const [on, setOn] = useState(false);
+  const [diff, setDiff] = useState<WordDiff | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const verified = [...events]
+    .reverse()
+    .find((e) => e.op === "verify" && e.actor.startsWith("human:"));
+  const changed =
+    verified !== undefined && events.some((e) => e.seq > verified.seq && CONTENT_OPS.has(e.op));
+  const current = urls.at === undefined || urls.at >= head;
+  useEffect(() => {
+    if (!on || !verified) return;
+    let live = true;
+    api<FileJson>(urls.api(`files/${enc(c.path)}`, { at: verified.seq })).then(
+      (old) => {
+        if (!live) return;
+        if (old.kind !== "concept") return setError("That version is not a concept.");
+        setDiff(wordDiff(parse(old.body).doc, parsed.doc));
+      },
+      (e: unknown) => live && setError(e instanceof ApiError ? e.message : String(e)),
+    );
+    return () => {
+      live = false;
+    };
+  }, [on, verified, urls, c.path, parsed]);
+  if (!changed || !current || !verified) return { toggle: null, diff: null };
+  return {
+    toggle: (
+      <p className="small">
+        <label>
+          <input type="checkbox" checked={on} onChange={(e) => setOn(e.currentTarget.checked)} />{" "}
+          Show changes since {verified.actor} verified it (seq {verified.seq})
+        </label>
+        {error && <span className="warn"> {error}</span>}
+      </p>
+    ),
+    diff: on ? diff : null,
+  };
 }
 
 function Scalar({ v }: { v: Json }) {

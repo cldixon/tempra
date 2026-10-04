@@ -11,7 +11,9 @@ import {
   parse,
   parseMdast,
   serialize,
+  toHTML,
   toMdast,
+  wordDiff,
 } from "./src/index";
 
 const FIXTURES = join(import.meta.dir, "..", "fixtures");
@@ -205,6 +207,15 @@ describe("links, footnotes and headings for the reader", () => {
     expect(toHtmlFragment(p.footnotes[0]?.doc as never).toHTML()).toBe("<p>Note.</p>");
   });
 
+  test("attribute values are escaped", () => {
+    const p = parse(
+      '[x](https://e.com/"onmouseover="alert(1)) ![a"b](https://e.com/i.png "t\\"x")',
+    );
+    const html = toHTML(p.doc);
+    expect(html).not.toMatch(/"\s*onmouseover=/);
+    expect(html).toContain("&quot;");
+  });
+
   test("raw HTML is shown as code, never rendered", () => {
     const html = toHtmlFragment(parse('Hi <img src=x onerror="alert(1)"> there').doc).toHTML();
     expect(html).toContain('<code class="raw">&lt;img src=x onerror="alert(1)"></code>');
@@ -241,6 +252,38 @@ describe("the position map", () => {
           expect(documentPos(p, markdownOffset(p, mid))).toBe(mid);
         }
       }
+    }
+  });
+});
+
+describe("word diff", () => {
+  const text = (doc: import("wordgard/doc").Plot.Doc, r: { from: number; to: number }) =>
+    doc.textContent({ from: r.from, to: r.to });
+
+  test("added words are ranges in the newer document; removed words sit where they were", () => {
+    const older = parse("The margin is 40 percent.\n\nSecond paragraph stays.").doc;
+    const newer = parse("The gross margin is 42 percent.\n\nSecond paragraph stays.").doc;
+    const d = wordDiff(older, newer);
+    expect(d.added.map((r) => text(newer, r))).toEqual(["gross ", "42 "]);
+    expect(d.removed.map((r) => r.text)).toEqual(["40"]);
+    const at = d.removed[0]?.pos ?? -1;
+    expect(newer.textContent({ from: at, to: at + 7 })).toBe("percent");
+  });
+
+  test("identical versions have no changes; a whole new block is added", () => {
+    const a = parse("Same words here.").doc;
+    expect(wordDiff(a, parse("Same words here.").doc)).toEqual({ added: [], removed: [] });
+    const b = parse("Same words here.\n\nA new block.").doc;
+    expect(wordDiff(a, b).added.map((r) => text(b, r))).toEqual(["A new block."]);
+  });
+
+  test("works across every fixture against an edited copy", () => {
+    for (const { body } of bodies().slice(0, 10)) {
+      const older = parse(body).doc;
+      const newer = parse(`${body.trimEnd()}\n\nAn added paragraph.\n`).doc;
+      const d = wordDiff(older, newer);
+      expect(d.added.map((r) => text(newer, r)).join("")).toBe("An added paragraph.");
+      expect(wordDiff(older, older)).toEqual({ added: [], removed: [] });
     }
   });
 });

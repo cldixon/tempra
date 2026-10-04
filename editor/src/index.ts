@@ -3,8 +3,10 @@
  * only package that imports Wordgard. This entry is DOM-free (the Worker may import it); the
  * reader's view is `@tempra/editor/view`.
  */
+import { type Plot, serialize as toElements } from "wordgard/doc";
 import type { Parsed } from "./parse";
 
+export { type WordDiff, wordDiff } from "./diff";
 export * from "./links";
 export {
   type Footnote,
@@ -53,4 +55,12 @@ export function documentPos(parsed: Parsed, offset: number): number {
     at += b.node.length;
   }
   return -1;
+}
+
+/**
+ * A document as an HTML string, with every text and attribute escaped by Wordgard. For small
+ * pieces shown outside the reader (footnote definitions beside the body).
+ */
+export function toHTML(doc: Plot.Doc): string {
+  return toElements(doc).toHTML();
 }

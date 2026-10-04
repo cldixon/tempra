@@ -32,7 +32,6 @@ import {
   Emphasis,
   type FootnoteParam,
   FootnoteRef,
-  HeaderCell,
   Heading,
   HorizontalRule,
   Image,
@@ -50,7 +49,6 @@ import {
   Strikethrough,
   Strong,
   Table,
-  TableRow,
   Task,
 } from "./schema";
 

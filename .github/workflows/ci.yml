@@ -52,7 +52,7 @@ jobs:
   # this repository but the two packages it imports. `cf deploy --dry-run` builds and validates
   # without credentials.
   standalone:
-    name: worker/ builds on its own (with design/ and app/)
+    name: worker/ builds on its own (with design/, editor/ and app/)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -61,13 +61,13 @@ jobs:
         with:
           bun-version-file: package.json
       # worker/ plus the packages it imports from the repo (design/, and app/, whose bundle
-      # `bun install` builds), under a bare workspace root.
-      - name: Copy worker/, design/ and app/ alone, install, build
+      # `bun install` builds, with editor/ inside it), under a bare workspace root.
+      - name: Copy worker/, design/, editor/ and app/ alone, install, build
         run: |
           dest="$RUNNER_TEMP/standalone"
           mkdir -p "$dest"
-          git ls-files worker design app | tar -cf - -T - | tar -xf - -C "$dest"
-          echo '{"private":true,"workspaces":["worker","design","app"]}' > "$dest/package.json"
+          git ls-files worker design editor app | tar -cf - -T - | tar -xf - -C "$dest"
+          echo '{"private":true,"workspaces":["worker","design","editor","app"]}' > "$dest/package.json"
           cd "$dest"
           bun install
           cd worker

@@ -113,8 +113,8 @@ function ui(url: string, init: RequestInit = {}, cookie = devCookie) {
 }
 
 /**
- * Every page of a library is the app's shell at its URL (TEMPRA-9), and every file renders through
- * the API the app reads (GET …/render/{path}), as the signed-in person.
+ * Every page of a library is the app's shell at its URL (TEMPRA-9), and every file reads through
+ * the API as the app reads it (GET …/files/{path} as JSON), as the signed-in person.
  */
 async function uiPages(owner: string, slug: string, paths: string[]): Promise<string[]> {
   const enc = (p: string) => p.split("/").map(encodeURIComponent).join("/");
@@ -141,10 +141,10 @@ async function uiPages(owner: string, slug: string, paths: string[]): Promise<st
     }
   }
   for (const p of [...concepts, "index.md", "log.md"]) {
-    const r = await ui(`${api}/render/${enc(p)}`);
-    const body = (await r.json().catch(() => null)) as { html?: string } | null;
-    if (r.status !== 200 || typeof body?.html !== "string") {
-      problems.push(`render ${p}: ${r.status} ${JSON.stringify(body).slice(0, 200)}`);
+    const r = await ui(`${api}/files/${enc(p)}`, { headers: { Accept: "application/json" } });
+    const body = (await r.json().catch(() => null)) as { kind?: string } | null;
+    if (r.status !== 200 || !body?.kind) {
+      problems.push(`files ${p}: ${r.status} ${JSON.stringify(body).slice(0, 200)}`);
     }
   }
   return problems;
@@ -162,11 +162,17 @@ function chromiumPath(): string | null {
 }
 
 /**
- * The app in a real browser, signed in as the seeded user: the library page, a concept and the
- * ledger draw from the API, links move within the app without reloading the page, and nothing
- * is refused by the CSP or throws.
+ * The app in a real browser, signed in as the seeded user: the library page, every concept in the
+ * Wordgard reader (read-only, not editable, with a footnote tooltip on hover) and the ledger draw
+ * from the API, links move within the app without reloading the page, and nothing is refused by
+ * the CSP or throws. GATE_SCREENSHOTS=<dir> saves screenshots of a concept and a tooltip.
  */
-async function browserRenders(owner: string, slug: string, concept: string): Promise<string[]> {
+async function browserRenders(
+  owner: string,
+  slug: string,
+  concepts: string[],
+  token: string,
+): Promise<string[]> {
   const executablePath = chromiumPath();
   if (!executablePath) return ["no Chromium found; set CHROME_PATH"];
   const browser = await chromium.launch({ executablePath });
@@ -207,11 +213,72 @@ async function browserRenders(owner: string, slug: string, concept: string): Pro
       await page.getByRole("heading", { level: 1, name: slug }).waitFor({ timeout: 15_000 });
       await page.getByText("ledger sequence").waitFor();
     });
-    await step("concept page", async () => {
-      await page.goto(`${base}/${owner}/${slug}/${enc(concept)}`);
-      await page.locator("article.prose").waitFor({ timeout: 15_000 });
-      await page.getByRole("heading", { level: 2, name: "History" }).waitFor();
-      await page.getByRole("heading", { level: 2, name: "Frontmatter" }).waitFor();
+    const shots = process.env.GATE_SCREENSHOTS;
+    let tooltipShown = false;
+    for (const concept of concepts) {
+      await step(`reader on ${concept}`, async () => {
+        await page.goto(`${base}/${owner}/${slug}/${enc(concept)}`);
+        const body = page.locator(".body .prose");
+        await body.waitFor({ timeout: 15_000 });
+        await page.getByRole("heading", { level: 2, name: "History" }).waitFor();
+        if ((await body.getAttribute("contenteditable")) === "true") throw new Error("editable");
+        if ((await body.innerText()).trim() === "") throw new Error("empty body");
+        if (shots && concept === concepts[0]) {
+          await page.screenshot({ path: `${shots}/concept.png`, fullPage: true });
+        }
+        const ref = page.locator(".body .fnref a").first();
+        if (!tooltipShown && (await ref.count()) > 0) {
+          await ref.hover();
+          await page.locator(".tooltip").first().waitFor({ timeout: 5_000 });
+          tooltipShown = true;
+          if (shots) await page.screenshot({ path: `${shots}/tooltip.png` });
+        }
+      });
+    }
+    if (!tooltipShown) problems.push("no footnote reference showed a tooltip");
+
+    // Verify a concept as a person, let an agent change it, and see the change over the text.
+    const concept = concepts[0] ?? "";
+    const url = `${base}/${owner}/${slug}/${enc(concept)}`;
+    await step("verify, an agent's edit, and the changes since verification", async () => {
+      const api = `${base}/api/v1/libraries/${owner}/${slug}/files/${enc(concept)}`;
+      const auth = { Authorization: `Bearer ${token}` };
+      /** An agent appends a sentence (which also lapses any human verification). */
+      const agentAppends = async (sentence: string) => {
+        const now = await fetch(api, { headers: auth });
+        const md = await now.text();
+        const put = await fetch(api, {
+          method: "PUT",
+          headers: {
+            ...auth,
+            "Content-Type": "text/markdown",
+            "If-Match": now.headers.get("ETag") ?? "",
+            "X-Note": "gate: an agent edits",
+          },
+          body: `${md.trimEnd()}\n\n${sentence}\n`,
+        });
+        if (!put.ok) throw new Error(`edit: ${put.status} ${await put.text()}`);
+      };
+      await agentAppends("A sentence before verification.");
+      await page.goto(url);
+      await page.getByRole("button", { name: "Verify this version" }).click();
+      await page.getByText(/^Verified as human:/).waitFor({ timeout: 10_000 });
+      await agentAppends("A sentence the gate added.");
+      await page.goto(url);
+      await page.getByLabel(/Show changes since human:/).check();
+      const added = page.locator(".body ins.diff-added").last();
+      await added.waitFor({ timeout: 10_000 });
+      if (!(await added.innerText()).includes("A sentence the gate added.")) {
+        throw new Error(`added: ${await added.innerText()}`);
+      }
+      if (shots) await page.screenshot({ path: `${shots}/changes.png`, fullPage: true });
+    });
+    await step("an internal link's tooltip", async () => {
+      const link = page.locator(".body a.internal:not(.broken)").first();
+      if ((await link.count()) === 0) return;
+      await link.hover();
+      await page.locator(".tooltip strong").first().waitFor({ timeout: 10_000 });
+      if (shots) await page.screenshot({ path: `${shots}/link.png` });
     });
     await step("ledger, reached by a link within the app", async () => {
       await page.evaluate(() => {
@@ -486,12 +553,12 @@ try {
     if (uiProblems.length > 0) failed = true;
 
     if (t === tokens[0]) {
-      const concept = original
+      const concepts = original
         .map((f) => f.path)
-        .find((p) => p.endsWith(".md") && !/(^|\/)(index|log)\.md$/.test(p));
-      const browser = concept
-        ? await browserRenders(t.owner, t.slug, concept).catch((e) => [String(e)])
-        : ["no concept"];
+        .filter((p) => p.endsWith(".md") && !/(^|\/)(index|log)\.md$/.test(p));
+      const browser = await browserRenders(t.owner, t.slug, concepts, t.token).catch((e) => [
+        String(e),
+      ]);
       console.log(`${browser.length === 0 ? "PASS" : "FAIL"} ${t.bundle}: the app in a browser`);
       for (const p of browser) console.log(`  - ${p}`);
       if (browser.length > 0) failed = true;
