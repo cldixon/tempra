@@ -197,7 +197,8 @@ export function libraryList(libs: LibrarySummary[], error?: string): string {
   return `<h1>Libraries</h1>${err}
 <div class="table-wrap"><table class="list"><thead><tr><th>Library</th><th>Concepts</th><th>Attachments</th><th>Work queue</th><th>Seq</th></tr></thead>
 <tbody>${rows}</tbody></table></div>
-${NEW_LIBRARY}`;
+${NEW_LIBRARY}
+<p><a href="/connect">Connect an agent</a> to your libraries.</p>`;
 }
 
 // ---------------------------------------------------------------- directory

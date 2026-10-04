@@ -92,6 +92,35 @@ describe("first run (v2 spec: Onboarding)", () => {
   });
 });
 
+describe("connect an agent (tempra-dev: v2/onboarding)", () => {
+  test("/connect is account-wide and linked from the header and the library list", async () => {
+    const s = setup();
+    const page = await text(s.app.request("/connect"));
+    expect(page).toContain("<h1>Connect an agent</h1>");
+    expect(page).toContain("choose All libraries, or select the ones it may use");
+    expect(page).toContain("<pre>http://localhost/mcp</pre>");
+    expect(page).toContain("claude mcp add --transport http tempra http://localhost/mcp");
+    expect(page).toContain('href="/tokens"');
+    expect(page).toContain('href="/apps"');
+    expect(page).not.toContain("demo");
+    const list = await text(s.app.request("/"));
+    expect(list).toContain('<a href="/connect">Connect an agent</a>');
+    expect(list).toContain('<a href="/connect">Connect</a>');
+    // Signed out, it asks for sign-in like every other account page.
+    const anon = await s.anon.request("/connect", { redirect: "manual" });
+    expect(anon.status).toBe(302);
+    expect(anon.headers.get("Location")).toBe("/sign-in?next=%2Fconnect");
+  });
+
+  test("a library's Connect tab names the library and points to /connect", async () => {
+    const s = setup();
+    const page = await text(s.app.request(`${UI}/-/connect`));
+    expect(page).toContain("choose All libraries, or select demo");
+    expect(page).toContain('<a href="/connect">Connect an agent</a> covers every library');
+    expect(page).toContain('href="/tokens?library=demo"');
+  });
+});
+
 describe("account page (v2 spec: Accounts and sign-in)", () => {
   test("sessions: this device, and signing out another", async () => {
     const s = setup();

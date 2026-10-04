@@ -46,22 +46,41 @@ export interface AgentWrite {
   note: string | null;
 }
 
+/** How to connect each kind of client; `slug` names the library when the page is about one. */
+function connectSteps(mcp: string, slug?: string): string {
+  const pick = slug
+    ? `choose All libraries, or select ${esc(slug)}`
+    : "choose All libraries, or select the ones it may use";
+  return `<h2>claude.ai</h2>
+<p>Add a custom connector with this URL. When asked, ${pick}.</p>
+<pre>${esc(mcp)}</pre>
+<h2>Claude Code</h2>
+<pre>claude mcp add --transport http tempra ${esc(mcp)}</pre>
+<p>Then run /mcp in Claude Code to sign in.</p>
+<h2>Other clients</h2>
+<p><a href="/tokens${slug ? `?library=${esc(encodeURIComponent(slug))}` : ""}">Create a token</a></p>
+<h2>Skill</h2>
+<p><a href="${SKILL_URL}">SKILL.md</a></p>`;
+}
+
+/** /connect: connecting an agent to the account (connections reach all or selected libraries). */
+export function accountConnectPage(opts: { mcp: string }): string {
+  return `<h1>Connect an agent</h1>
+<p>One connection can reach all your libraries, or the ones you select.</p>
+${connectSteps(opts.mcp)}
+<h2>Connected apps</h2>
+<p><a href="/apps">See and revoke connections</a></p>`;
+}
+
+/** A library's Connect tab: the same steps naming it, and whether an agent has written yet. */
 export function connectPage(opts: { urls: Urls; mcp: string; latest: AgentWrite | null }): string {
   const { urls } = opts;
   const status = opts.latest
     ? `Last agent write: ${esc(opts.latest.actor)}, ${esc(when(opts.latest.ts))} UTC${opts.latest.note ? `, "${esc(opts.latest.note)}"` : ""}. <a href="${esc(urls.ledger())}">Ledger</a>`
     : `No agent has written yet. <a href="${esc(urls.connect())}">Refresh</a>`;
   return `<h1>Connect an agent</h1>
-<h2>claude.ai</h2>
-<p>Add a custom connector with this URL, then pick ${esc(urls.slug)} when asked.</p>
-<pre>${esc(opts.mcp)}</pre>
-<h2>Claude Code</h2>
-<pre>claude mcp add --transport http tempra ${esc(opts.mcp)}</pre>
-<p>Then run /mcp in Claude Code to sign in.</p>
-<h2>Other clients</h2>
-<p><a href="/tokens?library=${esc(encodeURIComponent(urls.slug))}">Create a token</a></p>
-<h2>Skill</h2>
-<p><a href="${SKILL_URL}">SKILL.md</a></p>
+<p>Connections belong to your account. <a href="/connect">Connect an agent</a> covers every library.</p>
+${connectSteps(opts.mcp, urls.slug)}
 <h2>Status</h2>
 <p id="status">${status}</p>`;
 }
