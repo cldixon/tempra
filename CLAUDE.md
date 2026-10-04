@@ -16,9 +16,11 @@ either in this repo; do not add one.
 ## UI
 The app and the landing page share one design system, `design/` (`@tempra/design`, TEMPRA-8): tokens as CSS custom properties (`--tempra-*`, light and dark through `light-dark()`), a base stylesheet and `.prose` for rendered markdown. Edit `design/src/*.css`, then `bun run build` in `design/` to regenerate `design/dist/` (committed; a test fails if it is stale). The app serves it at a hashed path (`/_design/tempra.<hash>.css`, `style-src 'self'`) and links it from every page; the site imports `@tempra/design/tempra.css`. Visual changes go in the package, not in either consumer.
 
-For now the system is deliberately plain, close to browser defaults. Every app page is plain HTML: no other stylesheets, no inline styles or scripts, and as little text as works: headings, labels, links, short sentences. Class attributes may stay as hooks for the later design pass. This applies to every app page, new or old. It is a temporary phase while the app's pieces and layout settle; design comes after (TEMPRA-1). The principle stays: minimal and barebones first.
+Minimal and barebones first, in the app and on the site (spec: tempra-dev `v2/design-system.md`, UI rule). This is about styling, not technology: white background, dark text, clear links, buttons for actions, no design flourish, and as little text as works (headings, labels, links, short sentences), so the bones of what we build stay visible. Scripts, TypeScript, React components and client-side state are fine where a page needs them; the app is becoming a React SPA (TEMPRA-9). Every visual decision comes from `@tempra/design` (tokens, base CSS, and layout primitives and components as they are needed); neither consumer adds styling beyond its own page layout, and nothing is styled inline. The look comes from a separate design effort (TEMPRA-1) working in the package.
 
-The landing page (`site/`) follows the same principle with a little more room: Astro, semantic HTML, the design package plus one small layout stylesheet, no client-side JavaScript, web fonts or third-party scripts.
+Today's app pages are server-rendered and link only the design stylesheet, under a CSP with no inline styles or scripts; when scripts arrive they are hashed assets served by the Worker (`script-src 'self'`).
+
+The landing page (`site/`) is Astro: semantic HTML, the design package plus one small layout stylesheet, no web fonts or third-party scripts.
 
 ## Tooling
 - **bun for everything JS/TS**: installing (`bun install`, `bun add`), scripts (`bun run …`), tests (`bun test`), one-off binaries (`bunx`). Do not use npm, npx, yarn or pnpm, and do not commit other lockfiles.
