@@ -5,17 +5,27 @@
  * Starts the Worker with fresh local D1, R2 and DO state, seeds one library and write token per
  * sample bundle, imports each bundle as a tarball, exports it, and compares: same parsed
  * frontmatter (generated and verified included) and bodies, byte-identical attachments,
- * synthesized index.md and log.md ignored. Then renders every concept and directory of each bundle
- * in the built-in UI (signed in by a dev magic link), runs the nightly export through the Durable
+ * synthesized index.md and log.md ignored. Then checks every concept and directory of each bundle
+ * is the app's page and renders through the API (signed in by a dev magic link), drives the app in
+ * Chromium (playwright-core; CHROME_PATH picks the binary), runs the nightly export through the Durable
  * Object into local R2, signs up a second user who must not see the first one's libraries
  * (v2 spec: Phases and gates, A1), and has a fresh account sign up, connect over OAuth and write
  * (A2). Exits non-zero on any mismatch.
  *
  *   bun run gate [--port 8799] [--keep]
  */
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
+import { chromium } from "playwright-core";
 import { readTar, writeTar } from "../src/util/tar";
 import { compareBundle } from "../test/compare";
 import { BUNDLES, loadBundle } from "../test/fixtures";
@@ -102,29 +112,122 @@ function ui(url: string, init: RequestInit = {}, cookie = devCookie) {
   return fetch(url, { ...init, headers, redirect: "manual" });
 }
 
-/** Fetches the library page, every directory page and every concept page of a library. */
+/**
+ * Every page of a library is the app's shell at its URL (TEMPRA-9), and every file renders through
+ * the API the app reads (GET …/render/{path}), as the signed-in person.
+ */
 async function uiPages(owner: string, slug: string, paths: string[]): Promise<string[]> {
   const enc = (p: string) => p.split("/").map(encodeURIComponent).join("/");
   const lib = `${base}/${owner}/${slug}`;
+  const api = `${base}/api/v1/libraries/${owner}/${slug}`;
   const concepts = paths.filter((p) => p.endsWith(".md") && !/(^|\/)(index|log)\.md$/.test(p));
   const dirs = new Set<string>();
   for (const p of paths) {
     const parts = p.split("/").slice(0, -1);
     for (let i = 1; i <= parts.length; i++) dirs.add(parts.slice(0, i).join("/"));
   }
-  const urls = [
+  const pages = [
     `${lib}/`,
     `${lib}/-/ledger`,
     ...[...dirs].map((d) => `${lib}/${enc(d)}/`),
     ...concepts.map((p) => `${lib}/${enc(p)}`),
   ];
   const problems: string[] = [];
-  for (const url of urls) {
+  for (const url of pages) {
     const r = await ui(url);
     const html = await r.text();
-    if (r.status !== 200 || !html.includes("</main>")) {
+    if (r.status !== 200 || !html.includes('<div id="root"></div>')) {
       problems.push(`${url.slice(base.length)}: ${r.status} ${html.slice(0, 200)}`);
     }
+  }
+  for (const p of [...concepts, "index.md", "log.md"]) {
+    const r = await ui(`${api}/render/${enc(p)}`);
+    const body = (await r.json().catch(() => null)) as { html?: string } | null;
+    if (r.status !== 200 || typeof body?.html !== "string") {
+      problems.push(`render ${p}: ${r.status} ${JSON.stringify(body).slice(0, 200)}`);
+    }
+  }
+  return problems;
+}
+
+/** A Chromium for the browser step: CHROME_PATH, the container's Playwright build, or Chrome. */
+function chromiumPath(): string | null {
+  const candidates = [
+    process.env.CHROME_PATH,
+    "/opt/pw-browsers/chromium",
+    "/usr/bin/google-chrome",
+    "/usr/bin/chromium",
+  ];
+  return candidates.find((p): p is string => !!p && existsSync(p)) ?? null;
+}
+
+/**
+ * The app in a real browser, signed in as the seeded user: the library page, a concept and the
+ * ledger draw from the API, links move within the app without reloading the page, and nothing
+ * is refused by the CSP or throws.
+ */
+async function browserRenders(owner: string, slug: string, concept: string): Promise<string[]> {
+  const executablePath = chromiumPath();
+  if (!executablePath) return ["no Chromium found; set CHROME_PATH"];
+  const browser = await chromium.launch({ executablePath });
+  const problems: string[] = [];
+  try {
+    const page = await (await browser.newContext()).newPage();
+    // Failed requests are reported by URL below; the console only repeats them.
+    page.on("console", (m) => {
+      if (m.type() === "error" && !m.text().startsWith("Failed to load resource")) {
+        problems.push(`console: ${m.text()}`);
+      }
+    });
+    page.on("response", (r) => {
+      const path = new URL(r.url()).pathname;
+      if (r.status() >= 400 && path !== "/favicon.ico") problems.push(`${r.status()} ${path}`);
+    });
+    page.on("pageerror", (e) => problems.push(`page error: ${e.message}`));
+    const step = async (what: string, run: () => Promise<unknown>) => {
+      try {
+        await run();
+      } catch (e) {
+        problems.push(`${what}: ${String(e).split("\n")[0]}`);
+      }
+    };
+    const enc = (p: string) => p.split("/").map(encodeURIComponent).join("/");
+
+    // Signed in the way a person is: the email form, then the (dev, on-page) link.
+    await step("sign in", async () => {
+      await page.goto(`${base}/sign-in?next=${encodeURIComponent(`/${owner}/${slug}/`)}`);
+      await page.locator('input[name="email"]').fill("dev@localhost");
+      await page.getByRole("button", { name: "Email me a link" }).click();
+      const link = await page.locator('a[href*="/sign-in/link?t="]').first().getAttribute("href");
+      await page.goto(new URL(link ?? "", base).href);
+      await page.getByRole("button", { name: "Continue" }).click();
+      await page.waitForURL(`${base}/${owner}/${slug}/`);
+    });
+    await step("library page", async () => {
+      await page.getByRole("heading", { level: 1, name: slug }).waitFor({ timeout: 15_000 });
+      await page.getByText("ledger sequence").waitFor();
+    });
+    await step("concept page", async () => {
+      await page.goto(`${base}/${owner}/${slug}/${enc(concept)}`);
+      await page.locator("article.prose").waitFor({ timeout: 15_000 });
+      await page.getByRole("heading", { level: 2, name: "History" }).waitFor();
+      await page.getByRole("heading", { level: 2, name: "Frontmatter" }).waitFor();
+    });
+    await step("ledger, reached by a link within the app", async () => {
+      await page.evaluate(() => {
+        (globalThis as unknown as { stayed: boolean }).stayed = true;
+      });
+      await page.getByRole("link", { name: "Ledger", exact: true }).click();
+      await page.getByRole("heading", { level: 1, name: "Ledger" }).waitFor({ timeout: 15_000 });
+      await page.locator("li.request").first().waitFor();
+      const stayed = await page.evaluate(
+        () => (globalThis as unknown as { stayed?: boolean }).stayed,
+      );
+      if (!stayed) throw new Error("the link reloaded the page");
+      if (!page.url().endsWith(`/${owner}/${slug}/-/ledger`)) throw new Error(page.url());
+    });
+  } finally {
+    await browser.close();
   }
   return problems;
 }
@@ -148,8 +251,10 @@ async function nightlyExport(owner: string, slug: string, originals: number): Pr
     return [`nightly ledger.jsonl: ${ledger.status}`];
   }
   // The daily alarm was set when the library was first used.
-  const home = await (await ui(`${lib}/`)).text();
-  if (!home.includes("next run")) return ["no daily maintenance alarm scheduled"];
+  const stats = (await (await ui(`${base}/api/v1/libraries/${owner}/${slug}/stats`)).json()) as {
+    next_run: string | null;
+  };
+  if (!stats.next_run) return ["no daily maintenance alarm scheduled"];
   return [];
 }
 
@@ -196,12 +301,13 @@ async function strangers(owner: string, slug: string, token: string): Promise<st
   if (created.status !== 303 || !theirs.startsWith("/stranger/")) {
     problems.push(`stranger creates ${slug}: ${created.status} ${theirs}`);
   }
-  const home = await (await ui(`${base}/`, {}, cookie)).text();
-  if (home.includes(`href="/${owner}/`)) problems.push("stranger's list shows the dev's");
+  const libraries = `${base}/api/v1/libraries`;
+  const home = await (await ui(libraries, {}, cookie)).text();
+  if (home.includes(`"owner":"${owner}"`)) problems.push("stranger's list shows the dev's");
   const page = await ui(`${base}/${owner}/${slug}/`, {}, cookie);
   if (page.status !== 404) problems.push(`stranger opens the dev's ${slug}: ${page.status}`);
-  const mine = await (await ui(`${base}/`)).text();
-  if (mine.includes(`href="/stranger/`)) problems.push("dev's list shows the stranger's");
+  const mine = await (await ui(libraries)).text();
+  if (mine.includes('"owner":"stranger"')) problems.push("dev's list shows the stranger's");
   const cross = await fetch(`${base}/api/v1/libraries/stranger/${slug}/tree`, {
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -378,6 +484,18 @@ try {
     console.log(`${uiProblems.length === 0 ? "PASS" : "FAIL"} ${t.bundle}: UI pages render`);
     for (const p of uiProblems) console.log(`  - ${p}`);
     if (uiProblems.length > 0) failed = true;
+
+    if (t === tokens[0]) {
+      const concept = original
+        .map((f) => f.path)
+        .find((p) => p.endsWith(".md") && !/(^|\/)(index|log)\.md$/.test(p));
+      const browser = concept
+        ? await browserRenders(t.owner, t.slug, concept).catch((e) => [String(e)])
+        : ["no concept"];
+      console.log(`${browser.length === 0 ? "PASS" : "FAIL"} ${t.bundle}: the app in a browser`);
+      for (const p of browser) console.log(`  - ${p}`);
+      if (browser.length > 0) failed = true;
+    }
     const exportProblems = await nightlyExport(t.owner, t.slug, original.length);
     console.log(
       `${exportProblems.length === 0 ? "PASS" : "FAIL"} ${t.bundle}: nightly export to R2 via the Durable Object`,

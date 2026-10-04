@@ -5,7 +5,8 @@
   "packageManager": "bun@1.3.11",
   "workspaces": [
     "worker",
-    "design"
+    "design",
+    "app"
   ],
   "scripts": {
     "dev": "bun run --filter worker dev",

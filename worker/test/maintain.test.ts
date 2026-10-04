@@ -162,9 +162,13 @@ describe("stats, healthz and nightly exports in the UI and API", () => {
       libraryId: "lib-1",
       now: new Date(),
     });
-    const home = await (await s.app.request("/owner/demo/")).text();
-    expect(home).toContain("1 events in 1 requests");
-    expect(home).toContain("last nightly export");
+    // The library's home page reads these from /stats.
+    const after = (await (await s.app.request("/api/v1/libraries/owner/demo/stats")).json()) as {
+      events: number;
+      maintainers: { export: { last_run: string | null } };
+    };
+    expect(after.events).toBe(1);
+    expect(after.maintainers.export.last_run).not.toBeNull();
     const transfer = await (await s.app.request("/owner/demo/-/transfer")).text();
     const date = new Date().toISOString().slice(0, 10);
     expect(transfer).toContain(`/owner/demo/-/exports/${date}/bundle.tar`);

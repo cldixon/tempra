@@ -18,7 +18,7 @@ The app and the landing page share one design system, `design/` (`@tempra/design
 
 Minimal and barebones first, in the app and on the site (spec: tempra-dev `v2/design-system.md`, UI rule). This is about styling, not technology: white background, dark text, clear links, buttons for actions, no design flourish, and as little text as works (headings, labels, links, short sentences), so the bones of what we build stay visible. Scripts, TypeScript, React components and client-side state are fine where a page needs them; the app is becoming a React SPA (TEMPRA-9). Every visual decision comes from `@tempra/design` (tokens, base CSS, and layout primitives and components as they are needed); neither consumer adds styling beyond its own page layout, and nothing is styled inline. The look comes from a separate design effort (TEMPRA-1) working in the package.
 
-Today's app pages are server-rendered and link only the design stylesheet, under a CSP with no inline styles or scripts; when scripts arrive they are hashed assets served by the Worker (`script-src 'self'`).
+The app is becoming a React SPA, `app/` (`@tempra/app`, TEMPRA-9), screen by screen. Rebuilt pages (library list, directory, concept, ledger, diff) are one shell from the Worker (`worker/src/ui/spa.ts`): the design stylesheet, the bundle at a hashed path (`/_app/app.<hash>.js`, immutable) and an empty root, under a CSP of `script-src 'self'` and `style-src 'self' 'nonce-…'` (a per-response nonce, for Wordgard later); no inline scripts or styles. The server still checks sign-in and, for library pages, `authorizeLibrary` before answering with the shell. The SPA reads everything from the REST API with the session cookie (writes pass `fromThisSite`); concept bodies come from `GET …/render/{path}`, the server's renderer, until the Wordgard reader (TEMPRA-11). Pages not rebuilt yet stay server-rendered HTML in `worker/src/ui/`; sign-in, consent and legal pages stay that way for good.
 
 The landing page (`site/`) is Astro: semantic HTML, the design package plus one small layout stylesheet, no web fonts or third-party scripts.
 
@@ -43,8 +43,9 @@ The landing page (`site/`) is Astro: semantic HTML, the design package plus one 
 | `bun run preview` | PR previews (`tempra-pr-N` on `pr-N.tempra.dev`, own D1, R2, KV): `up --pr N [--email E]` creates what is missing, migrates, deploys, seeds the samples and runs the MCP smoke; `down --pr N` deletes it all; `sweep --keep 3,7` tears down every preview whose PR is not listed; `--dry-run` on `down`/`sweep` lists only. CI runs it; creating resources by hand needs the operator's go-ahead |
 | `bun run logs` | Recent events from Workers Observability via `cf observability telemetry query` (`--minutes`, `--errors`, `--json`) |
 | `cd design && bun run build` | Regenerate the design package's `dist/` after editing `design/src/` |
+| `cd app && bun run build` | Rebuild the SPA bundle (`app/dist/app.ts`, gitignored; `bun install` runs it too). `bun run dev` there rebuilds on every change, beside `bun run dev` at the root |
 | `cd site && bun run dev` | The landing page (`site/`, tempra.dev) locally; `bun run check`, `bun test`, `bun run build` there too. It is its own project (own `bun.lock`, not a root workspace) |
-| `bun run gate` | Gate: boots `cf dev` on fresh state (a throwaway project in `worker/.gate/`), round-trips Google's sample bundles over HTTP, renders every UI page for them (signed in by a dev magic link), runs the nightly export through the DO into local R2, checks a restore is refused cleanly (no PITR locally), signs up a second account that must see nothing of the first, has a fresh account go through first run, connect over OAuth with PKCE, write through MCP and delete its library, runs the daily sweep through the scheduled handler, and runs the MCP smoke flow; also runs in CI |
+| `bun run gate` | Gate: boots `cf dev` on fresh state (a throwaway project in `worker/.gate/`), round-trips Google's sample bundles over HTTP, checks every UI page for them is the app's shell and every file renders through the API (signed in by a dev magic link), drives the SPA in Chromium, runs the nightly export through the DO into local R2, checks a restore is refused cleanly (no PITR locally), signs up a second account that must see nothing of the first, has a fresh account go through first run, connect over OAuth with PKCE, write through MCP and delete its library, runs the daily sweep through the scheduled handler, and runs the MCP smoke flow; also runs in CI |
 
 Binding types come from `cloudflare.config.ts`: `bun run typecheck` regenerates them with `cf workers types` into `worker/.cloudflare/types/` (gitignored). Secrets are not in the config; type them in `worker/src/env.d.ts`.
 
@@ -67,6 +68,7 @@ worker/src/sweep.ts      The daily cron: blob sweep (31 days unreferenced) and o
 worker/src/legal.ts      /terms (draft) and /privacy
 worker/src/oauth/        /authorize consent (all or selected libraries, like GitHub repo access) and /apps (connected apps: list, revoke)
 worker/src/handles.ts    Handle rules: syntax, reserved names (routes, roles, brand), the 90-day hold on released handles
+worker/src/ui/spa.ts     The SPA's shell and bundle route, and renderView (GET …/render/{path})
 worker/src/ui/           Built-in UI at the root (`/`, `/<handle>/<library>/…`, library pages under `/-/`; old `/app/…` URLs 308): routes, views, account.ts (welcome, connect, account, delete), markdown-to-HTML (no raw HTML, safe URLs only)
 worker/src/client.ts     Worker <-> DO boundary: one `call` RPC, errors as data, R2 blob checks
 worker/src/library.ts    Library DO: one per OKF library, hosts the store on its SQLite; its daily alarm runs the maintainers
@@ -81,6 +83,7 @@ worker/scripts/          cf.ts (runs cf, reads the config), deploy.ts, logs.ts, 
 worker/migrations/       D1 migrations (account layer)
 worker/test/             bun tests; worker/test/tsconfig.json adds bun types
 design/                  @tempra/design: tokens, base and prose CSS (src/), build.ts generates dist/tempra.css and dist/tempra.ts (css, hash, href)
+app/                     @tempra/app: the React SPA (src/: main.tsx, router.ts, api.ts, urls.ts, ui.tsx, pages/); build.ts bundles it with Vite into dist/app.ts (js, hash, href) for the Worker
 site/                    The landing page at tempra.dev: static Astro (src/pages, src/layouts), worker.ts (www redirect, security headers), wrangler.jsonc
 skills/okf/SKILL.md      Agent skill doc: the OKF workflow over the MCP tools
 fixtures/                Google's four sample OKF bundles, vendored unchanged; do not edit
@@ -89,6 +92,7 @@ fixtures/                Google's four sample OKF bundles, vendored unchanged; d
 ## Testing
 - Unit tests run under `bun test`. `cloudflare:workers` does not exist outside workerd, so tests stub it with `mock.module` (see `worker/test/healthz.test.ts`).
 - Keep storage and OKF logic free of Worker APIs so it can be tested under bun with `bun:sqlite` standing in for the DO's SQLite handle (`worker/test/sqlite.ts`).
+- `app/app.test.ts` checks the SPA's router against the server's URLs; the gate drives the SPA in Chromium (`playwright-core`, browser from `CHROME_PATH`, the container's `/opt/pw-browsers/chromium`, or `/usr/bin/google-chrome` on CI runners).
 - Route and MCP tests (`worker/test/api.test.ts`, `mcp.test.ts`) run the real app in process via `worker/test/harness.ts`: a bun:sqlite store behind the same `callStore` the DO uses, the real account SQL and migrations on bun:sqlite (`worker/test/d1.ts`), an in-memory blob store and fixed test tokens. `s.app` is signed in as the demo library's owner (`owner/demo`), `s.anon` has no session, `s.stranger()` makes a second account. MCP tests drive it with the SDK's own client.
 - Tenancy (`worker/test/tenancy.test.ts`) walks every registered `{owner}/{lib}` route as a stranger and expects 404. A new library route needs nothing extra to be covered, but must go through `authorizeLibrary`.
 - MCP tool descriptions and `INSTRUCTIONS` in `worker/src/mcp/server.ts` carry the agent workflow; keep them in step with `skills/okf/SKILL.md`.
@@ -105,10 +109,10 @@ fixtures/                Google's four sample OKF bundles, vendored unchanged; d
 - Rate limits are `WRITE_LIMITER` (60 writes a minute per account) and `REQUEST_LIMITER` (600 requests a minute per token or app); metering writes to the Analytics Engine dataset `tempra_usage`; storage per library is `LIBRARY_STORAGE_MB`.
 - The landing page is the Worker `tempra-site` on `tempra.dev` and `www.tempra.dev` (www redirects to the apex). Cloudflare Workers Builds, connected to this repository with root directory `site`, deploys it: `main` runs `wrangler deploy`, other branches run `wrangler preview`, which posts a Preview URL and one per commit on the PR. It does not go through the app's preview/staging/production jobs.
 - Naming: the product is Tempra (repository `cldixon/tempra`, `tempra.dev`); OKF names only the file format. The former `okf-service` Workers and their resources were moved and deleted (v2 spec: Move to tempra.dev). Don't introduce `okf-tool`/`okf-service` names.
-- `worker/` is the deployable project and must stay self-contained: its own `package.json` with every dependency, nothing imported from outside `worker/` at build time except the `@tempra/design` workspace package (CI's standalone job builds `worker/` with `design/` alone). `site/` takes the same package as `file:../design`, so Workers Builds must watch `design/*` as well as `site/*`. `cloudflare.config.ts` must not import Worker code (scripts import it under bun).
+- `worker/` is the deployable project and must stay self-contained: its own `package.json` with every dependency, nothing imported from outside `worker/` at build time except the `@tempra/design` and `@tempra/app` workspace packages (CI's standalone job builds `worker/` with `design/` and `app/` alone; `bun install` builds the app's bundle). `site/` takes the same package as `file:../design`, so Workers Builds must watch `design/*` as well as `site/*`. `cloudflare.config.ts` must not import Worker code (scripts import it under bun).
 
 ## CI
-`.github/workflows/ci.yml` runs on PRs and pushes to `main`: `bun run check`, `bun run gate` (cf dev, sample-bundle round-trip, UI pages, MCP smoke), and a standalone build of `worker/` copied alone (`cf deploy --dry-run`). All must pass before merging.
+`.github/workflows/ci.yml` runs on PRs and pushes to `main`: `bun run check`, `bun run gate` (cf dev, sample-bundle round-trip, UI pages, the SPA in Chromium, MCP smoke), and a standalone build of `worker/` copied with `design/` and `app/` (`cf deploy --dry-run`). All must pass before merging.
 
 CD (tempra-dev: `delivery/ci-cd.md`) runs after those three, each stage off until its repository variable is `on`:
 - `PREVIEWS`: the `preview` job brings up PR N's preview and comments its URL; `preview-cleanup.yml` tears it down when the PR closes and sweeps leftovers nightly.

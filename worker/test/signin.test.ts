@@ -97,8 +97,8 @@ describe("magic-link sign-in (v2 spec: Accounts and sign-in)", () => {
   test("an existing email signs in to its account; handles stay unique", async () => {
     const s = setup();
     const { secret } = await signIn(s, "owner@example.com");
-    const home = await s.anon.request("/", { headers: withSession(secret) });
-    expect(await home.text()).toContain('href="/owner/demo/"');
+    const libs = await s.anon.request("/api/v1/libraries", { headers: withSession(secret) });
+    expect(await libs.text()).toContain('"owner":"owner","slug":"demo"');
     expect((await s.accounts.user("owner@elsewhere.org")).handle).toBe("owner-2");
     expect((await s.accounts.user("owner@third.org")).handle).toBe("owner-3");
   });

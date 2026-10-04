@@ -134,9 +134,9 @@ describe("tenancy (v2 spec: Tenancy and authorization)", () => {
     const ownerTokenId = ownerTokens[0]?.id ?? "";
     expect(ownerTokenId).toStartWith("tok_");
 
-    const home = await (await other.app.request("/")).text();
-    expect(home).toContain('href="/stranger/demo/"');
-    expect(home).not.toContain("/libraries/owner/");
+    const home = await (await other.app.request("/api/v1/libraries")).text();
+    expect(home).toContain('"owner":"stranger","slug":"demo"');
+    expect(home).not.toContain('"owner":"owner"');
     const tokens = await (await other.app.request("/tokens")).text();
     expect(tokens).not.toContain("claude-code/mine");
     expect(tokens).toContain("claude-code/stranger");

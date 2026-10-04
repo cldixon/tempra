@@ -61,9 +61,10 @@ describe("first run (v2 spec: Onboarding)", () => {
     expect(done.headers.get("Location")).toBe("/newbie/notes/-/connect");
     expect((await s.accounts.user("new@example.com")).actor).toBe("human:newbie");
 
-    const starter = await text(app.request("/newbie/notes/start-here.md"));
+    const starter = await text(app.request("/api/v1/libraries/newbie/notes/files/start-here.md"));
     expect(starter).toContain("Start here");
-    expect(starter).toContain("human:newbie");
+    const history = await text(app.request("/api/v1/libraries/newbie/notes/history/start-here.md"));
+    expect(history).toContain("human:newbie");
 
     const connect = await text(app.request("/newbie/notes/-/connect"));
     expect(connect).toContain("<pre>http://localhost/mcp</pre>");
@@ -103,9 +104,9 @@ describe("connect an agent (tempra-dev: v2/onboarding)", () => {
     expect(page).toContain('href="/tokens"');
     expect(page).toContain('href="/apps"');
     expect(page).not.toContain("demo");
-    const list = await text(s.app.request("/"));
-    expect(list).toContain('<a href="/connect">Connect an agent</a>');
-    expect(list).toContain('<a href="/connect">Connect</a>');
+    // The library list and the header are the app's now (app/src); the server's header still
+    // links it on every server page.
+    expect(page).toContain('<a href="/connect">Connect</a>');
     // Signed out, it asks for sign-in like every other account page.
     const anon = await s.anon.request("/connect", { redirect: "manual" });
     expect(anon.status).toBe(302);

@@ -22,6 +22,7 @@ import { OkfError } from "./store/errors";
 import type { ConceptContent, RequestContext, WriteOp } from "./store/store";
 import { authorizeLibrary } from "./tenancy";
 import { registerUiRoutes } from "./ui/routes";
+import { appHref, appScript, renderView, Urls } from "./ui/spa";
 import { admit, tokenAdmission, type UsageDeps } from "./usage";
 import { maybeGunzip, readTar } from "./util/tar";
 
@@ -200,6 +201,11 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
       "X-Content-Type-Options": "nosniff",
     });
   });
+
+  // The app's client bundle (TEMPRA-9), at a content-hashed URL like the stylesheet.
+  app.get("/_app/:file", (c) =>
+    `/_app/${c.req.param("file")}` === appHref ? appScript() : c.notFound(),
+  );
 
   app.use(`${BASE}/*`, async (c, next) => {
     const d = deps(c.env);
@@ -484,6 +490,16 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
 
   app.get(`${BASE}/stats`, async (c) => c.json(await c.var.lib.stats()));
 
+  // Counts for the library's home page: concepts, attachments, types, open work.
+  app.get(`${BASE}/summary`, async (c) => c.json(await c.var.lib.summary()));
+
+  // A file as the app shows it (ui/spa.ts): its body as the server renders it, for now.
+  app.get(`${BASE}/render/*`, async (c) => {
+    const { owner, slug } = c.var.token.library;
+    const urls = new Urls(owner, slug, num(c, "at"));
+    return c.json(await renderView(c.var.lib, urls, tail(c, "/render/")));
+  });
+
   app.get(`${BASE}/work`, async (c) =>
     c.json(await c.var.lib.work({ kind: c.req.query("kind"), limit: num(c, "limit") })),
   );
@@ -534,15 +550,35 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     return { d, user };
   };
 
+  // Who the caller acts as: the signed-in person, or the person a human: token acts for.
+  app.get("/api/v1/me", async (c) => {
+    const { d, user } = await human(c);
+    const account = await d.accounts.account(user.id);
+    if (!account) throw new OkfError(401, "no_account", "This account no longer exists.");
+    return c.json({ email: account.email, handle: account.handle, actor: account.actor });
+  });
+
   app.get("/api/v1/libraries", async (c) => {
     const { d, user } = await human(c);
-    return c.json({
-      libraries: (await d.accounts.libraries(user.id)).map(({ id, slug, owner }) => ({
-        id,
-        owner,
-        slug,
-      })),
-    });
+    const refs = await d.accounts.libraries(user.id);
+    const libraries = await Promise.all(
+      refs.map(async ({ id, slug, owner, do_id }) => {
+        const lib = await d.libraryByDoId(do_id);
+        const s = lib ? await lib.summary() : null;
+        return {
+          id,
+          owner,
+          slug,
+          ...(s && {
+            seq: s.seq,
+            concepts: s.concepts,
+            attachments: s.attachments,
+            open_work: s.open_work,
+          }),
+        };
+      }),
+    );
+    return c.json({ libraries });
   });
 
   app.post("/api/v1/libraries", async (c) => {

@@ -1,10 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { readTar, writeTar } from "../src/util/tar";
-import { setup } from "./harness";
+import { API, ORIGIN, setup } from "./harness";
 
 type S = ReturnType<typeof setup>;
 const LIB = "/owner/demo";
-const ORIGIN = "http://localhost";
 
 async function page(s: S, path: string) {
   const r = await s.app.request(path);
@@ -30,12 +29,18 @@ async function put(s: S, path: string, content: string) {
 }
 
 describe("verify, work queue, import and export (Phase 3, slice 3)", () => {
-  test("verify the current version from the concept page", async () => {
+  test("verify the current version, from the app or the old form post", async () => {
     const s = setup();
     await put(s, "a.md", "---\ntype: Note\n---\nChecked content.\n");
-    const before = await page(s, `${LIB}/a.md`);
-    expect(before.html).toContain("No human has verified this concept.");
-    expect(before.html).toContain(`action="${LIB}/-/verify/a.md"`);
+    const concept = async () =>
+      (await (
+        await s.app.request(`${API}/files/a.md`, { headers: { Accept: "application/json" } })
+      ).json()) as {
+        trust_tier: string;
+        hash: string;
+        frontmatter: { verified?: { by: string }[] };
+      };
+    expect((await concept()).trust_tier).toBe("unverified");
 
     const forged = await post(
       s,
@@ -44,28 +49,40 @@ describe("verify, work queue, import and export (Phase 3, slice 3)", () => {
       "https://evil.example",
     );
     expect(forged.status).toBe(403);
+    const forgedApi = await s.app.request(`${API}/verify/a.md`, {
+      method: "POST",
+      headers: { Origin: "https://evil.example" },
+    });
+    expect(forgedApi.status).toBe(403);
 
-    const done = await post(s, `${LIB}/-/verify/a.md`, new URLSearchParams({ note: "read it" }));
-    expect(done.status).toBe(303);
-    const after = await page(s, done.headers.get("Location") ?? "");
-    expect(after.html).toContain("Verified as human:owner");
-    expect(after.html).toContain("human-reviewed</span> by human:owner");
-    expect(after.html).not.toContain(`action="${LIB}/-/verify/a.md"`);
-    const ledger = await page(s, `${LIB}/-/ledger`);
-    expect(ledger.html).toContain("op-verify");
-    expect(ledger.html).toContain("read it");
+    // The app verifies through the API, with the note in X-Note.
+    const done = await s.app.request(`${API}/verify/a.md`, {
+      method: "POST",
+      headers: { Origin: ORIGIN, "X-Note": "read it" },
+    });
+    expect(done.status).toBe(200);
+    const after = await concept();
+    expect(after.trust_tier).toBe("human-reviewed");
+    expect(after.frontmatter.verified?.at(-1)?.by).toBe("human:owner");
+    const requests = (await (await s.app.request(`${API}/requests?limit=1`)).json()) as {
+      requests: { note: string; events: { op: string }[] }[];
+    };
+    expect(requests.requests[0]).toMatchObject({ note: "read it", events: [{ op: "verify" }] });
 
     // The next edit lapses it.
-    const hash = s.store().read("a.md");
-    if (hash.kind !== "concept") throw new Error();
     await s.req("/files/a.md", {
       method: "PUT",
-      headers: { "Content-Type": "text/markdown", "If-Match": `"${hash.hash}"` },
+      headers: { "Content-Type": "text/markdown", "If-Match": `"${after.hash}"` },
       body: "---\ntype: Note\n---\nChanged.\n",
     });
-    const lapsed = await page(s, `${LIB}/a.md`);
-    expect(lapsed.html).toContain("but the content has changed since");
-    expect(lapsed.html).toContain(`action="${LIB}/-/verify/a.md"`);
+    expect((await concept()).trust_tier).toBe("unverified");
+
+    // The server's form post still works and lands back on the concept.
+    await put(s, "b.md", "---\ntype: Note\n---\nB.\n");
+    const form = await post(s, `${LIB}/-/verify/b.md`, new URLSearchParams({ note: "b too" }));
+    expect(form.status).toBe(303);
+    expect(form.headers.get("Location")).toBe(`${LIB}/b.md?done=verify`);
+    expect(s.store().read("b.md")).toMatchObject({ trust_tier: "human-reviewed" });
   });
 
   test("the work queue page lists and filters items", async () => {
@@ -109,9 +126,9 @@ describe("verify, work queue, import and export (Phase 3, slice 3)", () => {
     expect(html).toContain("Imported 2 files from pack.tar");
     expect(html).toContain("1 file with lint");
     expect(s.store().read("notes/x.md").kind).toBe("concept");
-    const ledger = await page(s, `${LIB}/-/ledger`);
-    expect(ledger.html).toContain("bring in the pack");
-    expect(ledger.html).toContain("human:owner");
+    const ledger = await (await s.app.request(`${API}/requests?limit=1`)).text();
+    expect(ledger).toContain("bring in the pack");
+    expect(ledger).toContain("human:owner");
 
     const junk = new FormData();
     junk.set("bundle", new File([enc.encode("not a tar at all")], "x.tar"));

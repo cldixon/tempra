@@ -22,20 +22,10 @@ import {
   welcomePage,
 } from "./account";
 import { esc, htmlResponse, layout } from "./layout";
-import { linkTarget } from "./markdown";
+import { spaShell } from "./spa";
 import {
-  attachmentPage,
-  conceptPage,
-  derivedPage,
-  diffPage,
-  directoryPage,
-  type LedgerFilters,
   type LedgerRequest,
-  type LibraryStats,
-  type LibrarySummary,
-  ledgerPage,
   libNav,
-  libraryList,
   type NightlyExport,
   type RestoreRow,
   recoveryPage,
@@ -43,7 +33,6 @@ import {
   revertPage,
   type TokenForm,
   type TokenListRow,
-  type TreeEntry,
   tokenCreatedPage,
   tokensPage,
   transferPage,
@@ -119,16 +108,6 @@ async function humanContext(p: Page) {
   const form = await p.c.req.formData();
   const note = String(form.get("note") ?? "").trim();
   return { actor: p.user.actor, request_id: crypto.randomUUID(), note: note || null };
-}
-
-/** The confirmation shown after a write redirects back to a concept page. */
-function doneNotice(done: string | undefined, actor: string): string {
-  const text: Record<string, string> = {
-    restore: `Restored. The ledger records it as a revert by ${actor}.`,
-    verify: `Verified as ${actor}. The trust tier is human-reviewed until the next edit.`,
-  };
-  const t = done ? text[done] : undefined;
-  return t ? `<div class="notice ok">${esc(t)}</div>` : "";
 }
 
 function plural(n: number, word: string) {
@@ -210,19 +189,6 @@ function show(p: Page, title: string, body: string): Response {
   return htmlResponse(layout({ title, user: p.user.email, body }));
 }
 
-/** Maps a link or image in the body of the file at `from` to a UI URL. */
-function bodyUrl(urls: Urls, from: string) {
-  return (target: string, kind: "link" | "image"): string | null => {
-    const t = linkTarget(from, target);
-    if (!t) return null;
-    if (t.kind !== "internal") return t.href;
-    const name = basename(t.path);
-    if (t.dir || t.path === "") return urls.tree(t.path) + (t.anchor ?? "");
-    if (name === "index.md") return urls.tree(dirname(t.path)) + (t.anchor ?? "");
-    return kind === "image" ? urls.download(t.path) : urls.file(t.path, t.anchor);
-  };
-}
-
 /**
  * The built-in UI's reading pages (spec: Built-in UI): library list, directory and concept views,
  * attachments, raw sources, all for the signed-in owner and all accepting ?at=N.
@@ -234,29 +200,18 @@ export function registerUiRoutes<E extends AppEnv>(
   const get = (path: string, handler: (p: Page) => Promise<Response>) =>
     app.get(path, ui(deps, handler) as never);
 
-  const listLibraries = async (p: Page, error?: string) => {
-    const refs = await p.deps.accounts.libraries(p.user.id);
-    const libs = await Promise.all(
-      refs.map(async (ref): Promise<LibrarySummary | null> => {
-        const lib = await p.deps.libraryByDoId(ref.do_id);
-        return lib ? { owner: ref.owner, slug: ref.slug, ...(await lib.summary()) } : null;
-      }),
-    );
-    const body = libraryList(
-      libs.filter((l): l is LibrarySummary => l !== null),
-      error,
-    );
-    return htmlResponse(
-      layout({ title: "Libraries", user: p.user.email, body }),
-      error ? 400 : 200,
-    );
+  // Rebuilt pages are drawn by the app (TEMPRA-9): the server checks sign-in and, for a library's
+  // pages, that the person may open it (404 otherwise), then answers with the app's shell.
+  const spa = async (p: Page, library: boolean) => {
+    if (library) await openLibrary(p);
+    return spaShell();
   };
   get("/", async (p) => {
     // First run: no libraries yet (v2 spec: Onboarding).
     if ((await p.deps.accounts.libraries(p.user.id)).length === 0) {
       return p.c.redirect("/welcome", 302);
     }
-    return listLibraries(p);
+    return spa(p, false);
   });
   // The UI lived under /app until it moved to the root (v2 spec: URLs). 308 keeps a form post's
   // method and body; bookmarks and emailed links land on the page's new URL.
@@ -272,80 +227,15 @@ export function registerUiRoutes<E extends AppEnv>(
     return c.redirect(`${url.pathname}/${url.search}`, 301);
   });
 
-  const directory = async (p: Page, dir: string) => {
-    const { urls, lib } = await openLibrary(p);
-    const [tree, head] = await Promise.all([
-      lib.tree({ prefix: dir, depth: 1, at: urls.at }),
-      lib.headSeq(),
-    ]);
-    const atRoot = dir === "" && urls.at === undefined;
-    const [summary, ops] = atRoot
-      ? await Promise.all([lib.summary(), lib.stats()])
-      : [undefined, undefined];
-    if (dir !== "" && tree.entries.length === 0) {
-      throw new OkfError(404, "not_found", `There is no directory ${dir}/ in ${urls.slug}.`);
-    }
-    const body =
-      libNav(urls, "files") +
-      directoryPage({
-        urls,
-        dir,
-        head,
-        entries: tree.entries as TreeEntry[],
-        summary: summary ? { owner: urls.owner, slug: urls.slug, ...summary } : undefined,
-        ops: ops as LibraryStats | undefined,
-      });
-    return show(p, dir === "" ? urls.slug : `${dir}/ · ${urls.slug}`, body);
-  };
+  const directory = (p: Page) => spa(p, true);
+  get("/:owner/:lib/", (p) => directory(p));
+  get("/:owner/:lib/-/tree/*", (p) => directory(p));
 
-  get("/:owner/:lib/", (p) => directory(p, ""));
-  get("/:owner/:lib/-/tree/*", (p) => directory(p, tail(p.c, "/-/tree/")));
-
+  // A directory's index.md is the directory page itself.
   const file = async (p: Page, path: string) => {
-    const { urls, lib } = await openLibrary(p);
+    const { urls } = await openLibrary(p);
     if (basename(path) === "index.md") return p.c.redirect(urls.tree(dirname(path)));
-    const [view, head] = await Promise.all([lib.read(path, { at: urls.at }), lib.headSeq()]);
-    if (view.kind === "attachment") {
-      return show(
-        p,
-        `${view.path} · ${urls.slug}`,
-        attachmentPage({ urls, head, ...view, media: view.media ?? null }),
-      );
-    }
-    if (view.kind === "derived") {
-      return show(
-        p,
-        `${view.path} · ${urls.slug}`,
-        derivedPage({
-          urls,
-          head,
-          path: view.path,
-          markdown: view.markdown,
-          url: bodyUrl(urls, view.path),
-        }),
-      );
-    }
-    const [sources, links, history] = await Promise.all([
-      lib.sources(view.path, { at: urls.at }),
-      lib.links(view.path, { at: urls.at }),
-      lib.history(view.path),
-    ]);
-    const title = typeof view.frontmatter.title === "string" ? view.frontmatter.title : view.path;
-    return show(
-      p,
-      `${title} · ${urls.slug}`,
-      libNav(urls, "files") +
-        doneNotice(p.c.req.query("done"), p.user.actor) +
-        conceptPage({
-          urls,
-          head,
-          concept: view,
-          sources,
-          links,
-          history: history.events,
-          url: bodyUrl(urls, view.path),
-        }),
-    );
+    return spaShell();
   };
   get("/:owner/:lib/-/files/*", (p) => file(p, tail(p.c, "/-/files/")));
 
@@ -380,49 +270,9 @@ export function registerUiRoutes<E extends AppEnv>(
 
   // ---------------------------------------------------------------- history and the ledger
 
-  get("/:owner/:lib/-/diff/*", async (p) => {
-    const { urls, lib } = await openLibrary(p);
-    const path = tail(p.c, "/-/diff/");
-    const [d, head] = await Promise.all([
-      lib.diff(path, { from: intParam(p.c, "from"), to: intParam(p.c, "to") }),
-      lib.headSeq(),
-    ]);
-    return show(
-      p,
-      `Changes to ${d.path} · ${urls.slug}`,
-      libNav(urls, "files") +
-        diffPage({ urls, head, path: d.path, from: d.from, to: d.to, diff: d.diff }),
-    );
-  });
+  get("/:owner/:lib/-/diff/*", (p) => spa(p, true));
 
-  get("/:owner/:lib/-/ledger", async (p) => {
-    const { urls, lib } = await openLibrary(p);
-    const q = (k: string) => p.c.req.query(k)?.trim() || undefined;
-    const filters: LedgerFilters = {
-      prefix: q("prefix"),
-      actor: q("actor"),
-      from: q("from"),
-      to: q("to"),
-      before: intParam(p.c, "before"),
-    };
-    const res = await lib.requests({ ...filters, limit: 30 });
-    let notice: string | undefined;
-    if (p.c.req.query("done") === "revert") {
-      notice = `Reverted: ${plural(Number(p.c.req.query("n") ?? 0), "change")}, recorded as a new request by ${p.user.actor}.`;
-    }
-    return show(
-      p,
-      `Ledger · ${urls.slug}`,
-      libNav(urls, "ledger") +
-        ledgerPage({
-          urls,
-          filters,
-          requests: res.requests as LedgerRequest[],
-          next: res.next,
-          notice,
-        }),
-    );
-  });
+  get("/:owner/:lib/-/ledger", (p) => spa(p, true));
 
   // Revert a request (spec: The ledger): a confirmation page, then a same-origin POST.
   get("/:owner/:lib/-/revert/:request", async (p) => {
@@ -492,7 +342,10 @@ export function registerUiRoutes<E extends AppEnv>(
       const lib = await p.deps.accounts.createLibrary(slug, p.user);
       return p.c.redirect(new Urls(lib.owner, lib.slug).tree(""), 303);
     } catch (e) {
-      if (e instanceof OkfError && e.status < 500) return listLibraries(p, e.message);
+      if (e instanceof OkfError && e.status < 500) {
+        const body = `<h1>New library</h1><div class="notice">${esc(e.message)}</div><p><a href="/">Back to libraries</a></p>`;
+        return htmlResponse(layout({ title: "New library", user: p.user.email, body }), 400);
+      }
       throw e;
     }
   });
@@ -975,8 +828,8 @@ export function registerUiRoutes<E extends AppEnv>(
   // Directories and files at their own paths, after every fixed page (v2 spec: URLs): a trailing
   // slash is a directory. Registered last, so /{owner}/{lib}/-/... pages always win.
   get("/:owner/:lib/*", (p) => {
+    if (p.c.req.path.endsWith("/")) return directory(p);
     const prefix = `/${p.c.req.param("owner")}/${p.c.req.param("lib")}/`;
-    const path = decodePath(p.c.req.path.slice(encodeURI(prefix).length));
-    return p.c.req.path.endsWith("/") ? directory(p, path) : file(p, path);
+    return file(p, decodePath(p.c.req.path.slice(encodeURI(prefix).length)));
   });
 }
