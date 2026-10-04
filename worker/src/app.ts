@@ -1,6 +1,6 @@
 import * as design from "@tempra/design";
 import { type Context, Hono } from "hono";
-import { type Accounts, checkNewToken } from "./accounts";
+import { type Accounts, checkNewToken, type LibraryRef, type User } from "./accounts";
 import type { Authenticate, TokenInfo } from "./auth";
 import {
   type BlobStore,
@@ -14,8 +14,9 @@ import { registerLegalRoutes } from "./legal";
 import { registerAppRoutes } from "./oauth/routes";
 import { normalizePath, underPrefix } from "./okf/paths";
 import type { JsonObject } from "./okf/types";
+import { fromThisSite } from "./origin";
 import type { RestoreOutcome, RestoreRecord } from "./recovery";
-import type { Sessions } from "./session";
+import { readCookie, SESSION_COOKIE, type Sessions } from "./session";
 import { type Mailer, registerSignInRoutes } from "./signin";
 import { OkfError } from "./store/errors";
 import type { ConceptContent, RequestContext, WriteOp } from "./store/store";
@@ -202,8 +203,9 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
 
   app.use(`${BASE}/*`, async (c, next) => {
     const d = deps(c.env);
-    const token = await d.authenticate(bearer(c));
-    await authorizeLibrary(d.accounts, { token }, c.req.param("owner"), c.req.param("lib"));
+    const who = await principal(c, d);
+    const ref = await authorizeLibrary(d.accounts, who, c.req.param("owner"), c.req.param("lib"));
+    const token = "token" in who ? who.token : sessionToken(who.user, ref);
     await admit(d, tokenAdmission(token), c.req.method !== "GET" && c.req.method !== "HEAD");
     c.set("deps", d);
     c.set("token", token);
@@ -516,17 +518,20 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   // ------------------------------------------------------------------ libraries and tokens
 
   /**
-   * Management routes are human-only (spec: HTTP API): a human: bearer token, acting for the
-   * person who minted it, on that person's own libraries and tokens.
+   * Management routes are human-only (spec: HTTP API): the signed-in person's session, or a
+   * human: bearer token acting for the person who minted it, on that person's own libraries and
+   * tokens.
    */
   const human = async (c: C) => {
     const d = deps(c.env);
-    const token = await d.authenticate(bearer(c));
+    const who = await principal(c, d);
+    if ("user" in who) return { d, user: { id: who.user.id, handle: who.user.handle } };
+    const token = who.token;
     if (!token.actor.startsWith("human:") || !token.created_by || !token.library.owner) {
       throw new OkfError(403, "human_only", "Library and token management needs a human: token.");
     }
     const user = { id: token.created_by, handle: token.library.owner };
-    return { d, token, user };
+    return { d, user };
   };
 
   app.get("/api/v1/libraries", async (c) => {
@@ -646,6 +651,43 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   registerUiRoutes(app, deps);
 
   return app;
+}
+
+/**
+ * Who is calling a REST route: a bearer token when the request sends one, otherwise the
+ * signed-in person's session (the app's own pages, TEMPRA-9). A session may change state only
+ * from this site's pages: cookies are SameSite=Lax, and writes must also pass fromThisSite.
+ */
+async function principal(c: C, d: Deps): Promise<{ token: TokenInfo } | { user: User }> {
+  if (c.req.header("Authorization") !== undefined)
+    return { token: await d.authenticate(bearer(c)) };
+  const secret = readCookie(c.req.raw, SESSION_COOKIE);
+  const user = secret ? await d.sessions.user(secret) : null;
+  if (!user) throw new OkfError(401, "no_token", "Send Authorization: Bearer <token>, or sign in.");
+  if (c.req.method !== "GET" && c.req.method !== "HEAD" && !fromThisSite(c.req.raw)) {
+    throw new OkfError(
+      403,
+      "cross_origin",
+      "Changes must be submitted from this site's own pages.",
+    );
+  }
+  return { user };
+}
+
+/**
+ * The signed-in person acting on a library they may reach, as the token the routes act with:
+ * attributed to their human: actor, full write access like the UI's own forms.
+ */
+function sessionToken(user: User, library: LibraryRef): TokenInfo {
+  return {
+    id: `session:${user.id}`,
+    actor: user.actor,
+    scope: "write",
+    prefix: null,
+    mcp_tiers: "all",
+    library,
+    created_by: user.id,
+  };
 }
 
 function bearer(c: C): string {

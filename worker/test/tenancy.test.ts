@@ -65,14 +65,25 @@ describe("tenancy (v2 spec: Tenancy and authorization)", () => {
               }),
             ],
           ]
-        : [other.writer, other.human].map((token) => [
-            token === other.writer ? "write token" : "human token",
-            s.anon.request(path, {
-              method: r.method,
-              headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-              body: r.method === "GET" || r.method === "DELETE" ? undefined : "{}",
-            }),
-          ]);
+        : [
+            ...[other.writer, other.human].map((token): [string, Promise<Response>] => [
+              token === other.writer ? "write token" : "human token",
+              s.anon.request(path, {
+                method: r.method,
+                headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+                body: r.method === "GET" || r.method === "DELETE" ? undefined : "{}",
+              }),
+            ]),
+            // The app's own pages call the API with the session (TEMPRA-9).
+            [
+              "session",
+              other.app.request(path, {
+                method: r.method,
+                headers: { Origin: ORIGIN, "Content-Type": "application/json" },
+                body: r.method === "GET" || r.method === "DELETE" ? undefined : "{}",
+              }),
+            ],
+          ];
       for (const [who, res] of attempts) {
         const got = await res;
         const body = await got.text();
