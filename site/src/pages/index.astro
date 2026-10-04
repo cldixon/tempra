@@ -1,0 +1,69 @@
+---
+import Base from "../layouts/Base.astro";
+
+const APP = "https://app.tempra.dev";
+
+// Placeholder copy (TEMPRA-7): the structure and the core message, not the final words.
+const concepts = [
+  {
+    title: "Libraries of concepts",
+    body: "Your knowledge lives in libraries: markdown files, one idea each, with frontmatter that says what kind of thing it is. The format is OKF, so it stays portable.",
+  },
+  {
+    title: "Your agents read and write",
+    body: "Connect Claude, Claude Code or any MCP client. Agents browse, search, read and write concepts, as you or as themselves.",
+  },
+  {
+    title: "Every change in a ledger",
+    body: "Each write is recorded with who made it and why. See the history of any concept, compare versions and undo.",
+  },
+  {
+    title: "Trust you can see",
+    body: "Concepts carry their sources, a trust tier and a review date, so agents know what to rely on and what needs another look.",
+  },
+  {
+    title: "Yours to keep",
+    body: "Export a library as a plain bundle at any time. Delete your account and your data goes with it.",
+  },
+];
+
+const steps = [
+  "Sign up with your email.",
+  "Connect your agent with one URL.",
+  "Ask it to write down what you know.",
+];
+---
+
+<Base
+  title="Tempra: a knowledge base your agents can write"
+  description="Tempra keeps your knowledge as markdown concepts that you and your AI agents read and write, with every change recorded."
+>
+  <section aria-labelledby="hero">
+    <h1 id="hero">A knowledge base your agents can write.</h1>
+    <p>
+      Tempra keeps what you know as plain markdown that you and your AI agents read and write
+      together, with every change recorded.
+    </p>
+    <p><a href={`${APP}/sign-in`}>Get started</a></p>
+  </section>
+
+  <section aria-labelledby="concepts">
+    <h2 id="concepts">How it works</h2>
+    {
+      concepts.map((c) => (
+        <article>
+          <h3>{c.title}</h3>
+          <p>{c.body}</p>
+        </article>
+      ))
+    }
+  </section>
+
+  <section aria-labelledby="start">
+    <h2 id="start">Start in three steps</h2>
+    <ol>
+      {steps.map((s) => <li>{s}</li>)}
+    </ol>
+    <p><a href={`${APP}/sign-in`}>Sign up</a></p>
+  </section>
+</Base>

@@ -69,6 +69,25 @@ jobs:
         env:
           CF_SEND_TELEMETRY: "false"
 
+  # The landing page (site/, tempra.dev): Astro check, the Worker's tests, a static build. Its
+  # previews and deploys run on Cloudflare Workers Builds, not here (tempra-dev: delivery/site).
+  site:
+    name: site/ builds
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: site
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+      - run: bun test
+      - run: bun run build
+
   # CI/CD (tempra-dev library: delivery/ci-cd). Each stage is off until the operator turns it on
   # with a repository variable, once its prerequisites exist: PREVIEWS, STAGING_DEPLOYS and
   # PRODUCTION_DEPLOYS = on. Production also waits for approval in the `production` environment.

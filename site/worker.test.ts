@@ -1,0 +1,23 @@
+import { expect, test } from "bun:test";
+import worker from "./worker";
+
+const env = {
+  ASSETS: {
+    fetch: async (request: Request) =>
+      new Response(`asset ${new URL(request.url).pathname}`, { headers: { "X-Asset": "1" } }),
+  },
+};
+
+test("www redirects to the apex, keeping path and query", async () => {
+  const r = await worker.fetch(new Request("https://www.tempra.dev/a/b?x=1"), env);
+  expect(r.status).toBe(301);
+  expect(r.headers.get("Location")).toBe("https://tempra.dev/a/b?x=1");
+});
+
+test("the apex serves assets with security headers", async () => {
+  const r = await worker.fetch(new Request("https://tempra.dev/"), env);
+  expect(await r.text()).toBe("asset /");
+  expect(r.headers.get("X-Asset")).toBe("1");
+  expect(r.headers.get("Content-Security-Policy")).toContain("default-src 'none'");
+  expect(r.headers.get("X-Content-Type-Options")).toBe("nosniff");
+});
