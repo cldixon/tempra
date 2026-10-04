@@ -1,0 +1,25 @@
+{
+  "name": "@tempra/editor",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./view": "./src/view.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "mdast-util-from-markdown": "~2.0.3",
+    "mdast-util-gfm": "^3.1.0",
+    "mdast-util-to-markdown": "^2.2.0",
+    "micromark-extension-gfm": "^3.0.0",
+    "wordgard": "0.5.2"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.4.2",
+    "@types/mdast": "^4.0.4",
+    "typescript": "^7.0.2"
+  }
+}
