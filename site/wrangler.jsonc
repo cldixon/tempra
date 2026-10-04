@@ -22,5 +22,8 @@
   // No workers.dev URL for production; Previews still get their own URLs.
   "workers_dev": false,
   "preview_urls": true,
+  // Required by `wrangler preview` (Worker Previews), which Workers Builds runs for every branch
+  // but main. Empty: previews use the settings above.
+  "previews": {},
   "observability": { "enabled": true }
 }
