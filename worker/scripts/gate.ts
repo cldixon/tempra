@@ -9,8 +9,9 @@
  * is the app's page and renders through the API (signed in by a dev magic link), drives the app in
  * Chromium (playwright-core; CHROME_PATH picks the binary), runs the nightly export through the Durable
  * Object into local R2, signs up a second user who must not see the first one's libraries
- * (v2 spec: Phases and gates, A1), and has a fresh account sign up, connect over OAuth and write
- * (A2). Exits non-zero on any mismatch.
+ * (v2 spec: Phases and gates, A1), has a fresh account sign up, connect over OAuth and write
+ * (A2), and has three scripted agents work on one library at once (scripts/agents.ts), every
+ * write reaching the change feed. Exits non-zero on any mismatch.
  *
  *   bun run gate [--port 8799] [--keep]
  */
@@ -29,6 +30,7 @@ import { chromium } from "playwright-core";
 import { readTar, writeTar } from "../src/util/tar";
 import { compareBundle } from "../test/compare";
 import { BUNDLES, loadBundle } from "../test/fixtures";
+import { formatReport, runAgents } from "./agents";
 import { WORKER_DIR } from "./cf";
 import { mcpSmoke } from "./mcp-smoke";
 import { seed } from "./seed";
@@ -62,6 +64,13 @@ for (const b of BUNDLES) {
   tokens.push({ bundle: b, ...(await seed({ slug: b.replace(/_/g, "-"), persistTo: state })) });
 }
 const mcpToken = (await seed({ slug: "mcp", actor: "claude-code/gate", persistTo: state })).token;
+// Scripted agents (scripts/agents.ts): three tokens on one library, one actor each.
+const agentTokens = [];
+for (let i = 1; i <= 3; i++) {
+  agentTokens.push(
+    await seed({ slug: "agents", actor: `claude-code/agent-${i}`, persistTo: state }),
+  );
+}
 
 const dev = Bun.spawn(["bunx", "cf", "dev", "--port", String(port)], {
   cwd: project,
@@ -631,6 +640,20 @@ try {
   const mcpOk = await mcpSmoke({ url: base, token: mcpToken });
   console.log(`${mcpOk ? "PASS" : "FAIL"} MCP smoke on an empty library`);
   if (!mcpOk) failed = true;
+  // Several agents at once over MCP: a stale edit refused, turns on one concept, parallel
+  // writes; every write must reach the change feed. Patient, since the gate's earlier steps
+  // spend much of the account's write limit.
+  const a = agentTokens[0];
+  const agents = await runAgents({
+    url: base,
+    owner: a?.owner ?? "",
+    slug: a?.slug ?? "",
+    tokens: agentTokens.map((t) => t.token),
+    patient: true,
+    log: () => {},
+  });
+  console.log(formatReport(agents).replace(/^(PASS|FAIL)/, "$1 scripted agents:"));
+  if (!agents.ok) failed = true;
 } catch (e) {
   failed = true;
   console.error(e);

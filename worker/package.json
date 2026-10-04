@@ -12,7 +12,8 @@
     "gate": "bun scripts/gate.ts",
     "logs": "bun scripts/logs.ts",
     "admin": "bun scripts/admin.ts",
-    "preview": "bun scripts/preview.ts"
+    "preview": "bun scripts/preview.ts",
+    "agents": "bun scripts/agents.ts"
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "^1.2.1",

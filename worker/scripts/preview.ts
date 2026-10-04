@@ -6,6 +6,11 @@
  *   bun run preview up --pr N [--email <operator>]   create what is missing, migrate, deploy, seed, smoke
  *   bun run preview down --pr N                      delete the Worker, D1, R2 (emptied first) and KV
  *   bun run preview sweep --keep 3,7                 tear down every preview whose PR is not listed
+ *   bun run preview agents --pr N [--agents 3] [--scenario live] [--pace 2000] [--rounds 5]
+ *                              [--patient] [--keep-files] [--email E]
+ *                                                    scripted agents on the preview's `agents`
+ *                                                    library (scripts/agents.ts); creates nothing
+ *                                                    but that library and a token per agent
  *
  * `down` and `sweep` take --dry-run: list what would be deleted, delete nothing.
  *
@@ -25,6 +30,12 @@ const { values, positionals } = parseArgs({
     keep: { type: "string" },
     email: { type: "string" },
     "dry-run": { type: "boolean" },
+    agents: { type: "string" },
+    scenario: { type: "string", multiple: true },
+    pace: { type: "string" },
+    rounds: { type: "string" },
+    patient: { type: "boolean" },
+    "keep-files": { type: "boolean" },
   },
 });
 const command = positionals[0];
@@ -165,16 +176,7 @@ async function seedAndSmoke(
   const { mcpSmoke } = await import("./mcp-smoke");
   const { BUNDLES, loadBundle } = await import("../test/fixtures");
   const { writeTar } = await import("../src/util/tar");
-  /** A library and write token in the preview's D1, owned by the operator's account. */
-  const seed = async (slug: string, actor: string) => {
-    const args = ["bun", "scripts/seed.ts", "--remote", "--json", "--slug", slug, "--actor", actor];
-    if (email) args.push("--email", email);
-    return JSON.parse((await run(args, env)).trim().split("\n").at(-1) ?? "{}") as {
-      token: string;
-      owner: string;
-      slug: string;
-    };
-  };
+  const seed = (slug: string, actor: string) => seedRemote(slug, actor, email, env);
 
   for (const bundle of BUNDLES) {
     const s = await seed(bundle.replace(/_/g, "-"), "github-actions/preview");
@@ -195,6 +197,62 @@ async function seedAndSmoke(
 
   const smoke = await seed("smoke", "github-actions/smoke");
   if (!(await mcpSmoke({ url, token: smoke.token }))) throw new Error("MCP smoke failed.");
+}
+
+/** A library and write token in the preview's D1, owned by the operator's account. */
+async function seedRemote(
+  slug: string,
+  actor: string,
+  email: string | undefined,
+  env: Record<string, string | undefined>,
+) {
+  const args = ["bun", "scripts/seed.ts", "--remote", "--json", "--slug", slug, "--actor", actor];
+  if (email) args.push("--email", email);
+  return JSON.parse((await run(args, env)).trim().split("\n").at(-1) ?? "{}") as {
+    token: string;
+    owner: string;
+    slug: string;
+  };
+}
+
+// ------------------------------------------------------------------ agents
+
+/**
+ * Scripted agents against PR N's preview, which must be up: a token per agent on the library
+ * `agents` in the operator's account (written to the preview's D1), then the scenarios.
+ */
+async function agents(pr: string, email: string | undefined): Promise<boolean> {
+  const names = previewDeployment(pr);
+  const url = `https://${names.host}`;
+  const d1 = await d1Id(names.d1.name);
+  const kv = await kvId(`tempra-oauth-pr-${pr}`);
+  if (!d1 || !kv) throw new Error(`PR ${pr} has no preview; bring it up first.`);
+  const env = {
+    ...process.env,
+    TEMPRA_MODE: "preview",
+    TEMPRA_PR: pr,
+    TEMPRA_PREVIEW_D1_ID: d1,
+    TEMPRA_PREVIEW_KV_ID: kv,
+    CF_SEND_TELEMETRY: "false",
+  };
+  const seeded = [];
+  for (let i = 1; i <= Number(values.agents ?? 3); i++) {
+    seeded.push(await seedRemote("agents", `claude-code/agent-${i}`, email, env));
+  }
+  const { formatReport, runAgents } = await import("./agents");
+  const report = await runAgents({
+    url,
+    owner: seeded[0]?.owner ?? "",
+    slug: "agents",
+    tokens: seeded.map((s) => s.token),
+    scenarios: values.scenario,
+    pace: Number(values.pace ?? 0),
+    rounds: values.rounds ? Number(values.rounds) : undefined,
+    keep: values["keep-files"],
+    patient: values.patient,
+  });
+  console.log(formatReport(report));
+  return report.ok;
 }
 
 // ------------------------------------------------------------------ down and sweep
@@ -292,11 +350,14 @@ if (command === "up" && values.pr) {
   if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `url=${url}\n`);
 } else if (command === "down" && values.pr) {
   await down(values.pr);
+} else if (command === "agents" && values.pr) {
+  const ok = await agents(values.pr, values.email || process.env.TEMPRA_PREVIEW_EMAIL || undefined);
+  process.exit(ok ? 0 : 1);
 } else if (command === "sweep" && values.keep !== undefined) {
   await sweep(new Set(values.keep.split(/[\s,]+/).filter(Boolean)));
 } else {
   console.error(
-    "Usage: bun run preview up --pr N [--email E] | down --pr N | sweep --keep 3,7 (empty: none)",
+    "Usage: bun run preview up --pr N [--email E] | down --pr N | sweep --keep 3,7 (empty: none) | agents --pr N [--agents 3] [--scenario …] [--pace ms] [--rounds n] [--patient] [--keep-files]",
   );
   process.exit(2);
 }
