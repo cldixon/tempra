@@ -1,0 +1,49 @@
+---
+/**
+ * Every page: the top bar (sign in / sign up go to the app), the page, and the footer.
+ * Bare on purpose (TEMPRA-7): structure first, design later (TEMPRA-1).
+ */
+import "../styles/site.css";
+
+interface Props {
+  title: string;
+  description: string;
+  /** Keep the page out of search results (the 404 page). */
+  noindex?: boolean;
+}
+
+const { title, description, noindex = false } = Astro.props;
+const APP = "https://app.tempra.dev";
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    {noindex ? <meta name="robots" content="noindex" /> : <link rel="canonical" href={new URL(Astro.url.pathname, Astro.site)} />}
+  </head>
+  <body>
+    <header>
+      <nav aria-label="Main">
+        <a href="/"><strong>Tempra</strong></a>
+        <span>
+          <a href={`${APP}/sign-in`}>Sign in</a>
+          <a href={`${APP}/sign-in`}>Sign up</a>
+        </span>
+      </nav>
+    </header>
+    <main>
+      <slot />
+    </main>
+    <footer>
+      <p>
+        <a href={`${APP}/terms`}>Terms</a> ·
+        <a href={`${APP}/privacy`}>Privacy</a> ·
+        <a href="https://github.com/cldixon/tempra">GitHub</a>
+      </p>
+    </footer>
+  </body>
+</html>

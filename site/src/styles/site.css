@@ -1,0 +1,17 @@
+/* Bare on purpose: readable line length and spacing, browser defaults otherwise. */
+body {
+  max-width: 42rem;
+  margin: 0 auto;
+  padding: 1rem;
+  font-family: system-ui, sans-serif;
+  line-height: 1.5;
+}
+
+nav {
+  display: flex;
+  justify-content: space-between;
+}
+
+nav span a + a {
+  margin-left: 1rem;
+}
