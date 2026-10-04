@@ -8,9 +8,11 @@ import "../styles/site.css";
 interface Props {
   title: string;
   description: string;
+  /** Keep the page out of search results (the 404 page). */
+  noindex?: boolean;
 }
 
-const { title, description } = Astro.props;
+const { title, description, noindex = false } = Astro.props;
 const APP = "https://app.tempra.dev";
 ---
 
@@ -21,7 +23,7 @@ const APP = "https://app.tempra.dev";
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
     <meta name="description" content={description} />
-    <link rel="canonical" href={new URL(Astro.url.pathname, Astro.site)} />
+    {noindex ? <meta name="robots" content="noindex" /> : <link rel="canonical" href={new URL(Astro.url.pathname, Astro.site)} />}
   </head>
   <body>
     <header>
