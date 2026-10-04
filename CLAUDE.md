@@ -112,6 +112,7 @@ CD (tempra-dev: `delivery/ci-cd.md`) runs after those three, each stage off unti
 - `PREVIEWS`: the `preview` job brings up PR N's preview and comments its URL; `preview-cleanup.yml` tears it down when the PR closes and sweeps leftovers nightly.
 - `STAGING_DEPLOYS`: every push to `main` deploys staging and checks it (`/healthz`, MCP smoke with secret `STAGING_MCP_TOKEN` if set).
 - `PRODUCTION_DEPLOYS`: then production, after approval in the GitHub Environment `production` (configure its required reviewer before turning this on).
+- Each push to `main` runs on its own (TEMPRA-18): a run waiting for approval never blocks the next, and deploy jobs deploy only the tip of `main` (a superseded commit skips itself).
 
 The `site/ builds` job checks, tests and builds the landing page; its previews and deploys come from Workers Builds.
 
