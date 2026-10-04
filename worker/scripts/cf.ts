@@ -103,8 +103,14 @@ export async function cf(args: string[], opts: CfOptions = {}): Promise<string> 
       }
       await p.exited;
       const out = readFileSync(outFile, "utf8");
-      if (lingered || p.exitCode === 0) return out;
       const err = readFileSync(errFile, "utf8");
+      // A command that wants confirmation prints "Aborted." without --force and still exits 0.
+      if (/^Aborted\.\s*$/m.test(`${out}\n${err}`)) {
+        throw new Error(
+          `cf ${args.join(" ")} asked for confirmation (pass --force):\n${err}${out}`,
+        );
+      }
+      if (lingered || p.exitCode === 0) return out;
       const timedOut = !lingered && p.signalCode !== null;
       if (timedOut && attempt < attempts) {
         console.error(

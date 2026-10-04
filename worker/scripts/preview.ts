@@ -218,22 +218,48 @@ async function down(pr: string) {
   }
   if ((await buckets()).includes(names.r2)) {
     console.log(`Emptying and deleting R2 ${names.r2}`);
-    await cf(["r2", "objects", "bulk-delete", "--bucket-name", names.r2, "--prefix="]);
-    // Emptying can finish in the background; the bucket deletes once it is empty.
-    for (let attempt = 1; ; attempt++) {
-      try {
-        await cf(["r2", "buckets", "delete", names.r2, "--force"]);
-        break;
-      } catch (e) {
-        if (attempt >= 12) throw e;
-        await Bun.sleep(10_000);
-      }
-    }
+    await emptyBucket(names.r2);
+    await cf(["r2", "buckets", "delete", names.r2, "--force"]);
   }
   const kv = await kvId(`tempra-oauth-pr-${pr}`);
   if (kv) {
     console.log(`Deleting KV tempra-oauth-pr-${pr}`);
     await cf(["kv", "namespaces", "delete", kv, "--force"]);
+  }
+}
+
+/**
+ * Deletes every object in a bucket, a page at a time, by key; synchronous, unlike the API's
+ * empty-bucket mode (a bulk delete with an empty prefix), which runs as a background job.
+ */
+async function emptyBucket(bucket: string) {
+  let last = "";
+  for (;;) {
+    const page = await json<{ key: string }[]>([
+      "r2",
+      "objects",
+      "list",
+      "--bucket-name",
+      bucket,
+      "--per-page",
+      "1000",
+    ]);
+    if (page.length === 0) return;
+    // A page that comes back unchanged means the delete did nothing: stop rather than spin.
+    const first = page[0]?.key ?? "";
+    if (first === last) throw new Error(`Could not empty ${bucket}: ${first} is still there.`);
+    last = first;
+    await cf([
+      "r2",
+      "objects",
+      "bulk-delete",
+      "--bucket-name",
+      bucket,
+      "--body",
+      JSON.stringify(page.map((o) => o.key)),
+      // Without it cf asks to confirm, prints "Aborted." and still exits 0.
+      "--force",
+    ]);
   }
 }
 
