@@ -5,7 +5,9 @@ import { bindings, defineConfig, exports, triggers } from "cf/config";
  * types`). Scripts import this file too (scripts/cf.ts), so keep it free of Worker code imports.
  *
  * `--mode staging` gives a separate Worker with its own D1, R2 and KV (v2 spec: Operations);
- * `--mode production` is production; no mode is local dev (`cf dev`), type generation and dry runs.
+ * `--mode production` is production; `--mode preview` is one pull request's Worker, named by
+ * TEMPRA_PR with its resource ids in TEMPRA_PREVIEW_D1_ID and TEMPRA_PREVIEW_KV_ID (scripts/preview.ts
+ * sets them); no mode is local dev (`cf dev`), type generation and dry runs.
  */
 
 interface Deployment {
@@ -17,6 +19,10 @@ interface Deployment {
   kv: string;
   /** The address sign-in links and the digest come from (Cloudflare Email Service). */
   mailFrom: string;
+  /** Analytics Engine dataset for metering; tempra_usage unless set. */
+  usage?: string;
+  /** False: no daily sweep and digest. */
+  cron?: false;
 }
 
 const PRODUCTION: Deployment = {
@@ -38,6 +44,31 @@ const STAGING: Deployment = {
   mailFrom: "noreply@mail.tempra.dev",
 };
 
+/**
+ * Pull request N's preview (tempra-dev library: delivery/preview-deployments): its own Worker and
+ * resources on pr-N.tempra.dev, created and deleted by scripts/preview.ts. The ids are known only
+ * once the resources exist, so they come from the environment.
+ */
+export function previewDeployment(pr: string, ids: { d1?: string; kv?: string } = {}): Deployment {
+  if (!/^[1-9][0-9]*$/.test(pr)) throw new Error(`Not a pull request number: ${pr || "(unset)"}`);
+  return {
+    name: `tempra-pr-${pr}`,
+    host: `pr-${pr}.tempra.dev`,
+    d1: { name: `tempra-accounts-pr-${pr}`, id: ids.d1 ?? "" },
+    r2: `tempra-blobs-pr-${pr}`,
+    kv: ids.kv ?? "",
+    mailFrom: "noreply@mail.tempra.dev",
+    // Previews are short-lived; the daily sweep and digest run on staging and production only,
+    // and their traffic stays out of the usage data.
+    cron: false,
+    usage: "tempra_usage_preview",
+  };
+}
+
+/** The CLI's environment; the Worker's tsconfig has no Node types, so it is reached by hand. */
+const env: Record<string, string | undefined> =
+  (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env ?? {};
+
 const COMPATIBILITY = {
   compatibilityDate: "2026-09-01",
   // global_fetch_strictly_public: outbound fetch cannot reach private addresses; required for
@@ -47,7 +78,15 @@ const COMPATIBILITY = {
 };
 
 export default defineConfig(({ mode }) => {
-  const d = mode === "staging" ? STAGING : PRODUCTION;
+  const d: Deployment =
+    mode === "preview"
+      ? previewDeployment(env.TEMPRA_PR ?? "", {
+          d1: env.TEMPRA_PREVIEW_D1_ID,
+          kv: env.TEMPRA_PREVIEW_KV_ID,
+        })
+      : mode === "staging"
+        ? STAGING
+        : PRODUCTION;
   // No mode: local dev, type generation and dry runs. `cf dev` would send local requests to the
   // custom domain, so the domain is attached only with an explicit --mode.
   const local = !mode;
@@ -67,7 +106,7 @@ export default defineConfig(({ mode }) => {
       workersDev: false,
 
       // The daily blob sweep and operator digest (v2 spec: A3), after the libraries' 03:00 exports.
-      triggers: [triggers.scheduled({ schedule: "30 4 * * *" })],
+      triggers: d.cron === false ? [] : [triggers.scheduled({ schedule: "30 4 * * *" })],
 
       // One SQLite-backed Durable Object per library (spec: Backend architecture). Declared as an
       // export; this replaces Wrangler's `migrations` history (its v1 created the same class).
@@ -107,7 +146,7 @@ export default defineConfig(({ mode }) => {
         }),
 
         // Metering: one data point per request, write and email (v2 spec: Metering).
-        USAGE: bindings.analyticsEngineDataset({ name: "tempra_usage" }),
+        USAGE: bindings.analyticsEngineDataset({ name: d.usage ?? "tempra_usage" }),
 
         // The daily digest goes to OPERATOR_EMAIL, a secret (typed in src/env.d.ts); unset sends none.
         MAIL_FROM: bindings.text(d.mailFrom),
