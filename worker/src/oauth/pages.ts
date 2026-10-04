@@ -1,4 +1,5 @@
 import type { ConsentDescription, GrantSummary } from "@cloudflare/workers-oauth-provider";
+import { href as designHref } from "@tempra/design";
 import type { LibraryRef } from "../accounts";
 
 /** Escapes text for HTML; every client-supplied string passes through here. */
@@ -8,7 +9,8 @@ export function page(title: string, body: string): string {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(title)} - Tempra</title></head>
+<title>${esc(title)} - Tempra</title>
+<link rel="stylesheet" href="${designHref}"></head>
 <body><main>${body}</main></body></html>`;
 }
 

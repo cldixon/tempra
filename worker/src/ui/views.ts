@@ -369,7 +369,7 @@ export function conceptPage(opts: {
 ${typeof fm.description === "string" ? `<p class="muted">${esc(fm.description)}</p>` : ""}
 <div class="chips">${chips}</div>
 ${atNotice(urls, opts.head, current)}
-<article class="body">${rendered.html}</article>
+<article class="body prose">${rendered.html}</article>
 ${lint}`;
 
   const aside = [
@@ -556,7 +556,7 @@ export function derivedPage(opts: {
   return `${crumbs(urls, opts.path, true)}
 ${atNotice(urls, opts.head, urls.pinned(undefined).file(opts.path))}
 <p class="small muted">Synthesized by the server. <a href="${esc(urls.raw(opts.path))}">Raw</a></p>
-<article class="body">${rendered.html}</article>`;
+<article class="body prose">${rendered.html}</article>`;
 }
 
 export { dirOf };
