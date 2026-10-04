@@ -56,4 +56,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           open=$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --limit 500 --json number --jq '[.[].number] | join(",")')
-          bun run preview sweep --keep "$open"
+          # --keep=, not --keep "": bun run drops an empty argument, so with no open PRs --keep had
+          # no value and the sweep failed (nightly run of 2026-10-04).
+          bun run preview sweep --keep="$open"
