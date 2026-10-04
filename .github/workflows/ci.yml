@@ -9,10 +9,12 @@ on:
 permissions:
   contents: read
 
-# A newer push to a PR supersedes its running checks. Pushes to main run to the end, so a deploy
-# is never cut off halfway.
+# A newer push to a PR supersedes its running checks. Each push to main runs on its own (its group is
+# its run id), so a run waiting for production approval never holds up the next one (TEMPRA-18).
+# Deploys are ordered by the job-level groups below, and a deploy job whose commit is no longer the
+# tip of main skips itself, so an older run can never overwrite a newer deploy.
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -158,6 +160,8 @@ jobs:
     concurrency:
       group: deploy-staging
       cancel-in-progress: false
+    outputs:
+      deployed: ${{ steps.tip.outputs.deploy }}
     environment:
       name: staging
       url: https://staging.tempra.dev
@@ -168,13 +172,23 @@ jobs:
       SMOKE_TOKEN: ${{ secrets.STAGING_MCP_TOKEN }}
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - name: Still the tip of main?
+        id: tip
+        run: |
+          tip=$(git ls-remote origin refs/heads/main | cut -f1)
+          if [ "$tip" = "$GITHUB_SHA" ]; then echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else echo "deploy=false" >> "$GITHUB_OUTPUT"; echo "::notice::Superseded by $tip; not deploying $GITHUB_SHA."; fi
+      - if: steps.tip.outputs.deploy == 'true'
+        uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
-      - run: bun install --frozen-lockfile
-      - working-directory: worker
+      - if: steps.tip.outputs.deploy == 'true'
+        run: bun install --frozen-lockfile
+      - if: steps.tip.outputs.deploy == 'true'
+        working-directory: worker
         run: bun run deploy --mode staging --message "${{ github.sha }}"
-      - name: Check staging
+      - if: steps.tip.outputs.deploy == 'true'
+        name: Check staging
         working-directory: worker
         run: |
           curl -fsS --retry 10 --retry-delay 6 --retry-all-errors https://staging.tempra.dev/healthz
@@ -182,11 +196,13 @@ jobs:
             bun scripts/mcp-smoke.ts --url https://staging.tempra.dev --token "$SMOKE_TOKEN"
           fi
 
-  # After staging, a person approves in the `production` environment (required reviewer).
+  # After staging, a person approves in the `production` environment (required reviewer). Approving
+  # an older run that waited while main moved on is harmless: its tip check skips the deploy.
   production:
     name: Deploy production
     needs: [staging]
-    if: vars.PRODUCTION_DEPLOYS == 'on'
+    # A run whose commit was superseded before staging never asks for approval.
+    if: vars.PRODUCTION_DEPLOYS == 'on' && needs.staging.outputs.deployed == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     concurrency:
@@ -202,13 +218,23 @@ jobs:
       SMOKE_TOKEN: ${{ secrets.PRODUCTION_MCP_TOKEN }}
     steps:
       - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
+      - name: Still the tip of main?
+        id: tip
+        run: |
+          tip=$(git ls-remote origin refs/heads/main | cut -f1)
+          if [ "$tip" = "$GITHUB_SHA" ]; then echo "deploy=true" >> "$GITHUB_OUTPUT"
+          else echo "deploy=false" >> "$GITHUB_OUTPUT"; echo "::notice::Superseded by $tip; not deploying $GITHUB_SHA."; fi
+      - if: steps.tip.outputs.deploy == 'true'
+        uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
-      - run: bun install --frozen-lockfile
-      - working-directory: worker
+      - if: steps.tip.outputs.deploy == 'true'
+        run: bun install --frozen-lockfile
+      - if: steps.tip.outputs.deploy == 'true'
+        working-directory: worker
         run: bun run deploy --mode production --message "${{ github.sha }}"
-      - name: Check production
+      - if: steps.tip.outputs.deploy == 'true'
+        name: Check production
         working-directory: worker
         run: |
           curl -fsS --retry 10 --retry-delay 6 --retry-all-errors https://app.tempra.dev/healthz
