@@ -1,3 +1,4 @@
+import * as design from "@tempra/design";
 import { type Context, Hono } from "hono";
 import { type Accounts, checkNewToken } from "./accounts";
 import type { Authenticate, TokenInfo } from "./auth";
@@ -186,6 +187,17 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     const checks = health ? await health() : {};
     const ok = Object.values(checks).every((v) => v === "ok");
     return c.json({ ok, checks }, ok ? 200 : 503);
+  });
+
+  // The shared design stylesheet (@tempra/design, TEMPRA-8), at a content-hashed URL: a new
+  // stylesheet gets a new URL, so the old one can be cached for good.
+  app.get("/_design/:file", (c) => {
+    if (c.req.param("file") !== `tempra.${design.hash}.css`) return c.notFound();
+    return c.body(design.css, 200, {
+      "Content-Type": "text/css; charset=utf-8",
+      "Cache-Control": "public, max-age=31536000, immutable",
+      "X-Content-Type-Options": "nosniff",
+    });
   });
 
   app.use(`${BASE}/*`, async (c, next) => {

@@ -4,7 +4,8 @@
   "type": "module",
   "packageManager": "bun@1.3.11",
   "workspaces": [
-    "worker"
+    "worker",
+    "design"
   ],
   "scripts": {
     "dev": "bun run --filter worker dev",

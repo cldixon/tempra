@@ -1,0 +1,31 @@
+/*
+ * How a rendered concept reads: the markdown body of a concept, in the app now and wherever
+ * concepts are shown later (the site, inline MCP Apps views). Scoped to .prose.
+ */
+.prose {
+  max-width: var(--tempra-measure);
+}
+
+.prose pre {
+  overflow-x: auto;
+  padding: var(--tempra-space-2);
+  background: var(--tempra-color-code-bg);
+  border-radius: var(--tempra-radius);
+}
+
+.prose blockquote {
+  margin-left: 0;
+  padding-left: var(--tempra-space-3);
+  border-left: 3px solid var(--tempra-color-border);
+  color: var(--tempra-color-muted);
+}
+
+.prose table th,
+.prose table td {
+  border: 1px solid var(--tempra-color-border);
+}
+
+.prose .footnotes {
+  font-size: 0.9em;
+  color: var(--tempra-color-muted);
+}

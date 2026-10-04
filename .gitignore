@@ -12,6 +12,8 @@ node_modules/
 
 # Build / tooling output
 dist/
+# except the design package's generated output, which the app and the site import as is
+!design/dist/
 coverage/
 *.tsbuildinfo
 .cache/

@@ -12,6 +12,7 @@
     "test": "bun test"
   },
   "dependencies": {
+    "@tempra/design": "file:../design",
     "astro": "^7.3.5"
   },
   "devDependencies": {

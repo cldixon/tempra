@@ -1,10 +1,7 @@
-/* Bare on purpose: readable line length and spacing, browser defaults otherwise. */
+/* The site's own layout; colours, type and spacing come from @tempra/design. */
 body {
   max-width: 42rem;
   margin: 0 auto;
-  padding: 1rem;
-  font-family: system-ui, sans-serif;
-  line-height: 1.5;
 }
 
 nav {
@@ -13,5 +10,5 @@ nav {
 }
 
 nav span a + a {
-  margin-left: 1rem;
+  margin-left: var(--tempra-space-3);
 }

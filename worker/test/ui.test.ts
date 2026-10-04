@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import * as design from "@tempra/design";
 import { linkTarget, renderBody } from "../src/ui/markdown";
 import { setup } from "./harness";
 
@@ -333,5 +334,31 @@ describe("history, ledger and revert (Phase 3, slice 2)", () => {
     expect(done.status).toBe(303);
     expect(s.store().read("a.md")).toMatchObject({ body: "First.\n" });
     expect((await page(s, done.headers.get("Location") ?? "")).html).toContain("Restored.");
+  });
+});
+
+describe("the shared design stylesheet", () => {
+  test("served at its hashed path, immutable; any other name is a 404", async () => {
+    const s = setup();
+    const r = await s.anon.request(design.href);
+    expect(r.status).toBe(200);
+    expect(r.headers.get("Content-Type")).toContain("text/css");
+    expect(r.headers.get("Cache-Control")).toContain("immutable");
+    expect(await r.text()).toBe(design.css);
+    expect((await s.anon.request("/_design/tempra.000000000000.css")).status).toBe(404);
+  });
+
+  test("every page links it and its CSP allows it", async () => {
+    const s = setup();
+    for (const [client, path] of [
+      [s.app, "/"],
+      [s.anon, "/sign-in"],
+      [s.anon, "/privacy"],
+    ] as const) {
+      const r = await client.request(path);
+      expect(r.status).toBe(200);
+      expect(await r.text()).toContain(`<link rel="stylesheet" href="${design.href}">`);
+      expect(r.headers.get("Content-Security-Policy")).toContain("style-src 'self'");
+    }
   });
 });

@@ -1,0 +1,33 @@
+/*
+ * Tempra design tokens: the one place values live (TEMPRA-8). Deliberately plain for now, close to
+ * browser defaults; the design pass (TEMPRA-1) changes values here and both the app and the site
+ * follow. Light and dark come from the user's system through light-dark().
+ */
+:root {
+  color-scheme: light dark;
+
+  /* Color */
+  --tempra-color-text: light-dark(#111111, #e8e8e8);
+  --tempra-color-muted: light-dark(#555555, #a8a8a8);
+  --tempra-color-bg: light-dark(#ffffff, #121212);
+  --tempra-color-link: light-dark(#0000ee, #8ab4f8);
+  --tempra-color-link-visited: light-dark(#551a8b, #c58af9);
+  --tempra-color-border: light-dark(#cccccc, #444444);
+  --tempra-color-code-bg: light-dark(#f4f4f4, #1e1e1e);
+
+  /* Type */
+  --tempra-font-body: system-ui, sans-serif;
+  --tempra-font-mono: ui-monospace, monospace;
+  --tempra-font-size: 1rem;
+  --tempra-line-height: 1.5;
+  --tempra-measure: 70ch;
+
+  /* Space */
+  --tempra-space-1: 0.25rem;
+  --tempra-space-2: 0.5rem;
+  --tempra-space-3: 1rem;
+  --tempra-space-4: 2rem;
+
+  /* Shape */
+  --tempra-radius: 0;
+}

@@ -1,0 +1,51 @@
+/* Element defaults for every page of the app and the site; values come from tokens.css. */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  padding: var(--tempra-space-3);
+  background: var(--tempra-color-bg);
+  color: var(--tempra-color-text);
+  font-family: var(--tempra-font-body);
+  font-size: var(--tempra-font-size);
+  line-height: var(--tempra-line-height);
+}
+
+a {
+  color: var(--tempra-color-link);
+}
+
+a:visited {
+  color: var(--tempra-color-link-visited);
+}
+
+code,
+pre,
+kbd,
+samp {
+  font-family: var(--tempra-font-mono);
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--tempra-color-border);
+}
+
+table {
+  border-collapse: collapse;
+}
+
+th,
+td {
+  padding: var(--tempra-space-1) var(--tempra-space-2);
+  text-align: left;
+  vertical-align: top;
+}
+
+img {
+  max-width: 100%;
+}

@@ -40,7 +40,7 @@ function plain(title: string, body: string): Response {
   return new Response(page(title, body), {
     headers: {
       "Content-Type": "text/html; charset=utf-8",
-      "Content-Security-Policy": "default-src 'none'; frame-ancestors 'none'",
+      "Content-Security-Policy": "default-src 'none'; style-src 'self'; frame-ancestors 'none'",
       "X-Frame-Options": "DENY",
       "Cache-Control": "public, max-age=3600",
     },
