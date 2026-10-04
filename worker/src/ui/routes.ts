@@ -13,6 +13,7 @@ import { authorizeLibrary } from "../tenancy";
 import { maybeGunzip, readTar } from "../util/tar";
 import {
   type AgentWrite,
+  accountConnectPage,
   accountPage,
   connectPage,
   deleteLibraryPage,
@@ -810,6 +811,13 @@ export function registerUiRoutes<E extends AppEnv>(
       if (e instanceof OkfError && e.status < 500) return welcome({ ...p, user }, form, e);
       throw e;
     }
+  });
+
+  get("/connect", async (p) => {
+    const mcp = `${new URL(p.c.req.url).origin}/mcp`;
+    return htmlResponse(
+      layout({ title: "Connect an agent", user: p.user.email, body: accountConnectPage({ mcp }) }),
+    );
   });
 
   get("/:owner/:lib/-/connect", async (p) => {
