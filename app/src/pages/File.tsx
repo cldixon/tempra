@@ -7,8 +7,9 @@ import {
   wordDiff,
 } from "@tempra/editor";
 import type { Hovered } from "@tempra/editor/view";
-import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, api, useLoad } from "../api";
+import { type FeedEvent, useFeed } from "../live";
 import { el, Reader } from "../Reader";
 import { navigate } from "../router";
 import {
@@ -139,10 +140,35 @@ export function File(props: { urls: Urls; path: string; done: string | null; act
   }, [urls, path]);
   useScrollToHash(loaded.state === "ready");
   const notice = props.done ? DONE[props.done]?.(props.actor) : undefined;
+
+  // Live (tempra-dev: app/live): someone else's change to this file shows as a banner, and the
+  // new version swaps in by itself only while the reader is idle. Pinned versions stay put.
+  const [change, setChange] = useState<FeedEvent | null>(null);
+  const shown = loaded.state === "ready" ? loaded.data.file : null;
+  useFeed(urls, (events) => {
+    if (urls.at !== undefined || !shown) return;
+    const mine = events.filter(
+      (e) => (e.path === shown.path || e.from_path === shown.path) && e.actor !== props.actor,
+    );
+    const last = mine[mine.length - 1];
+    if (last) setChange(last);
+  });
+  const idle = useIdle(15_000);
+  const swappable = change !== null && change.op !== "delete" && change.op !== "move";
+  const swap = useCallback(() => {
+    setChange(null);
+    loaded.reload();
+  }, [loaded.reload]);
+  useEffect(() => {
+    if (swappable && idle) swap();
+  }, [swappable, idle, swap]);
   return (
     <>
       <LibNav urls={urls} active="files" />
       {notice && <div className="notice ok">{notice}</div>}
+      {change && shown && (
+        <ChangeBanner urls={urls} change={change} shownSeq={shown.seq} onSwap={swap} />
+      )}
       <Status loaded={loaded}>
         {(d) =>
           d.file.kind === "attachment" ? (
@@ -166,6 +192,86 @@ export function File(props: { urls: Urls; path: string; done: string | null; act
         }
       </Status>
     </>
+  );
+}
+
+/**
+ * True once the person has not scrolled, typed, clicked or selected text for `ms`: the moment a
+ * new version may replace what they are reading without pulling it from under them.
+ */
+function useIdle(ms: number): boolean {
+  const [idle, setIdle] = useState(false);
+  useEffect(() => {
+    let last = Date.now();
+    const busy = () => {
+      last = Date.now();
+      setIdle(false);
+    };
+    const kinds = ["scroll", "wheel", "keydown", "pointerdown", "selectionchange"] as const;
+    for (const k of kinds) document.addEventListener(k, busy, { passive: true, capture: true });
+    const timer = setInterval(() => {
+      const selecting = !(document.getSelection()?.isCollapsed ?? true);
+      setIdle(!selecting && Date.now() - last >= ms);
+    }, 1000);
+    return () => {
+      clearInterval(timer);
+      for (const k of kinds) document.removeEventListener(k, busy, { capture: true });
+    };
+  }, [ms]);
+  return idle;
+}
+
+const AGO_UNITS: [number, string][] = [
+  [86_400, "d"],
+  [3600, "h"],
+  [60, "min"],
+  [1, "s"],
+];
+
+function ago(ts: string, now: number): string {
+  const secs = Math.max(0, Math.round((now - Date.parse(ts)) / 1000));
+  for (const [size, unit] of AGO_UNITS)
+    if (secs >= size) return `${Math.floor(secs / size)} ${unit}`;
+  return "0 s";
+}
+
+/** "claude-ai/connector changed this 4 s ago, seq 41. Show diff · Show new version" */
+function ChangeBanner(props: { urls: Urls; change: FeedEvent; shownSeq: number; onSwap(): void }) {
+  const { urls, change: e } = props;
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 5000);
+    return () => clearInterval(t);
+  }, []);
+  const what =
+    e.op === "delete"
+      ? "deleted this"
+      : e.op === "move"
+        ? "moved this"
+        : e.op === "verify"
+          ? "verified this"
+          : "changed this";
+  return (
+    <div className="notice" role="status">
+      {e.actor} {what} {ago(e.ts, now)} ago, seq {e.seq}
+      {e.note ? `: ${e.note}` : ""}.{" "}
+      {e.op === "move" ? (
+        <a href={urls.pinned(undefined).file(e.path)}>Go to {e.path}</a>
+      ) : e.op === "delete" ? (
+        <a href={urls.tree(dirOf(e.from_path ?? e.path))}>Back to the directory</a>
+      ) : (
+        <>
+          {CONTENT_OPS.has(e.op) && (
+            <>
+              <a href={urls.diff(e.path, props.shownSeq, e.seq)}>Show diff</a> ·{" "}
+            </>
+          )}
+          <button type="button" onClick={props.onSwap}>
+            Show new version
+          </button>
+        </>
+      )}
+    </div>
   );
 }
 

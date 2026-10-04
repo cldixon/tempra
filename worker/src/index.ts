@@ -146,6 +146,11 @@ const depsFor = (env: Env): Deps => {
       },
     },
     library: (token) => client(token.library.do_id),
+    feed: (doId, request, prefix) => {
+      const url = new URL("https://library/feed");
+      if (prefix) url.searchParams.set("prefix", prefix);
+      return libraryStub(env, doId).fetch(new Request(url, request));
+    },
     // Checked against D1 first, so a forged download URL cannot create Durable Objects.
     libraryByDoId: async (doId) => {
       const row = await env.DB.prepare("SELECT 1 AS ok FROM libraries WHERE do_id = ?")

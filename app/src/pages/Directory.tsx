@@ -1,4 +1,6 @@
+import { useEffect } from "react";
 import { ApiError, api, useLoad } from "../api";
+import { lastSeen, markSeen, useFeed } from "../live";
 import {
   AtNotice,
   Chip,
@@ -14,6 +16,7 @@ import { baseName, type Urls } from "../urls";
 
 interface Entry {
   path: string;
+  seq?: number;
   kind: "concept" | "attachment" | "dir";
   files?: number;
   type?: string;
@@ -59,12 +62,32 @@ export function Directory({ urls, dir }: { urls: Urls; dir: string }) {
     }
     return { entries: tree.entries, stats, summary };
   });
+  // Live: anything written under this directory reloads it in place (tempra-dev: app/live).
+  const under = (p: string | null) =>
+    p !== null && (dir === "" || p === dir || p.startsWith(`${dir}/`));
+  useFeed(urls, (events) => {
+    if (urls.at === undefined && events.some((e) => under(e.path) || under(e.from_path))) {
+      loaded.reload();
+    }
+  });
+  const seen = lastSeen(urls);
+  const head = loaded.state === "ready" ? loaded.data.stats.seq : null;
+  useEffect(() => {
+    if (head !== null && urls.at === undefined) markSeen(urls, head);
+  }, [head, urls]);
   return (
     <>
       <LibNav urls={urls} active="files" />
       <Status loaded={loaded}>
         {({ entries, stats, summary }) => (
-          <Listing urls={urls} dir={dir} entries={entries} stats={stats} summary={summary} />
+          <Listing
+            urls={urls}
+            dir={dir}
+            entries={entries}
+            stats={stats}
+            summary={summary}
+            seen={seen}
+          />
         )}
       </Status>
     </>
@@ -77,8 +100,11 @@ function Listing(props: {
   entries: Entry[];
   stats: Stats;
   summary?: Summary;
+  /** The ledger sequence last seen here on this browser: later rows are marked new. */
+  seen: number | null;
 }) {
-  const { urls, dir, entries, stats, summary } = props;
+  const { urls, dir, entries, stats, summary, seen } = props;
+  const isNew = (e: Entry) => seen !== null && e.seq !== undefined && e.seq > seen;
   const dirs = entries.filter((e) => e.kind === "dir");
   const concepts = entries.filter((e) => e.kind === "concept");
   const attachments = entries.filter((e) => e.kind === "attachment");
@@ -122,6 +148,9 @@ function Listing(props: {
                   <td>{c.type ? <Chip text={c.type} /> : <Chip text="no type" tone="bad" />}</td>
                   <td>
                     <div className="chips">
+                      {isNew(c) && (
+                        <Chip text="new" tone="ok" title="Changed since you last looked" />
+                      )}
                       <TrustChip tier={c.trust_tier} />
                       {c.stale && <Chip text="stale" tone="bad" />}
                       {c.status && c.status !== "stable" && <Chip text={c.status} tone="warn" />}
@@ -143,6 +172,12 @@ function Listing(props: {
                   <tr key={a.path}>
                     <td className="name">
                       <a href={urls.file(a.path)}>{baseName(a.path)}</a>
+                      {isNew(a) && (
+                        <>
+                          {" "}
+                          <Chip text="new" tone="ok" title="Changed since you last looked" />
+                        </>
+                      )}
                     </td>
                     <td className="muted">{a.media ?? "file"}</td>
                     <td className="muted">{formatSize(a.size ?? 0)}</td>

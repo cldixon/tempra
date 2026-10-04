@@ -49,6 +49,11 @@ export interface Deps extends UsageDeps {
   recovery?: RecoveryDeps;
   /** Wipes a library's storage: its Durable Object, R2 exports and restore records (lifecycle.ts). */
   destroyLibrary?: (doId: string) => Promise<void>;
+  /**
+   * Hands a WebSocket upgrade to the library's Durable Object, which holds the change feed
+   * (feed.ts); `prefix` limits it to a directory.
+   */
+  feed?: (doId: string, request: Request, prefix: string) => Promise<Response>;
 }
 
 export interface RecoveryDeps {
@@ -497,6 +502,27 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   });
 
   app.get(`${BASE}/stats`, async (c) => c.json(await c.var.lib.stats()));
+
+  // The change feed (tempra-dev: app/live): a WebSocket on which the library's Durable Object
+  // pushes every committed event. Authorized and counted once, here, when it opens; a session
+  // must open it from this site's own pages. GET /events?since=N is the catch-up.
+  app.get(`${BASE}/feed`, async (c) => {
+    if (c.req.header("Upgrade")?.toLowerCase() !== "websocket") {
+      throw new OkfError(426, "upgrade_required", "Open the feed as a WebSocket.");
+    }
+    const token = c.var.token;
+    if (token.id.startsWith("session:") && !fromThisSite(c.req.raw)) {
+      throw new OkfError(403, "cross_origin", "Open the feed from this site's own pages.");
+    }
+    const feed = c.var.deps.feed;
+    if (!feed) throw new OkfError(501, "unavailable", "The change feed is not wired here.");
+    c.var.deps.meter?.({
+      kind: "feed",
+      account: token.library.owner || token.library.id,
+      library: token.library.id,
+    });
+    return feed(token.library.do_id, c.req.raw, c.req.query("prefix") ?? "");
+  });
 
   // Counts for the library's home page: concepts, attachments, types, open work.
   app.get(`${BASE}/summary`, async (c) => c.json(await c.var.lib.summary()));

@@ -7,7 +7,8 @@ import { OkfError } from "./store/errors";
  */
 
 export interface UsageEvent {
-  kind: "request" | "write" | "email";
+  /** A request, a write, a sign-in email, or a change-feed connection opened. */
+  kind: "request" | "write" | "email" | "feed";
   /** The account: a library owner's handle, or an email for sign-in mail. */
   account: string;
   library?: string;

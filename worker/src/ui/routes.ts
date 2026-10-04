@@ -204,7 +204,7 @@ export function registerUiRoutes<E extends AppEnv>(
   // pages, that the person may open it (404 otherwise), then answers with the app's shell.
   const spa = async (p: Page, library: boolean) => {
     if (library) await openLibrary(p);
-    return spaShell();
+    return spaShell(p.c.req.raw);
   };
   get("/", async (p) => {
     // First run: no libraries yet (v2 spec: Onboarding).
@@ -235,7 +235,7 @@ export function registerUiRoutes<E extends AppEnv>(
   const file = async (p: Page, path: string) => {
     const { urls } = await openLibrary(p);
     if (basename(path) === "index.md") return p.c.redirect(urls.tree(dirname(path)));
-    return spaShell();
+    return spaShell(p.c.req.raw);
   };
   get("/:owner/:lib/-/files/*", (p) => file(p, tail(p.c, "/-/files/")));
 

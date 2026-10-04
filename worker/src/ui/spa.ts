@@ -21,7 +21,10 @@ export function appScript(): Response {
  * per-response nonce, which Wordgard's runtime styles will use (Wordgard.cspNonce); no inline
  * scripts or styles. The page carries nothing private: the app reads everything through the API.
  */
-export function spaShell(): Response {
+export function spaShell(request: Request): Response {
+  const url = new URL(request.url);
+  // The change feed's WebSocket, on this host (wss:, or ws: for local http).
+  const socket = `${url.protocol === "https:" ? "wss" : "ws"}://${url.host}`;
   const nonce = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));
   const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
@@ -39,7 +42,7 @@ export function spaShell(): Response {
         "script-src 'self'",
         `style-src 'self' 'nonce-${nonce}'`,
         "img-src 'self' https:",
-        "connect-src 'self'",
+        `connect-src 'self' ${socket}`,
         "form-action 'self'",
         "frame-ancestors 'none'",
         "base-uri 'none'",

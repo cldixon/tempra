@@ -1,7 +1,9 @@
 import type { FormEvent } from "react";
+import { useEffect } from "react";
 import { api, useLoad } from "../api";
+import { lastSeen, markSeen, useFeed } from "../live";
 import { type Done, navigate } from "../router";
-import { LibNav, plural, Status, useTitle, when } from "../ui";
+import { Chip, LibNav, plural, Status, useTitle, when } from "../ui";
 import type { LedgerFilters, Urls } from "../urls";
 import { CONTENT_OPS } from "./File";
 
@@ -28,6 +30,24 @@ export function Ledger(props: { urls: Urls; filters: LedgerFilters; done: Done; 
       urls.api("requests", { ...f, limit: 30 }),
     ),
   );
+  // Live tail (tempra-dev: app/live): on the newest page, a new request that the filters may
+  // match reloads the list; the server applies the filters.
+  useFeed(urls, (events) => {
+    if (f.before !== undefined) return;
+    const under = (p: string | null) =>
+      p !== null &&
+      (!f.prefix || p === f.prefix || p.startsWith(`${f.prefix.replace(/\/$/, "")}/`));
+    const hit = events.some(
+      (e) => (!f.actor || e.actor === f.actor) && (under(e.path) || under(e.from_path)),
+    );
+    if (hit) loaded.reload();
+  });
+  const seen = lastSeen(urls);
+  const newest =
+    loaded.state === "ready" ? (loaded.data.requests[0]?.events.at(-1)?.seq ?? null) : null;
+  useEffect(() => {
+    if (newest !== null && f.before === undefined) markSeen(urls, newest);
+  }, [newest, urls, f.before]);
   const filter = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const form = new FormData(e.currentTarget);
@@ -70,7 +90,13 @@ export function Ledger(props: { urls: Urls; filters: LedgerFilters; done: Done; 
             ) : (
               <ol className="ledger">
                 {requests.map((r) => (
-                  <Request key={r.request_id} urls={urls} filters={f} request={r} />
+                  <Request
+                    key={r.request_id}
+                    urls={urls}
+                    filters={f}
+                    request={r}
+                    isNew={seen !== null && (r.events[0]?.seq ?? 0) > seen}
+                  />
                 ))}
               </ol>
             )}
@@ -90,10 +116,13 @@ function Request({
   urls,
   filters,
   request: r,
+  isNew,
 }: {
   urls: Urls;
   filters: LedgerFilters;
   request: LedgerRequest;
+  /** Made after the person last looked at this library. */
+  isNew: boolean;
 }) {
   const shown = r.events.slice(0, 12);
   const more = r.events.length - shown.length;
@@ -103,6 +132,11 @@ function Request({
   return (
     <li className="request">
       <div className="req-head">
+        {isNew && (
+          <>
+            <Chip text="new" tone="ok" title="Since you last looked" />{" "}
+          </>
+        )}
         <span className="muted small">{when(r.ts)}</span>{" "}
         <a href={urls.ledger({ ...filters, actor: r.actor, before: undefined })}>{r.actor}</a>{" "}
         <span className="muted small">

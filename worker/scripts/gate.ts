@@ -240,25 +240,54 @@ async function browserRenders(
     // Verify a concept as a person, let an agent change it, and see the change over the text.
     const concept = concepts[0] ?? "";
     const url = `${base}/${owner}/${slug}/${enc(concept)}`;
+    const api = `${base}/api/v1/libraries/${owner}/${slug}/files/${enc(concept)}`;
+    const auth = { Authorization: `Bearer ${token}` };
+    /** An agent appends a sentence (which also lapses any human verification). */
+    const agentAppends = async (sentence: string) => {
+      const now = await fetch(api, { headers: auth });
+      const md = await now.text();
+      const put = await fetch(api, {
+        method: "PUT",
+        headers: {
+          ...auth,
+          "Content-Type": "text/markdown",
+          "If-Match": now.headers.get("ETag") ?? "",
+          "X-Note": "gate: an agent edits",
+        },
+        body: `${md.trimEnd()}\n\n${sentence}\n`,
+      });
+      if (!put.ok) throw new Error(`edit: ${put.status} ${await put.text()}`);
+    };
+    const markStay = () =>
+      page.evaluate(() => {
+        (globalThis as unknown as { stayed: boolean }).stayed = true;
+      });
+    const stayed = () =>
+      page.evaluate(() => (globalThis as unknown as { stayed?: boolean }).stayed === true);
+
+    // The change feed (TEMPRA-12): an agent's write reaches an open page without a reload.
+    await step("an agent's write appears on the open page", async () => {
+      await page.goto(url);
+      await page.locator(".body .prose").waitFor({ timeout: 15_000 });
+      await page.waitForTimeout(500); // the feed's socket opens after the page's data
+      await markStay();
+      const started = Date.now();
+      await agentAppends("A sentence written while the page was open.");
+      const banner = page.getByRole("status").filter({ hasText: "changed this" });
+      await banner.waitFor({ timeout: 10_000 });
+      const ms = Date.now() - started;
+      console.log(`  (the change reached the page in ${ms} ms)`);
+      if (ms > 3000) throw new Error(`the banner took ${ms} ms`);
+      if (shots) await page.screenshot({ path: `${shots}/live.png` });
+      await banner.getByRole("button", { name: "Show new version" }).click();
+      await page
+        .locator(".body")
+        .getByText("A sentence written while the page was open.")
+        .waitFor();
+      if (!(await stayed())) throw new Error("the page reloaded");
+    });
+
     await step("verify, an agent's edit, and the changes since verification", async () => {
-      const api = `${base}/api/v1/libraries/${owner}/${slug}/files/${enc(concept)}`;
-      const auth = { Authorization: `Bearer ${token}` };
-      /** An agent appends a sentence (which also lapses any human verification). */
-      const agentAppends = async (sentence: string) => {
-        const now = await fetch(api, { headers: auth });
-        const md = await now.text();
-        const put = await fetch(api, {
-          method: "PUT",
-          headers: {
-            ...auth,
-            "Content-Type": "text/markdown",
-            "If-Match": now.headers.get("ETag") ?? "",
-            "X-Note": "gate: an agent edits",
-          },
-          body: `${md.trimEnd()}\n\n${sentence}\n`,
-        });
-        if (!put.ok) throw new Error(`edit: ${put.status} ${await put.text()}`);
-      };
       await agentAppends("A sentence before verification.");
       await page.goto(url);
       await page.getByRole("button", { name: "Verify this version" }).click();
@@ -280,18 +309,23 @@ async function browserRenders(
       await page.locator(".tooltip strong").first().waitFor({ timeout: 10_000 });
       if (shots) await page.screenshot({ path: `${shots}/link.png` });
     });
-    await step("ledger, reached by a link within the app", async () => {
-      await page.evaluate(() => {
-        (globalThis as unknown as { stayed: boolean }).stayed = true;
-      });
+    await step("ledger, reached by a link within the app, tails live", async () => {
+      await markStay();
       await page.getByRole("link", { name: "Ledger", exact: true }).click();
       await page.getByRole("heading", { level: 1, name: "Ledger" }).waitFor({ timeout: 15_000 });
-      await page.locator("li.request").first().waitFor();
-      const stayed = await page.evaluate(
-        () => (globalThis as unknown as { stayed?: boolean }).stayed,
-      );
-      if (!stayed) throw new Error("the link reloaded the page");
+      const requests = page.locator("li.request");
+      await requests.first().waitFor();
+      if (!(await stayed())) throw new Error("the link reloaded the page");
       if (!page.url().endsWith(`/${owner}/${slug}/-/ledger`)) throw new Error(page.url());
+      const top = await requests.first().innerText();
+      await page.waitForTimeout(500);
+      await agentAppends("A sentence for the live ledger.");
+      const until = Date.now() + 10_000;
+      while ((await requests.first().innerText()) === top) {
+        if (Date.now() > until) throw new Error("the new request did not appear");
+        await page.waitForTimeout(200);
+      }
+      if (!(await stayed())) throw new Error("the page reloaded");
     });
   } finally {
     await browser.close();
