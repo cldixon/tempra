@@ -203,14 +203,26 @@ async function openBrowser() {
   });
   page.on("response", (r) => {
     const path = new URL(r.url()).pathname;
-    if (r.status() >= 400 && path !== "/favicon.ico") problems.push(`${r.status()} ${path}`);
+    // A save that meets someone's write answers 412 on purpose (the editor then merges).
+    const expected = r.status() === 412 && r.request().method() === "PUT";
+    if (r.status() >= 400 && path !== "/favicon.ico" && !expected) {
+      problems.push(`${r.status()} ${path}`);
+    }
   });
   page.on("pageerror", (e) => problems.push(`page error: ${e.message}`));
+  let failures = 0;
   const step = async (what: string, run: () => Promise<unknown>) => {
     try {
       await run();
     } catch (e) {
       problems.push(`${what}: ${String(e).split("\n")[0]}`);
+      // GATE_SCREENSHOTS: what the page showed when the step failed.
+      const shots = process.env.GATE_SCREENSHOTS;
+      if (shots) {
+        await page
+          .screenshot({ path: `${shots}/failed-${++failures}.png`, fullPage: true })
+          .catch(() => {});
+      }
     }
   };
   /** Signs in the way a person does: the email form, then the (dev, on-page) link. */
@@ -603,6 +615,89 @@ async function browserRenders(
         }
         await page.getByText("Resolved (1)").waitFor({ timeout: 10_000 });
         await mark.first().waitFor({ state: "detached", timeout: 10_000 });
+        if (!(await stayed())) throw new Error("the page reloaded");
+      },
+    );
+    // The editor (TEMPRA-15): a person edits the body in place and saves with a note; an agent's
+    // edit on that text still matches; an edit that meets an agent's write is merged at save.
+    await step(
+      "editor: edit, save with a note, an agent edits after, a write meanwhile merges",
+      async () => {
+        await page.goto(url);
+        const body = page.locator(".body .prose");
+        await body.waitFor({ timeout: 15_000 });
+        await markStay();
+        const edit = async () => {
+          await page.getByRole("button", { name: "Edit", exact: true }).click();
+          await page.locator(".body [contenteditable='true']").first().waitFor({ timeout: 5_000 });
+        };
+        /** Clicks into a paragraph of the body, goes to the end of that line, and types. */
+        const typeInto = async (text: string, which: "first" | "last" = "last") => {
+          // A paragraph with words in it (code blocks and tables hold none).
+          await body
+            .locator("p", { hasText: /\w{4,}/ })
+            [which]()
+            .click();
+          await page.keyboard.press("End");
+          await page.keyboard.type(text);
+        };
+        const save = async (note: string) => {
+          await page.getByPlaceholder("What you changed, in one line").fill(note);
+          await page
+            .locator(".edit-bar")
+            .getByRole("button", { name: "Save", exact: true })
+            .click();
+        };
+        await edit();
+        if (shots) await page.screenshot({ path: `${shots}/editor.png` });
+        await typeInto(" Edited by a person.");
+        await save("gate: a person edits");
+        await page.getByText("Saved.").waitFor({ timeout: 10_000 });
+        await body.getByText("Edited by a person.").waitFor({ timeout: 10_000 });
+        const ev = (await (
+          await fetch(`${libApi}/history/${enc(concept)}`, { headers: bearer })
+        ).json()) as { events: { actor: string; meta: { note?: string } | null }[] };
+        const last = ev.events.at(-1);
+        if (!last?.actor.startsWith("human:") || last.meta?.note !== "gate: a person edits") {
+          throw new Error(`ledger: ${JSON.stringify(last)}`);
+        }
+        // An agent's find-and-replace on the text the person wrote still finds it.
+        const agentEdit = await fetch(`${libApi}/files/${enc(concept)}`, {
+          method: "PATCH",
+          headers: { ...bearer, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            edits: [{ old: "Edited by a person.", new: "Edited by a person, then an agent." }],
+            note: "gate: an agent edits after",
+          }),
+        });
+        if (!agentEdit.ok)
+          throw new Error(`agent edit: ${agentEdit.status} ${await agentEdit.text()}`);
+        await page.getByRole("button", { name: "Show new version" }).click();
+        await body.getByText("then an agent.").waitFor({ timeout: 10_000 });
+        // A write meanwhile: the save meets a 412 and merges, keeping both changes.
+        await edit();
+        // In the first paragraph: the agent's write lands at the end of the body, so they combine.
+        await typeInto(" A second edit.", "first");
+        // The caret is where the person clicked, not at the start of the body.
+        if ((await body.locator("p", { hasText: "A second edit." }).count()) !== 1) {
+          throw new Error("the typed text is not in the paragraph clicked");
+        }
+        await agentAppends("An agent wrote while the person edited.");
+        await save("gate: a person edits again");
+        await page
+          .getByRole("heading", { name: "Changed while you edited" })
+          .waitFor({ timeout: 10_000 });
+        if (shots) await page.screenshot({ path: `${shots}/merge.png` });
+        // Back to editing and Save again merges again: the agent's write is never overwritten.
+        await page.getByRole("button", { name: "Back to editing" }).click();
+        await save("gate: a person edits again");
+        await page
+          .getByRole("heading", { name: "Changed while you edited" })
+          .waitFor({ timeout: 10_000 });
+        await page.getByRole("button", { name: "Save merged" }).click();
+        await page.getByText("Saved.").waitFor({ timeout: 10_000 });
+        await body.getByText("A second edit.").waitFor({ timeout: 10_000 });
+        await body.getByText("An agent wrote while the person edited.").waitFor();
         if (!(await stayed())) throw new Error("the page reloaded");
       },
     );

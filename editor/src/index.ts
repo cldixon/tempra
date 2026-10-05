@@ -9,6 +9,14 @@ import type { Parsed } from "./parse";
 export { type WordDiff, wordDiff } from "./diff";
 export * from "./links";
 export {
+  conflicts,
+  type FieldMerge,
+  merge3,
+  mergeFields,
+  resolve,
+  type Segment,
+} from "./merge";
+export {
   type Footnote,
   type Parsed,
   type ParseOptions,

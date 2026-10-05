@@ -7,7 +7,12 @@ import type { Leaf, Mark } from "wordgard/doc";
 import { Decoration, PointSet, RangeSet, Tooltip, Widget, Wordgard } from "wordgard/editor";
 import { GardState, Transaction } from "wordgard/state";
 import type { WordDiff } from "./diff";
+import { type EditOptions, editing } from "./edit";
 import type { Parsed } from "./parse";
+import { serialize } from "./serialize";
+
+export type { EditOptions } from "./edit";
+
 import { type FootnoteParam, FootnoteRef, Link, type LinkParam } from "./schema";
 
 /** What the pointer is over, for a tooltip. */
@@ -53,8 +58,22 @@ export interface Reader {
   highlight(marks: readonly Highlight[]): void;
   /** The text selected in the reader, as document positions, or null. */
   selection(): { from: number; to: number } | null;
+  /**
+   * Turns editing on (menu bar, key bindings, history; the same instance, no remount) or off.
+   * Turning it off keeps the text as it is; `reset` puts the loaded version back.
+   */
+  setEditable(on: boolean, opts?: EditOptions): void;
+  /** Whether the body differs from the version the reader was built from. */
+  dirty(): boolean;
+  /** The body as markdown: unchanged blocks byte for byte as loaded (see serialize). */
+  markdown(): string;
+  /** Puts the loaded version back, dropping every edit. */
+  reset(): void;
   destroy(): void;
 }
+
+/** What differs between reading and editing: the editing extensions, or none. */
+const mode = GardState.Compartment.define();
 
 const setHighlights = Transaction.Effect.define<RangeSet<Decoration.Range>>();
 
@@ -108,6 +127,8 @@ function selectionTools(onComment: (range: Range) => void) {
 const highlights = GardState.Field.define<RangeSet<Decoration.Range>>({
   create: () => RangeSet.empty,
   update: (value, tr) => {
+    // Highlights follow the text while it is edited.
+    if (tr.docChanged) value = value.map(tr.changes);
     for (const e of tr.effects) if (e.is(setHighlights)) value = e.value;
     return value;
   },
@@ -144,10 +165,10 @@ const removedWidget = Widget.define<string>({
 });
 
 export function mountReader(opts: ReaderOptions): Reader {
+  const reading: GardState.Extension[] = [Wordgard.editable.of(false), GardState.readOnly.of(true)];
   const config: GardState.Extension[] = [
     highlights,
-    Wordgard.editable.of(false),
-    GardState.readOnly.of(true),
+    mode.of(reading),
     Wordgard.contentAttributes.of({ class: "prose", "aria-label": "Concept body" }),
     Wordgard.cspNonce.of(opts.nonce ?? ""),
   ];
@@ -169,10 +190,11 @@ export function mountReader(opts: ReaderOptions): Reader {
   }
 
   if (opts.hideFirst) {
+    // Reading only: an editor shows the heading it may change.
     const hidden = PointSet.create<Decoration.Point>((add) => {
       add(0, Decoration.Point.attributes({ hidden: "" }));
     });
-    config.push(Decoration.Point.source.of(() => hidden));
+    reading.push(Decoration.Point.source.of(() => hidden));
   }
 
   const diff = opts.diff;
@@ -217,13 +239,15 @@ export function mountReader(opts: ReaderOptions): Reader {
       return null;
     }
   };
+  let editingNow = false;
   // The toolbar follows the selection: shown once it settles, gone as soon as it does.
   let timer: ReturnType<typeof setTimeout> | undefined;
   const follow = () => {
     clearTimeout(timer);
     timer = setTimeout(() => {
       if (!wg.dom.isConnected) return;
-      const now = selection();
+      // While editing, the selection is for editing; the toolbar is for reading.
+      const now = editingNow ? null : selection();
       const shown = tools ? wg.state.field(tools, false) : null;
       if (now?.from === shown?.from && now?.to === shown?.to) return;
       wg.dispatch({ effects: setTools.of(now) });
@@ -235,6 +259,20 @@ export function mountReader(opts: ReaderOptions): Reader {
     highlight: (marks) =>
       wg.dispatch({ effects: setHighlights.of(highlightSet(marks, opts.parsed.doc.length)) }),
     selection,
+    setEditable: (on, editOpts) => {
+      editingNow = on;
+      wg.dispatch({
+        effects: [mode.reconfigure(on ? editing(editOpts ?? {}) : reading), setTools.of(null)],
+      });
+      // No focus here: the person clicks where they mean to type (focusing would put the caret
+      // at the start of the body, and on a fresh view could land after their click).
+    },
+    dirty: () => !wg.state.doc.eq(opts.parsed.doc),
+    markdown: () => serialize(wg.state.doc, opts.parsed),
+    reset: () => {
+      const doc = wg.state.doc;
+      wg.dispatch({ changes: { from: 0, to: doc.length, insert: opts.parsed.doc.slice(0) } });
+    },
     // A Wordgard disconnects (listeners, tooltips) when its element leaves the document.
     destroy: () => {
       clearTimeout(timer);
