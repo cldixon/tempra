@@ -1,5 +1,6 @@
 import { type KeyboardEvent, useEffect, useRef, useState } from "react";
 import { api } from "./api";
+import { prefetchFile } from "./prefetch";
 import { readRecent } from "./recent";
 import { navigate } from "./router";
 import type { Urls } from "./urls";
@@ -62,6 +63,12 @@ export function Switcher({ urls, open, onClose }: { urls: Urls; open: boolean; o
     ...found.filter((f) => !recent.some((r) => r.path === f.path)),
   ].slice(0, 12);
   const selected = Math.min(index, Math.max(hits.length - 1, 0));
+
+  // The selected file starts loading, so Enter opens a page that is already here.
+  const pick = hits[selected]?.path;
+  useEffect(() => {
+    if (open && pick) prefetchFile(urls, pick);
+  }, [open, pick, urls]);
 
   const go = (hit: Hit | undefined) => {
     if (!hit) return;

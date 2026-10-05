@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
 import { type FeedEvent, lastSeen, useFeed } from "./live";
+import { prefetchFile } from "./prefetch";
 import { baseName, dirOf, type Urls } from "./urls";
 
 /** One file of `GET …/outline`: the library's index, without bodies. */
@@ -207,6 +208,8 @@ export function Tree(props: { urls: Urls; file: string | null; dir: string | nul
             <a
               href={urls.file(e.path)}
               title={e.path}
+              onMouseEnter={() => prefetchFile(urls, e.path)}
+              onFocus={() => prefetchFile(urls, e.path)}
               aria-current={props.file === e.path ? "page" : undefined}
               ref={props.file === e.path ? currentRow : undefined}
             >
@@ -243,7 +246,12 @@ export function Tree(props: { urls: Urls; file: string | null; dir: string | nul
           {matches.map((e) => (
             <li key={e.path}>
               <div className="tree-row">
-                <a href={urls.file(e.path)} title={e.path}>
+                <a
+                  href={urls.file(e.path)}
+                  title={e.path}
+                  onMouseEnter={() => prefetchFile(urls, e.path)}
+                  onFocus={() => prefetchFile(urls, e.path)}
+                >
                   {label(e)}
                 </a>
                 {mark(e)}

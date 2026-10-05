@@ -4,12 +4,14 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { createPortal } from "react-dom";
 import { api, useLoad } from "./api";
-import { navigate } from "./router";
+import { lastNavigation, navigate } from "./router";
 import { Switcher } from "./Switcher";
 import { Tree } from "./Tree";
 import type { Me } from "./ui";
@@ -36,6 +38,9 @@ export function ContextPanel({ children }: { children: ReactNode }) {
 }
 
 const CONTEXT_KEY = "tempra:context";
+
+/** Where the main pane was scrolled on each page, for back and forward. */
+const scrolls = new Map<string, number>();
 const narrow = () => window.matchMedia("(max-width: 60rem)").matches;
 
 function storedHidden(): boolean {
@@ -64,6 +69,31 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
     return () => setPanels((n) => n - 1);
   }, []);
   const slot = useMemo(() => ({ el: contextEl, register }), [contextEl, register]);
+
+  // The main pane scrolls on its own: a new page starts at the top (or its #fragment), and back
+  // or forward returns to where the person was on that page.
+  const main = useRef<HTMLElement>(null);
+  const href = location.pathname + location.search;
+  const shownHref = useRef(href);
+  useLayoutEffect(() => {
+    if (shownHref.current === href) return;
+    shownHref.current = href;
+    const el = main.current;
+    if (!el) return;
+    const target = lastNavigation() === "pop" ? (scrolls.get(href) ?? 0) : 0;
+    el.scrollTop = target;
+    if (target === 0) return;
+    // The page's body may still be drawing (the reader mounts after this): keep the position
+    // until the page is tall enough to hold it, for up to a second.
+    const until = performance.now() + 1000;
+    let frame = requestAnimationFrame(function again() {
+      if (el.scrollTop !== target) el.scrollTop = target;
+      if (el.scrollTop !== target && performance.now() < until) {
+        frame = requestAnimationFrame(again);
+      }
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [href]);
 
   // A drawer closes when the person moves to another page.
   // biome-ignore lint/correctness/useExhaustiveDependencies: closes on every move.
@@ -150,7 +180,11 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
           ))}
         </ul>
       </div>
-      <main className="ws-main">
+      <main
+        className="ws-main"
+        ref={main}
+        onScroll={(e) => scrolls.set(href, e.currentTarget.scrollTop)}
+      >
         <ContextSlot.Provider value={slot}>{props.children}</ContextSlot.Provider>
       </main>
       <aside

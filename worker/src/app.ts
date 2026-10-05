@@ -555,7 +555,13 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   app.get(`${BASE}/summary`, async (c) => c.json(await c.var.lib.summary()));
 
   app.get(`${BASE}/work`, async (c) =>
-    c.json(await c.var.lib.work({ kind: c.req.query("kind"), limit: num(c, "limit") })),
+    c.json(
+      await c.var.lib.work({
+        kind: c.req.query("kind"),
+        limit: num(c, "limit"),
+        path: c.req.query("path"),
+      }),
+    ),
   );
 
   app.post(`${BASE}/verify/*`, async (c) => {

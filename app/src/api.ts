@@ -67,13 +67,39 @@ export type Loaded<T> =
  * What each page loaded last, by its key (the page and everything it reads), so that returning
  * to a page draws it at once. Bounded: the least recently used drop out first.
  */
-const cache = new Map<string, unknown>();
+const cache = new Map<string, { data: unknown; at: number }>();
 const CACHE_SIZE = 100;
+/** An answer this fresh is shown without asking again (a prefetch just before the click). */
+const FRESH_MS = 5000;
+/** Loads under way, so a prefetch and the page that follows share one request. */
+const inflight = new Map<string, Promise<unknown>>();
 
 function remember(key: string, data: unknown) {
   cache.delete(key);
-  cache.set(key, data);
+  cache.set(key, { data, at: Date.now() });
   if (cache.size > CACHE_SIZE) cache.delete(cache.keys().next().value as string);
+}
+
+function fetchOnce<T>(key: string, load: () => Promise<T>): Promise<T> {
+  let p = inflight.get(key) as Promise<T> | undefined;
+  if (!p) {
+    p = load().finally(() => inflight.delete(key));
+    inflight.set(key, p);
+  }
+  return p;
+}
+
+/**
+ * Loads a page's data ahead of a likely visit (a link hovered or selected), so the page draws
+ * from the cache when it opens. Does nothing when the answer is fresh or already on its way.
+ */
+export function prefetch<T>(key: string, load: () => Promise<T>) {
+  const hit = cache.get(key);
+  if ((hit && Date.now() - hit.at < FRESH_MS) || inflight.has(key)) return;
+  fetchOnce(key, load).then(
+    (data) => remember(key, data),
+    () => {},
+  );
 }
 
 /** Two answers with the same content (the same JSON), so a page can keep the one it shows. */
@@ -93,8 +119,10 @@ const same = (a: unknown, b: unknown) => {
  * dropped.
  */
 export function useLoad<T>(key: string, load: () => Promise<T>): Loaded<T> & { reload(): void } {
-  const initial = (k: string): Loaded<T> =>
-    cache.has(k) ? { state: "ready", data: cache.get(k) as T } : { state: "loading" };
+  const initial = (k: string): Loaded<T> => {
+    const hit = cache.get(k);
+    return hit ? { state: "ready", data: hit.data as T } : { state: "loading" };
+  };
   const [result, setResult] = useState<{ key: string; value: Loaded<T> }>(() => ({
     key,
     value: initial(key),
@@ -103,10 +131,14 @@ export function useLoad<T>(key: string, load: () => Promise<T>): Loaded<T> & { r
   // biome-ignore lint/correctness/useExhaustiveDependencies: `key` names everything `load` reads.
   useEffect(() => {
     let live = true;
-    load().then(
+    const hit = cache.get(key);
+    // Just loaded (a prefetch a moment ago): drawn from the cache, no need to ask again.
+    if (tick === 0 && hit && Date.now() - hit.at < FRESH_MS) return;
+    // An explicit reload (after an action, or a write on the feed) always asks afresh.
+    (tick === 0 ? fetchOnce(key, load) : load()).then(
       (data) => {
         if (!live) return;
-        const shown = cache.get(key);
+        const shown = cache.get(key)?.data;
         if (cache.has(key) && same(shown, data)) {
           // Nothing changed: keep what is on screen (and mark it as just used).
           remember(key, shown);

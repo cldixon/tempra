@@ -305,6 +305,38 @@ async function browserRenders(
         throw new Error("the sidebar was rebuilt (the page reloaded or the frame remounted)");
       }
     });
+    await step(
+      "workspace: hover prefetches, new pages start at the top, back restores",
+      async () => {
+        const other = concepts.find(
+          (c) => c !== nested && c.split("/").slice(0, -1).join("/") === folder,
+        );
+        if (!other) throw new Error(`no second concept in ${folder}/ to move to`);
+        const main = page.locator(".ws-main");
+        await page.locator(".body .prose").waitFor({ timeout: 15_000 });
+        await main.evaluate((el) => {
+          el.scrollTop = 300;
+        });
+        const before = await main.evaluate((el) => el.scrollTop);
+        const link = sidebar.locator(`a[title="${other}"]`);
+        await link.hover();
+        await page.waitForTimeout(1500); // the hover's prefetch lands in the cache
+        await link.click();
+        await page.waitForURL(`${lib}/${enc(other)}`);
+        if ((await page.getByText("Loading…").count()) > 0) {
+          throw new Error("a hovered file still showed Loading… when opened");
+        }
+        if ((await main.evaluate((el) => el.scrollTop)) !== 0) {
+          throw new Error("the new page did not start at the top");
+        }
+        await page.goBack();
+        await page.waitForURL(`${lib}/${enc(nested)}`);
+        const after = await main.evaluate((el) => el.scrollTop);
+        if (Math.abs(after - before) > 2) {
+          throw new Error(`back returned to ${after}px, not ${before}px`);
+        }
+      },
+    );
     await step("workspace: the tree follows an agent's write and move, live", async () => {
       const put = await fetch(`${libApi}/files/gate-live.md`, {
         method: "PUT",
