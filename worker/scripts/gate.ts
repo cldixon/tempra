@@ -640,7 +640,7 @@ async function browserRenders(
           // never types within the same frame, so wait until the caret is in the paragraph.
           const inside = () =>
             target.evaluate((p) => {
-              const node = getSelection()?.anchorNode ?? null;
+              const node = p.ownerDocument.getSelection()?.anchorNode ?? null;
               return node !== null && p.contains(node);
             });
           for (let i = 0; !(await inside()) && i < 20; i++) await page.waitForTimeout(50);
