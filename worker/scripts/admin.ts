@@ -112,7 +112,11 @@ switch (positionals[0]) {
         `INSERT OR IGNORE INTO invites (email, created) VALUES (${q(email)}, ${q(new Date().toISOString())})`,
         where,
       );
-      console.log(`${email} is invited.`);
+      await d1Sql(
+        `UPDATE waitlist SET decision = 'invited', decided = ${q(new Date().toISOString())} WHERE email = ${q(email)} AND decision IS NULL`,
+        where,
+      );
+      console.log(`${email} is invited. They are not emailed; approving at /waitlist emails them.`);
     } else {
       await d1Sql(`DELETE FROM invites WHERE email = ${q(email)}`, where);
       console.log(`${email} is no longer invited.`);
@@ -126,11 +130,12 @@ switch (positionals[0]) {
     )) {
       console.log(`invited   ${created}  ${email}`);
     }
-    for (const [email, created] of await d1Sql(
-      "SELECT email, created FROM waitlist ORDER BY created DESC",
+    for (const [email, created, decision] of await d1Sql(
+      "SELECT email, created, COALESCE(decision, 'waiting') FROM waitlist ORDER BY created DESC",
       where,
     )) {
-      console.log(`waiting   ${created}  ${email}`);
+      // Approved rows are in the invites list above too.
+      if (decision !== "invited") console.log(`${String(decision).padEnd(9)} ${created}  ${email}`);
     }
     break;
   }
