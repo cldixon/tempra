@@ -270,7 +270,16 @@ async function browserRenders(
         (el as unknown as { dataset: Record<string, string> }).dataset.gate = "kept";
       });
       if (folder) {
+        // Opening a folder is instant: the tree has the whole index, so no request is made.
+        let asked = 0;
+        const count = (r: { url(): string }) => {
+          if (/\/(tree|outline)(\?|$)/.test(new URL(r.url()).pathname)) asked++;
+        };
+        page.on("request", count);
         await sidebar.getByRole("button", { name: `Expand ${folder.split("/").pop()}` }).click();
+        await sidebar.locator(`a[title="${nested}"]`).waitFor({ timeout: 1000 });
+        page.off("request", count);
+        if (asked > 0) throw new Error(`opening a folder made ${asked} request(s)`);
       }
       await sidebar.locator(`a[title="${nested}"]`).click();
       await page.waitForURL(`${lib}/${enc(nested)}`);

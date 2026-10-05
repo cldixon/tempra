@@ -3,12 +3,12 @@ import { api } from "./api";
 import { type FeedEvent, lastSeen, useFeed } from "./live";
 import { baseName, dirOf, type Urls } from "./urls";
 
-/** One entry of `GET …/tree?depth=1`. */
+/** One file of `GET …/outline`: the library's index, without bodies. */
 interface Entry {
   path: string;
   kind: "dir" | "concept" | "attachment";
   title?: string | null;
-  seq?: number;
+  seq?: number | null;
 }
 
 /** How long a file keeps its "an agent just changed this" mark. */
@@ -39,43 +39,64 @@ function saveExpanded(urls: Urls, dirs: Set<string>) {
   }
 }
 
+/** Every folder's children from the flat list of files: folders first, then files, by name. */
+function buildDirs(files: Entry[]): Record<string, Entry[]> {
+  const dirs = new Map<string, Map<string, Entry>>([["", new Map()]]);
+  const at = (d: string) => {
+    let m = dirs.get(d);
+    if (!m) {
+      m = new Map();
+      dirs.set(d, m);
+    }
+    return m;
+  };
+  for (const f of files) {
+    at(dirOf(f.path)).set(f.path, f);
+    for (const d of ancestors(f.path)) at(dirOf(d)).set(d, { path: d, kind: "dir" });
+  }
+  const out: Record<string, Entry[]> = {};
+  for (const [d, m] of dirs) {
+    out[d] = [...m.values()].sort((a, b) =>
+      a.kind === "dir" && b.kind !== "dir"
+        ? -1
+        : b.kind === "dir" && a.kind !== "dir"
+          ? 1
+          : a.path.localeCompare(b.path),
+    );
+  }
+  return out;
+}
+
 /**
- * The library's file tree (tempra-dev: app/workspace): loaded one directory at a time, open
- * folders remembered on this browser, the open file revealed and marked, and kept current by the
- * change feed, with a mark on files an agent changed in the last minutes or since the last visit.
+ * The library's file tree (tempra-dev: app/workspace). The whole index (paths, titles,
+ * sequences; no bodies) arrives in one small request when the workspace opens, so opening a
+ * folder never waits. Open folders are remembered on this browser, the open file is revealed and
+ * marked, and the change feed refreshes the index once per burst of writes, with a mark on files
+ * an agent changed in the last minutes or that changed since the last visit.
  */
 export function Tree(props: { urls: Urls; file: string | null; dir: string | null }) {
   const { urls } = props;
-  const [dirs, setDirs] = useState<Record<string, Entry[]>>({});
+  const [files, setFiles] = useState<Entry[] | null>(null);
   const [expanded, setExpanded] = useState(() => loadExpanded(urls));
-  const [rootSeq, setRootSeq] = useState<number | null>(null);
+  const [seq, setSeq] = useState<number | null>(null);
   const [active, setActive] = useState<Map<string, { actor: string; at: number }>>(new Map());
   const [filter, setFilter] = useState("");
   const [now, setNow] = useState(() => Date.now());
   const seen = lastSeen(urls);
-  const loading = useRef(new Set<string>());
-  const loaded = useRef(dirs);
-  loaded.current = dirs;
+  const dirs = useMemo(() => (files ? buildDirs(files) : null), [files]);
 
-  const load = useCallback(
-    async (dir: string) => {
-      if (loading.current.has(dir)) return;
-      loading.current.add(dir);
-      try {
-        const r = await api<{ seq: number; entries: Entry[] }>(
-          urls.api("tree", { prefix: dir || undefined, depth: 1 }),
-        );
-        setDirs((d) => ({ ...d, [dir]: r.entries }));
-        if (dir === "") setRootSeq(r.seq);
-      } catch {
-        // A folder that went away (deleted, moved): it simply shows nothing.
-        setDirs((d) => ({ ...d, [dir]: [] }));
-      } finally {
-        loading.current.delete(dir);
-      }
-    },
-    [urls],
-  );
+  const load = useCallback(async () => {
+    try {
+      const r = await api<{ seq: number; files: Entry[] }>(urls.api("outline"));
+      setFiles(r.files);
+      setSeq(r.seq);
+    } catch {
+      setFiles((f) => f ?? []);
+    }
+  }, [urls]);
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   // The open file's folders are revealed when it opens (and may be collapsed after).
   const current = props.file ?? props.dir;
@@ -91,32 +112,15 @@ export function Tree(props: { urls: Urls; file: string | null; dir: string | nul
     });
   }, [current, props.file, urls]);
 
-  // Every open folder (and the root) is loaded once.
-  useEffect(() => {
-    for (const d of ["", ...expanded]) if (!(d in dirs)) void load(d);
-  }, [expanded, dirs, load]);
-
-  // Live: reload the loaded folders a write touched, once per burst.
-  const pending = useRef(new Set<string>());
+  // Live: one refresh of the index per burst of writes.
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const refresh = useCallback(
-    (paths: string[]) => {
-      for (const p of paths) for (const d of ["", ...ancestors(p)]) pending.current.add(d);
-      clearTimeout(timer.current);
-      timer.current = setTimeout(() => {
-        const todo = [...pending.current];
-        pending.current.clear();
-        for (const dir of todo) if (dir in loaded.current) void load(dir);
-      }, 300);
-    },
-    [load],
-  );
   useEffect(() => () => clearTimeout(timer.current), []);
   useFeed(
     urls,
-    rootSeq,
+    seq,
     (events: FeedEvent[]) => {
-      refresh(events.flatMap((e) => (e.from_path ? [e.path, e.from_path] : [e.path])));
+      clearTimeout(timer.current);
+      timer.current = setTimeout(() => void load(), 300);
       const agents = events.filter((e) => !e.actor.startsWith("human:") && e.op !== "delete");
       if (agents.length > 0) {
         setActive((a) => {
@@ -126,10 +130,7 @@ export function Tree(props: { urls: Urls; file: string | null; dir: string | nul
         });
       }
     },
-    () => {
-      setDirs({});
-      setRootSeq(null);
-    },
+    () => void load(),
   );
   // Activity marks fade after a few minutes.
   useEffect(() => {
@@ -161,7 +162,7 @@ export function Tree(props: { urls: Urls; file: string | null; dir: string | nul
         </span>
       );
     }
-    if (seen !== null && e.seq !== undefined && e.seq > seen) {
+    if (seen !== null && typeof e.seq === "number" && e.seq > seen) {
       return (
         <span className="tree-mark" title="Changed since you last looked">
           ∗
@@ -172,9 +173,9 @@ export function Tree(props: { urls: Urls; file: string | null; dir: string | nul
   };
   const label = (e: Entry) => (e.kind === "concept" && e.title ? e.title : baseName(e.path));
 
-  const rows = (dir: string) => {
-    const entries = dirs[dir];
-    if (entries === undefined) return <li className="muted small">Loading…</li>;
+  const rows = (dir: string): React.ReactNode => {
+    if (dirs === null) return <li className="muted small">Loading…</li>;
+    const entries = dirs[dir] ?? [];
     if (entries.length === 0 && dir === "") return <li className="muted small">No files yet.</li>;
     return entries.map((e) =>
       e.kind === "dir" ? (
@@ -221,29 +222,24 @@ export function Tree(props: { urls: Urls; file: string | null; dir: string | nul
   const matches = useMemo(() => {
     const q = filter.trim().toLowerCase();
     if (!q) return null;
-    return Object.values(dirs)
-      .flat()
-      .filter(
-        (e) =>
-          e.kind !== "dir" &&
-          (e.path.toLowerCase().includes(q) || (e.title ?? "").toLowerCase().includes(q)),
-      )
-      .sort((a, b) => a.path.localeCompare(b.path));
-  }, [filter, dirs]);
+    return (files ?? [])
+      .filter((e) => e.path.toLowerCase().includes(q) || (e.title ?? "").toLowerCase().includes(q))
+      .slice(0, 200);
+  }, [filter, files]);
 
   return (
     <nav aria-label="Files">
       <input
         className="ws-filter"
         type="search"
-        placeholder="Filter open folders"
-        aria-label="Filter open folders"
+        placeholder="Filter files"
+        aria-label="Filter files"
         value={filter}
         onChange={(e) => setFilter(e.target.value)}
       />
       {matches ? (
         <ul className="tree">
-          {matches.length === 0 && <li className="muted small">No match in open folders.</li>}
+          {matches.length === 0 && <li className="muted small">No match.</li>}
           {matches.map((e) => (
             <li key={e.path}>
               <div className="tree-row">
@@ -254,7 +250,7 @@ export function Tree(props: { urls: Urls; file: string | null; dir: string | nul
               </div>
             </li>
           ))}
-          <li className="muted small">Ctrl K searches the whole library.</li>
+          <li className="muted small">Ctrl K also searches inside files.</li>
         </ul>
       ) : (
         <ul className="tree">
