@@ -1,4 +1,4 @@
-import type { ConsentDescription, GrantSummary } from "@cloudflare/workers-oauth-provider";
+import type { ConsentDescription } from "@cloudflare/workers-oauth-provider";
 import { href as designHref } from "@tempra/design";
 import type { LibraryRef } from "../accounts";
 
@@ -91,58 +91,6 @@ ${opts.error ? `<p><strong>${esc(opts.error)}</strong></p>` : ""}
 }
 
 /** What /apps shows for a grant's libraries, by their current names. */
-function grantLibraries(m: GrantMetadata, libraries: LibraryRef[]): string {
-  if (m.libraries === "all") return "All libraries";
-  if (Array.isArray(m.libraries)) {
-    const names = libraries.filter((l) => m.libraries?.includes(l.id)).map((l) => l.slug);
-    return names.length > 0 ? names.map(esc).join(", ") : "None (deleted)";
-  }
-  return esc(m.library ?? "");
-}
-
-/** Grant metadata: `libraries` since account-level access, `library` (a slug) before it. */
-type GrantMetadata = {
-  libraries?: "all" | string[];
-  library?: string;
-  actor?: string;
-  access?: string;
-  prefix?: string | null;
-  tiers?: string;
-};
-
-export function grantsPage(opts: {
-  signedInAs: string;
-  grants: GrantSummary[];
-  clientNames: Map<string, string>;
-  libraries: LibraryRef[];
-  notice?: string;
-}): string {
-  const rows = opts.grants
-    .map((g) => {
-      const m = (g.metadata ?? {}) as GrantMetadata;
-      const app = opts.clientNames.get(g.clientId) ?? g.clientId;
-      return `<tr>
-  <td>${esc(app)}<br><span class="hint">${esc(m.actor ?? "")}</span></td>
-  <td>${grantLibraries(m, opts.libraries)}${m.prefix ? `<br><span class="hint">under ${esc(m.prefix)}/</span>` : ""}</td>
-  <td>${m.access === "write" ? "Read and write" : "Read only"}${m.tiers === "files" ? '<br><span class="hint">file tools only</span>' : ""}</td>
-  <td>${new Date(g.createdAt * 1000).toISOString().slice(0, 10)}</td>
-  <td><form method="post" action="/apps/revoke"><input type="hidden" name="grant" value="${esc(g.id)}"><button>Revoke</button></form></td>
-</tr>`;
-    })
-    .join("");
-  return page(
-    "Connected apps",
-    `<h1>Connected apps</h1>
-<p>Signed in as ${esc(opts.signedInAs)}.</p>
-${opts.notice ? `<p>${esc(opts.notice)}</p>` : ""}
-${
-  opts.grants.length === 0
-    ? "<p>None.</p>"
-    : `<table><thead><tr><th>App</th><th>Libraries</th><th>Access</th><th>Since</th><th></th></tr></thead><tbody>${rows}</tbody></table>`
-}`,
-  );
-}
-
 export function messagePage(title: string, message: string, status = 200) {
   return new Response(page(title, `<h1>${esc(title)}</h1><p>${esc(message)}</p>`), {
     status,

@@ -78,9 +78,11 @@ describe("magic-link sign-in (v2 spec: Accounts and sign-in)", () => {
     const home = await s.anon.request("/", { headers: withSession(secret), redirect: "manual" });
     expect(home.status).toBe(302);
     expect(home.headers.get("Location")).toBe("/welcome");
-    expect(
-      await (await s.anon.request("/account", { headers: withSession(secret) })).text(),
-    ).toContain("new.person@example.com");
+    const account = await s.anon.request("/api/v1/account", { headers: withSession(secret) });
+    expect(await account.json()).toMatchObject({
+      email: "new.person@example.com",
+      handle: "new-person",
+    });
     expect((await s.accounts.user("new.person@example.com")).actor).toBe("human:new-person");
 
     // Opening the link again (or a scanner fetching it) shows a button; posting it again fails.

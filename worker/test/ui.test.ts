@@ -42,6 +42,18 @@ describe("the app's pages (TEMPRA-9)", () => {
       `${LIB}/-/files/notes/a.md`,
       `${LIB}/-/ledger?actor=x`,
       `${LIB}/-/diff/notes/a.md?from=0`,
+      `${LIB}/-/work?kind=stale`,
+      `${LIB}/-/revert/some-request`,
+      `${LIB}/-/restore/notes/a.md?to=1`,
+      `${LIB}/-/transfer`,
+      `${LIB}/-/recovery`,
+      `${LIB}/-/connect`,
+      `${LIB}/-/delete`,
+      "/welcome",
+      "/connect",
+      "/tokens",
+      "/apps",
+      "/account",
     ]) {
       const r = await page(s, path);
       expect(r.status).toBe(200);
@@ -61,8 +73,6 @@ describe("the app's pages (TEMPRA-9)", () => {
     expect(one.headers.get("Content-Security-Policy")).not.toBe(
       two.headers.get("Content-Security-Policy"),
     );
-    // Server pages not rebuilt yet stay as they were.
-    expect((await page(s, `${LIB}/-/work`)).html).toContain("<h1>Work queue</h1>");
   });
 
   test("the bundle is served at its hashed path, immutable; any other name is a 404", async () => {
@@ -82,13 +92,28 @@ describe("the app's pages (TEMPRA-9)", () => {
     expect(r.headers.get("Location")).toBe(
       `/sign-in?next=${encodeURIComponent(`${LIB}/a.md?at=1`)}`,
     );
-    const post = await s.anon.request(`${LIB}/-/verify/a.md`, {
+    // The actions are the API's: no session, no write.
+    const post = await s.anon.request(`${API}/verify/a.md`, {
       method: "POST",
       headers: { Origin: "http://localhost" },
     });
     expect(post.status).toBe(401);
+    // The old form posts are gone.
+    expect(
+      (
+        await s.app.request(`${LIB}/-/verify/a.md`, {
+          method: "POST",
+          headers: { Origin: "http://localhost" },
+        })
+      ).status,
+    ).toBe(404);
     expect((await page(s, "/owner/other/")).status).toBe(404);
     expect((await page(s, "/owner/other/a.md")).status).toBe(404);
+    expect((await page(s, "/owner/other/-/work")).status).toBe(404);
+    const stranger = await s.stranger();
+    for (const path of [`${LIB}/`, `${LIB}/-/delete`, `${LIB}/-/recovery`, `${LIB}/-/revert/x`]) {
+      expect((await stranger.app.request(path)).status).toBe(404);
+    }
   });
 
   test("files as JSON describe every kind of file, as the app reads them", async () => {
@@ -146,17 +171,12 @@ async function hashOf(s: S, path: string) {
   return (await json<{ hash: string; seq: number }>(r)).hash;
 }
 
-async function submit(
-  s: S,
-  path: string,
-  fields: Record<string, string>,
-  origin = "http://localhost",
-) {
-  return s.app.request(path, {
+/** A write through the API as the signed-in owner, from this site's pages unless `origin` says. */
+async function send(s: S, path: string, body: unknown, origin = "http://localhost") {
+  return s.app.request(`${API}${path}`, {
     method: "POST",
-    headers: { Origin: origin, "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams(fields),
-    redirect: "manual",
+    headers: { Origin: origin, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
 }
 
@@ -204,19 +224,24 @@ describe("history, ledger and revert (Phase 3, slice 2)", () => {
       body: "---\ntype: Note\n---\nBad.\n",
     });
     const bad = (await get<Requests>(s, "/requests")).requests[0];
-    const revertUrl = `${LIB}/-/revert/${bad?.request_id}`;
-    const confirm = await page(s, revertUrl);
-    expect(confirm.html).toContain("Revert this request?");
-    expect(confirm.html).toContain("bad edit");
-    expect(confirm.html).toContain('<span class="add">+Bad.</span>');
+    expect(bad?.note).toBe("bad edit");
+    // The confirmation page is the app's; it reads the request and its diff from the API.
+    expect((await page(s, `${LIB}/-/revert/${bad?.request_id}`)).html).toContain(
+      '<div id="root"></div>',
+    );
+    const ids = (await get<Requests>(s, "/requests")).requests.map((r) => r.request_id);
+    expect(ids).toContain(bad?.request_id as string);
 
-    const forged = await submit(s, revertUrl, { note: "x" }, "https://evil.example");
+    const target = { request_id: bad?.request_id, note: "x" };
+    const forged = await send(s, "/revert", target, "https://evil.example");
     expect(forged.status).toBe(403);
     expect(await s.store().read("a.md")).toMatchObject({ body: "Bad.\n" });
 
-    const done = await submit(s, revertUrl, { note: "undo the bad edit" });
-    expect(done.status).toBe(303);
-    expect(done.headers.get("Location")).toBe(`${LIB}/-/ledger?done=revert&n=1`);
+    const done = await send(s, "/revert", {
+      request_id: bad?.request_id,
+      note: "undo the bad edit",
+    });
+    expect(done.status).toBe(200);
     expect(s.store().read("a.md")).toMatchObject({ body: "Good.\n" });
     expect((await get<Requests>(s, "/requests")).requests[0]).toMatchObject({
       actor: "human:owner",
@@ -233,12 +258,16 @@ describe("history, ledger and revert (Phase 3, slice 2)", () => {
       headers: { "Content-Type": "text/markdown", "If-Match": `"${await hashOf(s, "a.md")}"` },
       body: "---\ntype: Note\n---\nSecond.\n",
     });
-    const confirm = await page(s, `${LIB}/-/restore/a.md?to=${first}`);
-    expect(confirm.html).toContain('<span class="add">+First.</span>');
-    const done = await submit(s, `${LIB}/-/restore/a.md?to=${first}`, { note: "back to first" });
-    expect(done.status).toBe(303);
-    expect(done.headers.get("Location")).toBe(`${LIB}/a.md?done=restore`);
+    expect((await page(s, `${LIB}/-/restore/a.md?to=${first}`)).status).toBe(200);
+    const d = await get<{ diff: string }>(s, `/diff?path=a.md&from=${first}`);
+    expect(d.diff).toContain("+Second.");
+    const done = await send(s, "/revert", { path: "a.md", to_seq: first, note: "back to first" });
+    expect(done.status).toBe(200);
     expect(s.store().read("a.md")).toMatchObject({ body: "First.\n" });
+    expect((await get<Requests>(s, "/requests")).requests[0]).toMatchObject({
+      actor: "human:owner",
+      note: "back to first",
+    });
   });
 });
 
@@ -253,12 +282,37 @@ describe("the shared design stylesheet", () => {
     expect((await s.anon.request("/_design/tempra.000000000000.css")).status).toBe(404);
   });
 
-  test("every page links it and its CSP allows it", async () => {
+  test("every page links it and its CSP allows it: the shell and the server's own pages", async () => {
     const s = setup();
+    // An app asking for consent, so /authorize draws its page.
+    const reg = await s.anon.request("/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        client_name: "Claude",
+        redirect_uris: ["https://claude.ai/api/mcp/auth_callback"],
+        token_endpoint_auth_method: "none",
+        grant_types: ["authorization_code", "refresh_token"],
+        response_types: ["code"],
+      }),
+    });
+    const { client_id } = (await reg.json()) as { client_id: string };
+    const consent = `/authorize?${new URLSearchParams({
+      response_type: "code",
+      client_id,
+      redirect_uri: "https://claude.ai/api/mcp/auth_callback",
+      scope: "okf:read",
+      state: "st4te",
+      code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+      code_challenge_method: "S256",
+      resource: "http://localhost/mcp",
+    })}`;
     for (const [client, path] of [
       [s.app, "/"],
+      [s.app, "/account"],
       [s.anon, "/sign-in"],
-      [s.anon, "/privacy"],
+      [s.app, consent],
+      [s.app, "/account/email/confirm?t=x"],
     ] as const) {
       const r = await client.request(path);
       expect(r.status).toBe(200);

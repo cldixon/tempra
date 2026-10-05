@@ -5,12 +5,12 @@ import { ORIGIN, setup, UI } from "./harness";
 
 type S = ReturnType<typeof setup>;
 
-function post(s: S, path: string, fields: Record<string, string>) {
+/** JSON to the API as the signed-in owner, from the app's pages. */
+function post(s: S, path: string, body: unknown) {
   return s.app.request(path, {
     method: "POST",
-    headers: { Origin: ORIGIN },
-    body: new URLSearchParams(fields),
-    redirect: "manual",
+    headers: { Origin: ORIGIN, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
 }
 
@@ -29,10 +29,10 @@ describe("limits (v2 spec: Limits, abuse and metering)", () => {
   test("libraries per account, everywhere one can be created", async () => {
     const s = setup();
     for (const n of [2, 3, 4, 5]) {
-      expect((await post(s, "/new", { slug: `lib-${n}` })).status).toBe(303);
+      expect((await post(s, "/api/v1/libraries", { slug: `lib-${n}` })).status).toBe(201);
     }
-    const sixth = await post(s, "/new", { slug: "lib-6" });
-    expect(sixth.status).toBe(400);
+    const sixth = await post(s, "/api/v1/libraries", { slug: "lib-6" });
+    expect(sixth.status).toBe(403);
     expect(await sixth.text()).toContain("limit of 5 libraries");
     const rest = await s.anon.request("/api/v1/libraries", {
       method: "POST",
@@ -44,22 +44,27 @@ describe("limits (v2 spec: Limits, abuse and metering)", () => {
 
     // An override raises it; the account page shows both.
     s.db.run(`UPDATE users SET limits = '{"libraries": 6}' WHERE id = 'user_1'`);
-    expect((await post(s, "/new", { slug: "lib-6" })).status).toBe(303);
-    expect(await (await s.app.request("/account")).text()).toContain("Libraries: 6 of 6.");
+    expect((await post(s, "/api/v1/libraries", { slug: "lib-6" })).status).toBe(201);
+    const account = (await (await s.app.request("/api/v1/account")).json()) as {
+      usage: { libraries: number };
+      limits: { libraries: number };
+    };
+    expect(account.usage.libraries).toBe(6);
+    expect(account.limits.libraries).toBe(6);
   });
 
   test("active tokens per account; revoked ones do not count", async () => {
     const s = setup();
     s.db.run(`UPDATE users SET limits = '{"tokens": 1}' WHERE id = 'user_1'`);
     const mint = () =>
-      post(s, "/tokens", { library: "demo", actor: "claude-code/a", scope: "write" });
-    expect((await mint()).status).toBe(200);
+      post(s, "/api/v1/tokens", { library: "demo", actor: "claude-code/a", scope: "write" });
+    expect((await mint()).status).toBe(201);
     const second = await mint();
-    expect(second.status).toBe(400);
+    expect(second.status).toBe(403);
     expect(await second.text()).toContain("limit of 1 active tokens");
     const id = (await s.accounts.tokens("user_1"))[0]?.id ?? "";
     await s.accounts.revokeToken(id, "user_1");
-    expect((await mint()).status).toBe(200);
+    expect((await mint()).status).toBe(201);
   });
 
   test("storage per library: writes stop at the limit, reads go on", async () => {

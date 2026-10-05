@@ -38,24 +38,3 @@ export function htmlResponse(body: string, status = 200): Response {
     },
   });
 }
-
-export function chip(text: string, tone: "" | "ok" | "warn" | "bad" = "", title?: string) {
-  const t = title ? ` title="${esc(title)}"` : "";
-  return `<span class="chip${tone ? ` ${tone}` : ""}"${t}>${esc(text)}</span>`;
-}
-
-export function trustChip(tier: string | undefined): string {
-  if (tier === "human-reviewed")
-    return chip("human-reviewed", "ok", "A human verified this version");
-  if (tier === "machine-confirmed")
-    return chip("machine-confirmed", "", "A process re-checked this version");
-  return chip("unverified", "warn", "Nobody has verified this version");
-}
-
-/** A compact UTC timestamp: 2026-09-29 18:02. */
-export function when(iso: string): string {
-  return iso
-    .replace("T", " ")
-    .replace(/:\d\d(\.\d+)?Z$/, "")
-    .replace(/Z$/, "");
-}

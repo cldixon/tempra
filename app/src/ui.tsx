@@ -151,18 +151,18 @@ export function AtNotice({ urls, head, current }: { urls: Urls; head: number; cu
   );
 }
 
-export type LibTab = "files" | "ledger";
+export type LibTab = "files" | "ledger" | "work" | "transfer" | "recovery" | "connect" | "delete";
 
-/** The library's section tabs; only Files and Ledger are drawn by the app so far. */
+/** The library's section tabs. */
 export function LibNav({ urls, active }: { urls: Urls; active: LibTab | null }) {
-  const tabs: [string, string, LibTab | null][] = [
+  const tabs: [string, string, LibTab][] = [
     ["Files", urls.pinned(undefined).tree(""), "files"],
     ["Ledger", urls.ledger(), "ledger"],
-    ["Work queue", urls.work(), null],
-    ["Import & export", urls.transfer(), null],
-    ["Recovery", urls.recovery(), null],
-    ["Connect", urls.connect(), null],
-    ["Delete", urls.remove(), null],
+    ["Work queue", urls.work(), "work"],
+    ["Import & export", urls.transfer(), "transfer"],
+    ["Recovery", urls.recovery(), "recovery"],
+    ["Connect", urls.connect(), "connect"],
+    ["Delete", urls.remove(), "delete"],
   ];
   return (
     <nav className="libnav">
@@ -170,7 +170,7 @@ export function LibNav({ urls, active }: { urls: Urls; active: LibTab | null }) 
       {tabs.map(([name, href, key], i) => (
         <span key={name}>
           {i > 0 && " · "}
-          {key !== null && key === active ? <strong>{name}</strong> : <a href={href}>{name}</a>}
+          {key === active ? <strong>{name}</strong> : <a href={href}>{name}</a>}
         </span>
       ))}
     </nav>

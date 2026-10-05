@@ -29,8 +29,34 @@ export async function api<T>(url: string, init: RequestInit = {}): Promise<T> {
     const body = (await res.json().catch(() => null)) as { error?: string; code?: string } | null;
     throw new ApiError(res.status, body?.code ?? "error", body?.error ?? res.statusText);
   }
+  if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
+
+/**
+ * A form's action: `run` calls it, `busy` is set meanwhile, and its error (an API answer, or a
+ * check the page made itself) shows as `error` until the next run.
+ */
+export function useAction() {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const run = useCallback(async (fn: () => Promise<void>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await fn();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+  return { busy, error, run, setError };
+}
+
+/** The value of a form field, trimmed. */
+export const field = (form: HTMLFormElement, name: string) =>
+  String(new FormData(form).get(name) ?? "").trim();
 
 export type Loaded<T> =
   | { state: "loading" }

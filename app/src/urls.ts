@@ -1,4 +1,4 @@
-/** URLs of the UI pages for one library, optionally pinned to a sequence (as worker/src/ui/views.ts). */
+/** URLs of the app's pages for one library, optionally pinned to a sequence (v2 spec: URLs). */
 export class Urls {
   readonly base: string;
   constructor(
@@ -46,8 +46,16 @@ export class Urls {
   restore(path: string, to: number) {
     return `${this.base}-/restore/${enc(path)}${query({ to })}`;
   }
-  work() {
-    return this.page("work");
+  work(kind?: string) {
+    return `${this.page("work")}${query({ kind })}`;
+  }
+  /** The export download (a server redirect to a signed link). */
+  exportTar(at?: number) {
+    return `${this.page("export")}${query({ at })}`;
+  }
+  /** A nightly export's file (served by the server from R2). */
+  nightly(date: string, file: string) {
+    return this.page(`exports/${encodeURIComponent(date)}/${encodeURIComponent(file)}`);
   }
   transfer() {
     return this.page("transfer");

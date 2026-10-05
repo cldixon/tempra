@@ -1,5 +1,6 @@
 import * as design from "@tempra/design";
 import { type Context, Hono } from "hono";
+import { registerAccountApi } from "./account-api";
 import { type Accounts, checkNewToken, type LibraryRef, type User } from "./accounts";
 import type { Authenticate, TokenInfo } from "./auth";
 import {
@@ -11,6 +12,7 @@ import {
   putBlob,
 } from "./client";
 import { registerLegalRoutes } from "./legal";
+import { deleteLibrary } from "./lifecycle";
 import { registerAppRoutes } from "./oauth/routes";
 import { normalizePath, underPrefix } from "./okf/paths";
 import type { JsonObject } from "./okf/types";
@@ -23,6 +25,7 @@ import type { ConceptContent, RequestContext, WriteOp } from "./store/store";
 import { authorizeLibrary } from "./tenancy";
 import { registerUiRoutes } from "./ui/routes";
 import { appHref, appScript } from "./ui/spa";
+import { STARTER } from "./ui/starter";
 import { admit, tokenAdmission, type UsageDeps } from "./usage";
 import { maybeGunzip, readTar } from "./util/tar";
 
@@ -571,13 +574,15 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   const human = async (c: C) => {
     const d = deps(c.env);
     const who = await principal(c, d);
-    if ("user" in who) return { d, user: { id: who.user.id, handle: who.user.handle } };
+    if ("user" in who) {
+      return { d, user: { id: who.user.id, handle: who.user.handle }, session: who.user };
+    }
     const token = who.token;
     if (!token.actor.startsWith("human:") || !token.created_by || !token.library.owner) {
       throw new OkfError(403, "human_only", "Library and token management needs a human: token.");
     }
     const user = { id: token.created_by, handle: token.library.owner };
-    return { d, user };
+    return { d, user, session: null };
   };
 
   // Who the caller acts as: the signed-in person, or the person a human: token acts for.
@@ -612,10 +617,26 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   });
 
   app.post("/api/v1/libraries", async (c) => {
-    const { d, user } = await human(c);
-    const body = await c.req.json<{ slug?: string }>().catch(() => ({}) as { slug?: string });
+    const { d, user, session } = await human(c);
+    const body = await c.req
+      .json<{ slug?: string; starter?: boolean }>()
+      .catch(() => ({}) as { slug?: string; starter?: boolean });
     const lib = await d.accounts.createLibrary(body.slug ?? "", user);
+    // First run (v2 spec: Onboarding): a person's first library may begin with a note.
+    if (body.starter && session) {
+      const client = await d.libraryByDoId(lib.do_id);
+      await client?.apply(
+        { actor: session.actor, request_id: crypto.randomUUID(), note: "Starter note" },
+        [{ op: "write", path: "start-here.md", content: STARTER }],
+      );
+    }
     return c.json({ id: lib.id, owner: lib.owner, slug: lib.slug }, 201);
+  });
+
+  registerAccountApi(app, deps, async (c, d) => {
+    const who = await principal(c as C, d);
+    if (!("user" in who)) throw new OkfError(403, "session_only", "Sign in to the app.");
+    return who.user;
   });
 
   app.get("/api/v1/tokens", async (c) => {
@@ -624,7 +645,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   });
 
   app.post("/api/v1/tokens", async (c) => {
-    const { d, user } = await human(c);
+    const { d, user, session } = await human(c);
     const body = await c.req
       .json<{
         library?: string;
@@ -639,7 +660,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
       (l) => l.slug === body.library || l.id === body.library,
     );
     if (!lib) throw new OkfError(404, "no_library", `There is no library ${body.library ?? ""}.`);
-    // human: tokens are minted only in the UI, so none is anyone's own actor here.
+    // A person signed in to the app may mint a token as themselves (human:); a token may not.
     const fields = checkNewToken(
       {
         actor: body.actor ?? "",
@@ -648,7 +669,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
         expires: body.expires,
         mcpTiers: body.mcp_tiers,
       },
-      null,
+      session ? session.actor : null,
     );
     const minted = await d.accounts.createToken({
       ...fields,
@@ -682,6 +703,52 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     return c.json({
       restores: restores.map(({ bookmark: _b, undo_bookmark: _u, ...r }) => r),
     });
+  });
+
+  // Nightly exports and running the maintainers now (spec: Backups and recovery), as the app's
+  // Import & export page. People only, like restore.
+  const peopleOnly = (c: C) => {
+    if (!c.var.token.actor.startsWith("human:")) {
+      throw new OkfError(403, "human_only", "This needs a human: token, or the app.");
+    }
+    return c.var.token.library;
+  };
+
+  app.get(`${BASE}/exports`, async (c) => {
+    const ref = peopleOnly(c);
+    const list = c.var.deps.exports ? await c.var.deps.exports.list(ref.do_id) : [];
+    return c.json({
+      exports: list.map((e) => ({
+        // YYYY-MM-DD, or YYYY-MM-DD-pre-restore-HHMMSSmmm-xxxx before a restore.
+        date: e.folder.split("/").at(-2) ?? "",
+        seq: typeof e.manifest?.seq === "number" ? e.manifest.seq : null,
+        files: typeof e.manifest?.files === "number" ? e.manifest.files : null,
+      })),
+    });
+  });
+
+  app.post(`${BASE}/maintain`, async (c) => {
+    const ref = peopleOnly(c);
+    if (!c.var.deps.maintain)
+      throw new OkfError(501, "unavailable", "Maintenance is not wired here.");
+    const res = (await c.var.deps.maintain(ref.do_id)) as { export: { key?: string } };
+    return c.json({ export: res.export.key ?? null });
+  });
+
+  // Deleting a library: only from the app's pages, typing its name (v2 spec: Accounts).
+  app.post(`${BASE}/delete`, async (c) => {
+    if (!c.var.token.id.startsWith("session:")) {
+      throw new OkfError(403, "session_only", "A library is deleted only from the app's pages.");
+    }
+    const ref = c.var.token.library;
+    const body = await c.req.json<{ confirm?: string }>().catch(() => ({}) as { confirm?: string });
+    if (String(body.confirm ?? "").trim() !== ref.slug) {
+      throw new OkfError(400, "not_confirmed", `Type ${ref.slug} to confirm.`);
+    }
+    const user = await c.var.deps.accounts.account(c.var.token.created_by ?? "");
+    if (!user) throw new OkfError(401, "no_account", "This account no longer exists.");
+    await deleteLibrary(c.var.deps, c.env.OAUTH_PROVIDER, user, ref);
+    return c.body(null, 204);
   });
 
   app.post(`${BASE}/restore`, async (c) => {

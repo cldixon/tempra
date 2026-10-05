@@ -30,13 +30,33 @@ describe("routes follow the server's URLs (tempra-dev: v2/urls-and-handles)", ()
     });
   });
 
-  test("pages the app does not draw yet are left to the server", () => {
+  test("the account's pages and every library page are the app's (TEMPRA-14)", () => {
+    expect(at("/connect")).toEqual({ page: "connect" });
+    expect(at("/tokens?library=notes")).toEqual({ page: "tokens", library: "notes" });
+    expect(at("/account?done=email")).toEqual({ page: "account", done: "email" });
+    expect(at("/ann/notes/-/work?kind=lint")).toMatchObject({ page: "work", kind: "lint" });
+    expect(at("/ann/notes/-/revert/req_1")).toMatchObject({ page: "revert", request: "req_1" });
+    expect(at("/ann/notes/-/restore/a/b.md?to=4")).toMatchObject({
+      page: "restore",
+      path: "a/b.md",
+      to: 4,
+    });
+    expect(at("/ann/notes/-/connect")).toMatchObject({ page: "library-connect" });
+    for (const p of ["transfer", "recovery", "delete"]) {
+      expect(at(`/ann/notes/-/${p}`)).toMatchObject({ page: p, owner: "ann", slug: "notes" });
+    }
+  });
+
+  test("server pages and downloads are left to the server", () => {
     for (const p of [
-      "/connect",
+      "/sign-in",
+      "/authorize",
+      "/account/email/confirm",
       "/ann/notes",
-      "/ann/notes/-/work",
       "/ann/notes/-/raw/a.md",
-      "/ann/notes/-/revert/req_1",
+      "/ann/notes/-/download/a.png",
+      "/ann/notes/-/export",
+      "/ann/notes/-/exports/2026-10-01/bundle.tar",
       "/ann/notes/-/ledger/x",
     ]) {
       expect(at(p)).toBeNull();

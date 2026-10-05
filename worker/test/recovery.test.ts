@@ -21,15 +21,17 @@ async function put(s: S, path: string, content: string) {
   expect(r.status).toBeLessThan(300);
 }
 
-function post(s: S, fields: Record<string, string>, origin = ORIGIN) {
-  return s.app.request(`${LIB}/-/recovery`, {
+/** A restore as the Recovery page asks for it: the API, with the session, from this site. */
+function post(s: S, body: Record<string, string>, origin = ORIGIN) {
+  return s.app.request(`/api/v1/libraries/owner/demo/restore`, {
     method: "POST",
-    headers: { Origin: origin },
-    body: new URLSearchParams(fields),
+    headers: { Origin: origin, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
 }
 
-const minutesAgo = (n: number) => new Date(Date.now() - n * 60_000).toISOString().slice(0, 19);
+const minutesAgo = (n: number) =>
+  new Date(Date.now() - n * 60_000).toISOString().replace(/\.\d{3}Z$/, "Z");
 
 describe("point-in-time restore (spec: Backups and recovery)", () => {
   test("the requested time must be a past instant inside the 30-day window", () => {
@@ -154,60 +156,66 @@ describe("point-in-time restore (spec: Backups and recovery)", () => {
     expect(bucket.objects.size).toBe(0);
   });
 
-  test("the Recovery page: confirm by name, restore, list, undo", async () => {
+  test("the Recovery page: restore, list, undo, from the signed-in person", async () => {
     const s = setup();
     await put(s, "a.md", md("A\n"));
     const pageRes = await s.app.request(`${LIB}/-/recovery`);
-    const html = await pageRes.text();
     expect(pageRes.status).toBe(200);
-    expect(html).toContain("Restore this library to a point in time");
-    expect(html).toContain("<strong>Recovery</strong>");
-    expect(html).toContain("claude-code/test"); // recent requests help pick a time
-
-    // Cross-origin posts are refused; a wrong name changes nothing.
+    expect(await pageRes.text()).toContain('<div id="root"></div>');
+    // Recent requests help pick a time; the page reads them from the API.
     expect(
-      (await post(s, { to: minutesAgo(5), confirm: "demo" }, "https://evil.example")).status,
-    ).toBe(403);
-    const wrong = await post(s, { to: minutesAgo(5), confirm: "dem" });
-    expect(wrong.status).toBe(400);
-    expect(await wrong.text()).toContain("Type the library&#39;s name, demo, to confirm.");
+      await (await s.app.request("/api/v1/libraries/owner/demo/requests?limit=10")).text(),
+    ).toContain("claude-code/test");
+    // A stranger does not see the library.
+    const stranger = await s.stranger();
+    expect((await stranger.app.request(`${LIB}/-/recovery`)).status).toBe(404);
+
+    // Cross-origin posts are refused.
+    expect((await post(s, { to: minutesAgo(5) }, "https://evil.example")).status).toBe(403);
     expect(s.pitr.armed).toEqual([]);
 
-    // A datetime-local value has no offset; the page treats it as UTC.
     const to = minutesAgo(5);
-    const ok = await post(s, { to, confirm: "demo" });
-    const okHtml = await ok.text();
-    expect(ok.status).toBe(200);
-    expect(okHtml).toContain(`Restored demo to ${to}Z.`);
-    expect(s.pitr.armed).toEqual([`bookmark@${to}.000Z`]);
-    expect(okHtml).toContain("Undo");
-    const id = /name="undo" value="([^"]+)"/.exec(okHtml)?.[1] as string;
-    expect(id).toMatch(/^\d{8}T\d{9}Z-[0-9a-f]{4}$/);
+    const ok = await post(s, { to });
+    expect(ok.status).toBe(201);
+    const record = (await ok.json()) as { id: string; to: string; actor: string; export: string };
+    expect(record).toMatchObject({ to, actor: "human:owner" });
+    expect(s.pitr.armed).toEqual([`bookmark@${to.replace("Z", ".000Z")}`]);
+    expect(record.id).toMatch(/^\d{8}T\d{9}Z-[0-9a-f]{4}$/);
 
-    // The pre-restore export downloads like a nightly one.
-    const folder = /exports\/(\d{4}-\d{2}-\d{2}-pre-restore-\d{9}-[0-9a-f]{4})\/bundle\.tar/.exec(
-      okHtml,
-    )?.[1];
+    // The pre-restore export downloads like a nightly one, and is listed with them.
+    const folder = /(\d{4}-\d{2}-\d{2}-pre-restore-\d{9}-[0-9a-f]{4})\/?$/.exec(record.export)?.[1];
     expect(folder).toBeDefined();
     const dl = await s.app.request(`${LIB}/-/exports/${folder}/bundle.tar`);
     expect(dl.status).toBe(200);
-    const transfer = await (await s.app.request(`${LIB}/-/transfer`)).text();
-    expect(transfer).toContain("before a restore");
+    const exports = (await (
+      await s.app.request("/api/v1/libraries/owner/demo/exports")
+    ).json()) as {
+      exports: { date: string }[];
+    };
+    expect(exports.exports.map((e) => e.date)).toContain(folder as string);
+    const listed = (await (
+      await s.app.request("/api/v1/libraries/owner/demo/restores")
+    ).json()) as {
+      restores: { id: string }[];
+    };
+    expect(listed.restores.map((r) => r.id)).toEqual([record.id]);
 
     // A time outside the window is refused with the reason.
-    const old = await post(s, { to: "2020-01-01T00:00", confirm: "demo" });
+    const old = await post(s, { to: "2020-01-01T00:00:00Z" });
     expect(old.status).toBe(400);
     expect(await old.text()).toContain("30 days");
 
     // Undo arms the bookmark the restore returned.
-    const undo = await post(s, { undo: id, confirm: "demo" });
-    const undoHtml = await undo.text();
-    expect(undo.status).toBe(200);
-    expect(undoHtml).toContain("Undone: demo is back to how it was before that restore.");
+    const undo = await post(s, { undo: record.id });
+    expect(undo.status).toBe(201);
+    expect(await undo.json()).toMatchObject({
+      kind: "undo",
+      undoes: record.id,
+      actor: "human:owner",
+    });
     expect(s.pitr.armed[1]).toMatch(/^undo@/);
-    expect(undoHtml).toContain("Undid the restore made");
 
-    const missing = await post(s, { undo: "20200101T000000000Z", confirm: "demo" });
+    const missing = await post(s, { undo: "20200101T000000000Z" });
     expect(missing.status).toBe(404);
   });
 

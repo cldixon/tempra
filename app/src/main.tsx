@@ -1,11 +1,21 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { api, useLoad } from "./api";
+import { Account, Apps, ConnectAccount, Tokens, Welcome } from "./pages/Account";
 import { Diff } from "./pages/Diff";
 import { Directory } from "./pages/Directory";
 import { File } from "./pages/File";
 import { Ledger } from "./pages/Ledger";
 import { Libraries } from "./pages/Libraries";
+import {
+  ConnectLibrary,
+  DeleteLibrary,
+  Recovery,
+  Restore,
+  Revert,
+  Transfer,
+  Work,
+} from "./pages/Manage";
 import { interceptLinks, match, useLocation } from "./router";
 import { Header, type Me, PageBoundary } from "./ui";
 import { Urls } from "./urls";
@@ -40,6 +50,16 @@ function App() {
     page = <h1>Not found</h1>;
   } else if (route.page === "libraries") {
     page = <Libraries />;
+  } else if (route.page === "welcome") {
+    page = <Welcome me={who} />;
+  } else if (route.page === "connect") {
+    page = <ConnectAccount />;
+  } else if (route.page === "tokens") {
+    page = <Tokens me={who} library={route.library} />;
+  } else if (route.page === "apps") {
+    page = <Apps />;
+  } else if (route.page === "account") {
+    page = <Account done={route.done} />;
   } else {
     const urls = urlsFor(route.owner, route.slug, "at" in route ? route.at : undefined);
     switch (route.page) {
@@ -56,6 +76,27 @@ function App() {
         break;
       case "diff":
         page = <Diff urls={urls} path={route.path} from={route.from} to={route.to} />;
+        break;
+      case "work":
+        page = <Work urls={urls} kind={route.kind} />;
+        break;
+      case "transfer":
+        page = <Transfer urls={urls} />;
+        break;
+      case "recovery":
+        page = <Recovery urls={urls} />;
+        break;
+      case "library-connect":
+        page = <ConnectLibrary urls={urls} />;
+        break;
+      case "delete":
+        page = <DeleteLibrary urls={urls} />;
+        break;
+      case "revert":
+        page = <Revert urls={urls} request={route.request} actor={actor} />;
+        break;
+      case "restore":
+        page = <Restore urls={urls} path={route.path} to={route.to} actor={actor} />;
         break;
     }
   }
