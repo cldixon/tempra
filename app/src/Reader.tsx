@@ -23,8 +23,8 @@ export function Reader(props: {
   hideFirst: boolean;
   /** Ranges to highlight (comment quotes); changing them does not redraw the body. */
   highlights?: readonly Highlight[];
-  /** A highlight was clicked. */
-  onMark?(id: string): void;
+  /** A highlight was clicked (its id), or the body outside one (null). */
+  onMark?(id: string | null): void;
   /** Set to the mounted reader, for its selection. */
   handle?: RefObject<ReaderHandle | null>;
 }) {

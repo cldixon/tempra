@@ -65,7 +65,7 @@ describe("comments over REST and MCP", () => {
     expect(list.text).toContain("> revenue minus cost");
     expect(list.text).toContain("human:owner");
     const start = await call("start");
-    expect(start.text).toContain("open comment threads: 1");
+    expect(start.text).toContain("(1 of them comment threads)");
 
     expect(
       (await call("comment", { action: "reply", thread: thread.id, body: "Fixed." })).isError,

@@ -26,8 +26,8 @@ export interface ReaderOptions {
   diff?: WordDiff | null;
   /** Hide the first block (a heading that repeats the page's title). Display only. */
   hideFirst?: boolean;
-  /** A highlighted range was clicked (comment threads, by id). */
-  onMark?(id: string): void;
+  /** A highlighted range was clicked (comment threads, by id), or the text outside one (null). */
+  onMark?(id: string | null): void;
 }
 
 /** A highlighted range of the document, e.g. a comment's quote. */
@@ -144,8 +144,7 @@ export function mountReader(opts: ReaderOptions): Reader {
     // A click that ends a selection is not a click on the highlight.
     if (!(document.getSelection()?.isCollapsed ?? true)) return;
     const mark = (e.target as Element | null)?.closest?.("mark.comment-mark");
-    const id = mark?.getAttribute("data-thread");
-    if (id && onMark) onMark(id);
+    onMark?.(mark?.getAttribute("data-thread") ?? null);
   };
   wg.dom.addEventListener("click", click);
   return {

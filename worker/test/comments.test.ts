@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { OkfError } from "../src/store/errors";
 import { LibraryStore, type RequestContext } from "../src/store/store";
+import { WRITE_TOOLS } from "../src/usage";
 import { bunSqlHandle } from "./sqlite";
 
 let n = 0;
@@ -224,7 +225,8 @@ describe("comment threads", () => {
       true,
     );
     expect(s.outline().files[0]?.comments).toBe(2);
-    expect(s.openThreads("metrics/margin")).toBe(2);
+    const read = s.read("metrics/margin");
+    expect(read.kind === "concept" && read.open_comments).toBe(2);
 
     s.comment(ctx("agent:a"), { kind: "resolve", thread: a.id, body: "Cited." });
     expect(s.work({ kind: "comment" }).items).toHaveLength(1);
@@ -293,5 +295,29 @@ describe("comment threads", () => {
     const ev = lines.find((l) => l.t === "event" && l.op === "comment");
     expect(ev.meta.comment.body).toBe("Kept in the backup.");
     expect(ev.meta.comment.anchor.quote).toBe("reported monthly");
+  });
+
+  test("a client's `from` is only a hint: out of range or fractional, it is ignored", () => {
+    const s = seeded();
+    for (const from of [-5, 1.5, 10_000]) {
+      const t = s.comment(human(), {
+        kind: "open",
+        path: "metrics/margin.md",
+        body: "x",
+        anchor: { quote: "revenue minus cost", from },
+      }).thread;
+      expect(t.anchor?.quote).toBe("revenue minus cost");
+      expect(t.anchor?.from).toBeGreaterThanOrEqual(0);
+      expect(t.outdated).toBe(false);
+    }
+  });
+
+  test("log.md tells content changes only; comments count as writes for limits", () => {
+    const s = seeded();
+    const t = s.comment(human(), { kind: "open", path: "metrics/margin.md", body: "x" }).thread;
+    s.comment(human(), { kind: "resolve", thread: t.id });
+    const log = s.log();
+    expect(log).not.toContain("human:ana");
+    expect(WRITE_TOOLS.has("comment")).toBe(true);
   });
 });

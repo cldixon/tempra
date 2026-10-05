@@ -32,6 +32,7 @@ export const WRITE_TOOLS = new Set([
   "attach",
   "revert",
   "verify",
+  "comment",
 ]);
 
 /** Who a request counts against: a per-token (or per-connection) key and the account. */

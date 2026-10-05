@@ -29,7 +29,6 @@ export const LIBRARY_METHODS = [
   "comment",
   "comments",
   "thread",
-  "openThreads",
   "summary",
   "signDownload",
   "openDownload",

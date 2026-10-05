@@ -131,6 +131,9 @@ CREATE TABLE IF NOT EXISTS comments (
   seq       INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS comments_thread ON comments(thread_id, seq);
+-- Historical snapshots look for each concept's last content event; with op in it, this index
+-- covers that query, so it never reads event rows.
+CREATE INDEX IF NOT EXISTS events_content ON events(concept_id, seq, op) WHERE op != 'comment';
 `;
 
 /** Creates or migrates the schema forward; a no-op when already current. */

@@ -91,7 +91,7 @@ A good maintenance session: `start`, `log` to see what changed, `work` to pick a
 
 ## Comments
 
-Comments are how people ask you for changes. A thread sits on a concept, often on a quoted sentence, and stays open until someone resolves it. Comments are not content: they never change the concept or its hash, and exports leave them out.
+Comments are how people ask you for changes. A thread sits on a concept, often on a quoted sentence, and stays open until someone resolves it. Comments are not content: they never change the concept or its hash, `log.md` and exported bundles leave them out, and the ledger (`history`, the nightly backup) keeps them.
 
 - `read` says when a concept has open comments. Read them with `comments` (pass `path`) before you edit it.
 - Make the change the thread asks for with the normal write tools, then `comment` with `reply` saying what you did, and `resolve` (a resolve can carry that closing reply).

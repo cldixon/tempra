@@ -222,7 +222,7 @@ export function buildServer(ctx: McpContext): McpServer {
       const lines = [
         `# Library ${token.library.owner}/${token.library.slug} (seq ${summary.seq})`,
         "",
-        `Concepts: ${summary.concepts} · attachments: ${summary.attachments} · open work items: ${summary.open_work} · open comment threads: ${summary.open_comments}`,
+        `Concepts: ${summary.concepts} · attachments: ${summary.attachments} · open work items: ${summary.open_work} (${summary.open_comments} of them comment threads)`,
         `Types: ${types || "none yet"}`,
         you(),
         ...(others.length > 0
@@ -303,10 +303,7 @@ export function buildServer(ctx: McpContext): McpServer {
     },
     guarded(async (args: { path: string; at?: number; library?: string }) => {
       const picked = pick(args.library);
-      const [view, open] = await Promise.all([
-        picked.lib.read(args.path, { at: args.at }),
-        tier2 && args.at === undefined ? picked.lib.openThreads(args.path) : 0,
-      ]);
+      const view = await picked.lib.read(args.path, { at: args.at });
       if (view.kind === "derived") return text(view.markdown);
       if (view.kind === "attachment") {
         const url = await downloadUrl(picked, {
@@ -333,9 +330,9 @@ export function buildServer(ctx: McpContext): McpServer {
           `hash: ${view.hash}`,
           `seq: ${view.seq}${args.at !== undefined ? ` (as of ${args.at})` : ""}`,
           `trust: ${view.trust_tier} · stale: ${view.stale ? "yes" : "no"} · status: ${status} · inbound links: ${view.inbound_links}`,
-          ...(open > 0
+          ...(tier2 && view.open_comments > 0
             ? [
-                `Open comments: ${open}. Read them with \`comments\` (path ${view.path}) before you edit.`,
+                `Open comments: ${view.open_comments}. Read them with \`comments\` (path ${view.path}) before you edit.`,
               ]
             : []),
           lintText(view.lint),

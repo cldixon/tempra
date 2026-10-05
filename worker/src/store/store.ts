@@ -199,6 +199,8 @@ export type FileView =
       trust_tier: TrustTier;
       stale: boolean;
       inbound_links: number;
+      /** Open comment threads, at head (0 for an earlier version). */
+      open_comments: number;
     }
   | {
       kind: "attachment";
@@ -1441,6 +1443,7 @@ export class LibraryStore {
       trust_tier: trustTier(r.generated, verified),
       stale: isStale(field(r, "stale_after"), this.clock().getTime()),
       inbound_links: atHead ? this.inboundCount(e.concept_id) : 0,
+      open_comments: atHead ? this.openThreadsOf(e.concept_id) : 0,
     };
   }
 
@@ -1499,6 +1502,8 @@ export class LibraryStore {
     );
     const byReq = new Map<string, EventRow[]>();
     for (const e of events) {
+      // log.md tells what changed in the content; comments are not content.
+      if (e.op === "comment") continue;
       const row = { ...e, meta: e.meta ? (JSON.parse(e.meta) as JsonObject) : null };
       if (!underPrefix(e.path, prefix)) continue;
       const list = byReq.get(e.request_id) ?? [];
@@ -2025,6 +2030,9 @@ export class LibraryStore {
       });
     }
     if (want("comment")) {
+      // One concept's page asks for its own threads only (the partial index, by concept).
+      const onlyId =
+        only === undefined ? null : (snap.lookup(only)?.concept_id ?? "(no such concept)");
       // Open threads on concepts that exist, from the partial index on open threads.
       const threads = this.sql.all<{
         id: string;
@@ -2040,7 +2048,9 @@ export class LibraryStore {
                 (SELECT body FROM comments c WHERE c.thread_id = t.id ORDER BY c.seq LIMIT 1) AS body
          FROM threads t JOIN paths p ON p.concept_id = t.concept_id
          JOIN events e ON e.seq = t.last_seq
-         WHERE t.status = 'open'`,
+         WHERE t.status = 'open' AND (? IS NULL OR t.concept_id = ?)`,
+        onlyId,
+        onlyId,
       );
       for (const t of threads) {
         const e = snap.byId.get(t.concept_id);
@@ -2129,10 +2139,15 @@ export class LibraryStore {
       const quote = checkQuote(a.anchor.quote);
       const text = this.bodyOf(row);
       const starts = occurrences(text, quote);
-      const hint = a.anchor.from;
+      // Where the client saw the quote: a whole offset inside the body, or nothing.
+      const raw = a.anchor.from;
+      const hint =
+        typeof raw === "number" && Number.isInteger(raw) && raw >= 0 && raw <= text.length
+          ? raw
+          : undefined;
       let at: number | undefined;
-      if (typeof hint === "number" && text.startsWith(quote, hint)) at = hint;
-      else if (starts.length === 1 || (starts.length > 1 && typeof hint === "number")) {
+      if (hint !== undefined && text.startsWith(quote, hint)) at = hint;
+      else if (starts.length === 1 || (starts.length > 1 && hint !== undefined)) {
         at = starts.reduce((best, s) =>
           Math.abs(s - (hint ?? 0)) < Math.abs(best - (hint ?? 0)) ? s : best,
         );
@@ -2372,15 +2387,12 @@ export class LibraryStore {
     return new Map(rows.map((r) => [r.concept_id, r.n]));
   }
 
-  /** How many open threads a concept has (for `read`'s header). */
-  openThreads(input: string): number {
-    const p = normalizePath(input);
-    const row = p ? this.lookupRow(p) : undefined;
-    if (!row) return 0;
+  /** How many open threads a concept has (for `read`), from the partial index. */
+  private openThreadsOf(conceptId: string): number {
     return (
       this.sql.all<{ n: number }>(
         "SELECT COUNT(*) AS n FROM threads WHERE concept_id = ? AND status = 'open'",
-        row.concept_id,
+        conceptId,
       )[0]?.n ?? 0
     );
   }

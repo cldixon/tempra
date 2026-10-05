@@ -46,16 +46,19 @@ interface WorkItem {
   detail: string;
   suggested_action: string;
   inbound_links: number;
+  /** For a comment: its thread. */
+  thread?: string;
 }
 
 const KINDS: [string | undefined, string][] = [
   [undefined, "All"],
+  ["comment", "Comments"],
   ["stale", "Stale"],
   ["broken_link", "Broken links"],
   ["lint", "Lint"],
 ];
 
-/** What needs doing: stale concepts, broken links, lint (as `work` shows agents). */
+/** What needs doing: open comments, stale concepts, broken links, lint (as `work` shows agents). */
 export function Work({ urls, kind }: { urls: Urls; kind?: string }) {
   useTitle(`Work queue · ${urls.slug}`);
   const loaded = useLoad(`work ${urls.work(kind)}`, async () => {
@@ -89,17 +92,20 @@ export function Work({ urls, kind }: { urls: Urls; kind?: string }) {
                 <table className="list">
                   <tbody>
                     {items.map((i) => (
-                      <tr key={`${i.kind} ${i.path} ${i.detail}`}>
+                      <tr key={i.thread ?? `${i.kind} ${i.path} ${i.detail}`}>
                         <td>
                           <Chip
                             text={i.kind.replace("_", " ")}
-                            tone={i.kind === "lint" ? "warn" : "bad"}
+                            tone={i.kind === "comment" ? "" : i.kind === "lint" ? "warn" : "bad"}
                           />
                         </td>
                         <td className="name">
-                          <a href={urls.file(i.path)}>{i.path}</a>
+                          {/* A comment opens on its thread; its suggested action is for agents. */}
+                          <a href={i.thread ? `${urls.file(i.path)}#comments` : urls.file(i.path)}>
+                            {i.path}
+                          </a>
                           <div className="small muted">{i.detail}</div>
-                          <div className="small">→ {i.suggested_action}</div>
+                          {!i.thread && <div className="small">→ {i.suggested_action}</div>}
                         </td>
                         <td className="muted small">{i.inbound_links} inbound</td>
                         <td className="muted small">{when(i.since)}</td>

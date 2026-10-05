@@ -255,6 +255,7 @@ export function File(props: { urls: Urls; path: string; done: string | null; act
                 history={d.extra.history}
                 work={d.extra.work}
                 threads={threads.state === "ready" ? threads.data.threads : null}
+                threadsError={threads.state === "error" ? threads.error.message : null}
                 onCommented={threads.reload}
                 onVerified={loaded.reload}
               />
@@ -404,8 +405,9 @@ function ConceptView(props: {
   links: Links;
   history: HistoryEvent[];
   work: WorkItem[];
-  /** Null while they load. */
+  /** Null while they load, or when they failed (`threadsError`). */
   threads: Thread[] | null;
+  threadsError: string | null;
   onCommented(): void;
   onVerified(): void;
 }) {
@@ -504,11 +506,12 @@ function ConceptView(props: {
       {/* The workspace's right panel (tempra-dev: app/workspace). */}
       <ContextPanel>
         <Verify urls={urls} concept={c} head={head} onVerified={props.onVerified} />
-        {props.threads && (
+        {(props.threads || props.threadsError) && (
           <CommentsPanel
             urls={urls}
             path={c.path}
             placed={placed}
+            error={props.threadsError}
             writable={writable}
             pending={quote.pending}
             onClearPending={quote.clear}

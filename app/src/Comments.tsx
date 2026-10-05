@@ -114,17 +114,20 @@ export function usePendingQuote(
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
-/** Scrolls the reader to a thread's highlight. */
+/** Scrolls the reader to a thread's highlight (smoothly, unless motion is reduced). */
 function showMark(id: string) {
+  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
   document
     .querySelector(`mark.comment-mark[data-thread="${CSS.escape(id)}"]`)
-    ?.scrollIntoView({ block: "center", behavior: "smooth" });
+    ?.scrollIntoView({ block: "center", behavior: still ? "auto" : "smooth" });
 }
 
 export function CommentsPanel(props: {
   urls: Urls;
   path: string;
   placed: Placed[];
+  /** The threads could not be loaded (a new comment can still be made). */
+  error?: string | null;
   /** Comments can be written (the current version, not a pinned old one). */
   writable: boolean;
   pending: Pending | null;
@@ -154,6 +157,7 @@ export function CommentsPanel(props: {
   return (
     <section id="comments">
       <h2>Comments{open.length > 0 ? ` (${open.length})` : ""}</h2>
+      {props.error && <p className="small warn">Could not load the comments: {props.error}</p>}
       {props.writable && (
         <NewComment
           urls={urls}
@@ -281,6 +285,8 @@ function ThreadView(props: {
         body: JSON.stringify(body ? { body } : {}),
       });
       setReply("");
+      // A resolved thread is no longer highlighted: nothing stays active.
+      if (kind === "resolve" && props.active) props.onActive(null);
       props.onChanged();
     });
   };

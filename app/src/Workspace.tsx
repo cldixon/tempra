@@ -162,6 +162,14 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
   };
 
   const hasContext = panels > 0;
+  // A link to a page's comments (#comments, from the ledger or the work queue) shows them: on a
+  // narrow screen the context panel is a drawer, opened here; on a wide one it is shown.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on each page, once it has a panel.
+  useEffect(() => {
+    if (!hasContext || location.hash !== "#comments") return;
+    if (narrow) setDrawer("context");
+    else setHidden(false);
+  }, [hasContext, href, narrow]);
   const classes = ["workspace", !hasContext || hidden ? "no-context" : ""].filter(Boolean);
   const views: [string, string, Place["view"]][] = [
     ["Ledger", urls.ledger(), "ledger"],
