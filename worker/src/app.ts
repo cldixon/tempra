@@ -28,6 +28,7 @@ import { appHref, appScript } from "./ui/spa";
 import { STARTER } from "./ui/starter";
 import { admit, tokenAdmission, type UsageDeps } from "./usage";
 import { maybeGunzip, readTar } from "./util/tar";
+import { registerWaitlistRoutes } from "./waitlist";
 
 /** What the app needs from the platform; production wires D1, the DO and R2, tests fakes. */
 export interface Deps extends UsageDeps {
@@ -790,6 +791,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   // /mcp itself is served by the OAuth provider (worker.ts), which checks tokens first.
   registerLegalRoutes(app);
   registerSignInRoutes(app, deps);
+  registerWaitlistRoutes(app, deps);
   registerAppRoutes(app, deps);
   registerUiRoutes(app, deps);
 
