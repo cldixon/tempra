@@ -318,11 +318,19 @@ async function browserRenders(
           el.scrollTop = 300;
         });
         const before = await main.evaluate((el) => el.scrollTop);
+        const title = await main.locator("h1").first().innerText();
         const link = sidebar.locator(`a[title="${other}"]`);
         await link.hover();
         await page.waitForTimeout(1500); // the hover's prefetch lands in the cache
         await link.click();
         await page.waitForURL(`${lib}/${enc(other)}`);
+        // The URL changes before React draws the new page: wait for the page itself (on a
+        // slow runner the old one can still be on screen, scrolled, when the URL has moved).
+        await page.waitForFunction(
+          `(document.querySelector(".ws-main h1")?.textContent ?? "") !== ${JSON.stringify(title)}`,
+          undefined,
+          { timeout: 5000 },
+        );
         if ((await page.getByText("Loading…").count()) > 0) {
           throw new Error("a hovered file still showed Loading… when opened");
         }
