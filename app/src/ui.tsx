@@ -151,32 +151,6 @@ export function AtNotice({ urls, head, current }: { urls: Urls; head: number; cu
   );
 }
 
-export type LibTab = "files" | "ledger" | "work" | "transfer" | "recovery" | "connect" | "delete";
-
-/** The library's section tabs. */
-export function LibNav({ urls, active }: { urls: Urls; active: LibTab | null }) {
-  const tabs: [string, string, LibTab][] = [
-    ["Files", urls.pinned(undefined).tree(""), "files"],
-    ["Ledger", urls.ledger(), "ledger"],
-    ["Work queue", urls.work(), "work"],
-    ["Import & export", urls.transfer(), "transfer"],
-    ["Recovery", urls.recovery(), "recovery"],
-    ["Connect", urls.connect(), "connect"],
-    ["Delete", urls.remove(), "delete"],
-  ];
-  return (
-    <nav className="libnav">
-      <span className="muted">{urls.slug}:</span>{" "}
-      {tabs.map(([name, href, key], i) => (
-        <span key={name}>
-          {i > 0 && " · "}
-          {key === active ? <strong>{name}</strong> : <a href={href}>{name}</a>}
-        </span>
-      ))}
-    </nav>
-  );
-}
-
 /** What a page shows while its data loads or when it failed. */
 export function Status<T>({
   loaded,

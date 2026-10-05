@@ -11,6 +11,7 @@ import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } fro
 import { ApiError, api, useLoad } from "../api";
 import { type FeedEvent, useFeed } from "../live";
 import { el, Reader } from "../Reader";
+import { pushRecent } from "../recent";
 import { navigate } from "../router";
 import {
   AtNotice,
@@ -18,7 +19,6 @@ import {
   Chip,
   Crumbs,
   formatSize,
-  LibNav,
   Status,
   TrustChip,
   useScrollToHash,
@@ -26,6 +26,7 @@ import {
   when,
 } from "../ui";
 import { baseName, dirOf, enc, type Urls } from "../urls";
+import { ContextPanel } from "../Workspace";
 
 type Json = string | number | boolean | null | Json[] | { [k: string]: Json };
 type JsonObject = { [k: string]: Json };
@@ -173,7 +174,6 @@ export function File(props: { urls: Urls; path: string; done: string | null; act
   }, [swappable, idle, swap]);
   return (
     <>
-      <LibNav urls={urls} active="files" />
       {notice && <div className="notice ok">{notice}</div>}
       {change && shown && (
         <ChangeBanner urls={urls} change={change} shownSeq={shown.file.seq} onSwap={swap} />
@@ -376,8 +376,13 @@ function ConceptView(props: {
   const tooltip = useTooltips(urls, sources, footnotes);
   const changes = useVerificationDiff(urls, c, parsed, props.history, head);
 
+  // Recent files, for the quick switcher.
+  useEffect(() => {
+    if (urls.at === undefined) pushRecent(urls, { path: c.path, title });
+  }, [urls, c.path, title]);
+
   return (
-    <div className="layout">
+    <>
       <div>
         <Crumbs urls={urls} path={c.path} file />
         <h1>{title}</h1>
@@ -412,16 +417,17 @@ function ConceptView(props: {
           </>
         )}
       </div>
-      <aside>
+      {/* The workspace's right panel (tempra-dev: app/workspace). */}
+      <ContextPanel>
+        <Verify urls={urls} concept={c} head={head} onVerified={props.onVerified} />
         <Contents parsed={parsed} skipFirst={hideFirst} />
         <Work items={props.work} />
-        <Frontmatter fm={fm} />
         <SourcesPanel urls={urls} data={sources} footnotes={footnotes} />
         <LinksPanel urls={urls} links={links} head={head} />
-        <Verify urls={urls} concept={c} head={head} onVerified={props.onVerified} />
         <History urls={urls} concept={c} head={head} events={props.history} />
-      </aside>
-    </div>
+        <Frontmatter fm={fm} />
+      </ContextPanel>
+    </>
   );
 }
 

@@ -3,7 +3,7 @@ import { useEffect } from "react";
 import { api, useLoad } from "../api";
 import { lastSeen, markSeen, useFeed, useTrailing } from "../live";
 import { type Done, navigate } from "../router";
-import { Chip, LibNav, plural, Status, useTitle, when } from "../ui";
+import { Chip, plural, Status, useTitle, when } from "../ui";
 import type { LedgerFilters, Urls } from "../urls";
 import { CONTENT_OPS } from "./File";
 
@@ -67,7 +67,6 @@ export function Ledger(props: { urls: Urls; filters: LedgerFilters; done: Done; 
   };
   return (
     <>
-      <LibNav urls={urls} active="ledger" />
       <h1>Ledger</h1>
       {props.done?.kind === "revert" && (
         <div className="notice ok">

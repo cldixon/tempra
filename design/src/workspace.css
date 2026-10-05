@@ -1,0 +1,211 @@
+/*
+ * The workspace (TEMPRA-19): a library's tree on the left, the open file in the middle, its
+ * context on the right, under one header. Structure only: lines and spacing from the tokens, no
+ * decoration (the UI rule). Under 60rem the side panels become drawers over the main pane.
+ */
+body:has(> #root > .workspace) {
+  padding: 0;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: 16rem minmax(0, 1fr) 20rem;
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-areas:
+    "header header header"
+    "sidebar main context";
+  height: 100dvh;
+}
+
+.workspace.no-context {
+  grid-template-columns: 16rem minmax(0, 1fr);
+  grid-template-areas:
+    "header header"
+    "sidebar main";
+}
+
+.ws-header {
+  grid-area: header;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--tempra-space-2) var(--tempra-space-3);
+  padding: var(--tempra-space-2) var(--tempra-space-3);
+  border-bottom: 1px solid var(--tempra-color-border);
+}
+
+.ws-header .ws-spacer {
+  flex: 1;
+}
+
+.ws-sidebar,
+.ws-main,
+.ws-context {
+  overflow: auto;
+  padding: var(--tempra-space-3);
+}
+
+.ws-sidebar {
+  grid-area: sidebar;
+  border-right: 1px solid var(--tempra-color-border);
+}
+
+.ws-main {
+  grid-area: main;
+}
+
+.ws-context {
+  grid-area: context;
+  border-left: 1px solid var(--tempra-color-border);
+}
+
+.ws-context h2 {
+  font-size: 1rem;
+}
+
+.ws-filter {
+  width: 100%;
+  margin-bottom: var(--tempra-space-2);
+}
+
+/* The tree: nested lists, one row per directory or file. */
+.tree,
+.tree ul,
+.ws-views {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.tree ul {
+  padding-left: var(--tempra-space-3);
+}
+
+.tree-row {
+  display: flex;
+  align-items: baseline;
+  gap: var(--tempra-space-1);
+  white-space: nowrap;
+}
+
+.tree-row > a {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tree-row [aria-current="page"],
+.ws-views [aria-current="page"] {
+  font-weight: bold;
+}
+
+.tree-toggle {
+  flex: none;
+  width: 1.25em;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.tree-leaf {
+  flex: none;
+  width: 1.25em;
+}
+
+/* A file an agent changed in the last few minutes, or since the last visit. */
+.tree-mark {
+  flex: none;
+  color: var(--tempra-color-link);
+}
+
+.ws-views {
+  margin-top: var(--tempra-space-3);
+  padding-top: var(--tempra-space-2);
+  border-top: 1px solid var(--tempra-color-border);
+}
+
+.ws-toggle {
+  display: none;
+}
+
+/* The quick switcher: a modal dialog with a search box and a list of files. */
+.switcher {
+  width: min(36rem, 90vw);
+  padding: var(--tempra-space-3);
+  border: 1px solid var(--tempra-color-border);
+  background: var(--tempra-color-bg);
+  color: var(--tempra-color-text);
+}
+
+.switcher::backdrop {
+  background: rgb(0 0 0 / 0.3);
+}
+
+.switcher input {
+  width: 100%;
+}
+
+.switcher ul {
+  list-style: none;
+  margin: var(--tempra-space-2) 0 0;
+  padding: 0;
+}
+
+.switcher li {
+  padding: var(--tempra-space-1) var(--tempra-space-2);
+}
+
+.switcher li[aria-current="true"] {
+  background: var(--tempra-color-code-bg);
+}
+
+.switcher li button {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+@media (max-width: 60rem) {
+  .workspace,
+  .workspace.no-context {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas:
+      "header"
+      "main";
+  }
+
+  .ws-sidebar,
+  .ws-context {
+    display: none;
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    z-index: 10;
+    width: min(20rem, 85vw);
+    background: var(--tempra-color-bg);
+  }
+
+  .ws-sidebar {
+    left: 0;
+  }
+
+  .ws-context {
+    right: 0;
+  }
+
+  .ws-sidebar.open,
+  .ws-context.open {
+    display: block;
+  }
+
+  .ws-toggle {
+    display: inline-block;
+  }
+}

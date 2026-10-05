@@ -49,3 +49,10 @@ td {
 img {
   max-width: 100%;
 }
+
+/* A row of short labels (type, trust tier, status): kept apart, wrapping on narrow screens. */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--tempra-space-1) var(--tempra-space-2);
+}

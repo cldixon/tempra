@@ -1,17 +1,7 @@
 import { useEffect } from "react";
 import { ApiError, api, useLoad } from "../api";
 import { lastSeen, markSeen, useFeed, useTrailing } from "../live";
-import {
-  AtNotice,
-  Chip,
-  Crumbs,
-  formatSize,
-  LibNav,
-  Status,
-  TrustChip,
-  useTitle,
-  when,
-} from "../ui";
+import { AtNotice, Chip, Crumbs, formatSize, Status, TrustChip, useTitle, when } from "../ui";
 import { baseName, type Urls } from "../urls";
 
 interface Entry {
@@ -82,21 +72,18 @@ export function Directory({ urls, dir }: { urls: Urls; dir: string }) {
     if (head !== null && urls.at === undefined) markSeen(urls, head);
   }, [head, urls]);
   return (
-    <>
-      <LibNav urls={urls} active="files" />
-      <Status loaded={loaded}>
-        {({ entries, stats, summary }) => (
-          <Listing
-            urls={urls}
-            dir={dir}
-            entries={entries}
-            stats={stats}
-            summary={summary}
-            seen={seen}
-          />
-        )}
-      </Status>
-    </>
+    <Status loaded={loaded}>
+      {({ entries, stats, summary }) => (
+        <Listing
+          urls={urls}
+          dir={dir}
+          entries={entries}
+          stats={stats}
+          summary={summary}
+          seen={seen}
+        />
+      )}
+    </Status>
   );
 }
 

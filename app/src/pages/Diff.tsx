@@ -1,7 +1,7 @@
 import type { FormEvent } from "react";
 import { api, useLoad } from "../api";
 import { navigate } from "../router";
-import { Crumbs, LibNav, Status, useTitle } from "../ui";
+import { Crumbs, Status, useTitle } from "../ui";
 import { baseName, type Urls } from "../urls";
 
 interface DiffData {
@@ -21,12 +21,7 @@ export function Diff(props: { urls: Urls; path: string; from?: number; to?: numb
     ]);
     return { ...d, head: stats.seq };
   });
-  return (
-    <>
-      <LibNav urls={urls} active="files" />
-      <Status loaded={loaded}>{(d) => <DiffView urls={urls} {...d} />}</Status>
-    </>
-  );
+  return <Status loaded={loaded}>{(d) => <DiffView urls={urls} {...d} />}</Status>;
 }
 
 function DiffView(props: { urls: Urls } & DiffData & { head: number }) {
