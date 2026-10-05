@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { ApiError, api, useLoad } from "../api";
-import { lastSeen, markSeen, useFeed } from "../live";
+import { lastSeen, markSeen, useFeed, useTrailing } from "../live";
 import {
   AtNotice,
   Chip,
@@ -65,13 +65,19 @@ export function Directory({ urls, dir }: { urls: Urls; dir: string }) {
   // Live: anything written under this directory reloads it in place (tempra-dev: app/live).
   const under = (p: string | null) =>
     p !== null && (dir === "" || p === dir || p.startsWith(`${dir}/`));
-  useFeed(urls, (events) => {
-    if (urls.at === undefined && events.some((e) => under(e.path) || under(e.from_path))) {
-      loaded.reload();
-    }
-  });
-  const seen = lastSeen(urls);
   const head = loaded.state === "ready" ? loaded.data.stats.seq : null;
+  const reload = useTrailing(loaded.reload);
+  useFeed(
+    urls,
+    urls.at === undefined ? head : null,
+    (events) => {
+      if (urls.at === undefined && events.some((e) => under(e.path) || under(e.from_path))) {
+        reload();
+      }
+    },
+    reload,
+  );
+  const seen = lastSeen(urls);
   useEffect(() => {
     if (head !== null && urls.at === undefined) markSeen(urls, head);
   }, [head, urls]);

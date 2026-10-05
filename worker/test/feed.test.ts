@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { broadcast, concerns, type FeedEvent, type FeedMessage, feedEvent } from "../src/feed";
+import {
+  broadcast,
+  concerns,
+  FEED_MAX_AGE_MS,
+  FEED_REAUTHORIZE,
+  type FeedEvent,
+  type FeedMessage,
+  feedEvent,
+} from "../src/feed";
 import { API, ORIGIN, setup } from "./harness";
 
 // The change feed (tempra-dev: app/live, TEMPRA-12).
@@ -22,6 +30,8 @@ describe("broadcast", () => {
     const got: Record<string, FeedMessage[]> = { all: [], notes: [], other: [] };
     const socket = (name: string, prefix: string) => ({
       prefix,
+      opened: Date.now(),
+      close: () => {},
       send: (m: string) => got[name]?.push(JSON.parse(m) as FeedMessage),
     });
     const events = [event("notes/a.md"), event("tables/b.md", "notes/b.md"), event("x.md")];
@@ -47,17 +57,40 @@ describe("broadcast", () => {
       [
         {
           prefix: "",
+          opened: Date.now(),
+          close: () => {},
           send: () => {
             throw new Error("closed");
           },
         },
-        { prefix: "", send: (m) => ok.push(m) },
+        { prefix: "", opened: Date.now(), close: () => {}, send: (m) => ok.push(m) },
       ],
       1,
       [event("a.md")],
     );
     expect(sent).toBe(1);
     expect(ok).toHaveLength(1);
+  });
+
+  test("a socket past its age is closed to reconnect (and be authorized again), not sent to", () => {
+    const now = 1_000_000_000;
+    const sent: string[] = [];
+    const closed: number[] = [];
+    const socket = (opened: number) => ({
+      prefix: "",
+      opened,
+      send: (m: string) => sent.push(m),
+      close: (code: number) => closed.push(code),
+    });
+    const n = broadcast(
+      [socket(now - FEED_MAX_AGE_MS - 1), socket(now - 1000)],
+      1,
+      [event("a.md")],
+      now,
+    );
+    expect(n).toBe(1);
+    expect(sent).toHaveLength(1);
+    expect(closed).toEqual([FEED_REAUTHORIZE]);
   });
 
   test("concerns: the directory itself, below it, not a sibling with the same start", () => {

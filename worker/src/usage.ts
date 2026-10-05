@@ -51,13 +51,21 @@ export function tokenAdmission(token: TokenInfo): Admission {
   };
 }
 
-/** Counts a request (and a write); 429 when it is over a per-minute limit. */
-export async function admit(d: UsageDeps, who: Admission, write: boolean): Promise<void> {
+/**
+ * Counts a request (and a write); 429 when it is over a per-minute limit. `limited: false` meters
+ * without limiting: a person in the web UI, whose requests are few and deliberate.
+ */
+export async function admit(
+  d: UsageDeps,
+  who: Admission,
+  write: boolean,
+  limited = true,
+): Promise<void> {
   const { key, account, library } = who;
-  if (d.rateLimit && !(await d.rateLimit("request", key))) {
+  if (limited && d.rateLimit && !(await d.rateLimit("request", key))) {
     throw new OkfError(429, "rate_limited", "Too many requests from this token; slow down.");
   }
-  if (write && d.rateLimit && !(await d.rateLimit("write", account))) {
+  if (limited && write && d.rateLimit && !(await d.rateLimit("write", account))) {
     throw new OkfError(
       429,
       "rate_limited",

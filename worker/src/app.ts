@@ -217,7 +217,10 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     const who = await principal(c, d);
     const ref = await authorizeLibrary(d.accounts, who, c.req.param("owner"), c.req.param("lib"));
     const token = "token" in who ? who.token : sessionToken(who.user, ref);
-    await admit(d, tokenAdmission(token), c.req.method !== "GET" && c.req.method !== "HEAD");
+    // A person signed in to the app is metered but not rate limited (usage.ts), so agents
+    // spending the account's write budget never lock its owner out of the UI.
+    const write = c.req.method !== "GET" && c.req.method !== "HEAD";
+    await admit(d, tokenAdmission(token), write, "token" in who);
     c.set("deps", d);
     c.set("token", token);
     c.set("lib", d.library(token));

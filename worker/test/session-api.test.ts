@@ -21,6 +21,14 @@ describe("session on the REST API", () => {
     expect(await res.json()).toHaveProperty("seq");
   });
 
+  test("a person in the app is metered but never rate limited, even when agents spent the budget", async () => {
+    const s = setup();
+    s.deps.rateLimit = async () => false;
+    expect((await s.app.request(`${API}/tree`)).status).toBe(200);
+    expect((await s.app.request(`${API}/files/a.md`, put({ Origin: ORIGIN }))).status).toBe(200);
+    expect(s.usage.filter((u) => u.kind === "write")).toHaveLength(1);
+  });
+
   test("no session and no token is 401, not a sign-in redirect", async () => {
     const s = setup();
     const res = await s.anon.request(`${API}/tree`);

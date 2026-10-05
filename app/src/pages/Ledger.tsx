@@ -1,7 +1,7 @@
 import type { FormEvent } from "react";
 import { useEffect } from "react";
 import { api, useLoad } from "../api";
-import { lastSeen, markSeen, useFeed } from "../live";
+import { lastSeen, markSeen, useFeed, useTrailing } from "../live";
 import { type Done, navigate } from "../router";
 import { Chip, LibNav, plural, Status, useTitle, when } from "../ui";
 import type { LedgerFilters, Urls } from "../urls";
@@ -25,23 +25,34 @@ interface LedgerRequest {
 export function Ledger(props: { urls: Urls; filters: LedgerFilters; done: Done; actor: string }) {
   const { urls, filters: f } = props;
   useTitle(`Ledger · ${urls.slug}`);
-  const loaded = useLoad(`ledger ${urls.ledger(f)}`, () =>
-    api<{ requests: LedgerRequest[]; next: number | null }>(
-      urls.api("requests", { ...f, limit: 30 }),
-    ),
-  );
+  const loaded = useLoad(`ledger ${urls.ledger(f)}`, async () => {
+    const [page, stats] = await Promise.all([
+      api<{ requests: LedgerRequest[]; next: number | null }>(
+        urls.api("requests", { ...f, limit: 30 }),
+      ),
+      api<{ seq: number }>(urls.api("stats")),
+    ]);
+    return { ...page, head: stats.seq };
+  });
   // Live tail (tempra-dev: app/live): on the newest page, a new request that the filters may
   // match reloads the list; the server applies the filters.
-  useFeed(urls, (events) => {
-    if (f.before !== undefined) return;
-    const under = (p: string | null) =>
-      p !== null &&
-      (!f.prefix || p === f.prefix || p.startsWith(`${f.prefix.replace(/\/$/, "")}/`));
-    const hit = events.some(
-      (e) => (!f.actor || e.actor === f.actor) && (under(e.path) || under(e.from_path)),
-    );
-    if (hit) loaded.reload();
-  });
+  const reload = useTrailing(loaded.reload);
+  const tailing = f.before === undefined;
+  useFeed(
+    urls,
+    tailing && loaded.state === "ready" ? loaded.data.head : null,
+    (events) => {
+      if (!tailing) return;
+      const under = (p: string | null) =>
+        p !== null &&
+        (!f.prefix || p === f.prefix || p.startsWith(`${f.prefix.replace(/\/$/, "")}/`));
+      const hit = events.some(
+        (e) => (!f.actor || e.actor === f.actor) && (under(e.path) || under(e.from_path)),
+      );
+      if (hit) reload();
+    },
+    reload,
+  );
   const seen = lastSeen(urls);
   const newest =
     loaded.state === "ready" ? (loaded.data.requests[0]?.events.at(-1)?.seq ?? null) : null;

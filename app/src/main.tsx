@@ -7,10 +7,25 @@ import { File } from "./pages/File";
 import { Ledger } from "./pages/Ledger";
 import { Libraries } from "./pages/Libraries";
 import { interceptLinks, match, useLocation } from "./router";
-import { Header, type Me } from "./ui";
+import { Header, type Me, PageBoundary } from "./ui";
 import { Urls } from "./urls";
 
 let handle: string | null = null;
+
+/**
+ * One Urls per library and pinned sequence, so pages and their memos see the same object
+ * across renders (a fragment change re-renders the app; it must not remount the reader).
+ */
+const urlsCache = new Map<string, Urls>();
+function urlsFor(owner: string, slug: string, at: number | undefined): Urls {
+  const key = `${owner}/${slug}@${at ?? ""}`;
+  let urls = urlsCache.get(key);
+  if (!urls) {
+    urls = new Urls(owner, slug, at);
+    urlsCache.set(key, urls);
+  }
+  return urls;
+}
 
 function App() {
   const url = useLocation();
@@ -26,7 +41,7 @@ function App() {
   } else if (route.page === "libraries") {
     page = <Libraries />;
   } else {
-    const urls = new Urls(route.owner, route.slug, "at" in route ? route.at : undefined);
+    const urls = urlsFor(route.owner, route.slug, "at" in route ? route.at : undefined);
     switch (route.page) {
       case "directory":
         page = <Directory urls={urls} dir={route.dir} />;
@@ -47,7 +62,9 @@ function App() {
   return (
     <>
       <Header me={who} />
-      <main>{page}</main>
+      <main>
+        <PageBoundary key={url.pathname + url.search}>{page}</PageBoundary>
+      </main>
     </>
   );
 }

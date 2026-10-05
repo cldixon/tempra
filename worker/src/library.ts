@@ -45,8 +45,15 @@ export class Library extends DurableObject<Env> {
     const result = await callStore(this.store, r2BlobStore(this.env.BLOBS), method, args, {
       storageLimitBytes: mb * 1048576,
     });
-    // The write has committed (the store's transaction is synchronous): tell the feed.
-    if (writes && result.ok) this.publish(before);
+    // The write has committed (the store's transaction is synchronous): tell the feed. A
+    // failure here must not turn a committed write into an error (a client would retry it).
+    if (writes && result.ok) {
+      try {
+        this.publish(before);
+      } catch (e) {
+        console.error("feed publish failed", e);
+      }
+    }
     return result;
   }
 
@@ -67,6 +74,7 @@ export class Library extends DurableObject<Env> {
     this.ctx.acceptWebSocket(server);
     server.serializeAttachment({
       prefix: feedPrefix(new URL(request.url).searchParams.get("prefix")),
+      opened: Date.now(),
     });
     const hello: FeedMessage = { type: "hello", head: this.store.headSeq() };
     server.send(JSON.stringify(hello));
@@ -80,10 +88,16 @@ export class Library extends DurableObject<Env> {
     const head = this.store.headSeq();
     if (head <= before) return;
     const { events } = this.store.events({ since: before, limit: 1000 });
-    const feed: FeedSocket[] = sockets.map((ws) => ({
-      prefix: (ws.deserializeAttachment() as { prefix?: string } | null)?.prefix ?? "",
-      send: (m) => ws.send(m),
-    }));
+    const feed: FeedSocket[] = sockets.map((ws) => {
+      const a = ws.deserializeAttachment() as { prefix?: string; opened?: number } | null;
+      return {
+        prefix: a?.prefix ?? "",
+        // Sockets from before `opened` was recorded count as old: they reconnect once.
+        opened: a?.opened ?? 0,
+        send: (m) => ws.send(m),
+        close: (code, reason) => ws.close(code, reason),
+      };
+    });
     broadcast(feed, head, events.map(feedEvent));
   }
 

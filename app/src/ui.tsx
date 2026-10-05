@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect } from "react";
+import { Component, type ReactNode, useEffect } from "react";
 import type { ApiError, Loaded } from "./api";
 import { baseName, type Urls } from "./urls";
 
@@ -38,8 +38,44 @@ export function useTitle(title: string | null) {
 export function useScrollToHash(ready: boolean) {
   useEffect(() => {
     if (!ready || !location.hash) return;
-    document.getElementById(decodeURIComponent(location.hash.slice(1)))?.scrollIntoView();
+    let id: string;
+    try {
+      id = decodeURIComponent(location.hash.slice(1));
+    } catch {
+      // A malformed escape (an agent wrote the link): use the fragment as it is.
+      id = location.hash.slice(1);
+    }
+    document.getElementById(id)?.scrollIntoView();
   }, [ready]);
+}
+
+/**
+ * Keeps a failure in one page from blanking the app: the page shows an error instead, and the
+ * header still works. Keyed by the URL, so moving to another page starts afresh.
+ */
+export class PageBoundary extends Component<{ children: ReactNode }, { error: Error | null }> {
+  override state = { error: null as Error | null };
+
+  static getDerivedStateFromError(error: Error) {
+    return { error };
+  }
+
+  override componentDidCatch(error: Error) {
+    console.error(error);
+  }
+
+  override render() {
+    if (!this.state.error) return this.props.children;
+    return (
+      <>
+        <h1>Something went wrong</h1>
+        <p className="muted">{this.state.error.message}</p>
+        <p>
+          <a href={location.href}>Reload the page</a>
+        </p>
+      </>
+    );
+  }
 }
 
 export type Tone = "" | "ok" | "warn" | "bad";

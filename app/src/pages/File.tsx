@@ -144,21 +144,30 @@ export function File(props: { urls: Urls; path: string; done: string | null; act
   // Live (tempra-dev: app/live): someone else's change to this file shows as a banner, and the
   // new version swaps in by itself only while the reader is idle. Pinned versions stay put.
   const [change, setChange] = useState<FeedEvent | null>(null);
-  const shown = loaded.state === "ready" ? loaded.data.file : null;
-  useFeed(urls, (events) => {
-    if (urls.at !== undefined || !shown) return;
-    const mine = events.filter(
-      (e) => (e.path === shown.path || e.from_path === shown.path) && e.actor !== props.actor,
-    );
-    const last = mine[mine.length - 1];
-    if (last) setChange(last);
-  });
-  const idle = useIdle(15_000);
-  const swappable = change !== null && change.op !== "delete" && change.op !== "move";
+  const shown = loaded.state === "ready" ? loaded.data : null;
   const swap = useCallback(() => {
     setChange(null);
     loaded.reload();
   }, [loaded.reload]);
+  useFeed(
+    urls,
+    urls.at === undefined && shown ? shown.head : null,
+    (events) => {
+      if (urls.at !== undefined || !shown) return;
+      const path = shown.file.path;
+      const mine = events.filter(
+        (e) =>
+          e.seq > shown.head &&
+          (e.path === path || e.from_path === path) &&
+          e.actor !== props.actor,
+      );
+      const last = mine[mine.length - 1];
+      if (last) setChange(last);
+    },
+    swap,
+  );
+  const idle = useIdle(15_000);
+  const swappable = change !== null && change.op !== "delete" && change.op !== "move";
   useEffect(() => {
     if (swappable && idle) swap();
   }, [swappable, idle, swap]);
@@ -167,7 +176,7 @@ export function File(props: { urls: Urls; path: string; done: string | null; act
       <LibNav urls={urls} active="files" />
       {notice && <div className="notice ok">{notice}</div>}
       {change && shown && (
-        <ChangeBanner urls={urls} change={change} shownSeq={shown.seq} onSwap={swap} />
+        <ChangeBanner urls={urls} change={change} shownSeq={shown.file.seq} onSwap={swap} />
       )}
       <Status loaded={loaded}>
         {(d) =>
