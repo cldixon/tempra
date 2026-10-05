@@ -64,35 +64,76 @@ export type Loaded<T> =
   | { state: "ready"; data: T };
 
 /**
+ * What each page loaded last, by its key (the page and everything it reads), so that returning
+ * to a page draws it at once. Bounded: the least recently used drop out first.
+ */
+const cache = new Map<string, unknown>();
+const CACHE_SIZE = 100;
+
+function remember(key: string, data: unknown) {
+  cache.delete(key);
+  cache.set(key, data);
+  if (cache.size > CACHE_SIZE) cache.delete(cache.keys().next().value as string);
+}
+
+/** Two answers with the same content (the same JSON), so a page can keep the one it shows. */
+const same = (a: unknown, b: unknown) => {
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
+};
+
+/**
  * Loads data for a page and reloads it when `key` changes; `reload` fetches again in place. A
- * response that arrives after the page moved on is dropped.
+ * page seen before draws at once from what it loaded last time and is checked again in the
+ * background: it changes only if the answer did, so an unchanged page keeps its objects (the
+ * reader is not rebuilt, the scroll stays). A response that arrives after the page moved on is
+ * dropped.
  */
 export function useLoad<T>(key: string, load: () => Promise<T>): Loaded<T> & { reload(): void } {
-  const [result, setResult] = useState<{ key: string; value: Loaded<T> }>({
+  const initial = (k: string): Loaded<T> =>
+    cache.has(k) ? { state: "ready", data: cache.get(k) as T } : { state: "loading" };
+  const [result, setResult] = useState<{ key: string; value: Loaded<T> }>(() => ({
     key,
-    value: { state: "loading" },
-  });
+    value: initial(key),
+  }));
   const [tick, setTick] = useState(0);
   // biome-ignore lint/correctness/useExhaustiveDependencies: `key` names everything `load` reads.
   useEffect(() => {
     let live = true;
     load().then(
-      (data) => live && setResult({ key, value: { state: "ready", data } }),
-      (e: unknown) =>
-        live &&
-        setResult({
-          key,
-          value: {
-            state: "error",
-            error: e instanceof ApiError ? e : new ApiError(0, "network", String(e)),
-          },
-        }),
+      (data) => {
+        if (!live) return;
+        const shown = cache.get(key);
+        if (cache.has(key) && same(shown, data)) {
+          // Nothing changed: keep what is on screen (and mark it as just used).
+          remember(key, shown);
+          setResult((r) =>
+            r.key === key && r.value.state === "ready"
+              ? r
+              : { key, value: { state: "ready", data: shown as T } },
+          );
+          return;
+        }
+        remember(key, data);
+        setResult({ key, value: { state: "ready", data } });
+      },
+      (e: unknown) => {
+        if (!live) return;
+        const error = e instanceof ApiError ? e : new ApiError(0, "network", String(e));
+        // Offline: what was shown stays. An answer (gone, not allowed) replaces it.
+        if (error.status === 0 && cache.has(key)) return;
+        cache.delete(key);
+        setResult({ key, value: { state: "error", error } });
+      },
     );
     return () => {
       live = false;
     };
   }, [key, tick]);
   const reload = useCallback(() => setTick((t) => t + 1), []);
-  const value: Loaded<T> = result.key === key ? result.value : { state: "loading" };
+  const value: Loaded<T> = result.key === key ? result.value : initial(key);
   return { ...value, reload };
 }

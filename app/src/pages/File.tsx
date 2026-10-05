@@ -167,6 +167,10 @@ export function File(props: { urls: Urls; path: string; done: string | null; act
     },
     swap,
   );
+  // A page drawn from the cache catches up in the background: a change it now shows is no news.
+  useEffect(() => {
+    if (change && shown && change.seq <= shown.head) setChange(null);
+  }, [change, shown]);
   const idle = useIdle(15_000);
   const swappable = change !== null && change.op !== "delete" && change.op !== "move";
   useEffect(() => {

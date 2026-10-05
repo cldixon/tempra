@@ -296,6 +296,11 @@ async function browserRenders(
       await page.getByRole("heading", { level: 1, name: slug }).waitFor();
       await page.goForward();
       await page.waitForURL(`${lib}/${enc(nested)}`);
+      // A page seen before draws from the cache: no loading state on the way back.
+      if ((await page.getByText("Loading…").count()) > 0) {
+        throw new Error("a page seen before showed Loading… again");
+      }
+      await page.locator(".body .prose").waitFor({ timeout: 1000 });
       if ((await page.locator('.ws-sidebar[data-gate="kept"]').count()) !== 1) {
         throw new Error("the sidebar was rebuilt (the page reloaded or the frame remounted)");
       }
