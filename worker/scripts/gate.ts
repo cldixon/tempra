@@ -634,10 +634,17 @@ async function browserRenders(
         /** Clicks into a paragraph of the body, goes to the end of that line, and types. */
         const typeInto = async (text: string, which: "first" | "last" = "last") => {
           // A paragraph with words in it (code blocks and tables hold none).
-          await body
-            .locator("p", { hasText: /\w{4,}/ })
-            [which]()
-            .click();
+          const target = body.locator("p", { hasText: /\w{4,}/ })[which]();
+          await target.click();
+          // The editor takes up the click's selection on the next selectionchange; a person
+          // never types within the same frame, so wait until the caret is in the paragraph.
+          const inside = () =>
+            target.evaluate((p) => {
+              const node = getSelection()?.anchorNode ?? null;
+              return node !== null && p.contains(node);
+            });
+          for (let i = 0; !(await inside()) && i < 20; i++) await page.waitForTimeout(50);
+          await page.waitForTimeout(100);
           await page.keyboard.press("End");
           await page.keyboard.type(text);
         };
@@ -698,7 +705,10 @@ async function browserRenders(
         await typeInto(" A second edit.", "first");
         // The caret is where the person clicked, not at the start of the body.
         if ((await body.locator("p", { hasText: "A second edit." }).count()) !== 1) {
-          throw new Error("the typed text is not in the paragraph clicked");
+          const where = await body
+            .locator(":scope > *", { hasText: "A second edit." })
+            .evaluateAll((els) => els.map((e) => `${e.tagName}: ${e.textContent?.slice(0, 80)}`));
+          throw new Error(`the typed text is not in the paragraph clicked: ${where.join(" | ")}`);
         }
         await agentAppends("An agent wrote while the person edited.");
         await save("gate: a person edits again");

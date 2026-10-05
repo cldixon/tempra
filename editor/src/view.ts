@@ -178,8 +178,9 @@ export function mountReader(opts: ReaderOptions): Reader {
 
   if (opts.tooltip) {
     const ask = opts.tooltip;
-    const hover = Tooltip.hover(async (_wg, pos, side) => {
-      const hovered = hoveredAt(opts.parsed, pos, side);
+    const hover = Tooltip.hover(async (wg, pos, side) => {
+      // The document on screen, which differs from the loaded one while a person edits.
+      const hovered = hoveredAt(wg.state.doc, pos, side);
       if (!hovered) return null;
       const dom = await ask(hovered.what);
       if (!dom) return null;
@@ -258,7 +259,7 @@ export function mountReader(opts: ReaderOptions): Reader {
   return {
     dom: wg.dom,
     highlight: (marks) =>
-      wg.dispatch({ effects: setHighlights.of(highlightSet(marks, opts.parsed.doc.length)) }),
+      wg.dispatch({ effects: setHighlights.of(highlightSet(marks, wg.state.doc.length)) }),
     selection,
     setEditable: (on, editOpts) => {
       editingNow = on;
@@ -289,11 +290,11 @@ export function mountReader(opts: ReaderOptions): Reader {
 
 /** The footnote reference or link at a document position, with the range it covers. */
 function hoveredAt(
-  parsed: Parsed,
+  doc: Parsed["doc"],
   pos: number,
   side: -1 | 1,
 ): { what: Hovered; from: number; to: number } | null {
-  const doc = parsed.doc;
+  if (pos < 0 || pos > doc.length) return null;
   const at = doc.resolve(pos);
   const node = side < 0 ? at.nodeBefore : at.nodeAfter;
   if (!node) return null;
