@@ -11,6 +11,10 @@
  *                                                    scripted agents on the preview's `agents`
  *                                                    library (scripts/agents.ts); creates nothing
  *                                                    but that library and a token per agent
+ *   bun run preview token --pr N --slug S [--actor claude-code/dev]
+ *                                                    a write token on the operator's library S
+ *                                                    (created if missing), as JSON; used by
+ *                                                    `bun run mcp --pr N` (scripts/mcp.ts)
  *
  * `down` and `sweep` take --dry-run: list what would be deleted, delete nothing.
  *
@@ -36,6 +40,8 @@ const { values, positionals } = parseArgs({
     rounds: { type: "string" },
     patient: { type: "boolean" },
     "keep-files": { type: "boolean" },
+    slug: { type: "string" },
+    actor: { type: "string" },
   },
 });
 const command = positionals[0];
@@ -215,15 +221,9 @@ async function seedRemote(
   };
 }
 
-// ------------------------------------------------------------------ agents
-
-/**
- * Scripted agents against PR N's preview, which must be up: a token per agent on the library
- * `agents` in the operator's account (written to the preview's D1), then the scenarios.
- */
-async function agents(pr: string, email: string | undefined): Promise<boolean> {
+/** PR N's preview: its URL, and the environment that reaches its D1 (it must be up). */
+async function previewEnv(pr: string) {
   const names = previewDeployment(pr);
-  const url = `https://${names.host}`;
   const d1 = await d1Id(names.d1.name);
   const kv = await kvId(`tempra-oauth-pr-${pr}`);
   if (!d1 || !kv) throw new Error(`PR ${pr} has no preview; bring it up first.`);
@@ -235,6 +235,27 @@ async function agents(pr: string, email: string | undefined): Promise<boolean> {
     TEMPRA_PREVIEW_KV_ID: kv,
     CF_SEND_TELEMETRY: "false",
   };
+  return { url: `https://${names.host}`, env };
+}
+
+/**
+ * A write token on one of the operator's libraries in PR N's preview (created if missing), for
+ * an agent session working against the preview (`bun run mcp --pr N`). Prints JSON.
+ */
+async function token(pr: string, slug: string, actor: string, email: string | undefined) {
+  const { url, env } = await previewEnv(pr);
+  const s = await seedRemote(slug, actor, email, env);
+  console.log(JSON.stringify({ url, owner: s.owner, slug: s.slug, actor, token: s.token }));
+}
+
+// ------------------------------------------------------------------ agents
+
+/**
+ * Scripted agents against PR N's preview, which must be up: a token per agent on the library
+ * `agents` in the operator's account (written to the preview's D1), then the scenarios.
+ */
+async function agents(pr: string, email: string | undefined): Promise<boolean> {
+  const { url, env } = await previewEnv(pr);
   const seeded = [];
   for (let i = 1; i <= Number(values.agents ?? 3); i++) {
     seeded.push(await seedRemote("agents", `claude-code/agent-${i}`, email, env));
@@ -353,11 +374,18 @@ if (command === "up" && values.pr) {
 } else if (command === "agents" && values.pr) {
   const ok = await agents(values.pr, values.email || process.env.TEMPRA_PREVIEW_EMAIL || undefined);
   process.exit(ok ? 0 : 1);
+} else if (command === "token" && values.pr && values.slug) {
+  await token(
+    values.pr,
+    values.slug,
+    values.actor ?? "claude-code/dev",
+    values.email || process.env.TEMPRA_PREVIEW_EMAIL || undefined,
+  );
 } else if (command === "sweep" && values.keep !== undefined) {
   await sweep(new Set(values.keep.split(/[\s,]+/).filter(Boolean)));
 } else {
   console.error(
-    "Usage: bun run preview up --pr N [--email E] | down --pr N | sweep --keep 3,7 (empty: none) | agents --pr N [--agents 3] [--scenario …] [--pace ms] [--rounds n] [--patient] [--keep-files]",
+    "Usage: bun run preview up --pr N [--email E] | down --pr N | sweep --keep 3,7 (empty: none) | agents --pr N [--agents 3] [--scenario …] [--pace ms] [--rounds n] [--patient] [--keep-files] | token --pr N --slug S [--actor A]",
   );
   process.exit(2);
 }

@@ -22,7 +22,8 @@
     "logs": "bun run --filter worker logs",
     "preview": "bun run --filter worker preview",
     "admin": "bun run --filter worker admin",
-    "agents": "bun run --filter worker agents"
+    "agents": "bun run --filter worker agents",
+    "mcp": "bun run --filter worker mcp"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.14"

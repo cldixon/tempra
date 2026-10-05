@@ -43,6 +43,8 @@ describe("MCP server", () => {
       "write",
     ];
     const tier2 = [
+      "comment",
+      "comments",
       "diff",
       "export",
       "history",

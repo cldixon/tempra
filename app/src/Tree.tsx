@@ -12,6 +12,8 @@ interface Entry {
   kind: "dir" | "concept" | "attachment";
   title?: string | null;
   seq?: number | null;
+  /** Open comment threads on it. */
+  comments?: number;
 }
 
 /** How long a file keeps its "an agent just changed this" mark. */
@@ -155,7 +157,10 @@ export function Tree(props: {
           void load();
         }, wait);
       }
-      const agents = events.filter((e) => !e.actor.startsWith("human:") && e.op !== "delete");
+      // A comment is not a change to the file; the refresh above updates its count.
+      const agents = events.filter(
+        (e) => !e.actor.startsWith("human:") && e.op !== "delete" && e.op !== "comment",
+      );
       if (agents.length > 0) {
         setActive((a) => {
           const next = new Map(a);
@@ -210,7 +215,23 @@ export function Tree(props: {
     },
   });
 
-  const mark = (e: Entry) => {
+  const mark = (e: Entry) => (
+    <>
+      {change(e)}
+      {e.comments ? (
+        <span
+          className="tree-mark"
+          title={`${e.comments} open comment${e.comments === 1 ? "" : "s"}`}
+        >
+          <span aria-hidden="true">{e.comments}</span>
+          <span className="visually-hidden">
+            {e.comments} open comment{e.comments === 1 ? "" : "s"}
+          </span>
+        </span>
+      ) : null}
+    </>
+  );
+  const change = (e: Entry) => {
     const a = active.get(e.path);
     if (a && now - a.at < ACTIVE_MS) {
       return (

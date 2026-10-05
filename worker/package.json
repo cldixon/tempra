@@ -13,7 +13,8 @@
     "logs": "bun scripts/logs.ts",
     "admin": "bun scripts/admin.ts",
     "preview": "bun scripts/preview.ts",
-    "agents": "bun scripts/agents.ts"
+    "agents": "bun scripts/agents.ts",
+    "mcp": "bun scripts/mcp.ts"
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "^1.2.1",
@@ -21,6 +22,7 @@
     "@noble/hashes": "^2.4.0",
     "@tempra/app": "workspace:*",
     "@tempra/design": "workspace:*",
+    "@tempra/editor": "workspace:*",
     "hono": "^4.13.9",
     "mdast-util-from-markdown": "^2.0.3",
     "mdast-util-gfm-footnote": "^2.1.0",

@@ -28,6 +28,8 @@ coverage/
 
 # Env and secrets
 .env
+# bun run mcp: tokens it made for preview libraries
+.mcp-tokens.json
 .env.*
 !.env.example
 

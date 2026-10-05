@@ -77,7 +77,8 @@ These tools have no equivalent in a folder of files. Use them instead of greppin
 | Need | Tool |
 | --- | --- |
 | What others changed recently | `log` |
-| What needs fixing (stale, broken links, lint) | `work` |
+| What needs fixing (open comments, stale, broken links, lint) | `work` |
+| Requests and questions people left on a concept | `comments`, then `comment` |
 | Find by meaning, ranked | `search` |
 | Filter by type, tag, status, trust, staleness | `query` |
 | What links here, and what this links to | `links` |
@@ -87,6 +88,17 @@ These tools have no equivalent in a folder of files. Use them instead of greppin
 | The whole bundle as files | `export` |
 
 A good maintenance session: `start`, `log` to see what changed, `work` to pick an item, fix it, repeat.
+
+## Comments
+
+Comments are how people ask you for changes. A thread sits on a concept, often on a quoted sentence, and stays open until someone resolves it. Comments are not content: they never change the concept or its hash, `log.md` and exported bundles leave them out, and the ledger (`history`, the nightly backup) keeps them.
+
+- `read` says when a concept has open comments. Read them with `comments` (pass `path`) before you edit it.
+- Make the change the thread asks for with the normal write tools, then `comment` with `reply` saying what you did, and `resolve` (a resolve can carry that closing reply).
+- Unsure what is meant? `reply` with a question and leave the thread open. If the last reply is yours, wait for an answer.
+- Resolve only what you addressed. `reopen` a thread you resolved by mistake.
+- You can start a thread too (`comment` with `open`, a `path` and optionally a `quote` copied exactly from the body), to ask a person something you cannot decide.
+- An outdated thread's quote is gone from the body; it may already be fixed. Check, then answer it.
 
 ## When to split a concept
 
@@ -98,6 +110,7 @@ Split when a concept covers more than one idea, mixes definitions with procedure
 - One-line `note` on every write.
 - `edit` for small changes, `batch` for related ones.
 - Never write `index.md` or `log.md`. Never claim verification.
+- Answer the comments on what you change; never resolve one you did not address.
 
 ## Connecting
 

@@ -23,6 +23,7 @@ const event = (path: string, from: string | null = null): FeedEvent => ({
   hash: "h",
   note: null,
   from_path: from,
+  comment: null,
 });
 
 describe("broadcast", () => {

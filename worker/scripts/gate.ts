@@ -318,11 +318,21 @@ async function browserRenders(
           el.scrollTop = 300;
         });
         const before = await main.evaluate((el) => el.scrollTop);
+        const title = await main.locator("h1").first().innerText();
         const link = sidebar.locator(`a[title="${other}"]`);
         await link.hover();
         await page.waitForTimeout(1500); // the hover's prefetch lands in the cache
         await link.click();
         await page.waitForURL(`${lib}/${enc(other)}`);
+        // The URL changes before React draws the new page: wait for the page itself (on a
+        // slow runner the old one can still be on screen, scrolled, when the URL has moved).
+        // (A locator, not waitForFunction: the app's CSP refuses string evaluation.)
+        const exact = new RegExp(`^${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
+        await main
+          .locator("h1", { hasNotText: exact })
+          .or(main.getByText("Loading…"))
+          .first()
+          .waitFor({ timeout: 5000 });
         if ((await page.getByText("Loading…").count()) > 0) {
           throw new Error("a hovered file still showed Loading… when opened");
         }
@@ -502,6 +512,100 @@ async function browserRenders(
       await page.locator(".tooltip strong").first().waitFor({ timeout: 10_000 });
       if (shots) await page.screenshot({ path: `${shots}/link.png` });
     });
+    // Comments (TEMPRA-13): a person comments on selected text; an agent answers and resolves,
+    // and the open page follows without reloading.
+    await step(
+      "comments: comment on a selection, an agent replies and resolves, live",
+      async () => {
+        await page.goto(url);
+        await page.locator(".body .prose").waitFor({ timeout: 15_000 });
+        await page.getByRole("heading", { level: 2, name: /^Comments/ }).waitFor();
+        // Selects the first 16 characters of the first longer run of paragraph text, as a
+        // person dragging over it would (a script string: this file has no DOM types).
+        const select = () =>
+          page.evaluate<string | null>(`(() => {
+          const root = document.querySelector(".body .prose");
+          const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+          for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+            const text = n.textContent ?? "";
+            if (text.trim().length < 24 || n.parentElement?.closest("h1, h2, h3, a, code")) continue;
+            const start = text.search(/\\S/);
+            const range = document.createRange();
+            range.setStart(n, start);
+            range.setEnd(n, start + 16);
+            const sel = document.getSelection();
+            sel?.removeAllRanges();
+            sel?.addRange(range);
+            return range.toString();
+          }
+          return null;
+        })()`);
+        const unselect = () => page.evaluate("document.getSelection().removeAllRanges()");
+        const tools = page.locator(".selection-tools");
+        const draft = page.locator(".body mark.comment-draft");
+        // Selecting shows the toolbar; clicking away (the selection gone) hides it, and
+        // nothing is held for a comment.
+        const quote = await select();
+        if (!quote) throw new Error("no paragraph text to select");
+        await tools.waitFor({ timeout: 5_000 });
+        if (shots) await page.screenshot({ path: `${shots}/selection-tools.png` });
+        await unselect();
+        await tools.waitFor({ state: "detached", timeout: 5_000 });
+        if ((await page.locator(".comment-form .quote").count()) > 0) {
+          throw new Error("a quote stayed in the panel after the selection went");
+        }
+        // Comment on the toolbar starts a draft: outlined in the body, the box focused.
+        // Escape drops it; a second draft is posted.
+        await select();
+        await tools.getByRole("button", { name: "Comment" }).click();
+        await draft.waitFor({ timeout: 5_000 });
+        await page.locator(".comment-form .quote").waitFor();
+        if (
+          !(await page
+            .locator("#new-comment")
+            .evaluate((el) => el === el.ownerDocument.activeElement))
+        ) {
+          throw new Error("the comment box did not take the focus");
+        }
+        await page.keyboard.press("Escape");
+        await draft.waitFor({ state: "detached", timeout: 5_000 });
+        await select();
+        await tools.getByRole("button", { name: "Comment" }).click();
+        await tools.waitFor({ state: "detached", timeout: 5_000 });
+        await page.locator("#new-comment").fill("Gate: please check this sentence.");
+        if (shots) await page.screenshot({ path: `${shots}/comment-draft.png` });
+        await page
+          .locator(".comment-form")
+          .first()
+          .getByRole("button", { name: "Comment", exact: true })
+          .click();
+        await draft.waitFor({ state: "detached", timeout: 10_000 });
+        const mark = page.locator(".body mark.comment-mark");
+        await mark.first().waitFor({ timeout: 10_000 });
+        if (!(await mark.first().innerText()).includes(quote.trim().slice(0, 8))) {
+          throw new Error(`highlight: ${await mark.first().innerText()} for ${quote}`);
+        }
+        await page.locator(".thread").getByText("Gate: please check this sentence.").waitFor();
+        if (shots) await page.screenshot({ path: `${shots}/comment.png` });
+        const thread = await mark.first().getAttribute("data-thread");
+        await markStay();
+        await page.waitForTimeout(300);
+        for (const [suffix, body] of [
+          ["", { body: "Checked it; it holds." }],
+          ["/resolve", {}],
+        ] as const) {
+          const r = await fetch(`${libApi}/comments/${thread}${suffix}`, {
+            method: "POST",
+            headers: { ...bearer, "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          if (!r.ok) throw new Error(`agent ${suffix || "reply"}: ${r.status} ${await r.text()}`);
+        }
+        await page.getByText("Resolved (1)").waitFor({ timeout: 10_000 });
+        await mark.first().waitFor({ state: "detached", timeout: 10_000 });
+        if (!(await stayed())) throw new Error("the page reloaded");
+      },
+    );
     await step("ledger, reached by a link within the app, tails live", async () => {
       await markStay();
       await page.getByRole("link", { name: "Ledger", exact: true }).click();

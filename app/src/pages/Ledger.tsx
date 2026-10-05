@@ -11,7 +11,7 @@ interface LedgerEvent {
   seq: number;
   op: string;
   path: string;
-  meta: { from_path?: unknown } | null;
+  meta: { from_path?: unknown; comment?: unknown } | null;
 }
 
 interface LedgerRequest {
@@ -136,7 +136,8 @@ function Request({
 }) {
   const shown = r.events.slice(0, 12);
   const more = r.events.length - shown.length;
-  const revertible = r.events.some((e) => e.op !== "verify");
+  // Verifications and comments are not content; there is nothing of theirs to revert.
+  const revertible = r.events.some((e) => e.op !== "verify" && e.op !== "comment");
   const first = r.events[0]?.seq;
   const last = r.events.at(-1)?.seq;
   return (
@@ -170,7 +171,29 @@ function Request({
   );
 }
 
+/** What a comment event did: "replied", "resolved"…, and the start of what was said. */
+const COMMENT_VERBS: Record<string, string> = {
+  open: "commented",
+  reply: "replied",
+  resolve: "resolved a thread",
+  reopen: "reopened a thread",
+};
+
 function EventLine({ urls, event: e }: { urls: Urls; event: LedgerEvent }) {
+  const comment = e.meta?.comment as { kind?: string; body?: string } | undefined;
+  if (e.op === "comment" && comment) {
+    const said = typeof comment.body === "string" ? comment.body.replace(/\s+/g, " ") : "";
+    return (
+      <li>
+        <span className="op op-comment">comment</span>{" "}
+        <a href={`${urls.pinned(undefined).file(e.path)}#comments`}>{e.path}</a>{" "}
+        <span className="muted">
+          {COMMENT_VERBS[comment.kind ?? ""] ?? comment.kind}
+          {said ? `: ${said.length > 120 ? `${said.slice(0, 119)}…` : said}` : ""}
+        </span>
+      </li>
+    );
+  }
   // A deleted file is shown as it was just before.
   const view = urls.pinned(e.op === "delete" ? e.seq - 1 : e.seq).file(e.path);
   return (

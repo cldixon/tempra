@@ -180,6 +180,77 @@ div.body wg-content {
 }
 
 /*
+ * Comments (TEMPRA-13), in lines only: a thread's quote is underlined in the body (solid when its
+ * thread is the one in focus), a comment being written is outlined, and the selection toolbar
+ * and the threads are boxes and rules in the text color.
+ */
+mark.comment-mark {
+  background: none;
+  color: inherit;
+  text-decoration: underline dotted;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+  cursor: pointer;
+}
+
+mark.comment-mark.active {
+  text-decoration-style: solid;
+  text-decoration-thickness: 2px;
+}
+
+mark.comment-draft {
+  background: none;
+  color: inherit;
+  outline: 1px dashed var(--tempra-color-text);
+}
+
+.selection-tools {
+  display: flex;
+  gap: var(--tempra-space-1);
+  padding: var(--tempra-space-1);
+  border: 1px solid var(--tempra-color-text);
+  background: var(--tempra-color-bg);
+}
+
+.threads {
+  list-style: none;
+  padding: 0;
+}
+
+.thread {
+  border-top: 1px solid var(--tempra-color-border);
+  padding: var(--tempra-space-2) 0;
+}
+
+.thread.active {
+  outline: 1px solid var(--tempra-color-text);
+  outline-offset: 2px;
+}
+
+.quote {
+  margin: 0 0 var(--tempra-space-1);
+  color: var(--tempra-color-muted);
+  font-style: italic;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.comment {
+  margin: var(--tempra-space-1) 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.comment-form textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 3.5rem;
+  margin-bottom: var(--tempra-space-1);
+  font: inherit;
+}
+
+/*
  * The workspace (TEMPRA-19): a library's tree on the left, the open file in the middle, its
  * context on the right, under one header. Structure only: lines and spacing from the tokens, no
  * decoration (the UI rule). Under 60rem the side panels become drawers over the main pane.
