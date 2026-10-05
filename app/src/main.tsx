@@ -19,6 +19,7 @@ import {
 import { interceptLinks, match, useLocation } from "./router";
 import { Header, type Me, PageBoundary } from "./ui";
 import { Urls } from "./urls";
+import { type Place, Workspace } from "./Workspace";
 
 let handle: string | null = null;
 
@@ -45,6 +46,8 @@ function App() {
   const route = match(url);
   const actor = who?.actor ?? "";
   let page: React.ReactNode = null;
+  /** For a library's pages: the library and where in it the page is (the workspace frame). */
+  let library: { urls: Urls; place: Place } | null = null;
   if (!route) {
     // The Worker serves this page only at the app's own URLs, so this is a bug, not a 404.
     page = <h1>Not found</h1>;
@@ -62,6 +65,27 @@ function App() {
     page = <Account done={route.done} />;
   } else {
     const urls = urlsFor(route.owner, route.slug, "at" in route ? route.at : undefined);
+    const place: Place = { file: null, dir: null, view: null };
+    switch (route.page) {
+      case "directory":
+        place.dir = route.dir;
+        break;
+      case "file":
+      case "diff":
+      case "restore":
+        place.file = route.path;
+        break;
+      case "ledger":
+      case "revert":
+        place.view = "ledger";
+        break;
+      case "library-connect":
+        place.view = "connect";
+        break;
+      default:
+        place.view = route.page;
+    }
+    library = { urls: urlsFor(route.owner, route.slug, undefined), place };
     switch (route.page) {
       case "directory":
         page = <Directory urls={urls} dir={route.dir} />;
@@ -100,12 +124,20 @@ function App() {
         break;
     }
   }
+  const boundary = <PageBoundary key={url.pathname + url.search}>{page}</PageBoundary>;
+  // A library's pages share one workspace, kept mounted while the person moves within it.
+  if (library) {
+    const { urls, place } = library;
+    return (
+      <Workspace key={`${urls.owner}/${urls.slug}`} urls={urls} place={place} me={who}>
+        {boundary}
+      </Workspace>
+    );
+  }
   return (
     <>
       <Header me={who} />
-      <main>
-        <PageBoundary key={url.pathname + url.search}>{page}</PageBoundary>
-      </main>
+      <main>{boundary}</main>
     </>
   );
 }

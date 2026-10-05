@@ -137,6 +137,20 @@ describe("files", () => {
 });
 
 describe("queries and revert", () => {
+  test("GET /outline: every file's path, kind, title and seq in one answer, nothing more", async () => {
+    const { req } = setup();
+    await req("/files/a.md", { method: "PUT", body: doc("A.", "title: Alpha\n") });
+    await req("/files/deep/er/b.md", { method: "PUT", body: doc("B.") });
+    const r = await req("/outline");
+    expect(r.status).toBe(200);
+    const body = (await r.json()) as { seq: number; files: Record<string, unknown>[] };
+    expect(body.files).toEqual([
+      { path: "a.md", kind: "concept", title: "Alpha", seq: expect.any(Number) },
+      { path: "deep/er/b.md", kind: "concept", title: null, seq: expect.any(Number) },
+    ]);
+    expect(body.seq).toBeGreaterThan(0);
+  });
+
   test("tree, concepts, search, grep, links, events, revert", async () => {
     const { req } = setup();
     const batch = await req("/batch", {

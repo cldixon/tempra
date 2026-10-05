@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { PageCache, share } from "./cache";
 
 /** An error answer from the API: `{ error, code }` with its HTTP status. */
 export class ApiError extends Error {
@@ -63,36 +64,89 @@ export type Loaded<T> =
   | { state: "error"; error: ApiError }
   | { state: "ready"; data: T };
 
+const cache = new PageCache();
+/** Loads under way, so a prefetch and the page that follows share one request. */
+const inflight = new Map<string, { started: number; promise: Promise<unknown> }>();
+
+function fetchOnce<T>(
+  key: string,
+  load: () => Promise<T>,
+): { started: number; promise: Promise<T> } {
+  let f = inflight.get(key) as { started: number; promise: Promise<T> } | undefined;
+  if (!f) {
+    const started = performance.now();
+    const promise = load().finally(() => inflight.delete(key));
+    f = { started, promise };
+    inflight.set(key, f as { started: number; promise: Promise<unknown> });
+  }
+  return f;
+}
+
+/**
+ * Loads a page's data ahead of a likely visit (a link hovered or selected), so the page draws
+ * from the cache when it opens. Does nothing when a fresh prefetch is here or one is on its way.
+ */
+export function prefetch<T>(key: string, load: () => Promise<T>) {
+  if (cache.fresh(key) || inflight.has(key)) return;
+  const { started, promise } = fetchOnce(key, load);
+  promise.then(
+    (data) => cache.put(key, data, started, true),
+    () => {},
+  );
+}
+
 /**
  * Loads data for a page and reloads it when `key` changes; `reload` fetches again in place. A
- * response that arrives after the page moved on is dropped.
+ * page seen before draws at once from what it loaded last time and is checked again in the
+ * background (unless a prefetch has just loaded it); the new answer reuses every unchanged part
+ * of what is shown, so the page's memos and the reader built on them survive. A response that
+ * arrives after the page moved on is dropped.
  */
 export function useLoad<T>(key: string, load: () => Promise<T>): Loaded<T> & { reload(): void } {
-  const [result, setResult] = useState<{ key: string; value: Loaded<T> }>({
+  const initial = (k: string): Loaded<T> =>
+    cache.has(k) ? { state: "ready", data: cache.get(k) as T } : { state: "loading" };
+  const [result, setResult] = useState<{ key: string; value: Loaded<T> }>(() => ({
     key,
-    value: { state: "loading" },
-  });
+    value: initial(key),
+  }));
   const [tick, setTick] = useState(0);
   // biome-ignore lint/correctness/useExhaustiveDependencies: `key` names everything `load` reads.
   useEffect(() => {
     let live = true;
-    load().then(
-      (data) => live && setResult({ key, value: { state: "ready", data } }),
-      (e: unknown) =>
-        live &&
-        setResult({
-          key,
-          value: {
-            state: "error",
-            error: e instanceof ApiError ? e : new ApiError(0, "network", String(e)),
-          },
-        }),
+    // What the page drew from the cache before this answer, if anything.
+    const drawn = cache.get(key);
+    // Just prefetched (a hover a moment ago): drawn from the cache, no need to ask again.
+    if (tick === 0 && cache.takeFresh(key)) return;
+    // An explicit reload (after an action, or a write on the feed) always asks afresh.
+    const { started, promise } =
+      tick === 0 ? fetchOnce(key, load) : { started: performance.now(), promise: load() };
+    promise.then(
+      (data) => {
+        cache.put(key, data, started);
+        if (!live) return;
+        // Compared with what this page shows, not with the cache (a prefetch may have
+        // refreshed the cache without the page).
+        setResult((r) => {
+          const shown = r.key === key && r.value.state === "ready" ? r.value.data : drawn;
+          const next = share(shown, data);
+          if (r.key === key && next === shown) return r;
+          return { key, value: { state: "ready", data: next as T } };
+        });
+      },
+      (e: unknown) => {
+        if (!live) return;
+        const error = e instanceof ApiError ? e : new ApiError(0, "network", String(e));
+        // Offline: what was shown stays. An answer (gone, not allowed) replaces it.
+        if (error.status === 0 && cache.has(key)) return;
+        cache.drop(key);
+        setResult({ key, value: { state: "error", error } });
+      },
     );
     return () => {
       live = false;
     };
   }, [key, tick]);
   const reload = useCallback(() => setTick((t) => t + 1), []);
-  const value: Loaded<T> = result.key === key ? result.value : { state: "loading" };
+  const value: Loaded<T> = result.key === key ? result.value : initial(key);
   return { ...value, reload };
 }

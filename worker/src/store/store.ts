@@ -1531,6 +1531,22 @@ export class LibraryStore {
   }
 
   /** GET /tree: files under a prefix; with `depth`, deeper levels collapse into directory entries. */
+  /**
+   * GET /outline: every file's path, kind, title and sequence, for the app's file tree. Lean on
+   * purpose: titles come from the record cache, and nothing else per file is looked up (no trust
+   * tier, no attachment sizes), so it stays cheap to ask for after every burst of writes.
+   */
+  outline(opts: { at?: number } = {}) {
+    const snap = this.snapshot(opts.at);
+    const files = snap.sorted().map((e) => ({
+      path: e.path,
+      kind: e.kind,
+      title: e.kind === "concept" ? (str(field(this.record(e.hash), "title")) ?? null) : null,
+      seq: e.seq,
+    }));
+    return { seq: snap.seq, files };
+  }
+
   tree(opts: { prefix?: string; depth?: number; at?: number } = {}) {
     const snap = this.snapshot(opts.at);
     const prefix = normalizeDir(opts.prefix);
@@ -1924,12 +1940,15 @@ export class LibraryStore {
    * read time until the staleness maintainer arrives; broken links and lint come from flags.
    * Ranked by inbound links, then age.
    */
-  work(opts: { kind?: string; limit?: number } = {}) {
+  work(opts: { kind?: string; limit?: number; path?: string } = {}) {
     const snap = this.snapshot();
     const now = this.clock().getTime();
     const limit = Math.min(Math.max(opts.limit ?? 50, 1), 500);
     const items: WorkItem[] = [];
     const want = (k: string) => opts.kind === undefined || opts.kind === k;
+    // One file's items (the app's concept page), whatever the queue's length.
+    const only = opts.path === undefined ? undefined : (normalizePath(opts.path) ?? "");
+    const mine = (path: string) => only === undefined || path === only;
     if (want("stale")) {
       // From the typed column, so the queue never parses records (spec: Tier 3, staleness).
       const rows = this.sql.all<{ concept_id: string; stale_after: string }>(
@@ -1937,7 +1956,7 @@ export class LibraryStore {
       );
       for (const row of rows) {
         const e = snap.byId.get(row.concept_id);
-        if (e?.kind !== "concept") continue;
+        if (e?.kind !== "concept" || !mine(e.path)) continue;
         const staleAfter = row.stale_after;
         if (!isStale(staleAfter, now)) continue;
         items.push({
@@ -1962,7 +1981,7 @@ export class LibraryStore {
     for (const f of flags) {
       if (!want(f.kind)) continue;
       const e = snap.byId.get(f.concept_id);
-      if (!e) continue;
+      if (!e || !mine(e.path)) continue;
       const since =
         this.sql.all<{ ts: string }>("SELECT ts FROM events WHERE seq = ?", f.since_seq)[0]?.ts ??
         "";

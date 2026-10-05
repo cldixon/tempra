@@ -49,3 +49,20 @@ td {
 img {
   max-width: 100%;
 }
+
+/* A row of short labels (type, trust tier, status): kept apart, wrapping on narrow screens. */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--tempra-space-1) var(--tempra-space-2);
+}
+
+/* Text for screen readers only: what a symbol (a mark, an icon) means. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}

@@ -2,7 +2,7 @@ import { type FormEvent, useState } from "react";
 import { ApiError, api, field, useAction, useLoad } from "../api";
 import { useFeed, useTrailing } from "../live";
 import { navigate } from "../router";
-import { Chip, Crumbs, LibNav, plural, Status, useTitle, when } from "../ui";
+import { Chip, Crumbs, plural, Status, useTitle, when } from "../ui";
 import { baseName, type Urls } from "../urls";
 import { ConnectSteps } from "./Account";
 import { DiffLines } from "./Diff";
@@ -68,7 +68,6 @@ export function Work({ urls, kind }: { urls: Urls; kind?: string }) {
   useLive(urls, loaded.state === "ready" ? loaded.data.head : null, loaded.reload);
   return (
     <>
-      <LibNav urls={urls} active="work" />
       <h1>Work queue</h1>
       <p className="small">
         {KINDS.map(([k, label], i) => (
@@ -209,7 +208,6 @@ export function Transfer({ urls }: { urls: Urls }) {
     });
   return (
     <>
-      <LibNav urls={urls} active="transfer" />
       <h1>Import &amp; export</h1>
       {result && <div className="notice ok">{result}</div>}
       {action.error && <div className="notice">{action.error}</div>}
@@ -378,7 +376,6 @@ export function Recovery({ urls }: { urls: Urls }) {
   );
   return (
     <>
-      <LibNav urls={urls} active="recovery" />
       <h1>Recovery</h1>
       {result && <div className="notice ok">{result}</div>}
       {action.error && <div className="notice">{action.error}</div>}
@@ -514,52 +511,45 @@ export function Revert({ urls, request, actor }: { urls: Urls; request: string; 
     });
   };
   return (
-    <>
-      <LibNav urls={urls} active="ledger" />
-      <Status loaded={loaded}>
-        {({ r, diffs }) => (
-          <>
-            <h1>Revert this request?</h1>
-            <p>
-              {when(r.ts)} by <strong>{r.actor}</strong>
-              {r.note ? `: ${r.note}` : ""}
-            </p>
-            <ul className="events">
-              {r.events.map((e) => (
-                <EventLine key={e.seq} urls={urls} e={e} />
-              ))}
-            </ul>
-            <div className="panel-box">
-              <p>Undoes every change in this request, as a new request by {actor}.</p>
-              {action.error && <div className="notice">{action.error}</div>}
-              <form onSubmit={submit}>
-                <label>
-                  Note{" "}
-                  <input
-                    type="text"
-                    name="note"
-                    defaultValue={`Revert: ${r.note ?? r.request_id}`}
-                  />
-                </label>
-                <p>
-                  <button className="primary" type="submit" disabled={action.busy}>
-                    Revert
-                  </button>{" "}
-                  <a href={urls.ledger()}>Cancel</a>
-                </p>
-              </form>
-            </div>
-            <p className="small muted">What this request changed:</p>
-            {diffs.map((d) => (
-              <div key={d.path}>
-                <h2>{d.path}</h2>
-                <DiffLines diff={d.diff} />
-              </div>
+    <Status loaded={loaded}>
+      {({ r, diffs }) => (
+        <>
+          <h1>Revert this request?</h1>
+          <p>
+            {when(r.ts)} by <strong>{r.actor}</strong>
+            {r.note ? `: ${r.note}` : ""}
+          </p>
+          <ul className="events">
+            {r.events.map((e) => (
+              <EventLine key={e.seq} urls={urls} e={e} />
             ))}
-          </>
-        )}
-      </Status>
-    </>
+          </ul>
+          <div className="panel-box">
+            <p>Undoes every change in this request, as a new request by {actor}.</p>
+            {action.error && <div className="notice">{action.error}</div>}
+            <form onSubmit={submit}>
+              <label>
+                Note{" "}
+                <input type="text" name="note" defaultValue={`Revert: ${r.note ?? r.request_id}`} />
+              </label>
+              <p>
+                <button className="primary" type="submit" disabled={action.busy}>
+                  Revert
+                </button>{" "}
+                <a href={urls.ledger()}>Cancel</a>
+              </p>
+            </form>
+          </div>
+          <p className="small muted">What this request changed:</p>
+          {diffs.map((d) => (
+            <div key={d.path}>
+              <h2>{d.path}</h2>
+              <DiffLines diff={d.diff} />
+            </div>
+          ))}
+        </>
+      )}
+    </Status>
   );
 }
 
@@ -567,7 +557,7 @@ export function Revert({ urls, request, actor }: { urls: Urls; request: string; 
 export function Restore(props: { urls: Urls; path: string; to?: number; actor: string }) {
   const { urls, path, to } = props;
   useTitle(`Restore ${path} · ${urls.slug}`);
-  const loaded = useLoad(`restore ${path} ${to}`, async () => {
+  const loaded = useLoad(`restore ${urls.base} ${path} ${to}`, async () => {
     if (to === undefined) throw new ApiError(400, "bad_param", "`to` is required.");
     const stats = await api<{ seq: number }>(urls.api("stats"));
     return api<{ path: string; diff: string }>(urls.api("diff", { path, from: stats.seq, to }));
@@ -582,39 +572,36 @@ export function Restore(props: { urls: Urls; path: string; to?: number; actor: s
     });
   };
   return (
-    <>
-      <LibNav urls={urls} active="files" />
-      <Status loaded={loaded}>
-        {(d) => (
-          <>
-            <Crumbs urls={urls} path={d.path} file />
-            <h1>
-              Restore {baseName(d.path)} as of seq {to}?
-            </h1>
-            <div className="panel-box">
+    <Status loaded={loaded}>
+      {(d) => (
+        <>
+          <Crumbs urls={urls} path={d.path} file />
+          <h1>
+            Restore {baseName(d.path)} as of seq {to}?
+          </h1>
+          <div className="panel-box">
+            <p>
+              Writes back the version from seq {to}, as a revert by {props.actor}.
+            </p>
+            {action.error && <div className="notice">{action.error}</div>}
+            <form onSubmit={submit}>
+              <label>
+                Note{" "}
+                <input type="text" name="note" defaultValue={`Restore ${d.path} to seq ${to}`} />
+              </label>
               <p>
-                Writes back the version from seq {to}, as a revert by {props.actor}.
+                <button className="primary" type="submit" disabled={action.busy}>
+                  Restore
+                </button>{" "}
+                <a href={urls.pinned(to).file(d.path)}>Cancel</a>
               </p>
-              {action.error && <div className="notice">{action.error}</div>}
-              <form onSubmit={submit}>
-                <label>
-                  Note{" "}
-                  <input type="text" name="note" defaultValue={`Restore ${d.path} to seq ${to}`} />
-                </label>
-                <p>
-                  <button className="primary" type="submit" disabled={action.busy}>
-                    Restore
-                  </button>{" "}
-                  <a href={urls.pinned(to).file(d.path)}>Cancel</a>
-                </p>
-              </form>
-            </div>
-            <p className="small muted">Current version → version at seq {to}:</p>
-            <DiffLines diff={d.diff} />
-          </>
-        )}
-      </Status>
-    </>
+            </form>
+          </div>
+          <p className="small muted">Current version → version at seq {to}:</p>
+          <DiffLines diff={d.diff} />
+        </>
+      )}
+    </Status>
   );
 }
 
@@ -637,7 +624,6 @@ export function ConnectLibrary({ urls }: { urls: Urls }) {
   useLive(urls, loaded.state === "ready" ? loaded.data.head : null, loaded.reload);
   return (
     <>
-      <LibNav urls={urls} active="connect" />
       <h1>Connect an agent</h1>
       <p>
         Connections belong to your account. <a href="/connect">Connect an agent</a> covers every
@@ -679,7 +665,6 @@ export function DeleteLibrary({ urls }: { urls: Urls }) {
   };
   return (
     <>
-      <LibNav urls={urls} active="delete" />
       <h1>Delete {urls.slug}</h1>
       {action.error && <div className="notice">{action.error}</div>}
       <p>

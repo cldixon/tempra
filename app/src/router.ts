@@ -135,6 +135,10 @@ export function match(url: URL): Route | null {
 
 const NAVIGATE = "tempra:navigate";
 
+/** How the app last moved: to a new page, or back or forward through history. */
+let lastMove: "push" | "pop" = "push";
+export const lastNavigation = () => lastMove;
+
 /** The account's own pages, which no handle can collide with (they are reserved names). */
 const ACCOUNT_PAGES = new Set(["/", "/welcome", "/connect", "/tokens", "/apps", "/account"]);
 
@@ -147,6 +151,7 @@ export function navigate(href: string, opts: { replace?: boolean } = {}) {
   }
   if (opts.replace) history.replaceState(null, "", url.href);
   else history.pushState(null, "", url.href);
+  lastMove = "push";
   window.dispatchEvent(new Event(NAVIGATE));
   if (!url.hash) window.scrollTo(0, 0);
 }
@@ -156,11 +161,15 @@ export function useLocation(): URL {
   const [url, setUrl] = useState(() => new URL(location.href));
   useEffect(() => {
     const update = () => setUrl(new URL(location.href));
+    const back = () => {
+      lastMove = "pop";
+      update();
+    };
     window.addEventListener(NAVIGATE, update);
-    window.addEventListener("popstate", update);
+    window.addEventListener("popstate", back);
     return () => {
       window.removeEventListener(NAVIGATE, update);
-      window.removeEventListener("popstate", update);
+      window.removeEventListener("popstate", back);
     };
   }, []);
   return url;

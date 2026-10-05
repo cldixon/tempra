@@ -86,6 +86,10 @@ describe("verify, work queue, import and export (Phase 3, slice 3)", () => {
     const lint = await work("?kind=lint");
     expect(lint.items.map((i) => i.path)).toContain("b.md");
     expect(lint.items.every((i) => i.kind === "lint")).toBe(true);
+    // One file's items, as a concept page asks for them.
+    const one = await work("?path=a.md");
+    expect(one.items.map((i) => i.path)).toEqual(["a.md"]);
+    expect((await work("?path=nothing.md")).items).toEqual([]);
     await put(s, "gone.md", "---\ntype: Note\n---\nhere\n");
     expect((await work("?kind=broken_link")).items).toEqual([]);
   });

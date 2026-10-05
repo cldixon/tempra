@@ -11,6 +11,7 @@ export const LIBRARY_METHODS = [
   "revert",
   "read",
   "tree",
+  "outline",
   "concepts",
   "search",
   "grep",

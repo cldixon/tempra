@@ -8,9 +8,11 @@ import {
 } from "@tempra/editor";
 import type { Hovered } from "@tempra/editor/view";
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ApiError, api, useLoad } from "../api";
+import { ApiError, api, prefetch, useLoad } from "../api";
 import { type FeedEvent, useFeed } from "../live";
+import { registerPrefetch } from "../prefetch";
 import { el, Reader } from "../Reader";
+import { pushRecent } from "../recent";
 import { navigate } from "../router";
 import {
   AtNotice,
@@ -18,7 +20,6 @@ import {
   Chip,
   Crumbs,
   formatSize,
-  LibNav,
   Status,
   TrustChip,
   useScrollToHash,
@@ -26,6 +27,7 @@ import {
   when,
 } from "../ui";
 import { baseName, dirOf, enc, type Urls } from "../urls";
+import { ContextPanel } from "../Workspace";
 
 type Json = string | number | boolean | null | Json[] | { [k: string]: Json };
 type JsonObject = { [k: string]: Json };
@@ -104,36 +106,76 @@ function bodyHref(urls: Urls) {
   };
 }
 
+/** What a file's page shows: the file, the head, and for a concept its context. */
+interface FileData {
+  file: FileJson;
+  head: number;
+  extra: {
+    concept: Extract<FileJson, { kind: "concept" }>;
+    sources: Sources;
+    links: Links;
+    history: HistoryEvent[];
+    work: WorkItem[];
+  } | null;
+}
+
+/** Whether a path can be a concept: markdown, and not a synthesized index.md or log.md. */
+const isConceptPath = (path: string) =>
+  path.endsWith(".md") && !/(^|\/)(index|log)\.md$/.test(path);
+
+/** The cache key of a file's page (see useLoad). */
+const fileKey = (urls: Urls, path: string) => `file ${urls.file(path)}`;
+
+/**
+ * Everything a file's page shows, in one round of requests: the file and, for a concept, its
+ * sources, links, history and own work items (asked for in parallel; a file that is not a
+ * concept answers those with errors, which are then ignored).
+ */
+async function loadFile(urls: Urls, path: string): Promise<FileData> {
+  const p = enc(path);
+  const extra = <T,>(r: Promise<T>) =>
+    r.then(
+      (v) => ({ v }),
+      (e: unknown) => ({ e }),
+    );
+  const skip = Promise.resolve({ e: null });
+  // Only a concept has sources, links and history; the name says which files can be one.
+  const concept = isConceptPath(path);
+  const [file, stats, sources, links, history, work] = await Promise.all([
+    api<FileJson>(urls.api(`files/${p}`, { at: urls.at })),
+    api<{ seq: number }>(urls.api("stats")),
+    concept ? extra(api<Sources>(urls.api(`sources/${p}`, { at: urls.at }))) : skip,
+    concept ? extra(api<Links>(urls.api(`links/${p}`, { at: urls.at }))) : skip,
+    concept ? extra(api<{ events: HistoryEvent[] }>(urls.api(`history/${p}`))) : skip,
+    concept && urls.at === undefined
+      ? extra(api<{ items: WorkItem[] }>(urls.api("work", { path, limit: 500 })))
+      : Promise.resolve({ v: { items: [] as WorkItem[] } }),
+  ]);
+  const head = stats.seq;
+  if (file.kind !== "concept") return { file, head, extra: null };
+  // A concept reached by another spelling of its path: ask again by its own.
+  if (!concept) return loadFile(urls, file.path);
+  for (const r of [sources, links, history, work]) if ("e" in r) throw r.e;
+  const got = <T,>(r: { v: T } | { e: unknown }) => (r as { v: T }).v;
+  return {
+    file,
+    head,
+    extra: {
+      concept: file,
+      sources: got(sources),
+      links: got(links),
+      history: got(history).events,
+      work: got(work).items,
+    },
+  };
+}
+
+// Hovering a file in the tree, or picking it in the switcher, starts loading its page.
+registerPrefetch((urls, path) => prefetch(fileKey(urls, path), () => loadFile(urls, path)));
+
 export function File(props: { urls: Urls; path: string; done: string | null; actor: string }) {
   const { urls, path } = props;
-  const loaded = useLoad(`file ${urls.file(path)}`, async () => {
-    const [file, stats] = await Promise.all([
-      api<FileJson>(urls.api(`files/${enc(path)}`, { at: urls.at })),
-      api<{ seq: number }>(urls.api("stats")),
-    ]);
-    const head = stats.seq;
-    if (file.kind !== "concept") return { file, head, extra: null };
-    const p = enc(file.path);
-    const [sources, links, history, work] = await Promise.all([
-      api<Sources>(urls.api(`sources/${p}`, { at: urls.at })),
-      api<Links>(urls.api(`links/${p}`, { at: urls.at })),
-      api<{ events: HistoryEvent[] }>(urls.api(`history/${p}`)),
-      urls.at === undefined
-        ? api<{ items: WorkItem[] }>(urls.api("work", { limit: 1000 }))
-        : Promise.resolve({ items: [] as WorkItem[] }),
-    ]);
-    return {
-      file,
-      head,
-      extra: {
-        concept: file,
-        sources,
-        links,
-        history: history.events,
-        work: work.items.filter((w) => w.path === file.path),
-      },
-    };
-  });
+  const loaded = useLoad(fileKey(urls, path), () => loadFile(urls, path));
   // index.md is the directory's own page.
   useEffect(() => {
     if (baseName(path) === "index.md") navigate(urls.tree(dirOf(path)), { replace: true });
@@ -166,6 +208,10 @@ export function File(props: { urls: Urls; path: string; done: string | null; act
     },
     swap,
   );
+  // A page drawn from the cache catches up in the background: a change it now shows is no news.
+  useEffect(() => {
+    if (change && shown && change.seq <= shown.head) setChange(null);
+  }, [change, shown]);
   const idle = useIdle(15_000);
   const swappable = change !== null && change.op !== "delete" && change.op !== "move";
   useEffect(() => {
@@ -173,8 +219,9 @@ export function File(props: { urls: Urls; path: string; done: string | null; act
   }, [swappable, idle, swap]);
   return (
     <>
-      <LibNav urls={urls} active="files" />
       {notice && <div className="notice ok">{notice}</div>}
+      {/* A concept's context panel keeps its place while the page loads (no column jump). */}
+      {loaded.state === "loading" && isConceptPath(path) && <ContextPanel>{null}</ContextPanel>}
       {change && shown && (
         <ChangeBanner urls={urls} change={change} shownSeq={shown.file.seq} onSwap={swap} />
       )}
@@ -376,8 +423,13 @@ function ConceptView(props: {
   const tooltip = useTooltips(urls, sources, footnotes);
   const changes = useVerificationDiff(urls, c, parsed, props.history, head);
 
+  // Recent files, for the quick switcher.
+  useEffect(() => {
+    if (urls.at === undefined) pushRecent(urls, { path: c.path, title });
+  }, [urls, c.path, title]);
+
   return (
-    <div className="layout">
+    <>
       <div>
         <Crumbs urls={urls} path={c.path} file />
         <h1>{title}</h1>
@@ -412,16 +464,17 @@ function ConceptView(props: {
           </>
         )}
       </div>
-      <aside>
+      {/* The workspace's right panel (tempra-dev: app/workspace). */}
+      <ContextPanel>
+        <Verify urls={urls} concept={c} head={head} onVerified={props.onVerified} />
         <Contents parsed={parsed} skipFirst={hideFirst} />
         <Work items={props.work} />
-        <Frontmatter fm={fm} />
         <SourcesPanel urls={urls} data={sources} footnotes={footnotes} />
         <LinksPanel urls={urls} links={links} head={head} />
-        <Verify urls={urls} concept={c} head={head} onVerified={props.onVerified} />
         <History urls={urls} concept={c} head={head} events={props.history} />
-      </aside>
-    </div>
+        <Frontmatter fm={fm} />
+      </ContextPanel>
+    </>
   );
 }
 

@@ -257,6 +257,152 @@ async function browserRenders(
       await page.getByRole("heading", { level: 1, name: slug }).waitFor({ timeout: 15_000 });
       await page.getByText("ledger sequence").waitFor();
     });
+    // The workspace (TEMPRA-19): the tree stays while files open in the main pane.
+    const nested = concepts.find((c) => c.includes("/")) ?? concepts[0] ?? "";
+    const folder = nested.split("/").slice(0, -1).join("/");
+    const sidebar = page.locator(".ws-sidebar");
+    const lib = `${base}/${owner}/${slug}`;
+    const bearer = { Authorization: `Bearer ${token}` };
+    const libApi = `${base}/api/v1/libraries/${owner}/${slug}`;
+    await step("workspace: open a file from the tree, the sidebar stays", async () => {
+      await sidebar.getByRole("navigation", { name: "Files" }).waitFor({ timeout: 15_000 });
+      await sidebar.evaluate((el) => {
+        (el as unknown as { dataset: Record<string, string> }).dataset.gate = "kept";
+      });
+      if (folder) {
+        // Opening a folder is instant: the tree has the whole index, so no request is made.
+        let asked = 0;
+        const count = (r: { url(): string }) => {
+          if (/\/(tree|outline)(\?|$)/.test(new URL(r.url()).pathname)) asked++;
+        };
+        page.on("request", count);
+        await sidebar.getByRole("button", { name: `Expand ${folder.split("/").pop()}` }).click();
+        await sidebar.locator(`a[title="${nested}"]`).waitFor({ timeout: 1000 });
+        page.off("request", count);
+        if (asked > 0) throw new Error(`opening a folder made ${asked} request(s)`);
+      }
+      await sidebar.locator(`a[title="${nested}"]`).click();
+      await page.waitForURL(`${lib}/${enc(nested)}`);
+      await page.locator(".body .prose").waitFor({ timeout: 15_000 });
+      if ((await sidebar.locator(`a[aria-current="page"][title="${nested}"]`).count()) !== 1) {
+        throw new Error("the open file is not marked in the tree");
+      }
+      await page
+        .locator(".ws-context")
+        .getByRole("heading", { level: 2, name: "History" })
+        .waitFor();
+      await page.goBack();
+      await page.waitForURL(`${lib}/`);
+      await page.getByRole("heading", { level: 1, name: slug }).waitFor();
+      await page.goForward();
+      await page.waitForURL(`${lib}/${enc(nested)}`);
+      // A page seen before draws from the cache: no loading state on the way back.
+      if ((await page.getByText("Loading…").count()) > 0) {
+        throw new Error("a page seen before showed Loading… again");
+      }
+      await page.locator(".body .prose").waitFor({ timeout: 1000 });
+      if ((await page.locator('.ws-sidebar[data-gate="kept"]').count()) !== 1) {
+        throw new Error("the sidebar was rebuilt (the page reloaded or the frame remounted)");
+      }
+    });
+    await step(
+      "workspace: hover prefetches, new pages start at the top, back restores",
+      async () => {
+        const other = concepts.find(
+          (c) => c !== nested && c.split("/").slice(0, -1).join("/") === folder,
+        );
+        if (!other) throw new Error(`no second concept in ${folder}/ to move to`);
+        const main = page.locator(".ws-main");
+        await page.locator(".body .prose").waitFor({ timeout: 15_000 });
+        await main.evaluate((el) => {
+          el.scrollTop = 300;
+        });
+        const before = await main.evaluate((el) => el.scrollTop);
+        const link = sidebar.locator(`a[title="${other}"]`);
+        await link.hover();
+        await page.waitForTimeout(1500); // the hover's prefetch lands in the cache
+        await link.click();
+        await page.waitForURL(`${lib}/${enc(other)}`);
+        if ((await page.getByText("Loading…").count()) > 0) {
+          throw new Error("a hovered file still showed Loading… when opened");
+        }
+        if ((await main.evaluate((el) => el.scrollTop)) !== 0) {
+          throw new Error("the new page did not start at the top");
+        }
+        await page.goBack();
+        await page.waitForURL(`${lib}/${enc(nested)}`);
+        const after = await main.evaluate((el) => el.scrollTop);
+        if (Math.abs(after - before) > 2) {
+          throw new Error(`back returned to ${after}px, not ${before}px`);
+        }
+      },
+    );
+    await step("workspace: the tree follows an agent's write and move, live", async () => {
+      const put = await fetch(`${libApi}/files/gate-live.md`, {
+        method: "PUT",
+        headers: { ...bearer, "Content-Type": "text/markdown", "X-Note": "gate: tree" },
+        body: "---\ntype: Note\ntitle: Gate live\ndescription: Written while the tree was open.\n---\nLive.\n",
+      });
+      if (!put.ok) throw new Error(`write: ${put.status}`);
+      const row = sidebar.locator('a[title="gate-live.md"]');
+      await row.waitFor({ timeout: 5000 });
+      if ((await sidebar.locator('.tree-mark[title*="changed this just now"]').count()) === 0) {
+        throw new Error("no activity mark on the agent's file");
+      }
+      const target = folder ? `${folder}/gate-live.md` : "moved/gate-live.md";
+      const moved = await fetch(`${libApi}/files/gate-live.md/move`, {
+        method: "POST",
+        headers: { ...bearer, "Content-Type": "application/json" },
+        body: JSON.stringify({ to: target, note: "gate: tree move" }),
+      });
+      if (!moved.ok) throw new Error(`move: ${moved.status}`);
+      await row.waitFor({ state: "detached", timeout: 5000 });
+      if (folder) await sidebar.locator(`a[title="${target}"]`).waitFor({ timeout: 5000 });
+      await fetch(`${libApi}/files/${enc(target)}`, { method: "DELETE", headers: bearer });
+    });
+    await step("workspace: the quick switcher opens a concept", async () => {
+      const first = concepts[0] ?? "";
+      const meta = (await (
+        await fetch(`${libApi}/files/${enc(first)}`, {
+          headers: { ...bearer, Accept: "application/json" },
+        })
+      ).json()) as { frontmatter?: { title?: string } };
+      const word = String(meta.frontmatter?.title ?? "").split(/\s+/)[0] ?? "";
+      await page.keyboard.press("Control+k");
+      const box = page.getByRole("dialog", { name: "Open a file" }).getByRole("combobox");
+      await box.fill(word);
+      const option = page.locator('.switcher [role="option"]', { hasText: first }).first();
+      await option.waitFor({ timeout: 5000 });
+      await box.press("ArrowDown");
+      await box.press("ArrowUp");
+      // The hit for the first concept, wherever it ranks.
+      await option.click();
+      await page.waitForURL(`${lib}/${enc(first)}`);
+    });
+    await step("workspace: at phone width the tree is a drawer", async () => {
+      await page.setViewportSize({ width: 420, height: 800 });
+      if (await sidebar.isVisible()) throw new Error("the sidebar shows at phone width");
+      const files = page.getByRole("button", { name: "Files" });
+      await files.click();
+      await sidebar.waitFor({ state: "visible" });
+      // The drawer sits below the header: its button stays in reach, and Escape closes it.
+      if (!(await files.isVisible())) throw new Error("the drawer covers the header");
+      await page.keyboard.press("Escape");
+      await sidebar.waitFor({ state: "hidden" });
+      // A tap on the page closes it too.
+      await files.click();
+      await sidebar.waitFor({ state: "visible" });
+      await page.locator(".ws-main").click({ position: { x: 380, y: 300 } });
+      await sidebar.waitFor({ state: "hidden" });
+      await files.click();
+      await sidebar.waitFor({ state: "visible" });
+      await sidebar.getByRole("link", { name: "Ledger" }).click();
+      await page.waitForURL(`${lib}/-/ledger`);
+      await sidebar.waitFor({ state: "hidden" });
+      await page.setViewportSize({ width: 1280, height: 720 });
+      await page.goto(`${lib}/`);
+    });
+
     const shots = process.env.GATE_SCREENSHOTS;
     let tooltipShown = false;
     for (const concept of concepts) {
@@ -323,6 +469,9 @@ async function browserRenders(
       console.log(`  (the change reached the page in ${ms} ms)`);
       if (ms > 3000) throw new Error(`the banner took ${ms} ms`);
       if (shots) await page.screenshot({ path: `${shots}/live.png` });
+      // The open file prefetched again (a hover on its own row) must not hide the new version.
+      await page.locator(`.ws-sidebar a[title="${concept}"]`).hover();
+      await page.waitForTimeout(500);
       await banner.getByRole("button", { name: "Show new version" }).click();
       await page
         .locator(".body")

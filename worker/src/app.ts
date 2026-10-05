@@ -372,6 +372,10 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     ),
   );
 
+  // The whole library's index in one small answer, for the app's file tree (TEMPRA-19): every
+  // file's path, kind, title and sequence, no bodies or other frontmatter.
+  app.get(`${BASE}/outline`, async (c) => c.json(await c.var.lib.outline({ at: num(c, "at") })));
+
   app.get(`${BASE}/concepts`, async (c) =>
     c.json(
       await c.var.lib.concepts({
@@ -534,7 +538,13 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   app.get(`${BASE}/summary`, async (c) => c.json(await c.var.lib.summary()));
 
   app.get(`${BASE}/work`, async (c) =>
-    c.json(await c.var.lib.work({ kind: c.req.query("kind"), limit: num(c, "limit") })),
+    c.json(
+      await c.var.lib.work({
+        kind: c.req.query("kind"),
+        limit: num(c, "limit"),
+        path: c.req.query("path"),
+      }),
+    ),
   );
 
   app.post(`${BASE}/verify/*`, async (c) => {
