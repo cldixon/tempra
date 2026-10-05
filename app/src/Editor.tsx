@@ -146,9 +146,10 @@ export function linkTarget(urls: Urls, raw: string): string {
   try {
     // Only a full URL or a rooted path can be one of the app's; "#x" and "dir/x.md" are not.
     if (!scheme && !text.startsWith("/")) throw new Error("relative");
-    const url = new URL(text, location.href);
+    const here = new URL(location.href);
+    const url = new URL(text, here);
     const prefix = `/${urls.owner}/${urls.slug}/`;
-    if (url.origin === location.origin && url.pathname.startsWith(prefix)) {
+    if (url.origin === here.origin && url.pathname.startsWith(prefix)) {
       const rest = decodeURIComponent(url.pathname.slice(prefix.length));
       if (rest && !rest.startsWith("-/")) return `/${rest}${url.hash}`;
     }
