@@ -180,26 +180,10 @@ async function seedAndSmoke(
   env: Record<string, string | undefined>,
 ) {
   const { mcpSmoke } = await import("./mcp-smoke");
-  const { BUNDLES, loadBundle } = await import("../test/fixtures");
-  const { writeTar } = await import("../src/util/tar");
+  const { importSamples } = await import("./samples");
   const seed = (slug: string, actor: string) => seedRemote(slug, actor, email, env);
 
-  for (const bundle of BUNDLES) {
-    const s = await seed(bundle.replace(/_/g, "-"), "github-actions/preview");
-    const lib = `${url}/api/v1/libraries/${s.owner}/${s.slug}`;
-    const headers = { Authorization: `Bearer ${s.token}` };
-    const tree = (await (await fetch(`${lib}/tree`, { headers })).json()) as {
-      entries?: unknown[];
-    };
-    if ((tree.entries ?? []).length > 0) continue;
-    const imp = await fetch(`${lib}/import?source=fixtures/${bundle}`, {
-      method: "POST",
-      headers: { ...headers, "Content-Type": "application/x-tar" },
-      body: writeTar(loadBundle(bundle)),
-    });
-    if (!imp.ok) throw new Error(`import ${bundle}: ${imp.status} ${await imp.text()}`);
-    console.log(`Imported ${bundle} into ${s.owner}/${s.slug}`);
-  }
+  await importSamples(url, (slug) => seed(slug, "github-actions/preview"));
 
   const smoke = await seed("smoke", "github-actions/smoke");
   if (!(await mcpSmoke({ url, token: smoke.token }))) throw new Error("MCP smoke failed.");

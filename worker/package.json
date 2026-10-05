@@ -14,7 +14,8 @@
     "admin": "bun scripts/admin.ts",
     "preview": "bun scripts/preview.ts",
     "agents": "bun scripts/agents.ts",
-    "mcp": "bun scripts/mcp.ts"
+    "mcp": "bun scripts/mcp.ts",
+    "samples": "bun scripts/samples.ts"
   },
   "dependencies": {
     "@cloudflare/workers-oauth-provider": "^1.2.1",

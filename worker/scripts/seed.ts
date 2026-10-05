@@ -53,19 +53,23 @@ export async function seed(opts: SeedOptions = {}): Promise<Seeded> {
 
   const secret = newTokenSecret();
   const libraryId = `lib_${crypto.randomUUID()}`;
+  // The account with this email owns the library: user_dev on a fresh database (local, a
+  // preview), or the person's existing account (staging), whose user row is left as it is.
+  const ownerId = `(SELECT id FROM users WHERE email = ${q(email)})`;
   const sql = [
     `INSERT OR IGNORE INTO users (id, email, actor, handle, created) VALUES ('user_dev', ${q(email)}, ${q(human)}, ${q(handle)}, ${q(now)});`,
-    `INSERT OR IGNORE INTO libraries (id, slug, owner, visibility, created, do_id) VALUES (${q(libraryId)}, ${q(slug)}, 'user_dev', 'private', ${q(now)}, ${q(libraryId)});`,
-    `INSERT OR IGNORE INTO tokens (id, hash, library, actor, scope, prefix, created_by) VALUES (${q(`tok_${crypto.randomUUID()}`)}, ${q(hashToken(secret))}, (SELECT id FROM libraries WHERE owner = 'user_dev' AND slug = ${q(slug)}), ${q(actor)}, ${q(scope)}, ${q(opts.prefix ?? null)}, 'user_dev');`,
+    `INSERT OR IGNORE INTO libraries (id, slug, owner, visibility, created, do_id) SELECT ${q(libraryId)}, ${q(slug)}, ${ownerId}, 'private', ${q(now)}, ${q(libraryId)};`,
+    `INSERT OR IGNORE INTO tokens (id, hash, library, actor, scope, prefix, created_by) VALUES (${q(`tok_${crypto.randomUUID()}`)}, ${q(hashToken(secret))}, (SELECT id FROM libraries WHERE owner = ${ownerId} AND slug = ${q(slug)}), ${q(actor)}, ${q(scope)}, ${q(opts.prefix ?? null)}, ${ownerId});`,
   ].join(" ");
   await d1Sql(sql, where(opts));
   const rows = await d1Sql(
     `SELECT l.id, u.handle FROM libraries l JOIN users u ON u.id = l.owner
-     WHERE l.owner = 'user_dev' AND l.slug = ${q(slug)}`,
+     WHERE l.owner = ${ownerId} AND l.slug = ${q(slug)}`,
     where(opts),
   );
-  const id = (rows[0]?.[0] as string | undefined) ?? libraryId;
-  const owner = (rows[0]?.[1] as string | undefined) ?? handle;
+  if (!rows[0]) throw new Error(`No account with the email ${email} to own ${slug}.`);
+  const id = rows[0][0] as string;
+  const owner = rows[0][1] as string;
   return { token: secret, owner, slug, library_id: id, actor, scope };
 }
 

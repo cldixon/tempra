@@ -21,6 +21,11 @@ if (!worker) throw new Error("cloudflare.config.ts defines no worker.");
 
 export const WORKER_NAME = worker.name;
 
+/** The deployment's custom domain; none for local dev (no mode). */
+export const WORKER_HOST: string | undefined = (worker as { domains?: unknown[] }).domains?.find(
+  (d): d is string => typeof d === "string",
+);
+
 /** The account database (binding DB). */
 export function accountsDb(): { name: string; id: string } {
   const db = worker?.env?.DB as { type?: string; name?: string; id?: string } | undefined;
