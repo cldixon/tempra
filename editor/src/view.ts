@@ -28,6 +28,11 @@ export interface ReaderOptions {
   hideFirst?: boolean;
   /** A highlighted range was clicked (comment threads, by id), or the text outside one (null). */
   onMark?(id: string | null): void;
+  /**
+   * Offers Comment on selected text: a small toolbar beside the selection, drawn by the reader.
+   * Called with the selection (document positions) when it is pressed.
+   */
+  onComment?(range: { from: number; to: number }): void;
 }
 
 /** A highlighted range of the document, e.g. a comment's quote. */
@@ -37,6 +42,8 @@ export interface Highlight {
   from: number;
   to: number;
   active?: boolean;
+  /** A comment being written on this range (not yet posted). */
+  draft?: boolean;
 }
 
 export interface Reader {
@@ -50,6 +57,52 @@ export interface Reader {
 }
 
 const setHighlights = Transaction.Effect.define<RangeSet<Decoration.Range>>();
+
+type Range = { from: number; to: number };
+const setTools = Transaction.Effect.define<Range | null>();
+
+/**
+ * The selection toolbar: shown beside selected text, hidden when the selection goes. Built by
+ * `selectionTools`, which knows what its buttons do.
+ */
+function selectionTools(onComment: (range: Range) => void) {
+  return GardState.Field.define<Range | null>({
+    create: () => null,
+    update: (value, tr) => {
+      for (const e of tr.effects) if (e.is(setTools)) value = e.value;
+      return value;
+    },
+    provide: (field) =>
+      Tooltip.show.from(field, (range) =>
+        range
+          ? {
+              pos: range.from,
+              end: range.to,
+              above: true,
+              create: (wg) => {
+                const dom = document.createElement("div");
+                dom.className = "selection-tools";
+                dom.setAttribute("role", "toolbar");
+                dom.setAttribute("aria-label", "Selection");
+                const comment = document.createElement("button");
+                comment.type = "button";
+                comment.textContent = "Comment";
+                // Pressing the button must not take the selection away first.
+                comment.addEventListener("mousedown", (e) => e.preventDefault());
+                comment.addEventListener("click", () => {
+                  wg.dispatch({ effects: setTools.of(null) });
+                  onComment(range);
+                  // The draft highlight takes over from the browser's selection.
+                  document.getSelection()?.removeAllRanges();
+                });
+                dom.append(comment);
+                return { dom };
+              },
+            }
+          : null,
+      ),
+  });
+}
 
 /** The highlighted ranges, replaced as a whole by a setHighlights effect. */
 const highlights = GardState.Field.define<RangeSet<Decoration.Range>>({
@@ -72,10 +125,9 @@ function highlightSet(marks: readonly Highlight[], size: number): RangeSet<Decor
         m.from,
         m.to,
         Decoration.Range.wrapper("mark", {
-          attributes: {
-            class: m.active ? "comment-mark active" : "comment-mark",
-            "data-thread": m.id,
-          },
+          attributes: m.draft
+            ? { class: "comment-draft" }
+            : { class: m.active ? "comment-mark active" : "comment-mark", "data-thread": m.id },
         }),
       );
     }
@@ -99,6 +151,9 @@ export function mountReader(opts: ReaderOptions): Reader {
     Wordgard.contentAttributes.of({ class: "prose", "aria-label": "Concept body" }),
     Wordgard.cspNonce.of(opts.nonce ?? ""),
   ];
+
+  const tools = opts.onComment ? selectionTools(opts.onComment) : null;
+  if (tools) config.push(tools);
 
   if (opts.tooltip) {
     const ask = opts.tooltip;
@@ -147,27 +202,43 @@ export function mountReader(opts: ReaderOptions): Reader {
     onMark?.(mark?.getAttribute("data-thread") ?? null);
   };
   wg.dom.addEventListener("click", click);
+  const selection = (): Range | null => {
+    const sel = document.getSelection();
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
+    const range = sel.getRangeAt(0);
+    if (!wg.dom.contains(range.startContainer) || !wg.dom.contains(range.endContainer)) {
+      return null;
+    }
+    try {
+      const a = wg.posAtDOM(range.startContainer, range.startOffset);
+      const b = wg.posAtDOM(range.endContainer, range.endOffset);
+      return a === b ? null : { from: Math.min(a, b), to: Math.max(a, b) };
+    } catch {
+      return null;
+    }
+  };
+  // The toolbar follows the selection: shown once it settles, gone as soon as it does.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const follow = () => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      if (!wg.dom.isConnected) return;
+      const now = selection();
+      const shown = tools ? wg.state.field(tools, false) : null;
+      if (now?.from === shown?.from && now?.to === shown?.to) return;
+      wg.dispatch({ effects: setTools.of(now) });
+    }, 120);
+  };
+  if (tools) document.addEventListener("selectionchange", follow);
   return {
     dom: wg.dom,
     highlight: (marks) =>
       wg.dispatch({ effects: setHighlights.of(highlightSet(marks, opts.parsed.doc.length)) }),
-    selection: () => {
-      const sel = document.getSelection();
-      if (!sel || sel.isCollapsed || sel.rangeCount === 0) return null;
-      const range = sel.getRangeAt(0);
-      if (!wg.dom.contains(range.startContainer) || !wg.dom.contains(range.endContainer)) {
-        return null;
-      }
-      try {
-        const a = wg.posAtDOM(range.startContainer, range.startOffset);
-        const b = wg.posAtDOM(range.endContainer, range.endOffset);
-        return a === b ? null : { from: Math.min(a, b), to: Math.max(a, b) };
-      } catch {
-        return null;
-      }
-    },
+    selection,
     // A Wordgard disconnects (listeners, tooltips) when its element leaves the document.
     destroy: () => {
+      clearTimeout(timer);
+      document.removeEventListener("selectionchange", follow);
       wg.dom.removeEventListener("click", click);
       wg.dom.remove();
     },

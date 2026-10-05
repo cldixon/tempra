@@ -6,7 +6,7 @@ import {
   type WordDiff,
   wordDiff,
 } from "@tempra/editor";
-import type { Hovered, Reader as ReaderHandle } from "@tempra/editor/view";
+import type { Hovered } from "@tempra/editor/view";
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, api, prefetch, useLoad } from "../api";
 import {
@@ -14,7 +14,7 @@ import {
   highlightsOf,
   placeThreads,
   type Thread,
-  usePendingQuote,
+  useDraft,
   useThreads,
 } from "../Comments";
 import { type FeedEvent, useFeed } from "../live";
@@ -35,7 +35,7 @@ import {
   when,
 } from "../ui";
 import { baseName, dirOf, enc, type Urls } from "../urls";
-import { ContextPanel } from "../Workspace";
+import { ContextPanel, useRevealContext } from "../Workspace";
 
 type Json = string | number | boolean | null | Json[] | { [k: string]: Json };
 type JsonObject = { [k: string]: Json };
@@ -444,15 +444,26 @@ function ConceptView(props: {
   const changes = useVerificationDiff(urls, c, parsed, props.history, head);
 
   // Comments: each thread's quote found in the body on screen, highlighted while open.
-  const reader = useRef<ReaderHandle | null>(null);
   const writable = urls.at === undefined || urls.at >= head;
   const [active, setActive] = useState<string | null>(null);
   const placed = useMemo(
     () => placeThreads(props.threads ?? [], c.body, parsed),
     [props.threads, c.body, parsed],
   );
-  const highlights = useMemo(() => highlightsOf(placed, active), [placed, active]);
-  const quote = usePendingQuote(reader, parsed, writable);
+  // Comment on selected text: the reader's toolbar starts a draft, shown in the panel.
+  const draft = useDraft(parsed);
+  const reveal = useRevealContext();
+  const startDraft = useCallback(
+    (range: { from: number; to: number }) => {
+      draft.start(range);
+      reveal();
+    },
+    [draft.start, reveal],
+  );
+  const highlights = useMemo(
+    () => highlightsOf(placed, active, draft.draft),
+    [placed, active, draft.draft],
+  );
 
   // Recent files, for the quick switcher.
   useEffect(() => {
@@ -487,7 +498,7 @@ function ConceptView(props: {
           hideFirst={hideFirst}
           highlights={highlights}
           onMark={setActive}
-          handle={reader}
+          onComment={writable ? startDraft : undefined}
         />
         {c.lint.length > 0 && (
           <>
@@ -513,8 +524,8 @@ function ConceptView(props: {
             placed={placed}
             error={props.threadsError}
             writable={writable}
-            pending={quote.pending}
-            onClearPending={quote.clear}
+            draft={draft.draft}
+            onClearDraft={draft.clear}
             active={active}
             onActive={setActive}
             onChanged={props.onCommented}

@@ -5,7 +5,7 @@ import {
   mountReader,
   type Reader as ReaderHandle,
 } from "@tempra/editor/view";
-import { type RefObject, useEffect, useRef } from "react";
+import { useEffect, useRef } from "react";
 
 /** The page's CSP nonce, which the SPA shell puts in a meta tag for Wordgard's styles. */
 function nonce(): string {
@@ -25,18 +25,21 @@ export function Reader(props: {
   highlights?: readonly Highlight[];
   /** A highlight was clicked (its id), or the body outside one (null). */
   onMark?(id: string | null): void;
-  /** Set to the mounted reader, for its selection. */
-  handle?: RefObject<ReaderHandle | null>;
+  /** Offers Comment on selected text (the reader's selection toolbar). */
+  onComment?(range: { from: number; to: number }): void;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const tooltip = useRef(props.tooltip);
   tooltip.current = props.tooltip;
   const onMark = useRef(props.onMark);
   onMark.current = props.onMark;
+  const onComment = useRef(props.onComment);
+  onComment.current = props.onComment;
+  const commentable = props.onComment !== undefined;
   const highlights = useRef(props.highlights);
   highlights.current = props.highlights;
   const current = useRef<ReaderHandle | null>(null);
-  const { parsed, diff, hideFirst, handle } = props;
+  const { parsed, diff, hideFirst } = props;
   useEffect(() => {
     if (!host.current) return;
     const reader = mountReader({
@@ -47,16 +50,15 @@ export function Reader(props: {
       diff,
       hideFirst,
       onMark: (id) => onMark.current?.(id),
+      onComment: commentable ? (range) => onComment.current?.(range) : undefined,
     });
     current.current = reader;
-    if (handle) handle.current = reader;
     if (highlights.current?.length) reader.highlight(highlights.current);
     return () => {
       reader.destroy();
       current.current = null;
-      if (handle) handle.current = null;
     };
-  }, [parsed, diff, hideFirst, handle]);
+  }, [parsed, diff, hideFirst, commentable]);
   useEffect(() => {
     current.current?.highlight(props.highlights ?? []);
   }, [props.highlights]);

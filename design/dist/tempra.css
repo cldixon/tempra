@@ -14,8 +14,6 @@
   --tempra-color-link-visited: light-dark(#551a8b, #c58af9);
   --tempra-color-border: light-dark(#cccccc, #444444);
   --tempra-color-code-bg: light-dark(#f4f4f4, #1e1e1e);
-  --tempra-color-mark: light-dark(#fff3a8, #4d4100);
-  --tempra-color-mark-active: light-dark(#ffd84a, #7a6400);
 
   /* Type */
   --tempra-font-body: system-ui, sans-serif;
@@ -181,15 +179,37 @@ div.body wg-content {
   margin-left: var(--tempra-space-4);
 }
 
-/* Comments (TEMPRA-13): a thread's quote highlighted in the body, and the threads beside it. */
+/*
+ * Comments (TEMPRA-13), in lines only: a thread's quote is underlined in the body (solid when its
+ * thread is the one in focus), a comment being written is outlined, and the selection toolbar
+ * and the threads are boxes and rules in the text color.
+ */
 mark.comment-mark {
-  background: var(--tempra-color-mark);
+  background: none;
   color: inherit;
+  text-decoration: underline dotted;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
   cursor: pointer;
 }
 
 mark.comment-mark.active {
-  background: var(--tempra-color-mark-active);
+  text-decoration-style: solid;
+  text-decoration-thickness: 2px;
+}
+
+mark.comment-draft {
+  background: none;
+  color: inherit;
+  outline: 1px dashed var(--tempra-color-text);
+}
+
+.selection-tools {
+  display: flex;
+  gap: var(--tempra-space-1);
+  padding: var(--tempra-space-1);
+  border: 1px solid var(--tempra-color-text);
+  background: var(--tempra-color-bg);
 }
 
 .threads {
@@ -203,15 +223,14 @@ mark.comment-mark.active {
 }
 
 .thread.active {
-  border-left: 3px solid var(--tempra-color-mark-active);
-  padding-left: var(--tempra-space-2);
+  outline: 1px solid var(--tempra-color-text);
+  outline-offset: 2px;
 }
 
 .quote {
   margin: 0 0 var(--tempra-space-1);
-  padding-left: var(--tempra-space-2);
-  border-left: 3px solid var(--tempra-color-mark);
   color: var(--tempra-color-muted);
+  font-style: italic;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }

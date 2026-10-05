@@ -24,7 +24,18 @@ export interface Place {
   view: "ledger" | "work" | "transfer" | "recovery" | "connect" | "delete" | null;
 }
 
-const ContextSlot = createContext<{ el: HTMLElement | null; register(): () => void } | null>(null);
+const ContextSlot = createContext<{
+  el: HTMLElement | null;
+  register(): () => void;
+  /** Shows the context panel: opens its drawer on a narrow screen. */
+  reveal(): void;
+} | null>(null);
+
+/** Shows the workspace's context panel (a drawer on a narrow screen); a no-op outside one. */
+export function useRevealContext(): () => void {
+  const slot = useContext(ContextSlot);
+  return useCallback(() => slot?.reveal(), [slot]);
+}
 
 /**
  * The open page's context (trust, sources, links, history, work; later comments), drawn in the
@@ -82,7 +93,12 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
     setPanels((n) => n + 1);
     return () => setPanels((n) => n - 1);
   }, []);
-  const slot = useMemo(() => ({ el: contextEl, register }), [contextEl, register]);
+  const narrowRef = useRef(false);
+  const reveal = useCallback(() => {
+    if (narrowRef.current) setDrawer("context");
+    else setHidden(false);
+  }, []);
+  const slot = useMemo(() => ({ el: contextEl, register, reveal }), [contextEl, register, reveal]);
 
   // The main pane scrolls on its own: a new page starts at the top (or its #fragment), and back
   // or forward returns to where the person was on that page.
@@ -119,6 +135,7 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
   // biome-ignore lint/correctness/useExhaustiveDependencies: closes on every move.
   useEffect(() => setDrawer(null), [place.file, place.dir, place.view]);
 
+  narrowRef.current = narrow;
   // Drawers are for narrow screens: widening closes them. Escape closes one, and an open one
   // takes the focus (the context drawer through its own element below).
   useEffect(() => {
@@ -126,7 +143,9 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
   }, [narrow]);
   useEffect(() => {
     if (!drawer) return;
-    (drawer === "files" ? sidebar.current : contextEl)?.focus();
+    // An opened drawer takes the focus, unless something in it already has (a comment box).
+    const el = drawer === "files" ? sidebar.current : contextEl;
+    if (!el?.contains(document.activeElement)) el?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setDrawer(null);
     };

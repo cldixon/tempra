@@ -5,8 +5,8 @@
  */
 import { documentPos, markdownOffset, type Parsed } from "@tempra/editor";
 import { locate } from "@tempra/editor/anchor";
-import type { Highlight, Reader as ReaderHandle } from "@tempra/editor/view";
-import { type FormEvent, type RefObject, useEffect, useMemo, useState } from "react";
+import type { Highlight } from "@tempra/editor/view";
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, useAction, useLoad } from "./api";
 import { Chip, when } from "./ui";
 import type { Urls } from "./urls";
@@ -57,9 +57,13 @@ export function placeThreads(threads: Thread[], body: string, parsed: Parsed): P
   });
 }
 
-/** The highlights for the reader: open threads whose quote is on screen. */
-export function highlightsOf(placed: Placed[], active: string | null): Highlight[] {
-  return placed
+/** The highlights for the reader: open threads whose quote is on screen, and the draft. */
+export function highlightsOf(
+  placed: Placed[],
+  active: string | null,
+  draft: Draft | null,
+): Highlight[] {
+  const marks: Highlight[] = placed
     .filter((t) => t.status === "open" && t.at && t.at.pos >= 0 && t.at.end > t.at.pos)
     .map((t) => ({
       id: t.id,
@@ -67,49 +71,41 @@ export function highlightsOf(placed: Placed[], active: string | null): Highlight
       to: t.at?.end ?? 0,
       active: t.id === active,
     }));
+  if (draft) marks.push({ id: "draft", from: draft.pos, to: draft.end, draft: true });
+  return marks;
 }
 
-/** The quote a comment would be anchored on: the reader's selection, as body markdown. */
-export interface Pending {
+/** A comment being written on a quote: the body markdown, and where it is in the document. */
+export interface Draft {
   quote: string;
+  /** Markdown offset of the quote in the body. */
   from: number;
+  /** Document positions, for the draft highlight. */
+  pos: number;
+  end: number;
 }
 
 /**
- * Follows the selection in the reader: a non-empty selection in the body becomes the pending
- * quote, which stays (while the person types the comment) until it is posted or dropped.
+ * The draft comment's quote: started from the reader's selection toolbar, kept (highlighted)
+ * while the comment is written, until it is posted or dropped.
  */
-export function usePendingQuote(
-  reader: RefObject<ReaderHandle | null>,
-  parsed: Parsed,
-  enabled: boolean,
-) {
-  const [pending, setPending] = useState<Pending | null>(null);
-  // A new version of the body: the old selection's offsets no longer apply.
+export function useDraft(parsed: Parsed) {
+  const [draft, setDraft] = useState<Draft | null>(null);
+  // A new version of the body: the old offsets no longer apply.
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset when the body changes.
-  useEffect(() => setPending(null), [parsed]);
-  useEffect(() => {
-    if (!enabled) return;
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const check = () => {
-      clearTimeout(timer);
-      timer = setTimeout(() => {
-        const sel = reader.current?.selection();
-        if (!sel) return;
-        const from = markdownOffset(parsed, sel.from);
-        const to = markdownOffset(parsed, sel.to);
-        if (from < 0 || to <= from) return;
-        const quote = parsed.source.slice(from, to);
-        if (quote.trim()) setPending({ quote, from });
-      }, 150);
-    };
-    document.addEventListener("selectionchange", check);
-    return () => {
-      clearTimeout(timer);
-      document.removeEventListener("selectionchange", check);
-    };
-  }, [reader, parsed, enabled]);
-  return { pending, clear: () => setPending(null) };
+  useEffect(() => setDraft(null), [parsed]);
+  const start = useCallback(
+    (range: { from: number; to: number }) => {
+      const from = markdownOffset(parsed, range.from);
+      const to = markdownOffset(parsed, range.to);
+      if (from < 0 || to <= from) return;
+      const quote = parsed.source.slice(from, to);
+      if (quote.trim()) setDraft({ quote, from, pos: range.from, end: range.to });
+    },
+    [parsed],
+  );
+  const clear = useCallback(() => setDraft(null), []);
+  return { draft, start, clear };
 }
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
@@ -130,8 +126,8 @@ export function CommentsPanel(props: {
   error?: string | null;
   /** Comments can be written (the current version, not a pinned old one). */
   writable: boolean;
-  pending: Pending | null;
-  onClearPending(): void;
+  draft: Draft | null;
+  onClearDraft(): void;
   active: string | null;
   onActive(id: string | null): void;
   onChanged(): void;
@@ -162,8 +158,8 @@ export function CommentsPanel(props: {
         <NewComment
           urls={urls}
           path={props.path}
-          pending={props.pending}
-          onClearPending={props.onClearPending}
+          draft={props.draft}
+          onClearDraft={props.onClearDraft}
           onPosted={(id) => {
             props.onActive(id);
             props.onChanged();
@@ -210,12 +206,18 @@ export function CommentsPanel(props: {
 function NewComment(props: {
   urls: Urls;
   path: string;
-  pending: Pending | null;
-  onClearPending(): void;
+  draft: Draft | null;
+  onClearDraft(): void;
   onPosted(id: string): void;
 }) {
   const { busy, error, run } = useAction();
   const [text, setText] = useState("");
+  const box = useRef<HTMLTextAreaElement>(null);
+  const { draft, onClearDraft } = props;
+  // A comment started from the selection toolbar: the box takes the focus.
+  useEffect(() => {
+    if (draft) box.current?.focus();
+  }, [draft]);
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const body = text.trim();
@@ -226,39 +228,53 @@ function NewComment(props: {
         body: JSON.stringify({
           path: props.path,
           body,
-          anchor: props.pending ? { quote: props.pending.quote, from: props.pending.from } : null,
+          anchor: draft ? { quote: draft.quote, from: draft.from } : null,
         }),
       });
       setText("");
-      props.onClearPending();
+      onClearDraft();
       props.onPosted(r.thread.id);
     });
   };
   return (
     <form className="comment-form" onSubmit={submit}>
-      {props.pending ? (
-        <>
-          <blockquote className="quote small">{clip(props.pending.quote, 300)}</blockquote>
-          <button type="button" className="small" onClick={props.onClearPending}>
-            Comment on the whole concept instead
-          </button>
-        </>
+      {draft ? (
+        <blockquote className="quote small">{clip(draft.quote, 300)}</blockquote>
       ) : (
-        <p className="small muted">Select text in the body to comment on it.</p>
+        <p className="small muted">Select text to comment on it.</p>
       )}
       <label className="visually-hidden" htmlFor="new-comment">
         Comment
       </label>
       <textarea
         id="new-comment"
+        ref={box}
         value={text}
         onChange={(e) => setText(e.currentTarget.value)}
-        placeholder={props.pending ? "Comment on the selection" : "Comment on this concept"}
+        // Escape drops the draft; leaving an empty draft drops it too (as a click away does).
+        onKeyDown={(e) => {
+          if (e.key === "Escape" && draft) {
+            e.stopPropagation();
+            onClearDraft();
+          }
+        }}
+        onBlur={(e) => {
+          if (draft && !e.currentTarget.value.trim()) onClearDraft();
+        }}
+        placeholder={draft ? "Comment on the selection" : "Comment on this concept"}
       />
       {error && <div className="notice">{error}</div>}
       <button className="primary" type="submit" disabled={busy || !text.trim()}>
         Comment
       </button>
+      {draft && (
+        <>
+          {" "}
+          <button type="button" onClick={onClearDraft}>
+            Cancel
+          </button>
+        </>
+      )}
     </form>
   );
 }
