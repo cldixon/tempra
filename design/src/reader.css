@@ -43,3 +43,53 @@ div.body wg-content {
 .toc .depth-2 {
   margin-left: var(--tempra-space-4);
 }
+
+/* Comments (TEMPRA-13): a thread's quote highlighted in the body, and the threads beside it. */
+mark.comment-mark {
+  background: var(--tempra-color-mark);
+  color: inherit;
+  cursor: pointer;
+}
+
+mark.comment-mark.active {
+  background: var(--tempra-color-mark-active);
+}
+
+.threads {
+  list-style: none;
+  padding: 0;
+}
+
+.thread {
+  border-top: 1px solid var(--tempra-color-border);
+  padding: var(--tempra-space-2) 0;
+}
+
+.thread.active {
+  border-left: 3px solid var(--tempra-color-mark-active);
+  padding-left: var(--tempra-space-2);
+}
+
+.quote {
+  margin: 0 0 var(--tempra-space-1);
+  padding-left: var(--tempra-space-2);
+  border-left: 3px solid var(--tempra-color-mark);
+  color: var(--tempra-color-muted);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.comment {
+  margin: var(--tempra-space-1) 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.comment-form textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 3.5rem;
+  margin-bottom: var(--tempra-space-1);
+  font: inherit;
+}

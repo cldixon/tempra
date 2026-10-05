@@ -6,9 +6,17 @@ import {
   type WordDiff,
   wordDiff,
 } from "@tempra/editor";
-import type { Hovered } from "@tempra/editor/view";
+import type { Hovered, Reader as ReaderHandle } from "@tempra/editor/view";
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, api, prefetch, useLoad } from "../api";
+import {
+  CommentsPanel,
+  highlightsOf,
+  placeThreads,
+  type Thread,
+  usePendingQuote,
+  useThreads,
+} from "../Comments";
 import { type FeedEvent, useFeed } from "../live";
 import { registerPrefetch } from "../prefetch";
 import { el, Reader } from "../Reader";
@@ -176,6 +184,9 @@ registerPrefetch((urls, path) => prefetch(fileKey(urls, path), () => loadFile(ur
 export function File(props: { urls: Urls; path: string; done: string | null; actor: string }) {
   const { urls, path } = props;
   const loaded = useLoad(fileKey(urls, path), () => loadFile(urls, path));
+  // A concept's comment threads load beside it, and reload on their own (comments are not
+  // content: a new comment never redraws the body).
+  const threads = useThreads(urls, isConceptPath(path) ? path : null);
   // index.md is the directory's own page.
   useEffect(() => {
     if (baseName(path) === "index.md") navigate(urls.tree(dirOf(path)), { replace: true });
@@ -197,10 +208,12 @@ export function File(props: { urls: Urls; path: string; done: string | null; act
     (events) => {
       if (urls.at !== undefined || !shown) return;
       const path = shown.file.path;
+      if (events.some((e) => e.op === "comment" && e.path === path)) threads.reload();
       const mine = events.filter(
         (e) =>
           e.seq > shown.head &&
           (e.path === path || e.from_path === path) &&
+          e.op !== "comment" &&
           e.actor !== props.actor,
       );
       const last = mine[mine.length - 1];
@@ -241,6 +254,8 @@ export function File(props: { urls: Urls; path: string; done: string | null; act
                 links={d.extra.links}
                 history={d.extra.history}
                 work={d.extra.work}
+                threads={threads.state === "ready" ? threads.data.threads : null}
+                onCommented={threads.reload}
                 onVerified={loaded.reload}
               />
             )
@@ -389,6 +404,9 @@ function ConceptView(props: {
   links: Links;
   history: HistoryEvent[];
   work: WorkItem[];
+  /** Null while they load. */
+  threads: Thread[] | null;
+  onCommented(): void;
   onVerified(): void;
 }) {
   const { urls, concept: c, head, sources, links } = props;
@@ -423,6 +441,17 @@ function ConceptView(props: {
   const tooltip = useTooltips(urls, sources, footnotes);
   const changes = useVerificationDiff(urls, c, parsed, props.history, head);
 
+  // Comments: each thread's quote found in the body on screen, highlighted while open.
+  const reader = useRef<ReaderHandle | null>(null);
+  const writable = urls.at === undefined || urls.at >= head;
+  const [active, setActive] = useState<string | null>(null);
+  const placed = useMemo(
+    () => placeThreads(props.threads ?? [], c.body, parsed),
+    [props.threads, c.body, parsed],
+  );
+  const highlights = useMemo(() => highlightsOf(placed, active), [placed, active]);
+  const quote = usePendingQuote(reader, parsed, writable);
+
   // Recent files, for the quick switcher.
   useEffect(() => {
     if (urls.at === undefined) pushRecent(urls, { path: c.path, title });
@@ -449,7 +478,15 @@ function ConceptView(props: {
         </div>
         <AtNotice urls={urls} head={head} current={urls.pinned(undefined).file(c.path)} />
         {changes.toggle}
-        <Reader parsed={parsed} tooltip={tooltip} diff={changes.diff} hideFirst={hideFirst} />
+        <Reader
+          parsed={parsed}
+          tooltip={tooltip}
+          diff={changes.diff}
+          hideFirst={hideFirst}
+          highlights={highlights}
+          onMark={setActive}
+          handle={reader}
+        />
         {c.lint.length > 0 && (
           <>
             <h2 id="lint">Lint</h2>
@@ -467,8 +504,22 @@ function ConceptView(props: {
       {/* The workspace's right panel (tempra-dev: app/workspace). */}
       <ContextPanel>
         <Verify urls={urls} concept={c} head={head} onVerified={props.onVerified} />
+        {props.threads && (
+          <CommentsPanel
+            urls={urls}
+            path={c.path}
+            placed={placed}
+            writable={writable}
+            pending={quote.pending}
+            onClearPending={quote.clear}
+            active={active}
+            onActive={setActive}
+            onChanged={props.onCommented}
+          />
+        )}
         <Contents parsed={parsed} skipFirst={hideFirst} />
-        <Work items={props.work} />
+        {/* Open comments are in their own section above. */}
+        <Work items={props.work.filter((w) => w.kind !== "comment")} />
         <SourcesPanel urls={urls} data={sources} footnotes={footnotes} />
         <LinksPanel urls={urls} links={links} head={head} />
         <History urls={urls} concept={c} head={head} events={props.history} />
@@ -890,7 +941,9 @@ function Verify(props: { urls: Urls; concept: Concept; head: number; onVerified(
 }
 
 function History(props: { urls: Urls; concept: Concept; head: number; events: HistoryEvent[] }) {
-  const { urls, concept: c, head, events } = props;
+  const { urls, concept: c, head } = props;
+  // Comments are in their own section; history is the concept's versions.
+  const events = props.events.filter((e) => e.op !== "comment");
   const shown = [...events].reverse().slice(0, 50);
   // Time travel shortcuts (spec: Time travel in the UI).
   const verified = [...events]

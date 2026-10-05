@@ -14,6 +14,8 @@
   --tempra-color-link-visited: light-dark(#551a8b, #c58af9);
   --tempra-color-border: light-dark(#cccccc, #444444);
   --tempra-color-code-bg: light-dark(#f4f4f4, #1e1e1e);
+  --tempra-color-mark: light-dark(#fff3a8, #4d4100);
+  --tempra-color-mark-active: light-dark(#ffd84a, #7a6400);
 
   /* Type */
   --tempra-font-body: system-ui, sans-serif;

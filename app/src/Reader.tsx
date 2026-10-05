@@ -1,6 +1,11 @@
 import type { Parsed, WordDiff } from "@tempra/editor";
-import { type Hovered, mountReader } from "@tempra/editor/view";
-import { useEffect, useRef } from "react";
+import {
+  type Highlight,
+  type Hovered,
+  mountReader,
+  type Reader as ReaderHandle,
+} from "@tempra/editor/view";
+import { type RefObject, useEffect, useRef } from "react";
 
 /** The page's CSP nonce, which the SPA shell puts in a meta tag for Wordgard's styles. */
 function nonce(): string {
@@ -16,11 +21,22 @@ export function Reader(props: {
   tooltip(hovered: Hovered): HTMLElement | null | Promise<HTMLElement | null>;
   diff: WordDiff | null;
   hideFirst: boolean;
+  /** Ranges to highlight (comment quotes); changing them does not redraw the body. */
+  highlights?: readonly Highlight[];
+  /** A highlight was clicked. */
+  onMark?(id: string): void;
+  /** Set to the mounted reader, for its selection. */
+  handle?: RefObject<ReaderHandle | null>;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const tooltip = useRef(props.tooltip);
   tooltip.current = props.tooltip;
-  const { parsed, diff, hideFirst } = props;
+  const onMark = useRef(props.onMark);
+  onMark.current = props.onMark;
+  const highlights = useRef(props.highlights);
+  highlights.current = props.highlights;
+  const current = useRef<ReaderHandle | null>(null);
+  const { parsed, diff, hideFirst, handle } = props;
   useEffect(() => {
     if (!host.current) return;
     const reader = mountReader({
@@ -30,9 +46,20 @@ export function Reader(props: {
       tooltip: (h) => tooltip.current(h),
       diff,
       hideFirst,
+      onMark: (id) => onMark.current?.(id),
     });
-    return () => reader.destroy();
-  }, [parsed, diff, hideFirst]);
+    current.current = reader;
+    if (handle) handle.current = reader;
+    if (highlights.current?.length) reader.highlight(highlights.current);
+    return () => {
+      reader.destroy();
+      current.current = null;
+      if (handle) handle.current = null;
+    };
+  }, [parsed, diff, hideFirst, handle]);
+  useEffect(() => {
+    current.current?.highlight(props.highlights ?? []);
+  }, [props.highlights]);
   return <div className="body" ref={host} />;
 }
 

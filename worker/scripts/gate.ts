@@ -502,6 +502,63 @@ async function browserRenders(
       await page.locator(".tooltip strong").first().waitFor({ timeout: 10_000 });
       if (shots) await page.screenshot({ path: `${shots}/link.png` });
     });
+    // Comments (TEMPRA-13): a person comments on selected text; an agent answers and resolves,
+    // and the open page follows without reloading.
+    await step(
+      "comments: comment on a selection, an agent replies and resolves, live",
+      async () => {
+        await page.goto(url);
+        await page.locator(".body .prose").waitFor({ timeout: 15_000 });
+        await page.getByRole("heading", { level: 2, name: /^Comments/ }).waitFor();
+        // Selects the first 16 characters of the first longer run of paragraph text, as a
+        // person dragging over it would (a script string: this file has no DOM types).
+        const quote = await page.evaluate<string | null>(`(() => {
+          const root = document.querySelector(".body .prose");
+          const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+          for (let n = walker.nextNode(); n; n = walker.nextNode()) {
+            const text = n.textContent ?? "";
+            if (text.trim().length < 24 || n.parentElement?.closest("h1, h2, h3, a, code")) continue;
+            const start = text.search(/\\S/);
+            const range = document.createRange();
+            range.setStart(n, start);
+            range.setEnd(n, start + 16);
+            const sel = document.getSelection();
+            sel?.removeAllRanges();
+            sel?.addRange(range);
+            return range.toString();
+          }
+          return null;
+        })()`);
+        if (!quote) throw new Error("no paragraph text to select");
+        await page.locator(".comment-form .quote").first().waitFor({ timeout: 5_000 });
+        await page.locator("#new-comment").fill("Gate: please check this sentence.");
+        await page.getByRole("button", { name: "Comment", exact: true }).click();
+        const mark = page.locator(".body mark.comment-mark");
+        await mark.first().waitFor({ timeout: 10_000 });
+        if (!(await mark.first().innerText()).includes(quote.trim().slice(0, 8))) {
+          throw new Error(`highlight: ${await mark.first().innerText()} for ${quote}`);
+        }
+        await page.locator(".thread").getByText("Gate: please check this sentence.").waitFor();
+        if (shots) await page.screenshot({ path: `${shots}/comment.png` });
+        const thread = await mark.first().getAttribute("data-thread");
+        await markStay();
+        await page.waitForTimeout(300);
+        for (const [suffix, body] of [
+          ["", { body: "Checked it; it holds." }],
+          ["/resolve", {}],
+        ] as const) {
+          const r = await fetch(`${libApi}/comments/${thread}${suffix}`, {
+            method: "POST",
+            headers: { ...bearer, "Content-Type": "application/json" },
+            body: JSON.stringify(body),
+          });
+          if (!r.ok) throw new Error(`agent ${suffix || "reply"}: ${r.status} ${await r.text()}`);
+        }
+        await page.getByText("Resolved (1)").waitFor({ timeout: 10_000 });
+        await mark.first().waitFor({ state: "detached", timeout: 10_000 });
+        if (!(await stayed())) throw new Error("the page reloaded");
+      },
+    );
     await step("ledger, reached by a link within the app, tails live", async () => {
       await markStay();
       await page.getByRole("link", { name: "Ledger", exact: true }).click();
