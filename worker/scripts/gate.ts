@@ -326,11 +326,13 @@ async function browserRenders(
         await page.waitForURL(`${lib}/${enc(other)}`);
         // The URL changes before React draws the new page: wait for the page itself (on a
         // slow runner the old one can still be on screen, scrolled, when the URL has moved).
-        await page.waitForFunction(
-          `(document.querySelector(".ws-main h1")?.textContent ?? "") !== ${JSON.stringify(title)}`,
-          undefined,
-          { timeout: 5000 },
-        );
+        // (A locator, not waitForFunction: the app's CSP refuses string evaluation.)
+        const exact = new RegExp(`^${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
+        await main
+          .locator("h1", { hasNotText: exact })
+          .or(main.getByText("Loading…"))
+          .first()
+          .waitFor({ timeout: 5000 });
         if ((await page.getByText("Loading…").count()) > 0) {
           throw new Error("a hovered file still showed Loading… when opened");
         }
