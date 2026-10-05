@@ -1,6 +1,7 @@
 import * as design from "@tempra/design";
 import { type Context, Hono } from "hono";
-import { type Accounts, checkNewToken } from "./accounts";
+import { registerAccountApi } from "./account-api";
+import { type Accounts, checkNewToken, type LibraryRef, type User } from "./accounts";
 import type { Authenticate, TokenInfo } from "./auth";
 import {
   type BlobStore,
@@ -11,16 +12,20 @@ import {
   putBlob,
 } from "./client";
 import { registerLegalRoutes } from "./legal";
+import { deleteLibrary } from "./lifecycle";
 import { registerAppRoutes } from "./oauth/routes";
 import { normalizePath, underPrefix } from "./okf/paths";
 import type { JsonObject } from "./okf/types";
+import { fromThisSite } from "./origin";
 import type { RestoreOutcome, RestoreRecord } from "./recovery";
-import type { Sessions } from "./session";
+import { readCookie, SESSION_COOKIE, type Sessions } from "./session";
 import { type Mailer, registerSignInRoutes } from "./signin";
 import { OkfError } from "./store/errors";
 import type { ConceptContent, RequestContext, WriteOp } from "./store/store";
 import { authorizeLibrary } from "./tenancy";
 import { registerUiRoutes } from "./ui/routes";
+import { appHref, appScript } from "./ui/spa";
+import { STARTER } from "./ui/starter";
 import { admit, tokenAdmission, type UsageDeps } from "./usage";
 import { maybeGunzip, readTar } from "./util/tar";
 
@@ -47,6 +52,11 @@ export interface Deps extends UsageDeps {
   recovery?: RecoveryDeps;
   /** Wipes a library's storage: its Durable Object, R2 exports and restore records (lifecycle.ts). */
   destroyLibrary?: (doId: string) => Promise<void>;
+  /**
+   * Hands a WebSocket upgrade to the library's Durable Object, which holds the change feed
+   * (feed.ts); `prefix` limits it to a directory.
+   */
+  feed?: (doId: string, request: Request, prefix: string) => Promise<Response>;
 }
 
 export interface RecoveryDeps {
@@ -200,11 +210,20 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     });
   });
 
+  // The app's client bundle (TEMPRA-9), at a content-hashed URL like the stylesheet.
+  app.get("/_app/:file", (c) =>
+    `/_app/${c.req.param("file")}` === appHref ? appScript() : c.notFound(),
+  );
+
   app.use(`${BASE}/*`, async (c, next) => {
     const d = deps(c.env);
-    const token = await d.authenticate(bearer(c));
-    await authorizeLibrary(d.accounts, { token }, c.req.param("owner"), c.req.param("lib"));
-    await admit(d, tokenAdmission(token), c.req.method !== "GET" && c.req.method !== "HEAD");
+    const who = await principal(c, d);
+    const ref = await authorizeLibrary(d.accounts, who, c.req.param("owner"), c.req.param("lib"));
+    const token = "token" in who ? who.token : sessionToken(who.user, ref);
+    // A person signed in to the app is metered but not rate limited (usage.ts), so agents
+    // spending the account's write budget never lock its owner out of the UI.
+    const write = c.req.method !== "GET" && c.req.method !== "HEAD";
+    await admit(d, tokenAdmission(token), write, "token" in who);
     c.set("deps", d);
     c.set("token", token);
     c.set("lib", d.library(token));
@@ -217,6 +236,13 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     const path = tail(c, "/files/");
     const view = await c.var.lib.read(path, { at: num(c, "at"), computed: bool(c, "computed") });
     c.header("X-Seq", String(view.seq));
+    const wantsJson = (c.req.header("Accept") ?? "").includes("application/json");
+    if (view.kind === "attachment" && wantsJson) {
+      // A description, not the bytes: what the app shows on an attachment's page.
+      const { kind, path, seq, hash, size, media } = view;
+      c.header("ETag", `"${hash}"`);
+      return c.json({ kind, path, seq, hash, size, media: media ?? null });
+    }
     if (view.kind === "attachment") {
       c.header("ETag", `"${view.hash}"`);
       c.header("Content-Type", view.media ?? "application/octet-stream");
@@ -229,9 +255,10 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
       if (!obj) throw new OkfError(500, "blob_missing", `Bytes for ${view.path} are missing.`);
       return c.body(obj.body as ReadableStream);
     }
-    const wantsJson = (c.req.header("Accept") ?? "").includes("application/json");
     if (view.kind === "derived") {
-      if (wantsJson) return c.json({ path: view.path, seq: view.seq, markdown: view.markdown });
+      if (wantsJson) {
+        return c.json({ kind: view.kind, path: view.path, seq: view.seq, markdown: view.markdown });
+      }
       return c.body(view.markdown, 200, { "Content-Type": "text/markdown; charset=utf-8" });
     }
     c.header("ETag", `"${view.hash}"`);
@@ -482,6 +509,30 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
 
   app.get(`${BASE}/stats`, async (c) => c.json(await c.var.lib.stats()));
 
+  // The change feed (tempra-dev: app/live): a WebSocket on which the library's Durable Object
+  // pushes every committed event. Authorized and counted once, here, when it opens; a session
+  // must open it from this site's own pages. GET /events?since=N is the catch-up.
+  app.get(`${BASE}/feed`, async (c) => {
+    if (c.req.header("Upgrade")?.toLowerCase() !== "websocket") {
+      throw new OkfError(426, "upgrade_required", "Open the feed as a WebSocket.");
+    }
+    const token = c.var.token;
+    if (token.id.startsWith("session:") && !fromThisSite(c.req.raw)) {
+      throw new OkfError(403, "cross_origin", "Open the feed from this site's own pages.");
+    }
+    const feed = c.var.deps.feed;
+    if (!feed) throw new OkfError(501, "unavailable", "The change feed is not wired here.");
+    c.var.deps.meter?.({
+      kind: "feed",
+      account: token.library.owner || token.library.id,
+      library: token.library.id,
+    });
+    return feed(token.library.do_id, c.req.raw, c.req.query("prefix") ?? "");
+  });
+
+  // Counts for the library's home page: concepts, attachments, types, open work.
+  app.get(`${BASE}/summary`, async (c) => c.json(await c.var.lib.summary()));
+
   app.get(`${BASE}/work`, async (c) =>
     c.json(await c.var.lib.work({ kind: c.req.query("kind"), limit: num(c, "limit") })),
   );
@@ -516,35 +567,76 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   // ------------------------------------------------------------------ libraries and tokens
 
   /**
-   * Management routes are human-only (spec: HTTP API): a human: bearer token, acting for the
-   * person who minted it, on that person's own libraries and tokens.
+   * Management routes are human-only (spec: HTTP API): the signed-in person's session, or a
+   * human: bearer token acting for the person who minted it, on that person's own libraries and
+   * tokens.
    */
   const human = async (c: C) => {
     const d = deps(c.env);
-    const token = await d.authenticate(bearer(c));
+    const who = await principal(c, d);
+    if ("user" in who) {
+      return { d, user: { id: who.user.id, handle: who.user.handle }, session: who.user };
+    }
+    const token = who.token;
     if (!token.actor.startsWith("human:") || !token.created_by || !token.library.owner) {
       throw new OkfError(403, "human_only", "Library and token management needs a human: token.");
     }
     const user = { id: token.created_by, handle: token.library.owner };
-    return { d, token, user };
+    return { d, user, session: null };
   };
+
+  // Who the caller acts as: the signed-in person, or the person a human: token acts for.
+  app.get("/api/v1/me", async (c) => {
+    const { d, user } = await human(c);
+    const account = await d.accounts.account(user.id);
+    if (!account) throw new OkfError(401, "no_account", "This account no longer exists.");
+    return c.json({ email: account.email, handle: account.handle, actor: account.actor });
+  });
 
   app.get("/api/v1/libraries", async (c) => {
     const { d, user } = await human(c);
-    return c.json({
-      libraries: (await d.accounts.libraries(user.id)).map(({ id, slug, owner }) => ({
-        id,
-        owner,
-        slug,
-      })),
-    });
+    const refs = await d.accounts.libraries(user.id);
+    const libraries = await Promise.all(
+      refs.map(async ({ id, slug, owner, do_id }) => {
+        const lib = await d.libraryByDoId(do_id);
+        const s = lib ? await lib.summary() : null;
+        return {
+          id,
+          owner,
+          slug,
+          ...(s && {
+            seq: s.seq,
+            concepts: s.concepts,
+            attachments: s.attachments,
+            open_work: s.open_work,
+          }),
+        };
+      }),
+    );
+    return c.json({ libraries });
   });
 
   app.post("/api/v1/libraries", async (c) => {
-    const { d, user } = await human(c);
-    const body = await c.req.json<{ slug?: string }>().catch(() => ({}) as { slug?: string });
+    const { d, user, session } = await human(c);
+    const body = await c.req
+      .json<{ slug?: string; starter?: boolean }>()
+      .catch(() => ({}) as { slug?: string; starter?: boolean });
     const lib = await d.accounts.createLibrary(body.slug ?? "", user);
+    // First run (v2 spec: Onboarding): a person's first library may begin with a note.
+    if (body.starter && session) {
+      const client = await d.libraryByDoId(lib.do_id);
+      await client?.apply(
+        { actor: session.actor, request_id: crypto.randomUUID(), note: "Starter note" },
+        [{ op: "write", path: "start-here.md", content: STARTER }],
+      );
+    }
     return c.json({ id: lib.id, owner: lib.owner, slug: lib.slug }, 201);
+  });
+
+  registerAccountApi(app, deps, async (c, d) => {
+    const who = await principal(c as C, d);
+    if (!("user" in who)) throw new OkfError(403, "session_only", "Sign in to the app.");
+    return who.user;
   });
 
   app.get("/api/v1/tokens", async (c) => {
@@ -553,7 +645,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   });
 
   app.post("/api/v1/tokens", async (c) => {
-    const { d, user } = await human(c);
+    const { d, user, session } = await human(c);
     const body = await c.req
       .json<{
         library?: string;
@@ -568,7 +660,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
       (l) => l.slug === body.library || l.id === body.library,
     );
     if (!lib) throw new OkfError(404, "no_library", `There is no library ${body.library ?? ""}.`);
-    // human: tokens are minted only in the UI, so none is anyone's own actor here.
+    // A person signed in to the app may mint a token as themselves (human:); a token may not.
     const fields = checkNewToken(
       {
         actor: body.actor ?? "",
@@ -577,7 +669,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
         expires: body.expires,
         mcpTiers: body.mcp_tiers,
       },
-      null,
+      session ? session.actor : null,
     );
     const minted = await d.accounts.createToken({
       ...fields,
@@ -613,6 +705,52 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     });
   });
 
+  // Nightly exports and running the maintainers now (spec: Backups and recovery), as the app's
+  // Import & export page. People only, like restore.
+  const peopleOnly = (c: C) => {
+    if (!c.var.token.actor.startsWith("human:")) {
+      throw new OkfError(403, "human_only", "This needs a human: token, or the app.");
+    }
+    return c.var.token.library;
+  };
+
+  app.get(`${BASE}/exports`, async (c) => {
+    const ref = peopleOnly(c);
+    const list = c.var.deps.exports ? await c.var.deps.exports.list(ref.do_id) : [];
+    return c.json({
+      exports: list.map((e) => ({
+        // YYYY-MM-DD, or YYYY-MM-DD-pre-restore-HHMMSSmmm-xxxx before a restore.
+        date: e.folder.split("/").at(-2) ?? "",
+        seq: typeof e.manifest?.seq === "number" ? e.manifest.seq : null,
+        files: typeof e.manifest?.files === "number" ? e.manifest.files : null,
+      })),
+    });
+  });
+
+  app.post(`${BASE}/maintain`, async (c) => {
+    const ref = peopleOnly(c);
+    if (!c.var.deps.maintain)
+      throw new OkfError(501, "unavailable", "Maintenance is not wired here.");
+    const res = (await c.var.deps.maintain(ref.do_id)) as { export: { key?: string } };
+    return c.json({ export: res.export.key ?? null });
+  });
+
+  // Deleting a library: only from the app's pages, typing its name (v2 spec: Accounts).
+  app.post(`${BASE}/delete`, async (c) => {
+    if (!c.var.token.id.startsWith("session:")) {
+      throw new OkfError(403, "session_only", "A library is deleted only from the app's pages.");
+    }
+    const ref = c.var.token.library;
+    const body = await c.req.json<{ confirm?: string }>().catch(() => ({}) as { confirm?: string });
+    if (String(body.confirm ?? "").trim() !== ref.slug) {
+      throw new OkfError(400, "not_confirmed", `Type ${ref.slug} to confirm.`);
+    }
+    const user = await c.var.deps.accounts.account(c.var.token.created_by ?? "");
+    if (!user) throw new OkfError(401, "no_account", "This account no longer exists.");
+    await deleteLibrary(c.var.deps, c.env.OAUTH_PROVIDER, user, ref);
+    return c.body(null, 204);
+  });
+
   app.post(`${BASE}/restore`, async (c) => {
     const { recovery, ref, token } = recoveryFor(c);
     const body = await c.req
@@ -646,6 +784,43 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   registerUiRoutes(app, deps);
 
   return app;
+}
+
+/**
+ * Who is calling a REST route: a bearer token when the request sends one, otherwise the
+ * signed-in person's session (the app's own pages, TEMPRA-9). A session may change state only
+ * from this site's pages: cookies are SameSite=Lax, and writes must also pass fromThisSite.
+ */
+async function principal(c: C, d: Deps): Promise<{ token: TokenInfo } | { user: User }> {
+  if (c.req.header("Authorization") !== undefined)
+    return { token: await d.authenticate(bearer(c)) };
+  const secret = readCookie(c.req.raw, SESSION_COOKIE);
+  const user = secret ? await d.sessions.user(secret) : null;
+  if (!user) throw new OkfError(401, "no_token", "Send Authorization: Bearer <token>, or sign in.");
+  if (c.req.method !== "GET" && c.req.method !== "HEAD" && !fromThisSite(c.req.raw)) {
+    throw new OkfError(
+      403,
+      "cross_origin",
+      "Changes must be submitted from this site's own pages.",
+    );
+  }
+  return { user };
+}
+
+/**
+ * The signed-in person acting on a library they may reach, as the token the routes act with:
+ * attributed to their human: actor, full write access like the UI's own forms.
+ */
+function sessionToken(user: User, library: LibraryRef): TokenInfo {
+  return {
+    id: `session:${user.id}`,
+    actor: user.actor,
+    scope: "write",
+    prefix: null,
+    mcp_tiers: "all",
+    library,
+    created_by: user.id,
+  };
 }
 
 function bearer(c: C): string {

@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import * as app from "@tempra/app";
 import * as design from "@tempra/design";
-import { linkTarget, renderBody } from "../src/ui/markdown";
-import { setup } from "./harness";
+import { API, setup } from "./harness";
 
 type S = ReturnType<typeof setup>;
 
@@ -22,140 +22,113 @@ async function page(s: S, path: string) {
 
 const LIB = "/owner/demo";
 
-describe("markdown rendering for the UI", () => {
-  const opts = {
-    url: (t: string) => {
-      const l = linkTarget("a/b.md", t);
-      if (!l) return null;
-      return l.kind === "internal" ? `/ui/${l.path}${l.anchor ?? ""}` : l.href;
-    },
-    footnote: (label: string, defined: boolean) => (defined ? `#fn-${label}` : null),
-  };
+/** The JSON the app reads, as the signed-in owner (session cookie). */
+async function get<T = unknown>(s: S, path: string): Promise<T> {
+  const r = await s.app.request(`${API}${path}`, { headers: { Accept: "application/json" } });
+  expect(r.status).toBe(200);
+  return (await r.json()) as T;
+}
 
-  test("never renders raw HTML or unsafe URLs", () => {
-    const { html } = renderBody(
-      [
-        "<script>alert(1)</script>",
-        "",
-        'Hi <img src=x onerror="alert(1)"> [bad](javascript:alert(1)) [data](data:text/html,x)',
-        "",
-        "[ok](https://e.com) [rel](../c.md#h) ![pic](p.png)",
-      ].join("\n"),
-      opts,
-    );
-    expect(html).not.toContain("<script");
-    expect(html).not.toContain('<img src="x"');
-    expect(html).toContain("&#x3C;script>");
-    expect(html).not.toContain("javascript:");
-    expect(html).not.toContain("data:text");
-    expect(html).toContain('href="https://e.com" rel="noopener noreferrer nofollow"');
-    expect(html).toContain('href="/ui/c.md#h"');
-    expect(html).toContain('src="/ui/a/p.png"');
-  });
-
-  test("tables, heading anchors and footnotes", () => {
-    const r = renderBody(
-      "# Schema\n\n| a | b |\n| - | - |\n| 1 | 2 |\n\n# Schema\n\nClaim.[^s] Loose.[^x]\n\n[^s]: The **standard**\n",
-      opts,
-    );
-    expect(r.html).toContain('<h1 id="schema">');
-    expect(r.html).toContain('<h1 id="schema-1">');
-    expect(r.html).toContain("<table>");
-    expect(r.html).toContain('<sup class="fnref"><a href="#fn-s">[s]</a></sup>');
-    // Without a definition GFM keeps it as text, as any renderer would; lint flags it.
-    expect(r.html).toContain("Loose.[^x]");
-    expect(r.footnotes.get("s")).toContain("<strong>standard</strong>");
-  });
-});
-
-describe("built-in UI pages", () => {
-  test("library list, directory and concept views", async () => {
+describe("the app's pages (TEMPRA-9)", () => {
+  test("every rebuilt page is the app's shell, at its old URL", async () => {
     const s = setup();
-    await put(s, "policies/margin.md", "---\ntype: Policy\ntitle: Margin Standard\n---\nRules.\n");
-    await put(
-      s,
-      "metrics/gross-margin.md",
-      [
-        "---",
-        "type: Metric",
-        "title: Gross <Margin>",
-        "description: Revenue minus COGS.",
-        "stale_after: 2020-01-01T00:00:00Z",
-        "sources:",
-        "  - { id: std, resource: /policies/margin.md, title: Margin Standard }",
-        "  - { id: web, resource: https://e.com/doc }",
-        "---",
-        "Uses [the policy](/policies/margin.md) and [missing](/nope.md).[^std] Also [^web].",
-        "",
-        "[^std]: FY2026 standard",
-        "",
-      ].join("\n"),
-      "first draft",
+    await put(s, "notes/a.md", "---\ntype: Note\n---\nA.\n");
+    for (const path of [
+      "/",
+      `${LIB}/`,
+      `${LIB}/notes/`,
+      `${LIB}/-/tree/notes/`,
+      `${LIB}/notes/a.md`,
+      `${LIB}/-/files/notes/a.md`,
+      `${LIB}/-/ledger?actor=x`,
+      `${LIB}/-/diff/notes/a.md?from=0`,
+      `${LIB}/-/work?kind=stale`,
+      `${LIB}/-/revert/some-request`,
+      `${LIB}/-/restore/notes/a.md?to=1`,
+      `${LIB}/-/transfer`,
+      `${LIB}/-/recovery`,
+      `${LIB}/-/connect`,
+      `${LIB}/-/delete`,
+      "/welcome",
+      "/connect",
+      "/tokens",
+      "/apps",
+      "/account",
+    ]) {
+      const r = await page(s, path);
+      expect(r.status).toBe(200);
+      expect(r.html).toContain(`<script type="module" src="${app.href}"></script>`);
+      expect(r.html).toContain(`<link rel="stylesheet" href="${design.href}">`);
+      expect(r.html).toContain('<div id="root"></div>');
+      const csp = r.headers.get("Content-Security-Policy") ?? "";
+      expect(csp).toContain("script-src 'self';");
+      expect(csp).toMatch(/style-src 'self' 'nonce-[A-Za-z0-9+/=]+';/);
+      expect(csp).toContain("connect-src 'self'");
+      expect(r.headers.get("Cache-Control")).toBe("no-store");
+    }
+    // No inline scripts, and a fresh nonce on every response.
+    const one = await page(s, "/");
+    expect(one.html).not.toMatch(/<script(?![^>]*\bsrc=)/);
+    const two = await page(s, "/");
+    expect(one.headers.get("Content-Security-Policy")).not.toBe(
+      two.headers.get("Content-Security-Policy"),
     );
-
-    const list = await page(s, "/");
-    expect(list.status).toBe(200);
-    expect(list.headers.get("Content-Security-Policy")).toContain("default-src 'none'");
-    expect(list.html).toContain('href="/owner/demo/"');
-    expect(list.html).toContain("owner@example.com");
-
-    const root = await page(s, `${LIB}/`);
-    expect(root.status).toBe(200);
-    expect(root.html).toContain(`href="${LIB}/metrics/"`);
-    expect(root.html).toContain("<strong>2</strong>concepts");
-
-    const dir = await page(s, `${LIB}/metrics/`);
-    expect(dir.html).toContain("Gross &#60;Margin&#62;");
-    expect(dir.html).toContain("stale");
-    expect(dir.html).toContain("unverified");
-
-    const c = await page(s, `${LIB}/metrics/gross-margin.md`);
-    expect(c.status).toBe(200);
-    // Title escaped; body links point at UI pages; the broken one is flagged.
-    expect(c.html).toContain("<h1>Gross &#60;Margin&#62;</h1>");
-    expect(c.html).toContain(`href="${LIB}/policies/margin.md"`);
-    expect(c.html).toContain("broken_link");
-    // Footnotes resolve to the sources panel, with counts, definitions and signals.
-    expect(c.html).toContain('<a href="#src-std">[std]</a>');
-    expect(c.html).toContain('id="src-std"');
-    expect(c.html).toContain("cited 1×");
-    expect(c.html).toContain("FY2026 standard");
-    expect(c.html).toContain("Margin Standard");
-    // Frontmatter panel, history with the note, raw link.
-    expect(c.html).toContain("<dt>stale_after</dt>");
-    expect(c.html).toContain("first draft");
-    expect(c.html).toContain(`href="${LIB}/-/raw/metrics/gross-margin.md"`);
-
-    const policy = await page(s, `${LIB}/policies/margin.md`);
-    expect(policy.html).toContain(`href="/owner/demo/metrics/gross-margin.md"`);
-    expect(policy.html).toContain("cites it");
   });
 
-  test("time travel: ?at shows the version then, with a notice", async () => {
+  test("the bundle is served at its hashed path, immutable; any other name is a 404", async () => {
     const s = setup();
-    await put(s, "a.md", "---\ntype: Note\n---\nFirst words.\n");
-    const r = await s.req("/files/a.md", { headers: { Accept: "application/json" } });
-    const { hash, seq } = (await r.json()) as { hash: string; seq: number };
+    const r = await s.anon.request(app.href);
+    expect(r.status).toBe(200);
+    expect(r.headers.get("Content-Type")).toContain("text/javascript");
+    expect(r.headers.get("Cache-Control")).toContain("immutable");
+    expect(await r.text()).toBe(app.js);
+    expect((await s.anon.request("/_app/app.000000000000.js")).status).toBe(404);
+  });
+
+  test("pages require sign-in, and a library the person cannot open is a 404", async () => {
+    const s = setup();
+    const r = await s.anon.request(`${LIB}/a.md?at=1`);
+    expect(r.status).toBe(302);
+    expect(r.headers.get("Location")).toBe(
+      `/sign-in?next=${encodeURIComponent(`${LIB}/a.md?at=1`)}`,
+    );
+    // The actions are the API's: no session, no write.
+    const post = await s.anon.request(`${API}/verify/a.md`, {
+      method: "POST",
+      headers: { Origin: "http://localhost" },
+    });
+    expect(post.status).toBe(401);
+    // The old form posts are gone.
+    expect(
+      (
+        await s.app.request(`${LIB}/-/verify/a.md`, {
+          method: "POST",
+          headers: { Origin: "http://localhost" },
+        })
+      ).status,
+    ).toBe(404);
+    expect((await page(s, "/owner/other/")).status).toBe(404);
+    expect((await page(s, "/owner/other/a.md")).status).toBe(404);
+    expect((await page(s, "/owner/other/-/work")).status).toBe(404);
+    const stranger = await s.stranger();
+    for (const path of [`${LIB}/`, `${LIB}/-/delete`, `${LIB}/-/recovery`, `${LIB}/-/revert/x`]) {
+      expect((await stranger.app.request(path)).status).toBe(404);
+    }
+  });
+
+  test("files as JSON describe every kind of file, as the app reads them", async () => {
+    const s = setup();
+    await put(s, "a.md", "---\ntype: Note\ntitle: A\n---\nFirst words.\n");
+    const { hash, seq } = await get<{ hash: string; seq: number }>(s, "/files/a.md");
     await s.req("/files/a.md", {
       method: "PUT",
       headers: { "Content-Type": "text/markdown", "If-Match": `"${hash}"` },
-      body: "---\ntype: Note\n---\nSecond words.\n",
+      body: "---\ntype: Note\ntitle: A\n---\nSecond words.\n",
     });
-    const now = await page(s, `${LIB}/a.md`);
-    expect(now.html).toContain("Second words.");
-    expect(now.html).not.toContain("Viewing as of");
-    const then = await page(s, `${LIB}/a.md?at=${seq}`);
-    expect(then.html).toContain("First words.");
-    expect(then.html).toContain(`Viewing as of sequence ${seq}`);
-    // Links on a pinned page stay pinned.
-    expect(then.html).toContain(`${LIB}/-/raw/a.md?at=${seq}`);
-    const raw = await s.app.request(`${LIB}/-/raw/a.md?at=${seq}`);
-    expect(raw.headers.get("Content-Type")).toContain("text/plain");
-    expect(await raw.text()).toContain("First words.");
-  });
-
-  test("attachments, synthesized files, and errors as pages", async () => {
-    const s = setup();
+    // A concept: frontmatter and the markdown body the reader parses, at any sequence.
+    expect(await get(s, "/files/a.md")).toMatchObject({ kind: "concept", body: "Second words.\n" });
+    expect(await get(s, `/files/a.md?at=${seq}`)).toMatchObject({ body: "First words.\n" });
+    // An attachment: its description, not its bytes.
     const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
     const up = await s.req("/files/img/logo.png", {
       method: "PUT",
@@ -163,36 +136,29 @@ describe("built-in UI pages", () => {
       body: png,
     });
     expect(up.status).toBeLessThan(300);
-    const a = await page(s, `${LIB}/img/logo.png`);
-    expect(a.html).toContain("image/png");
-    expect(a.html).toContain(`src="${LIB}/-/download/img/logo.png"`);
+    expect(await get(s, "/files/img/logo.png")).toMatchObject({
+      kind: "attachment",
+      path: "img/logo.png",
+      media: "image/png",
+      size: 8,
+    });
+    const bytes = await s.app.request(`${API}/files/img/logo.png`);
+    expect(new Uint8Array(await bytes.arrayBuffer())).toEqual(png);
     const dl = await s.app.request(`${LIB}/-/download/img/logo.png`, { redirect: "manual" });
     expect(dl.status).toBe(302);
-    const bytes = await s.app.request(dl.headers.get("Location") ?? "");
-    expect(new Uint8Array(await bytes.arrayBuffer())).toEqual(png);
-
+    // A synthesized file: its markdown.
+    expect(await get(s, "/files/log.md")).toMatchObject({ kind: "derived", path: "log.md" });
+    // index.md is the directory's page; a missing file is a 404.
     const index = await s.app.request(`${LIB}/img/index.md`, { redirect: "manual" });
     expect(index.headers.get("Location")).toBe(`${LIB}/img/`);
-    expect((await page(s, `${LIB}/log.md`)).html).toContain("Synthesized by the server");
-
-    const missing = await page(s, `${LIB}/nope.md`);
-    expect(missing.status).toBe(404);
-    expect(missing.html).toContain("Back to libraries");
-    expect((await page(s, "/owner/other/")).status).toBe(404);
-  });
-
-  test("pages require sign-in", async () => {
-    const s = setup();
-    const r = await s.anon.request(`${LIB}/a.md?at=1`);
-    expect(r.status).toBe(302);
-    expect(r.headers.get("Location")).toBe(
-      `/sign-in?next=${encodeURIComponent(`${LIB}/a.md?at=1`)}`,
-    );
-    const post = await s.anon.request(`${LIB}/-/verify/a.md`, {
-      method: "POST",
-      headers: { Origin: "http://localhost" },
-    });
-    expect(post.status).toBe(401);
+    expect(
+      (await s.app.request(`${API}/files/nope.md`, { headers: { Accept: "application/json" } }))
+        .status,
+    ).toBe(404);
+    // The raw source, as an export writes it.
+    const raw = await s.app.request(`${LIB}/-/raw/a.md?at=${seq}`);
+    expect(raw.headers.get("Content-Type")).toContain("text/plain");
+    expect(await raw.text()).toContain("First words.");
   });
 });
 
@@ -205,78 +171,44 @@ async function hashOf(s: S, path: string) {
   return (await json<{ hash: string; seq: number }>(r)).hash;
 }
 
-async function submit(
-  s: S,
-  path: string,
-  fields: Record<string, string>,
-  origin = "http://localhost",
-) {
-  return s.app.request(path, {
+/** A write through the API as the signed-in owner, from this site's pages unless `origin` says. */
+async function send(s: S, path: string, body: unknown, origin = "http://localhost") {
+  return s.app.request(`${API}${path}`, {
     method: "POST",
-    headers: { Origin: origin, "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams(fields),
-    redirect: "manual",
+    headers: { Origin: origin, "Content-Type": "application/json" },
+    body: JSON.stringify(body),
   });
 }
 
-describe("history, ledger and revert (Phase 3, slice 2)", () => {
-  test("a leading heading that repeats the title is not shown twice", async () => {
-    const s = setup();
-    await put(
-      s,
-      "a.md",
-      "---\ntype: Note\ntitle: Alpha\n---\n# Alpha\n\nBody text.\n\n# Alpha again\n",
-    );
-    const c = await page(s, `${LIB}/a.md`);
-    expect(c.html).toContain("<h1>Alpha</h1>");
-    expect(c.html).not.toContain('<h1 id="alpha">');
-    expect(c.html).toContain("Alpha again");
-    expect(c.html).toContain("Body text.");
-  });
+type Requests = { requests: { request_id: string; actor: string; note: string | null }[] };
 
-  test("diffs between versions, and since the last human verification", async () => {
+describe("history, ledger and revert (Phase 3, slice 2)", () => {
+  test("diffs between versions", async () => {
     const s = setup();
     await put(s, "a.md", "---\ntype: Note\n---\nOne.\n", "first");
-    const first = (
-      await json<{ seq: number }>(
-        await s.req("/files/a.md", { headers: { Accept: "application/json" } }),
-      )
-    ).seq;
-    await s.store().verify({ actor: "human:owner", request_id: "v1" }, "a.md");
     await s.req("/files/a.md", {
       method: "PUT",
       headers: { "Content-Type": "text/markdown", "If-Match": `"${await hashOf(s, "a.md")}"` },
       body: "---\ntype: Note\n---\nTwo.\n",
     });
-    const c = await page(s, `${LIB}/a.md`);
-    expect(c.html).toContain("Changes since human verification");
-    expect(c.html).toContain(`${LIB}/-/diff/a.md?to=${first}`);
-    const d = await page(s, `${LIB}/-/diff/a.md`);
-    expect(d.status).toBe(200);
-    expect(d.html).toContain('<span class="del">-One.</span>');
-    expect(d.html).toContain('<span class="add">+Two.</span>');
-    const since = /href="([^"]*diff\/a\.md\?from=\d+)"/.exec(c.html)?.[1] ?? "";
-    expect((await page(s, since.replace(/&amp;/g, "&"))).html).toContain("+Two.");
+    const d = await get<{ diff: string }>(s, "/diff?path=a.md");
+    expect(d.diff).toContain("-One.");
+    expect(d.diff).toContain("+Two.");
   });
 
-  test("the ledger lists requests with filters and pages", async () => {
+  test("the ledger lists requests with filters", async () => {
     const s = setup();
     await put(s, "notes/a.md", "---\ntype: Note\n---\nA\n", "add a");
     await put(s, "other/b.md", "---\ntype: Note\n---\nB\n", "add b");
-    const all = await page(s, `${LIB}/-/ledger`);
-    expect(all.html).toContain("add a");
-    expect(all.html).toContain("add b");
-    expect(all.html.indexOf("add b")).toBeLessThan(all.html.indexOf("add a"));
-    const scoped = await page(s, `${LIB}/-/ledger?prefix=notes`);
-    expect(scoped.html).toContain("add a");
-    expect(scoped.html).not.toContain("add b");
-    expect((await page(s, `${LIB}/-/ledger?actor=someone/else`)).html).toContain(
-      "No requests match",
-    );
+    const notes = async (q: string) =>
+      (await get<Requests>(s, `/requests${q}`)).requests.map((r) => r.note);
+    expect(await notes("")).toEqual(["add b", "add a"]);
+    expect(await notes("?prefix=notes")).toEqual(["add a"]);
+    expect(await notes("?actor=someone/else")).toEqual([]);
     const today = new Date().toISOString().slice(0, 10);
-    expect((await page(s, `${LIB}/-/ledger?from=${today}&to=${today}`)).html).toContain("add a");
-    expect((await page(s, `${LIB}/-/ledger?to=2000-01-01`)).html).toContain("No requests match");
-    expect((await page(s, `${LIB}/-/ledger?from=yesterday`)).status).toBe(400);
+    expect(await notes(`?from=${today}&to=${today}`)).toContain("add a");
+    expect(await notes("?to=2000-01-01")).toEqual([]);
+    expect((await s.app.request(`${API}/requests?from=yesterday`)).status).toBe(400);
   });
 
   test("revert a request from the ledger, attributed to the signed-in human", async () => {
@@ -291,49 +223,51 @@ describe("history, ledger and revert (Phase 3, slice 2)", () => {
       },
       body: "---\ntype: Note\n---\nBad.\n",
     });
-    const ledger = await page(s, `${LIB}/-/ledger`);
-    const revertUrl = /href="([^"]*\/revert\/[^"]+)"/.exec(ledger.html)?.[1] ?? "";
-    const confirm = await page(s, revertUrl);
-    expect(confirm.html).toContain("Revert this request?");
-    expect(confirm.html).toContain("bad edit");
-    expect(confirm.html).toContain('<span class="add">+Bad.</span>');
+    const bad = (await get<Requests>(s, "/requests")).requests[0];
+    expect(bad?.note).toBe("bad edit");
+    // The confirmation page is the app's; it reads the request and its diff from the API.
+    expect((await page(s, `${LIB}/-/revert/${bad?.request_id}`)).html).toContain(
+      '<div id="root"></div>',
+    );
+    const ids = (await get<Requests>(s, "/requests")).requests.map((r) => r.request_id);
+    expect(ids).toContain(bad?.request_id as string);
 
-    const forged = await submit(s, revertUrl, { note: "x" }, "https://evil.example");
+    const target = { request_id: bad?.request_id, note: "x" };
+    const forged = await send(s, "/revert", target, "https://evil.example");
     expect(forged.status).toBe(403);
     expect(await s.store().read("a.md")).toMatchObject({ body: "Bad.\n" });
 
-    const done = await submit(s, revertUrl, { note: "undo the bad edit" });
-    expect(done.status).toBe(303);
-    expect(done.headers.get("Location")).toContain("done=revert");
-    const r = s.store().read("a.md");
-    expect(r).toMatchObject({ body: "Good.\n" });
-    const after = await page(s, done.headers.get("Location") ?? "");
-    expect(after.html).toContain("Reverted: 1 change");
-    expect(after.html).toContain("human:owner");
-    expect(after.html).toContain("undo the bad edit");
+    const done = await send(s, "/revert", {
+      request_id: bad?.request_id,
+      note: "undo the bad edit",
+    });
+    expect(done.status).toBe(200);
+    expect(s.store().read("a.md")).toMatchObject({ body: "Good.\n" });
+    expect((await get<Requests>(s, "/requests")).requests[0]).toMatchObject({
+      actor: "human:owner",
+      note: "undo the bad edit",
+    });
   });
 
   test("restore one file to an earlier version", async () => {
     const s = setup();
     await put(s, "a.md", "---\ntype: Note\n---\nFirst.\n");
-    const first = (
-      await json<{ seq: number }>(
-        await s.req("/files/a.md", { headers: { Accept: "application/json" } }),
-      )
-    ).seq;
+    const first = (await get<{ seq: number }>(s, "/files/a.md")).seq;
     await s.req("/files/a.md", {
       method: "PUT",
       headers: { "Content-Type": "text/markdown", "If-Match": `"${await hashOf(s, "a.md")}"` },
       body: "---\ntype: Note\n---\nSecond.\n",
     });
-    const pinned = await page(s, `${LIB}/a.md?at=${first}`);
-    expect(pinned.html).toContain(`${LIB}/-/restore/a.md?to=${first}`);
-    const confirm = await page(s, `${LIB}/-/restore/a.md?to=${first}`);
-    expect(confirm.html).toContain('<span class="add">+First.</span>');
-    const done = await submit(s, `${LIB}/-/restore/a.md?to=${first}`, { note: "back to first" });
-    expect(done.status).toBe(303);
+    expect((await page(s, `${LIB}/-/restore/a.md?to=${first}`)).status).toBe(200);
+    const d = await get<{ diff: string }>(s, `/diff?path=a.md&from=${first}`);
+    expect(d.diff).toContain("+Second.");
+    const done = await send(s, "/revert", { path: "a.md", to_seq: first, note: "back to first" });
+    expect(done.status).toBe(200);
     expect(s.store().read("a.md")).toMatchObject({ body: "First.\n" });
-    expect((await page(s, done.headers.get("Location") ?? "")).html).toContain("Restored.");
+    expect((await get<Requests>(s, "/requests")).requests[0]).toMatchObject({
+      actor: "human:owner",
+      note: "back to first",
+    });
   });
 });
 
@@ -348,12 +282,37 @@ describe("the shared design stylesheet", () => {
     expect((await s.anon.request("/_design/tempra.000000000000.css")).status).toBe(404);
   });
 
-  test("every page links it and its CSP allows it", async () => {
+  test("every page links it and its CSP allows it: the shell and the server's own pages", async () => {
     const s = setup();
+    // An app asking for consent, so /authorize draws its page.
+    const reg = await s.anon.request("/register", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        client_name: "Claude",
+        redirect_uris: ["https://claude.ai/api/mcp/auth_callback"],
+        token_endpoint_auth_method: "none",
+        grant_types: ["authorization_code", "refresh_token"],
+        response_types: ["code"],
+      }),
+    });
+    const { client_id } = (await reg.json()) as { client_id: string };
+    const consent = `/authorize?${new URLSearchParams({
+      response_type: "code",
+      client_id,
+      redirect_uri: "https://claude.ai/api/mcp/auth_callback",
+      scope: "okf:read",
+      state: "st4te",
+      code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
+      code_challenge_method: "S256",
+      resource: "http://localhost/mcp",
+    })}`;
     for (const [client, path] of [
       [s.app, "/"],
+      [s.app, "/account"],
       [s.anon, "/sign-in"],
-      [s.anon, "/privacy"],
+      [s.app, consent],
+      [s.app, "/account/email/confirm?t=x"],
     ] as const) {
       const r = await client.request(path);
       expect(r.status).toBe(200);

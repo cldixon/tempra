@@ -86,6 +86,25 @@ async function exchange(app: App, clientId: string, location: string, verifier: 
   return (await r.json()) as { access_token: string; refresh_token: string; scope: string };
 }
 
+type Apps = {
+  apps: { id: string; app: string; actor: string | null; libraries: "all" | string[] }[];
+};
+
+async function apps(app: App): Promise<Apps["apps"]> {
+  const r = await app.request("/api/v1/apps");
+  expect(r.status).toBe(200);
+  return ((await r.json()) as Apps).apps;
+}
+
+/** The app's API, as its pages call it: JSON, from this site. */
+function api(app: App, path: string, method: string, body?: unknown, origin = ORIGIN) {
+  return app.request(path, {
+    method,
+    headers: { Origin: origin, "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
 async function mcp(app: App, token: string) {
   const transport = new StreamableHTTPClientTransport(new URL(`${ORIGIN}/mcp`), {
     requestInit: { headers: { Authorization: `Bearer ${token}` } },
@@ -237,27 +256,27 @@ describe("OAuth for MCP clients", () => {
     const done = await submit(app, flow, approve);
     const tokens = await exchange(app, clientId, done.headers.get("Location") ?? "", flow.verifier);
 
-    const list = await (await app.request("/apps")).text();
-    expect(list).toContain("Claude");
-    expect(list).toContain("claude-ai/connector");
-    const grant = /name="grant" value="([^"]+)"/.exec(list)?.[1] ?? "";
+    const list = await apps(app);
+    expect(list).toHaveLength(1);
+    expect(list[0]).toMatchObject({ app: "Claude", actor: "claude-ai/connector" });
+    const grant = list[0]?.id ?? "";
 
-    const forged = await app.request("/apps/revoke", {
-      method: "POST",
-      headers: {
-        Origin: "https://evil.example",
-        "Content-Type": "application/x-www-form-urlencoded",
-      },
-      body: new URLSearchParams({ grant }),
-    });
+    const forged = await api(
+      app,
+      `/api/v1/apps/${grant}`,
+      "DELETE",
+      undefined,
+      "https://evil.example",
+    );
     expect(forged.status).toBe(403);
-    const revoked = await app.request("/apps/revoke", {
-      method: "POST",
-      headers: { Origin: ORIGIN, "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ grant }),
-      redirect: "manual",
+    const byToken = await app.request(`/api/v1/apps/${grant}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
     });
-    expect(revoked.status).toBe(303);
+    expect(byToken.status).toBe(403);
+    const revoked = await api(app, `/api/v1/apps/${grant}`, "DELETE");
+    expect(revoked.status).toBe(204);
+    expect(await apps(app)).toEqual([]);
     const r = await app.request("/mcp", {
       method: "POST",
       headers: {
@@ -282,14 +301,11 @@ describe("OAuth for MCP clients", () => {
         flow.verifier,
       );
       const [path, confirm] =
-        how === "library" ? ["/owner/demo/-/delete", "demo"] : ["/account/delete", "owner"];
-      const del = await app.request(path, {
-        method: "POST",
-        headers: { Origin: ORIGIN, "Content-Type": "application/x-www-form-urlencoded" },
-        body: new URLSearchParams({ confirm }),
-        redirect: "manual",
-      });
-      expect(del.status).toBeLessThan(400);
+        how === "library"
+          ? ["/api/v1/libraries/owner/demo/delete", "demo"]
+          : ["/api/v1/account/delete", "owner"];
+      const del = await api(app, path, "POST", { confirm });
+      expect(del.status).toBe(204);
       const r = await app.request("/mcp", {
         method: "POST",
         headers: {
@@ -343,15 +359,12 @@ describe("OAuth for MCP clients", () => {
     expect(theirs.text).toContain("no_library");
 
     // Deleting one library keeps a connection to all of them.
-    const del = await app.request("/owner/developers/-/delete", {
-      method: "POST",
-      headers: { Origin: ORIGIN, "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({ confirm: "developers" }),
-      redirect: "manual",
+    const del = await api(app, "/api/v1/libraries/owner/developers/delete", "POST", {
+      confirm: "developers",
     });
-    expect(del.status).toBeLessThan(400);
+    expect(del.status).toBe(204);
     expect((await call("start")).text).toContain("# Library owner/demo");
-    expect(await (await app.request("/apps")).text()).toContain("All libraries");
+    expect((await apps(app))[0]?.libraries).toBe("all");
   });
 
   test("selected libraries: only those, and a suspended account is cut off", async () => {
@@ -369,8 +382,7 @@ describe("OAuth for MCP clients", () => {
     // A library created later is not selected.
     await accounts.createLibrary("later", { id: "user_1", handle: "owner" });
     expect((await call("start")).text).toContain("# Library owner/demo");
-    const apps = await (await app.request("/apps")).text();
-    expect(apps).toContain("<td>demo");
+    expect((await apps(app))[0]?.libraries).toEqual(["demo"]);
 
     db.run("UPDATE users SET suspended = ? WHERE id = ?", [new Date().toISOString(), "user_1"]);
     const r = await app.request("/mcp", {

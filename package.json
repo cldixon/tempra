@@ -5,7 +5,9 @@
   "packageManager": "bun@1.3.11",
   "workspaces": [
     "worker",
-    "design"
+    "design",
+    "editor",
+    "app"
   ],
   "scripts": {
     "dev": "bun run --filter worker dev",
@@ -19,7 +21,8 @@
     "gate": "bun run --filter worker gate",
     "logs": "bun run --filter worker logs",
     "preview": "bun run --filter worker preview",
-    "admin": "bun run --filter worker admin"
+    "admin": "bun run --filter worker admin",
+    "agents": "bun run --filter worker agents"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.5.14"

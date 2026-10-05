@@ -49,9 +49,10 @@ jobs:
           CF_SEND_TELEMETRY: "false"
 
   # worker/ is the deployable project: it must install and build with nothing from the rest of
-  # this repository. `cf deploy --dry-run` builds and validates without credentials.
+  # this repository but the two packages it imports. `cf deploy --dry-run` builds and validates
+  # without credentials.
   standalone:
-    name: worker/ builds on its own (with design/)
+    name: worker/ builds on its own (with design/, editor/ and app/)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -59,13 +60,14 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version-file: package.json
-      # worker/ plus the one package it imports from the repo (design/), under a bare workspace root.
-      - name: Copy worker/ and design/ alone, install, build
+      # worker/ plus the packages it imports from the repo (design/, and app/, whose bundle
+      # `bun install` builds, with editor/ inside it), under a bare workspace root.
+      - name: Copy worker/, design/, editor/ and app/ alone, install, build
         run: |
           dest="$RUNNER_TEMP/standalone"
           mkdir -p "$dest"
-          git ls-files worker design | tar -cf - -T - | tar -xf - -C "$dest"
-          echo '{"private":true,"workspaces":["worker","design"]}' > "$dest/package.json"
+          git ls-files worker design editor app | tar -cf - -T - | tar -xf - -C "$dest"
+          echo '{"private":true,"workspaces":["worker","design","editor","app"]}' > "$dest/package.json"
           cd "$dest"
           bun install
           cd worker

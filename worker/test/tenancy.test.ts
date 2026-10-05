@@ -65,14 +65,31 @@ describe("tenancy (v2 spec: Tenancy and authorization)", () => {
               }),
             ],
           ]
-        : [other.writer, other.human].map((token) => [
-            token === other.writer ? "write token" : "human token",
-            s.anon.request(path, {
-              method: r.method,
-              headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-              body: r.method === "GET" || r.method === "DELETE" ? undefined : "{}",
-            }),
-          ]);
+        : [
+            ...[other.writer, other.human].map((token): [string, Promise<Response>] => [
+              token === other.writer ? "write token" : "human token",
+              s.anon.request(path, {
+                method: r.method,
+                headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+                body:
+                  r.method === "GET" || r.method === "DELETE"
+                    ? undefined
+                    : JSON.stringify({ confirm: "demo" }),
+              }),
+            ]),
+            // The app's own pages call the API with the session (TEMPRA-9).
+            [
+              "session",
+              other.app.request(path, {
+                method: r.method,
+                headers: { Origin: ORIGIN, "Content-Type": "application/json" },
+                body:
+                  r.method === "GET" || r.method === "DELETE"
+                    ? undefined
+                    : JSON.stringify({ confirm: "demo" }),
+              }),
+            ],
+          ];
       for (const [who, res] of attempts) {
         const got = await res;
         const body = await got.text();
@@ -112,27 +129,27 @@ describe("tenancy (v2 spec: Tenancy and authorization)", () => {
   test("lists and token management show and touch only the account's own", async () => {
     const s = setup();
     const other = await s.stranger();
-    // The owner mints a token in the UI.
-    const minted = await s.app.request("/tokens", {
+    // The owner mints a token in the app.
+    const minted = await s.app.request("/api/v1/tokens", {
       method: "POST",
-      headers: { Origin: ORIGIN },
-      body: new URLSearchParams({ library: "demo", actor: "claude-code/mine", scope: "write" }),
+      headers: { Origin: ORIGIN, "Content-Type": "application/json" },
+      body: JSON.stringify({ library: "demo", actor: "claude-code/mine", scope: "write" }),
     });
-    expect(minted.status).toBe(200);
+    expect(minted.status).toBe(201);
     const ownerTokens = await s.accounts.tokens("user_1");
     const ownerTokenId = ownerTokens[0]?.id ?? "";
     expect(ownerTokenId).toStartWith("tok_");
 
-    const home = await (await other.app.request("/")).text();
-    expect(home).toContain('href="/stranger/demo/"');
-    expect(home).not.toContain("/libraries/owner/");
-    const tokens = await (await other.app.request("/tokens")).text();
+    const home = await (await other.app.request("/api/v1/libraries")).text();
+    expect(home).toContain('"owner":"stranger","slug":"demo"');
+    expect(home).not.toContain('"owner":"owner"');
+    const tokens = await (await other.app.request("/api/v1/tokens")).text();
     expect(tokens).not.toContain("claude-code/mine");
     expect(tokens).toContain("claude-code/stranger");
 
     // Revoking the owner's token from the stranger's session, or with their human: token.
-    const ui = await other.app.request(`/tokens/${ownerTokenId}/revoke`, {
-      method: "POST",
+    const ui = await other.app.request(`/api/v1/tokens/${ownerTokenId}`, {
+      method: "DELETE",
       headers: { Origin: ORIGIN },
     });
     expect(ui.status).toBe(404);

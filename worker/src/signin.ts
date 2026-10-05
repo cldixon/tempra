@@ -1,6 +1,7 @@
 import type { Context, Hono } from "hono";
 import { signupMode, type User } from "./accounts";
 import type { Deps } from "./app";
+import { LEGAL } from "./legal";
 import { esc, messagePage, page } from "./oauth/pages";
 import { fromThisSite } from "./origin";
 import {
@@ -59,7 +60,7 @@ export async function signedIn(
 
 /**
  * Sends a link by email, or in local dev (no mailer, DEV_SIGNIN=1, loopback) logs it and returns
- * HTML showing it on the page. Returns "" once mailed, or null when sending failed.
+ * the link, to show on the page. Returns "" once mailed, or null when sending failed.
  */
 export async function sendLink(
   req: Request,
@@ -71,7 +72,7 @@ export async function sendLink(
   if (!d.mailer || devSignIn(req, env)) {
     if (!devSignIn(req, env)) return null;
     console.log(`Link for ${msg.to}: ${msg.link}`);
-    return `<p>Local dev, no email sent: <a id="dev-link" href="${esc(msg.link)}">link</a></p>`;
+    return msg.link;
   }
   try {
     await d.mailer.send({ to: msg.to, subject: msg.subject, text: msg.text });
@@ -114,7 +115,7 @@ ${err}<form method="post" action="/sign-in">
 <p><label for="email">Email</label>
 <input id="email" name="email" type="text" inputmode="email" autocomplete="email" required value="${esc(opts.email ?? "")}"></p>
 <p><button type="submit">Email me a link</button></p></form>
-<p><a href="/terms">Terms</a> | <a href="/privacy">Privacy</a></p>`;
+<p><a href="${LEGAL}/terms">Terms</a> | <a href="${LEGAL}/privacy">Privacy</a></p>`;
 }
 
 export function registerSignInRoutes<E extends AppEnv>(
@@ -172,7 +173,10 @@ export function registerSignInRoutes<E extends AppEnv>(
       if (sent === null) {
         return html("<h1>Could not send email</h1><p>Try again in a few minutes.</p>", 502);
       }
-      shown = sent;
+      // Local dev: the link is shown here instead of mailed.
+      shown = sent
+        ? `<p>Local dev, no email sent: <a id="dev-link" href="${esc(sent)}">link</a></p>`
+        : "";
     }
     // The same answer whether the email has an account, is invited, is waitlisted, or asked
     // too often: the page reveals none of it.

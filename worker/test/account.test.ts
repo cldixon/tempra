@@ -6,6 +6,7 @@ import { ORIGIN, setup, UI } from "./harness";
 type S = ReturnType<typeof setup>;
 type App = S["app"];
 
+/** A form post to one of the server's own pages (sign-in, the email-change link). */
 function post(app: App, path: string, fields: Record<string, string>) {
   return app.request(path, {
     method: "POST",
@@ -14,6 +15,24 @@ function post(app: App, path: string, fields: Record<string, string>) {
     redirect: "manual",
   });
 }
+
+/** A call to the REST API as the app makes it: JSON, from this site's pages. */
+function call(app: App, path: string, method: string, body?: unknown, origin = ORIGIN) {
+  return app.request(path, {
+    method,
+    headers: { Origin: origin, ...(body !== undefined && { "Content-Type": "application/json" }) },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
+/** The page is the app's shell. */
+async function shell(app: App, path: string) {
+  const r = await app.request(path, { redirect: "manual" });
+  expect(r.status).toBe(200);
+  expect(await r.text()).toContain('<div id="root"></div>');
+}
+
+type Requests = { requests: { actor: string; note: string | null }[] };
 
 const text = async (r: Response | Promise<Response>) => (await r).text();
 
@@ -35,102 +54,115 @@ async function newcomer(s: S, email = "new@example.com") {
 describe("first run (v2 spec: Onboarding)", () => {
   test("no libraries: welcome, pick a handle and a library, land on Connect", async () => {
     const s = setup();
-    const { app } = await newcomer(s);
+    const { app, user } = await newcomer(s);
     const home = await app.request("/", { redirect: "manual" });
     expect(home.status).toBe(302);
     expect(home.headers.get("Location")).toBe("/welcome");
-    const page = await text(app.request("/welcome"));
+    await shell(app, "/welcome");
     // new@example.com: "new" is a route name (v2 spec: Handles), so the suggestion is u-new.
-    expect(page).toContain('name="handle" value="u-new"');
-    expect(page).toContain('name="library" value="notes"');
-    expect(page).not.toContain("<style");
+    const me = (await (await app.request("/api/v1/account")).json()) as { handle: string };
+    expect(me.handle).toBe("u-new");
 
-    // A taken handle, or a bad library name, keeps the form.
-    const taken = await post(app, "/welcome", { handle: "owner", library: "notes" });
+    // A taken handle, or a bad library name, is refused.
+    const taken = await call(app, "/api/v1/account/handle", "PUT", { handle: "owner" });
     expect(taken.status).toBe(409);
     expect(await taken.text()).toContain("The handle owner is taken.");
-    const bad = await post(app, "/welcome", { handle: "newbie", library: "Bad Name!" });
+    const bad = await call(app, "/api/v1/libraries", "POST", { slug: "Bad Name!" });
     expect(bad.status).toBe(400);
+    expect(await s.accounts.libraries(user.id)).toEqual([]);
 
-    const done = await post(app, "/welcome", {
-      handle: "Newbie",
-      library: "notes",
-      starter: "1",
-    });
-    expect(done.status).toBe(303);
-    expect(done.headers.get("Location")).toBe("/newbie/notes/-/connect");
+    // The welcome page: the handle, then the library with its starter note.
+    expect((await call(app, "/api/v1/account/handle", "PUT", { handle: "Newbie" })).status).toBe(
+      200,
+    );
+    const done = await call(app, "/api/v1/libraries", "POST", { slug: "notes", starter: true });
+    expect(done.status).toBe(201);
+    expect(await done.json()).toMatchObject({ owner: "newbie", slug: "notes" });
     expect((await s.accounts.user("new@example.com")).actor).toBe("human:newbie");
 
-    const starter = await text(app.request("/newbie/notes/start-here.md"));
+    const starter = await text(app.request("/api/v1/libraries/newbie/notes/files/start-here.md"));
     expect(starter).toContain("Start here");
-    expect(starter).toContain("human:newbie");
+    const history = await text(app.request("/api/v1/libraries/newbie/notes/history/start-here.md"));
+    expect(history).toContain("human:newbie");
 
-    const connect = await text(app.request("/newbie/notes/-/connect"));
-    expect(connect).toContain("<pre>http://localhost/mcp</pre>");
-    expect(connect).toContain("claude mcp add --transport http tempra http://localhost/mcp");
-    expect(connect).toContain('href="/tokens?library=notes"');
-    expect(connect).toContain("No agent has written yet.");
-    // The token form opens on that library.
-    expect(await text(app.request("/tokens?library=notes"))).toContain(
-      '<option value="notes" selected>',
-    );
+    // Connect: the app's page; no agent has written yet.
+    await shell(app, "/newbie/notes/-/connect");
+    await shell(app, "/tokens?library=notes");
+    const recent = (await (
+      await app.request("/api/v1/libraries/newbie/notes/requests?limit=10")
+    ).json()) as Requests;
+    expect(recent.requests.every((r) => r.actor.startsWith("human:"))).toBe(true);
+  });
+
+  test("a starter note only from the app: a token's new library starts empty", async () => {
+    const s = setup();
+    const r = await s.anon.request("/api/v1/libraries", {
+      method: "POST",
+      headers: { Authorization: "Bearer human", "Content-Type": "application/json" },
+      body: JSON.stringify({ slug: "plain", starter: true }),
+    });
+    expect(r.status).toBe(201);
+    const files = await s.app.request("/api/v1/libraries/owner/plain/files/start-here.md", {
+      headers: { Accept: "application/json" },
+    });
+    expect(files.status).toBe(404);
   });
 
   test("Connect turns to the agent's first write", async () => {
     const s = setup();
-    const before = await text(s.app.request(`${UI}/-/connect`));
-    expect(before).toContain("No agent has written yet.");
+    const agentWrites = async () =>
+      (
+        (await (
+          await s.app.request("/api/v1/libraries/owner/demo/requests?limit=10")
+        ).json()) as Requests
+      ).requests.filter((r) => !r.actor.startsWith("human:"));
+    expect(await agentWrites()).toEqual([]);
     const w = await s.req("/files/a.md", {
       method: "PUT",
       headers: { "Content-Type": "text/markdown", "X-Note": "hello" },
       body: "---\ntype: Note\n---\nhi\n",
     });
     expect(w.status).toBe(200);
-    const after = await text(s.app.request(`${UI}/-/connect`));
-    expect(after).toContain("Last agent write: claude-code/test");
-    expect(after).toContain('"hello"');
+    expect((await agentWrites())[0]).toMatchObject({ actor: "claude-code/test", note: "hello" });
   });
 });
 
 describe("connect an agent (tempra-dev: v2/onboarding)", () => {
-  test("/connect is account-wide and linked from the header and the library list", async () => {
+  test("/connect and a library's Connect tab are the app's pages, behind sign-in", async () => {
     const s = setup();
-    const page = await text(s.app.request("/connect"));
-    expect(page).toContain("<h1>Connect an agent</h1>");
-    expect(page).toContain("choose All libraries, or select the ones it may use");
-    expect(page).toContain("<pre>http://localhost/mcp</pre>");
-    expect(page).toContain("claude mcp add --transport http tempra http://localhost/mcp");
-    expect(page).toContain('href="/tokens"');
-    expect(page).toContain('href="/apps"');
-    expect(page).not.toContain("demo");
-    const list = await text(s.app.request("/"));
-    expect(list).toContain('<a href="/connect">Connect an agent</a>');
-    expect(list).toContain('<a href="/connect">Connect</a>');
+    await shell(s.app, "/connect");
+    await shell(s.app, `${UI}/-/connect`);
     // Signed out, it asks for sign-in like every other account page.
     const anon = await s.anon.request("/connect", { redirect: "manual" });
     expect(anon.status).toBe(302);
     expect(anon.headers.get("Location")).toBe("/sign-in?next=%2Fconnect");
-  });
-
-  test("a library's Connect tab names the library and points to /connect", async () => {
-    const s = setup();
-    const page = await text(s.app.request(`${UI}/-/connect`));
-    expect(page).toContain("choose All libraries, or select demo");
-    expect(page).toContain('<a href="/connect">Connect an agent</a> covers every library');
-    expect(page).toContain('href="/tokens?library=demo"');
+    const stranger = await s.stranger();
+    expect((await stranger.app.request(`${UI}/-/connect`)).status).toBe(404);
   });
 });
 
 describe("account page (v2 spec: Accounts and sign-in)", () => {
+  type Account = {
+    email: string;
+    handle: string;
+    actor: string;
+    sessions: { id: string; current: boolean }[];
+  };
+  const account = async (app: App) =>
+    (await (await app.request("/api/v1/account")).json()) as Account;
+
   test("sessions: this device, and signing out another", async () => {
     const s = setup();
     const other = s.sessionFor("user_1");
-    const page = await text(s.app.request("/account"));
-    expect(page).toContain("owner@example.com");
-    expect(page).toContain("this device");
-    expect(page).toContain(sha256Hex(other));
-    const ended = await post(s.app, "/account/sessions/end", { id: sha256Hex(other) });
-    expect(ended.status).toBe(303);
+    await shell(s.app, "/account");
+    const me = await account(s.app);
+    expect(me.email).toBe("owner@example.com");
+    expect(me.sessions.filter((x) => x.current)).toHaveLength(1);
+    expect(me.sessions.find((x) => x.id === sha256Hex(other))).toMatchObject({ current: false });
+    const end = (id: string, origin = ORIGIN) =>
+      call(s.app, `/api/v1/account/sessions/${id}`, "DELETE", undefined, origin);
+    expect((await end(sha256Hex(other), "https://evil.example")).status).toBe(403);
+    expect((await end(sha256Hex(other))).status).toBe(204);
     const otherHome = await s.anon.request("/", {
       headers: { Cookie: `${SESSION_COOKIE}=${other}` },
       redirect: "manual",
@@ -139,30 +171,89 @@ describe("account page (v2 spec: Accounts and sign-in)", () => {
     // Another account's session id is not ours to end.
     const stranger = await s.stranger();
     const theirs = (await s.sessions.list(stranger.user.id))[0]?.id ?? "";
-    await post(s.app, "/account/sessions/end", { id: theirs });
+    await end(theirs);
     expect(await s.sessions.list(stranger.user.id)).toHaveLength(1);
   });
 
   test("changing the handle moves paths and the actor for future writes", async () => {
     const s = setup();
-    expect((await post(s.app, "/account/handle", { handle: "bad handle" })).status).toBe(400);
+    const rename = (handle: string) => call(s.app, "/api/v1/account/handle", "PUT", { handle });
+    expect((await rename("bad handle")).status).toBe(400);
     const stranger = await s.stranger();
-    const taken = await post(s.app, "/account/handle", { handle: stranger.user.handle });
-    expect(taken.status).toBe(409);
+    expect((await rename(stranger.user.handle)).status).toBe(409);
 
-    const r = await post(s.app, "/account/handle", { handle: "renamed" });
+    const r = await rename("renamed");
     expect(r.status).toBe(200);
-    expect(await r.text()).toContain("Actor: human:renamed");
+    expect((await r.json()) as object).toEqual({ handle: "renamed", actor: "human:renamed" });
     // The old handle is held for this account: its URLs redirect (v2 spec: Handles).
     const old = await s.app.request(`${UI}/-/ledger?prefix=x`, { redirect: "manual" });
     expect(old.status).toBe(301);
     expect(old.headers.get("Location")).toBe("/renamed/demo/-/ledger?prefix=x");
     expect((await s.app.request("/renamed/demo/")).status).toBe(200);
+    // Future writes from the app carry the new actor.
+    const w = await s.app.request("/api/v1/libraries/renamed/demo/files/n.md", {
+      method: "PUT",
+      headers: { Origin: ORIGIN, "Content-Type": "text/markdown" },
+      body: "---\ntype: Note\n---\nn\n",
+    });
+    expect(w.status).toBeLessThan(300);
+    const reqs = (await (
+      await s.app.request("/api/v1/libraries/renamed/demo/requests?limit=1")
+    ).json()) as Requests;
+    expect(reqs.requests[0]?.actor).toBe("human:renamed");
     // The library's tokens follow: their path now carries the new handle.
     const tree = await s.anon.request("/api/v1/libraries/renamed/demo/tree", {
       headers: { Authorization: `Bearer ${(await mintToken(s)).secret}` },
     });
     expect(tree.status).toBe(200);
+  });
+
+  test("the account API is the signed-in person's only: tokens, strangers' origins and no session are refused", async () => {
+    const s = setup();
+    const minted = await s.accounts.createToken({
+      libraryId: "lib-1",
+      actor: "human:owner",
+      scope: "write",
+      prefix: null,
+      expires: null,
+      mcpTiers: "all",
+      createdBy: "user_1",
+    });
+    const routes: [string, string, unknown?][] = [
+      ["GET", "/api/v1/account"],
+      ["PUT", "/api/v1/account/handle", { handle: "taken-over" }],
+      ["POST", "/api/v1/account/email", { email: "evil@example.com" }],
+      ["DELETE", "/api/v1/account/sessions/x"],
+      ["POST", "/api/v1/account/delete", { confirm: "owner" }],
+      ["GET", "/api/v1/apps"],
+      ["DELETE", "/api/v1/apps/x"],
+    ];
+    for (const [method, path, body] of routes) {
+      // Even a human: token for this very account never reaches them.
+      for (const secret of [minted.secret, "human"]) {
+        const r = await s.anon.request(path, {
+          method,
+          headers: {
+            Authorization: `Bearer ${secret}`,
+            Origin: ORIGIN,
+            "Content-Type": "application/json",
+          },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        });
+        expect(r.status).toBe(403);
+        expect(((await r.json()) as { code: string }).code).toBe("session_only");
+      }
+      expect((await call(s.anon, path, method, body)).status).toBe(401);
+      if (method !== "GET") {
+        expect((await call(s.app, path, method, body, "https://evil.example")).status).toBe(403);
+      }
+    }
+    // Nothing changed.
+    expect(await s.accounts.user("owner@example.com")).toMatchObject({
+      id: "user_1",
+      handle: "owner",
+    });
+    expect(s.outbox).toEqual([]);
   });
 });
 
@@ -189,20 +280,37 @@ describe("deleting (v2 spec: A2)", () => {
       headers: { "Content-Type": "text/markdown" },
       body: "---\ntype: Note\n---\nhi\n",
     });
-    await post(s.app, `${UI}/-/maintain`, {});
+    const API = "/api/v1/libraries/owner/demo";
+    expect((await call(s.app, `${API}/maintain`, "POST")).status).toBe(200);
     expect([...s.bucket.objects.keys()].some((k) => k.startsWith("exports/lib-1/"))).toBe(true);
 
-    const page = await text(s.app.request(`${UI}/-/delete`));
-    expect(page).toContain("Type demo to confirm");
-    const wrong = await post(s.app, `${UI}/-/delete`, { confirm: "dem" });
+    await shell(s.app, `${UI}/-/delete`);
+    const del = (confirm: string, origin = ORIGIN) =>
+      call(s.app, `${API}/delete`, "POST", { confirm }, origin);
+    const wrong = await del("dem");
     expect(wrong.status).toBe(400);
+    expect(((await wrong.json()) as { code: string }).code).toBe("not_confirmed");
+    expect((await del("demo", "https://evil.example")).status).toBe(403);
+    // Only from the app's pages: not even a human: token deletes a library.
+    const byToken = await s.anon.request(`${API}/delete`, {
+      method: "POST",
+      headers: { Authorization: "Bearer human", "Content-Type": "application/json" },
+      body: JSON.stringify({ confirm: "demo" }),
+    });
+    expect(byToken.status).toBe(403);
+    // A stranger does not see it.
+    const stranger = await s.stranger("other@example.com");
+    expect((await call(stranger.app, `${API}/delete`, "POST", { confirm: "demo" })).status).toBe(
+      404,
+    );
     expect((await s.app.request(`${UI}/`)).status).toBe(200);
 
-    const done = await post(s.app, `${UI}/-/delete`, { confirm: "demo" });
-    expect(done.status).toBe(303);
+    const done = await del("demo");
+    expect(done.status).toBe(204);
     expect((await s.app.request(`${UI}/`)).status).toBe(404);
     expect(await s.accounts.libraries("user_1")).toEqual([]);
-    expect(s.db.query("SELECT COUNT(*) AS n FROM tokens").get()).toEqual({ n: 0 });
+    // The stranger's tokens (two) are all that is left.
+    expect(s.db.query("SELECT COUNT(*) AS n FROM tokens").get()).toEqual({ n: 2 });
     expect([...s.bucket.objects.keys()].some((k) => k.startsWith("exports/lib-1/"))).toBe(false);
     const api = await s.anon.request("/api/v1/libraries/owner/demo/tree", {
       headers: { Authorization: `Bearer ${token.secret}` },
@@ -216,13 +324,21 @@ describe("deleting (v2 spec: A2)", () => {
   test("an account: confirm by handle; everything goes but a tombstone", async () => {
     const s = setup();
     const stranger = await s.stranger();
-    const wrong = await post(s.app, "/account/delete", { confirm: "nope" });
+    await shell(s.app, "/account");
+    const wrong = await call(s.app, "/api/v1/account/delete", "POST", { confirm: "nope" });
     expect(wrong.status).toBe(400);
+    const forged = await call(
+      s.app,
+      "/api/v1/account/delete",
+      "POST",
+      { confirm: "owner" },
+      "https://evil.example",
+    );
+    expect(forged.status).toBe(403);
 
-    const done = await post(s.app, "/account/delete", { confirm: "owner" });
-    expect(done.status).toBe(200);
+    const done = await call(s.app, "/api/v1/account/delete", "POST", { confirm: "owner" });
+    expect(done.status).toBe(204);
     expect(done.headers.get("Set-Cookie")).toContain("Max-Age=0");
-    expect(await done.text()).toContain("Account deleted");
     expect(s.db.query("SELECT COUNT(*) AS n FROM users WHERE id = 'user_1'").get()).toEqual({
       n: 0,
     });
@@ -244,11 +360,12 @@ describe("changing the email (v2 spec: A3)", () => {
 
   test("a link to the new address confirms it; the old address is told", async () => {
     const s = setup();
-    const bad = await post(s.app, "/account/email", { email: "nope" });
-    expect(bad.status).toBe(400);
-    const asked = await post(s.app, "/account/email", { email: "New@Example.org" });
+    const ask = (email: string) => call(s.app, "/api/v1/account/email", "POST", { email });
+    expect((await ask("nope")).status).toBe(400);
+    expect((await ask("owner@example.com")).status).toBe(400);
+    const asked = await ask("New@Example.org");
     expect(asked.status).toBe(200);
-    expect(await asked.text()).toContain("Check new@example.org for a link.");
+    expect((await asked.json()) as object).toEqual({ sent_to: "new@example.org" });
     const mail = s.outbox.at(-1);
     expect(mail?.to).toBe("new@example.org");
     const t = linkIn(mail?.text ?? "").searchParams.get("t") ?? "";
@@ -262,15 +379,26 @@ describe("changing the email (v2 spec: A3)", () => {
 
     const page = await text(s.app.request(`/account/email/confirm?t=${t}`));
     expect(page).toContain("Confirm your new email");
+    // A post from another site is refused, and the link is not spent by it.
+    const forged = await s.app.request("/account/email/confirm", {
+      method: "POST",
+      headers: { Origin: "https://evil.example" },
+      body: new URLSearchParams({ t }),
+      redirect: "manual",
+    });
+    expect(forged.status).toBe(403);
     const done = await post(s.app, "/account/email/confirm", { t });
-    expect(done.status).toBe(200);
-    expect(await done.text()).toContain("Your email is now new@example.org.");
+    expect(done.status).toBe(303);
+    expect(done.headers.get("Location")).toBe("/account?done=email");
     expect(s.outbox.at(-1)).toMatchObject({
       to: "owner@example.com",
       subject: "Your Tempra email changed",
     });
     // The account is the same; it signs in with the new address now.
     expect((await s.accounts.user("new@example.org")).id).toBe("user_1");
+    expect(
+      ((await (await s.app.request("/api/v1/account")).json()) as { email: string }).email,
+    ).toBe("new@example.org");
     // A used link is spent.
     expect((await post(s.app, "/account/email/confirm", { t })).status).toBe(400);
   });
@@ -278,7 +406,7 @@ describe("changing the email (v2 spec: A3)", () => {
   test("an address another account uses cannot be taken", async () => {
     const s = setup();
     await s.stranger();
-    await post(s.app, "/account/email", { email: "stranger@example.com" });
+    await call(s.app, "/api/v1/account/email", "POST", { email: "stranger@example.com" });
     const t = linkIn(s.outbox.at(-1)?.text ?? "").searchParams.get("t") ?? "";
     const r = await post(s.app, "/account/email/confirm", { t });
     expect(r.status).toBe(409);
@@ -287,17 +415,15 @@ describe("changing the email (v2 spec: A3)", () => {
 });
 
 describe("terms and privacy (v2 spec: A3)", () => {
-  test("plain public pages, linked from sign-in and the account page", async () => {
+  test("on the landing page; the app's old URLs redirect there, and sign-in links them", async () => {
     const s = setup();
     for (const path of ["/terms", "/privacy"]) {
-      const r = await s.anon.request(path);
-      const html = await r.text();
-      expect(r.status).toBe(200);
-      expect(html).not.toContain("<script");
-      expect(html).not.toContain("<style");
+      const r = await s.anon.request(path, { redirect: "manual" });
+      expect(r.status).toBe(301);
+      expect(r.headers.get("Location")).toBe(`https://tempra.dev${path}`);
     }
-    expect(await text(s.anon.request("/terms"))).toContain("Draft.");
-    expect(await text(s.anon.request("/sign-in"))).toContain('<a href="/privacy">');
-    expect(await text(s.app.request("/account"))).toContain('<a href="/terms">');
+    const signIn = await text(s.anon.request("/sign-in"));
+    expect(signIn).toContain('<a href="https://tempra.dev/terms">');
+    expect(signIn).toContain('<a href="https://tempra.dev/privacy">');
   });
 });

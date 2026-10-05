@@ -6,16 +6,15 @@ import {
   type OAuthHelpers,
 } from "@cloudflare/workers-oauth-provider";
 import type { Hono } from "hono";
-import type { LibraryRef, User } from "../accounts";
+import type { LibraryRef } from "../accounts";
 import { checkSlug } from "../accounts";
 import type { Deps } from "../app";
 import type { TokenInfo } from "../auth";
 import { normalizeDir } from "../okf/paths";
-import { fromThisSite } from "../origin";
 import { signedIn } from "../signin";
 import { OkfError } from "../store/errors";
 import type { AccountGrant } from "../tenancy";
-import { type ConsentForm, consentPage, grantsPage, messagePage } from "./pages";
+import { type ConsentForm, consentPage, messagePage } from "./pages";
 
 /** OAuth scopes (spec: Apps under Auth). A grant never carries more than the person approved. */
 export const SCOPES = ["okf:read", "okf:write"];
@@ -241,48 +240,5 @@ export function registerAppRoutes<E extends AppEnv>(
       if (e instanceof OkfError) return messagePage("Cannot connect this app", e.message, e.status);
       return authError(e);
     }
-  });
-
-  app.get("/apps", async (c) => {
-    const user = await signedIn(c.req.raw, deps(c.env));
-    if (user instanceof Response) return user;
-    const libs = await deps(c.env).accounts.libraries(user.id);
-    return html(await renderGrants(c.env.OAUTH_PROVIDER, user, libs, c.req.query("notice")));
-  });
-
-  app.post("/apps/revoke", async (c) => {
-    const user = await signedIn(c.req.raw, deps(c.env));
-    if (user instanceof Response) return user;
-    // Session cookies are SameSite=Lax, and every post must also come from this site.
-    if (!fromThisSite(c.req.raw)) {
-      return messagePage("Refused", "Revoke requests must come from this site.", 403);
-    }
-    const id = String((await c.req.formData()).get("grant") ?? "");
-    const oauth: OAuthHelpers = c.env.OAUTH_PROVIDER;
-    await oauth.revokeGrant(id, user.id);
-    return c.redirect("/apps?notice=Connection+revoked.", 303);
-  });
-}
-
-async function renderGrants(oauth: OAuthHelpers, user: User, libs: LibraryRef[], notice?: string) {
-  const grants = [];
-  let cursor: string | undefined;
-  do {
-    const page = await oauth.listUserGrants(user.id, { cursor, limit: 100 });
-    grants.push(...page.items);
-    cursor = page.cursor;
-  } while (cursor);
-  const names = new Map<string, string>();
-  for (const id of new Set(grants.map((g) => g.clientId))) {
-    const client = await oauth.lookupClient(id).catch(() => null);
-    if (client?.clientName) names.set(id, client.clientName);
-  }
-  grants.sort((a, b) => b.createdAt - a.createdAt);
-  return grantsPage({
-    signedInAs: user.email,
-    grants,
-    clientNames: names,
-    libraries: libs,
-    notice,
   });
 }

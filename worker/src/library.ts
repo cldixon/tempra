@@ -1,5 +1,13 @@
 import { DurableObject } from "cloudflare:workers";
 import { type CallResult, callStore, type LibraryMethod, r2BlobStore } from "./client";
+import {
+  broadcast,
+  type FeedMessage,
+  type FeedSocket,
+  feedEvent,
+  feedPrefix,
+  WRITE_METHODS,
+} from "./feed";
 import { DEFAULT_STORAGE_MB } from "./limits";
 import {
   DEFAULT_RETENTION_DAYS,
@@ -23,6 +31,8 @@ export class Library extends DurableObject<Env> {
     this.store = new LibraryStore(doSqlHandle(ctx.storage), {
       size: () => ctx.storage.sql.databaseSize,
     });
+    // Keepalive pings are answered without waking a hibernated object.
+    ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
   }
 
   /** The single RPC entry point: runs a store method and returns its result or error as data. */
@@ -30,9 +40,76 @@ export class Library extends DurableObject<Env> {
     if (this.restarting) return RESTARTING;
     if (!this.alarmChecked) await this.ensureAlarm();
     const mb = Number(this.env.LIBRARY_STORAGE_MB) || DEFAULT_STORAGE_MB;
-    return callStore(this.store, r2BlobStore(this.env.BLOBS), method, args, {
+    const writes = WRITE_METHODS.has(method);
+    const before = writes ? this.store.headSeq() : 0;
+    const result = await callStore(this.store, r2BlobStore(this.env.BLOBS), method, args, {
       storageLimitBytes: mb * 1048576,
     });
+    // The write has committed (the store's transaction is synchronous): tell the feed. A
+    // failure here must not turn a committed write into an error (a client would retry it).
+    if (writes && result.ok) {
+      try {
+        this.publish(before);
+      } catch (e) {
+        console.error("feed publish failed", e);
+      }
+    }
+    return result;
+  }
+
+  // ---------------------------------------------------------------- the change feed
+
+  /**
+   * The feed's WebSocket (tempra-dev: app/live). The Worker has already authorized the caller
+   * and counted the connection; this accepts the socket with the hibernation API, so an idle
+   * library costs nothing while browsers stay connected, and says where the ledger stands.
+   */
+  override async fetch(request: Request): Promise<Response> {
+    if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
+      return new Response("Expected a WebSocket.", { status: 426 });
+    }
+    if (this.restarting) return new Response("Restarting.", { status: 503 });
+    const pair = new WebSocketPair();
+    const [client, server] = [pair[0], pair[1]];
+    this.ctx.acceptWebSocket(server);
+    server.serializeAttachment({
+      prefix: feedPrefix(new URL(request.url).searchParams.get("prefix")),
+      opened: Date.now(),
+    });
+    const hello: FeedMessage = { type: "hello", head: this.store.headSeq() };
+    server.send(JSON.stringify(hello));
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  /** Sends the events after `before` to every open feed socket. */
+  private publish(before: number) {
+    const sockets = this.ctx.getWebSockets();
+    if (sockets.length === 0) return;
+    const head = this.store.headSeq();
+    if (head <= before) return;
+    const { events } = this.store.events({ since: before, limit: 1000 });
+    const feed: FeedSocket[] = sockets.map((ws) => {
+      const a = ws.deserializeAttachment() as { prefix?: string; opened?: number } | null;
+      return {
+        prefix: a?.prefix ?? "",
+        // Sockets from before `opened` was recorded count as old: they reconnect once.
+        opened: a?.opened ?? 0,
+        send: (m) => ws.send(m),
+        close: (code, reason) => ws.close(code, reason),
+      };
+    });
+    broadcast(feed, head, events.map(feedEvent));
+  }
+
+  /** The feed is one-way; anything a client sends (other than ping) is ignored. */
+  override async webSocketMessage(): Promise<void> {}
+
+  override async webSocketClose(ws: WebSocket, code: number): Promise<void> {
+    try {
+      ws.close(code === 1005 ? 1000 : code, "closed");
+    } catch {
+      // Already closed.
+    }
   }
 
   /** For the daily sweep and digest: referenced attachments, storage and maintenance stats. */

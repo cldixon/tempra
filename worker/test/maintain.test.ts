@@ -162,12 +162,25 @@ describe("stats, healthz and nightly exports in the UI and API", () => {
       libraryId: "lib-1",
       now: new Date(),
     });
-    const home = await (await s.app.request("/owner/demo/")).text();
-    expect(home).toContain("1 events in 1 requests");
-    expect(home).toContain("last nightly export");
-    const transfer = await (await s.app.request("/owner/demo/-/transfer")).text();
+    // The library's home page reads these from /stats.
+    const after = (await (await s.app.request("/api/v1/libraries/owner/demo/stats")).json()) as {
+      events: number;
+      maintainers: { export: { last_run: string | null } };
+    };
+    expect(after.events).toBe(1);
+    expect(after.maintainers.export.last_run).not.toBeNull();
+    expect((await s.app.request("/owner/demo/-/transfer")).status).toBe(200);
     const date = new Date().toISOString().slice(0, 10);
-    expect(transfer).toContain(`/owner/demo/-/exports/${date}/bundle.tar`);
+    // The Import & export page lists the nightly exports from the API.
+    const list = (await (await s.app.request("/api/v1/libraries/owner/demo/exports")).json()) as {
+      exports: { date: string; seq: number | null; files: number | null }[];
+    };
+    expect(list.exports).toEqual([{ date, seq: 1, files: 3 }]);
+    // People only, like restore: an agent's token cannot list them.
+    expect((await s.req("/exports")).status).toBe(403);
+    expect((await s.req("/exports", { token: "human" })).status).toBe(200);
+    const stranger = await s.stranger();
+    expect((await stranger.app.request("/api/v1/libraries/owner/demo/exports")).status).toBe(404);
     const tar = await s.app.request(`/owner/demo/-/exports/${date}/bundle.tar`);
     expect(tar.headers.get("Content-Disposition")).toContain(`demo-${date}-bundle.tar`);
     expect(readTar(new Uint8Array(await tar.arrayBuffer())).map((f) => f.path)).toContain("a.md");
@@ -184,18 +197,26 @@ describe("Export now", () => {
       headers: { "Content-Type": "text/markdown" },
       body: md("A\n"),
     });
-    const post = () =>
-      s.app.request("/owner/demo/-/maintain", {
+    const post = (origin = "http://localhost") =>
+      s.app.request("/api/v1/libraries/owner/demo/maintain", {
         method: "POST",
-        headers: { Origin: "http://localhost" },
+        headers: { Origin: origin },
       });
-    const first = await (await post()).text();
-    expect(first).toContain("Exported to R2 at <code>exports/lib-1/");
-    expect(await (await post()).text()).toContain("Nothing changed since the last export");
-    const forged = await s.app.request("/owner/demo/-/maintain", {
+    expect((await post("https://evil.example")).status).toBe(403);
+    expect(s.bucket.objects.size).toBe(0);
+    const first = await post();
+    expect(first.status).toBe(200);
+    const date = new Date().toISOString().slice(0, 10);
+    expect((await first.json()) as object).toEqual({ export: `exports/lib-1/${date}/` });
+    // Nothing changed since the last export: none made.
+    expect((await (await post()).json()) as object).toEqual({ export: null });
+    // An agent's token may not run it; a stranger does not see the library.
+    expect((await s.req("/maintain", { method: "POST" })).status).toBe(403);
+    const stranger = await s.stranger();
+    const theirs = await stranger.app.request("/api/v1/libraries/owner/demo/maintain", {
       method: "POST",
-      headers: { Origin: "https://evil.example" },
+      headers: { Origin: "http://localhost" },
     });
-    expect(forged.status).toBe(403);
+    expect(theirs.status).toBe(404);
   });
 });
