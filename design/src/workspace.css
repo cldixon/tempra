@@ -147,29 +147,17 @@ body:has(> #root > .workspace) {
   width: 100%;
 }
 
-.switcher ul {
-  list-style: none;
-  margin: var(--tempra-space-2) 0 0;
-  padding: 0;
+.switcher [role="listbox"] {
+  margin-top: var(--tempra-space-2);
 }
 
-.switcher li {
+.switcher [role="option"] {
   padding: var(--tempra-space-1) var(--tempra-space-2);
-}
-
-.switcher li[aria-current="true"] {
-  background: var(--tempra-color-code-bg);
-}
-
-.switcher li button {
-  width: 100%;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  text-align: left;
   cursor: pointer;
+}
+
+.switcher [role="option"][aria-selected="true"] {
+  background: var(--tempra-color-code-bg);
 }
 
 @media (max-width: 60rem) {
@@ -181,23 +169,22 @@ body:has(> #root > .workspace) {
       "main";
   }
 
+  /* Drawers open over the main pane, below the header, so its buttons stay in reach. */
   .ws-sidebar,
   .ws-context {
+    grid-area: main;
+    z-index: 1;
     display: none;
-    position: fixed;
-    top: 0;
-    bottom: 0;
-    z-index: 10;
     width: min(20rem, 85vw);
     background: var(--tempra-color-bg);
   }
 
   .ws-sidebar {
-    left: 0;
+    justify-self: start;
   }
 
   .ws-context {
-    right: 0;
+    justify-self: end;
   }
 
   .ws-sidebar.open,

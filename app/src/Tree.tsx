@@ -5,6 +5,8 @@ import { prefetchFile } from "./prefetch";
 import { baseName, dirOf, type Urls } from "./urls";
 
 /** One file of `GET …/outline`: the library's index, without bodies. */
+export type OutlineFile = Entry;
+
 interface Entry {
   path: string;
   kind: "dir" | "concept" | "attachment";
@@ -14,6 +16,12 @@ interface Entry {
 
 /** How long a file keeps its "an agent just changed this" mark. */
 const ACTIVE_MS = 5 * 60_000;
+
+/** The least time between two refreshes of the index while writes keep coming. */
+const REFRESH_MS = 3000;
+
+/** How long a pointer rests on a file before its page is loaded ahead. */
+const HOVER_MS = 120;
 
 const ancestors = (path: string) => {
   const out: string[] = [];
@@ -75,7 +83,13 @@ function buildDirs(files: Entry[]): Record<string, Entry[]> {
  * marked, and the change feed refreshes the index once per burst of writes, with a mark on files
  * an agent changed in the last minutes or that changed since the last visit.
  */
-export function Tree(props: { urls: Urls; file: string | null; dir: string | null }) {
+export function Tree(props: {
+  urls: Urls;
+  file: string | null;
+  dir: string | null;
+  /** The index, for the quick switcher's path and title matches. */
+  onIndex?(files: OutlineFile[]): void;
+}) {
   const { urls } = props;
   const [files, setFiles] = useState<Entry[] | null>(null);
   const [expanded, setExpanded] = useState(() => loadExpanded(urls));
@@ -86,18 +100,31 @@ export function Tree(props: { urls: Urls; file: string | null; dir: string | nul
   const seen = lastSeen(urls);
   const dirs = useMemo(() => (files ? buildDirs(files) : null), [files]);
 
+  // Only the latest request's answer is kept (two loads may cross).
+  const asked = useRef(0);
+  const loadedAt = useRef(0);
+  const [failed, setFailed] = useState(false);
   const load = useCallback(async () => {
+    const mine = ++asked.current;
+    loadedAt.current = Date.now();
     try {
       const r = await api<{ seq: number; files: Entry[] }>(urls.api("outline"));
+      if (mine !== asked.current) return;
       setFiles(r.files);
-      setSeq(r.seq);
+      setFailed(false);
+      // The feed is synced once, from the first index; it stays live after that.
+      setSeq((s) => s ?? r.seq);
     } catch {
-      setFiles((f) => f ?? []);
+      if (mine === asked.current) setFailed(true);
     }
   }, [urls]);
   useEffect(() => {
     void load();
   }, [load]);
+  const onIndex = props.onIndex;
+  useEffect(() => {
+    if (files) onIndex?.(files);
+  }, [files, onIndex]);
 
   // The open file's folders are revealed when it opens (and may be collapsed after).
   const current = props.file ?? props.dir;
@@ -113,15 +140,21 @@ export function Tree(props: { urls: Urls; file: string | null; dir: string | nul
     });
   }, [current, props.file, urls]);
 
-  // Live: one refresh of the index per burst of writes.
+  // Live: the index is refreshed shortly after a write, and at most every few seconds while
+  // agents keep writing (each refresh reads the whole index).
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
   useFeed(
     urls,
     seq,
     (events: FeedEvent[]) => {
-      clearTimeout(timer.current);
-      timer.current = setTimeout(() => void load(), 300);
+      if (timer.current === undefined) {
+        const wait = Math.max(300, loadedAt.current + REFRESH_MS - Date.now());
+        timer.current = setTimeout(() => {
+          timer.current = undefined;
+          void load();
+        }, wait);
+      }
       const agents = events.filter((e) => !e.actor.startsWith("human:") && e.op !== "delete");
       if (agents.length > 0) {
         setActive((a) => {
@@ -131,7 +164,11 @@ export function Tree(props: { urls: Urls; file: string | null; dir: string | nul
         });
       }
     },
-    () => void load(),
+    () => {
+      // The ledger went back (a restore): start again from the new index.
+      setSeq(null);
+      void load();
+    },
   );
   // Activity marks fade after a few minutes.
   useEffect(() => {
@@ -148,25 +185,46 @@ export function Tree(props: { urls: Urls; file: string | null; dir: string | nul
       return next;
     });
 
+  // The open file's row is scrolled into view once, when it opens (not after every refresh,
+  // which would pull the person back while agents write).
   const currentRow = useRef<HTMLAnchorElement | null>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: scroll when the open file changes or its row appears.
+  const scrolledTo = useRef<string | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the row may first appear when the index arrives.
   useEffect(() => {
-    currentRow.current?.scrollIntoView({ block: "nearest" });
+    if (scrolledTo.current === current || !currentRow.current) return;
+    scrolledTo.current = current;
+    currentRow.current.scrollIntoView({ block: "nearest" });
   }, [current, dirs]);
+
+  // A file's page is loaded ahead when the pointer rests on it, or the keyboard reaches it.
+  const hoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(hoverTimer.current), []);
+  const ahead = (path: string) => ({
+    onMouseEnter: () => {
+      clearTimeout(hoverTimer.current);
+      hoverTimer.current = setTimeout(() => prefetchFile(urls, path), HOVER_MS);
+    },
+    onMouseLeave: () => clearTimeout(hoverTimer.current),
+    onFocus: (e: { currentTarget: Element }) => {
+      if (e.currentTarget.matches(":focus-visible")) prefetchFile(urls, path);
+    },
+  });
 
   const mark = (e: Entry) => {
     const a = active.get(e.path);
     if (a && now - a.at < ACTIVE_MS) {
       return (
         <span className="tree-mark" title={`${a.actor} changed this just now`}>
-          ●
+          <span aria-hidden="true">●</span>
+          <span className="visually-hidden">changed by {a.actor} just now</span>
         </span>
       );
     }
     if (seen !== null && typeof e.seq === "number" && e.seq > seen) {
       return (
         <span className="tree-mark" title="Changed since you last looked">
-          ∗
+          <span aria-hidden="true">∗</span>
+          <span className="visually-hidden">changed since you last looked</span>
         </span>
       );
     }
@@ -175,6 +233,16 @@ export function Tree(props: { urls: Urls; file: string | null; dir: string | nul
   const label = (e: Entry) => (e.kind === "concept" && e.title ? e.title : baseName(e.path));
 
   const rows = (dir: string): React.ReactNode => {
+    if (dirs === null && failed) {
+      return (
+        <li className="small">
+          Could not load the files.{" "}
+          <button type="button" onClick={() => void load()}>
+            Retry
+          </button>
+        </li>
+      );
+    }
     if (dirs === null) return <li className="muted small">Loading…</li>;
     const entries = dirs[dir] ?? [];
     if (entries.length === 0 && dir === "") return <li className="muted small">No files yet.</li>;
@@ -208,8 +276,7 @@ export function Tree(props: { urls: Urls; file: string | null; dir: string | nul
             <a
               href={urls.file(e.path)}
               title={e.path}
-              onMouseEnter={() => prefetchFile(urls, e.path)}
-              onFocus={() => prefetchFile(urls, e.path)}
+              {...ahead(e.path)}
               aria-current={props.file === e.path ? "page" : undefined}
               ref={props.file === e.path ? currentRow : undefined}
             >
@@ -246,12 +313,7 @@ export function Tree(props: { urls: Urls; file: string | null; dir: string | nul
           {matches.map((e) => (
             <li key={e.path}>
               <div className="tree-row">
-                <a
-                  href={urls.file(e.path)}
-                  title={e.path}
-                  onMouseEnter={() => prefetchFile(urls, e.path)}
-                  onFocus={() => prefetchFile(urls, e.path)}
-                >
+                <a href={urls.file(e.path)} title={e.path} {...ahead(e.path)}>
                   {label(e)}
                 </a>
                 {mark(e)}

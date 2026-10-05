@@ -119,6 +119,10 @@ interface FileData {
   } | null;
 }
 
+/** Whether a path can be a concept: markdown, and not a synthesized index.md or log.md. */
+const isConceptPath = (path: string) =>
+  path.endsWith(".md") && !/(^|\/)(index|log)\.md$/.test(path);
+
 /** The cache key of a file's page (see useLoad). */
 const fileKey = (urls: Urls, path: string) => `file ${urls.file(path)}`;
 
@@ -136,7 +140,7 @@ async function loadFile(urls: Urls, path: string): Promise<FileData> {
     );
   const skip = Promise.resolve({ e: null });
   // Only a concept has sources, links and history; the name says which files can be one.
-  const concept = path.endsWith(".md") && !/(^|\/)(index|log)\.md$/.test(path);
+  const concept = isConceptPath(path);
   const [file, stats, sources, links, history, work] = await Promise.all([
     api<FileJson>(urls.api(`files/${p}`, { at: urls.at })),
     api<{ seq: number }>(urls.api("stats")),
@@ -216,6 +220,8 @@ export function File(props: { urls: Urls; path: string; done: string | null; act
   return (
     <>
       {notice && <div className="notice ok">{notice}</div>}
+      {/* A concept's context panel keeps its place while the page loads (no column jump). */}
+      {loaded.state === "loading" && isConceptPath(path) && <ContextPanel>{null}</ContextPanel>}
       {change && shown && (
         <ChangeBanner urls={urls} change={change} shownSeq={shown.file.seq} onSwap={swap} />
       )}

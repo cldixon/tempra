@@ -369,19 +369,32 @@ async function browserRenders(
       ).json()) as { frontmatter?: { title?: string } };
       const word = String(meta.frontmatter?.title ?? "").split(/\s+/)[0] ?? "";
       await page.keyboard.press("Control+k");
-      const box = page.getByRole("dialog", { name: "Open a file" }).getByRole("searchbox");
+      const box = page.getByRole("dialog", { name: "Open a file" }).getByRole("combobox");
       await box.fill(word);
-      await page.locator(".switcher li", { hasText: first }).first().waitFor({ timeout: 5000 });
+      const option = page.locator('.switcher [role="option"]', { hasText: first }).first();
+      await option.waitFor({ timeout: 5000 });
       await box.press("ArrowDown");
       await box.press("ArrowUp");
       // The hit for the first concept, wherever it ranks.
-      await page.locator(".switcher li", { hasText: first }).first().locator("button").click();
+      await option.click();
       await page.waitForURL(`${lib}/${enc(first)}`);
     });
     await step("workspace: at phone width the tree is a drawer", async () => {
       await page.setViewportSize({ width: 420, height: 800 });
       if (await sidebar.isVisible()) throw new Error("the sidebar shows at phone width");
-      await page.getByRole("button", { name: "Files" }).click();
+      const files = page.getByRole("button", { name: "Files" });
+      await files.click();
+      await sidebar.waitFor({ state: "visible" });
+      // The drawer sits below the header: its button stays in reach, and Escape closes it.
+      if (!(await files.isVisible())) throw new Error("the drawer covers the header");
+      await page.keyboard.press("Escape");
+      await sidebar.waitFor({ state: "hidden" });
+      // A tap on the page closes it too.
+      await files.click();
+      await sidebar.waitFor({ state: "visible" });
+      await page.locator(".ws-main").click({ position: { x: 380, y: 300 } });
+      await sidebar.waitFor({ state: "hidden" });
+      await files.click();
       await sidebar.waitFor({ state: "visible" });
       await sidebar.getByRole("link", { name: "Ledger" }).click();
       await page.waitForURL(`${lib}/-/ledger`);
@@ -456,6 +469,9 @@ async function browserRenders(
       console.log(`  (the change reached the page in ${ms} ms)`);
       if (ms > 3000) throw new Error(`the banner took ${ms} ms`);
       if (shots) await page.screenshot({ path: `${shots}/live.png` });
+      // The open file prefetched again (a hover on its own row) must not hide the new version.
+      await page.locator(`.ws-sidebar a[title="${concept}"]`).hover();
+      await page.waitForTimeout(500);
       await banner.getByRole("button", { name: "Show new version" }).click();
       await page
         .locator(".body")

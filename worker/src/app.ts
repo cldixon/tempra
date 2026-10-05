@@ -374,24 +374,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
 
   // The whole library's index in one small answer, for the app's file tree (TEMPRA-19): every
   // file's path, kind, title and sequence, no bodies or other frontmatter.
-  app.get(`${BASE}/outline`, async (c) => {
-    const { seq, entries } = await c.var.lib.tree({ at: num(c, "at") });
-    return c.json({
-      seq,
-      files: entries.flatMap((e) =>
-        e.kind === "dir"
-          ? []
-          : [
-              {
-                path: e.path,
-                kind: e.kind,
-                title: "title" in e ? (e.title ?? null) : null,
-                seq: "seq" in e ? e.seq : null,
-              },
-            ],
-      ),
-    });
-  });
+  app.get(`${BASE}/outline`, async (c) => c.json(await c.var.lib.outline({ at: num(c, "at") })));
 
   app.get(`${BASE}/concepts`, async (c) =>
     c.json(

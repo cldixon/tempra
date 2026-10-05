@@ -1531,6 +1531,22 @@ export class LibraryStore {
   }
 
   /** GET /tree: files under a prefix; with `depth`, deeper levels collapse into directory entries. */
+  /**
+   * GET /outline: every file's path, kind, title and sequence, for the app's file tree. Lean on
+   * purpose: titles come from the record cache, and nothing else per file is looked up (no trust
+   * tier, no attachment sizes), so it stays cheap to ask for after every burst of writes.
+   */
+  outline(opts: { at?: number } = {}) {
+    const snap = this.snapshot(opts.at);
+    const files = snap.sorted().map((e) => ({
+      path: e.path,
+      kind: e.kind,
+      title: e.kind === "concept" ? (str(field(this.record(e.hash), "title")) ?? null) : null,
+      seq: e.seq,
+    }));
+    return { seq: snap.seq, files };
+  }
+
   tree(opts: { prefix?: string; depth?: number; at?: number } = {}) {
     const snap = this.snapshot(opts.at);
     const prefix = normalizeDir(opts.prefix);

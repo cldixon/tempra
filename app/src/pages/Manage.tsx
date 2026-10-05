@@ -557,7 +557,7 @@ export function Revert({ urls, request, actor }: { urls: Urls; request: string; 
 export function Restore(props: { urls: Urls; path: string; to?: number; actor: string }) {
   const { urls, path, to } = props;
   useTitle(`Restore ${path} · ${urls.slug}`);
-  const loaded = useLoad(`restore ${path} ${to}`, async () => {
+  const loaded = useLoad(`restore ${urls.base} ${path} ${to}`, async () => {
     if (to === undefined) throw new ApiError(400, "bad_param", "`to` is required.");
     const stats = await api<{ seq: number }>(urls.api("stats"));
     return api<{ path: string; diff: string }>(urls.api("diff", { path, from: stats.seq, to }));

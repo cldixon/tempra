@@ -13,7 +13,7 @@ import { createPortal } from "react-dom";
 import { api, useLoad } from "./api";
 import { lastNavigation, navigate } from "./router";
 import { Switcher } from "./Switcher";
-import { Tree } from "./Tree";
+import { type OutlineFile, Tree } from "./Tree";
 import type { Me } from "./ui";
 import { Urls } from "./urls";
 
@@ -38,10 +38,21 @@ export function ContextPanel({ children }: { children: ReactNode }) {
 }
 
 const CONTEXT_KEY = "tempra:context";
+const NARROW = "(max-width: 60rem)";
 
 /** Where the main pane was scrolled on each page, for back and forward. */
 const scrolls = new Map<string, number>();
-const narrow = () => window.matchMedia("(max-width: 60rem)").matches;
+/** Whether the screen is narrow enough for drawers, following resizes. */
+function useNarrow(): boolean {
+  const [narrow, setNarrow] = useState(() => window.matchMedia(NARROW).matches);
+  useEffect(() => {
+    const m = window.matchMedia(NARROW);
+    const update = () => setNarrow(m.matches);
+    m.addEventListener("change", update);
+    return () => m.removeEventListener("change", update);
+  }, []);
+  return narrow;
+}
 
 function storedHidden(): boolean {
   try {
@@ -63,6 +74,9 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
   const [hidden, setHidden] = useState(storedHidden);
   const [drawer, setDrawer] = useState<"files" | "context" | null>(null);
   const [switching, setSwitching] = useState(false);
+  const narrow = useNarrow();
+  const [index, setIndex] = useState<OutlineFile[]>([]);
+  const sidebar = useRef<HTMLDivElement>(null);
 
   const register = useCallback(() => {
     setPanels((n) => n + 1);
@@ -84,7 +98,7 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
     el.scrollTop = target;
     if (target === 0) return;
     // The page's body may still be drawing (the reader mounts after this): keep the position
-    // until the page is tall enough to hold it, for up to a second.
+    // until the page is tall enough to hold it, for up to a second, or until the person scrolls.
     const until = performance.now() + 1000;
     let frame = requestAnimationFrame(function again() {
       if (el.scrollTop !== target) el.scrollTop = target;
@@ -92,12 +106,33 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
         frame = requestAnimationFrame(again);
       }
     });
-    return () => cancelAnimationFrame(frame);
+    const stop = () => cancelAnimationFrame(frame);
+    const inputs = ["wheel", "touchstart", "keydown", "pointerdown"] as const;
+    for (const i of inputs) el.addEventListener(i, stop, { passive: true });
+    return () => {
+      stop();
+      for (const i of inputs) el.removeEventListener(i, stop);
+    };
   }, [href]);
 
   // A drawer closes when the person moves to another page.
   // biome-ignore lint/correctness/useExhaustiveDependencies: closes on every move.
   useEffect(() => setDrawer(null), [place.file, place.dir, place.view]);
+
+  // Drawers are for narrow screens: widening closes them. Escape closes one, and an open one
+  // takes the focus (the context drawer through its own element below).
+  useEffect(() => {
+    if (!narrow) setDrawer(null);
+  }, [narrow]);
+  useEffect(() => {
+    if (!drawer) return;
+    (drawer === "files" ? sidebar.current : contextEl)?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setDrawer(null);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [drawer, contextEl]);
 
   // Ctrl or Cmd+K opens the quick switcher, from anywhere in the workspace.
   useEffect(() => {
@@ -112,7 +147,7 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
   }, []);
 
   const toggleContext = () => {
-    if (narrow()) {
+    if (narrow) {
       setDrawer((d) => (d === "context" ? null : "context"));
       return;
     }
@@ -157,7 +192,7 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
         {hasContext && (
           <button
             type="button"
-            aria-pressed={narrow() ? drawer === "context" : !hidden}
+            aria-pressed={narrow ? drawer === "context" : !hidden}
             onClick={toggleContext}
           >
             Context
@@ -168,8 +203,12 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
         <a href="/apps">Connected apps</a>
         {props.me && <a href="/account">{props.me.email}</a>}
       </header>
-      <div className={drawer === "files" ? "ws-sidebar open" : "ws-sidebar"}>
-        <Tree urls={urls} file={place.file} dir={place.dir} />
+      <div
+        ref={sidebar}
+        tabIndex={-1}
+        className={drawer === "files" ? "ws-sidebar open" : "ws-sidebar"}
+      >
+        <Tree urls={urls} file={place.file} dir={place.dir} onIndex={setIndex} />
         <ul className="ws-views" aria-label="Library">
           {views.map(([name, href, key]) => (
             <li key={name}>
@@ -184,16 +223,19 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
         className="ws-main"
         ref={main}
         onScroll={(e) => scrolls.set(href, e.currentTarget.scrollTop)}
+        // A tap on the page closes an open drawer, as a tap outside a menu does.
+        onPointerDown={() => drawer && setDrawer(null)}
       >
         <ContextSlot.Provider value={slot}>{props.children}</ContextSlot.Provider>
       </main>
       <aside
         ref={setContextEl}
         className={drawer === "context" ? "ws-context open" : "ws-context"}
-        hidden={!hasContext || (hidden && drawer !== "context")}
+        hidden={!hasContext || (narrow ? false : hidden)}
+        tabIndex={-1}
         aria-label="Context"
       />
-      <Switcher urls={urls} open={switching} onClose={() => setSwitching(false)} />
+      <Switcher urls={urls} index={index} open={switching} onClose={() => setSwitching(false)} />
     </div>
   );
 }

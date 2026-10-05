@@ -56,3 +56,13 @@ img {
   flex-wrap: wrap;
   gap: var(--tempra-space-1) var(--tempra-space-2);
 }
+
+/* Text for screen readers only: what a symbol (a mark, an icon) means. */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
