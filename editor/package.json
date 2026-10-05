@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./anchor": "./src/anchor.ts",
     "./view": "./src/view.ts"
   },
   "scripts": {

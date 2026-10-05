@@ -1,6 +1,7 @@
 import { hmac } from "@noble/hashes/hmac.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, hexToBytes, randomBytes } from "@noble/hashes/utils.js";
+import { locate, occurrences, selectorAt } from "@tempra/editor/anchor";
 import { stringify as yamlStringify } from "yaml";
 import {
   buildRecord,
@@ -40,9 +41,19 @@ import type {
   TrustTier,
   Verification,
 } from "../okf/types";
+import {
+  type CommentAction,
+  type CommentResult,
+  type CommentView,
+  checkQuote,
+  commentBody,
+  type StoredAnchor,
+  type ThreadStatus,
+  type ThreadView,
+} from "./comments";
 import { notFound, OkfError } from "./errors";
 import { migrate } from "./schema";
-import type { SqlHandle } from "./sql";
+import type { SqlHandle, SqlValue } from "./sql";
 
 /** Concepts over this many bytes of rendered markdown are refused (spec: OKF conformance). */
 export const DEFAULT_CONCEPT_CAP = 100 * 1024;
@@ -408,7 +419,8 @@ export class LibraryStore {
         : this.sql
             .all<Entry & { location: string }>(
               `SELECT e.path, e.concept_id, e.hash, e.seq, b.location FROM events e
-               JOIN (SELECT concept_id, MAX(seq) AS m FROM events WHERE seq <= ? GROUP BY concept_id) x
+               JOIN (SELECT concept_id, MAX(seq) AS m FROM events
+                     WHERE seq <= ? AND op != 'comment' GROUP BY concept_id) x
                  ON e.seq = x.m
                JOIN blobs b ON b.hash = e.hash
                WHERE e.hash IS NOT NULL`,
@@ -936,7 +948,12 @@ export class LibraryStore {
     if (!first) throw new OkfError(404, "not_found", `No request ${requestId}.`);
     const base = first.seq - 1;
     const before = this.snapshot(base);
-    const ids = [...new Set(events.filter((e) => e.op !== "verify").map((e) => e.concept_id))];
+    // Verifications and comments are not content: reverting a request leaves them be.
+    const ids = [
+      ...new Set(
+        events.filter((e) => e.op !== "verify" && e.op !== "comment").map((e) => e.concept_id),
+      ),
+    ];
     const plan = ids.map((id) => ({
       id,
       before: before.byId.get(id),
@@ -1538,11 +1555,14 @@ export class LibraryStore {
    */
   outline(opts: { at?: number } = {}) {
     const snap = this.snapshot(opts.at);
+    // Open comment threads, at head only (comments are not versioned with content).
+    const open = snap.seq === this.headSeq() ? this.openThreadCounts() : new Map<string, number>();
     const files = snap.sorted().map((e) => ({
       path: e.path,
       kind: e.kind,
       title: e.kind === "concept" ? (str(field(this.record(e.hash), "title")) ?? null) : null,
       seq: e.seq,
+      ...(open.has(e.concept_id) ? { comments: open.get(e.concept_id) } : {}),
     }));
     return { seq: snap.seq, files };
   }
@@ -1900,7 +1920,7 @@ export class LibraryStore {
     let from = opts.from;
     if (from === undefined) {
       const last = this.sql.all<{ seq: number }>(
-        "SELECT seq FROM events WHERE concept_id = ? AND seq <= ? AND op NOT IN ('move', 'verify') ORDER BY seq DESC LIMIT 1",
+        "SELECT seq FROM events WHERE concept_id = ? AND seq <= ? AND op NOT IN ('move', 'verify', 'comment') ORDER BY seq DESC LIMIT 1",
         id,
         to,
       )[0];
@@ -2004,6 +2024,46 @@ export class LibraryStore {
         inbound_links: this.inboundCount(e.concept_id),
       });
     }
+    if (want("comment")) {
+      // Open threads on concepts that exist, from the partial index on open threads.
+      const threads = this.sql.all<{
+        id: string;
+        concept_id: string;
+        actor: string;
+        anchor: string | null;
+        replies: number;
+        last_actor: string;
+        ts: string;
+        body: string;
+      }>(
+        `SELECT t.id, t.concept_id, t.actor, t.anchor, t.replies, t.last_actor, e.ts,
+                (SELECT body FROM comments c WHERE c.thread_id = t.id ORDER BY c.seq LIMIT 1) AS body
+         FROM threads t JOIN paths p ON p.concept_id = t.concept_id
+         JOIN events e ON e.seq = t.last_seq
+         WHERE t.status = 'open'`,
+      );
+      for (const t of threads) {
+        const e = snap.byId.get(t.concept_id);
+        if (!e || !mine(e.path)) continue;
+        const quote = t.anchor ? (JSON.parse(t.anchor) as StoredAnchor).quote : null;
+        const said = clip(t.body ?? "", 160);
+        const on = quote ? ` on “${clip(quote, 80)}”` : "";
+        const replies =
+          t.replies > 0
+            ? `; ${t.replies} ${t.replies === 1 ? "reply" : "replies"}, last by ${t.last_actor}`
+            : "";
+        items.push({
+          kind: "comment",
+          path: e.path,
+          since: t.ts,
+          detail: `${t.actor} commented${on}: ${said}${replies}`,
+          suggested_action:
+            "Read the thread with `comments`, make the change it asks for, then reply with `comment` and resolve it. If you only have a question, reply without resolving; if the last reply is yours, wait for an answer.",
+          inbound_links: this.inboundCount(e.concept_id),
+          thread: t.id,
+        });
+      }
+    }
     items.sort((a, b) => b.inbound_links - a.inbound_links || (a.since < b.since ? -1 : 1));
     return { seq: snap.seq, total: items.length, items: items.slice(0, limit) };
   }
@@ -2036,6 +2096,292 @@ export class LibraryStore {
           results: [{ op: "verify", path: row.path, hash: row.hash, seq, lint: [] }],
         };
       }),
+    );
+  }
+
+  // ---------------------------------------------------------------- comments
+
+  /**
+   * One comment action as one request (tempra-dev: app/comments): open a thread on a concept
+   * (optionally on a quote), reply, resolve or reopen. Recorded as a `comment` event whose meta
+   * carries the action in full, so the ledger stays the source of truth; the `threads` and
+   * `comments` tables follow in the same transaction. The concept's version does not change.
+   */
+  comment(ctx: RequestContext, action: CommentAction): CommentResult {
+    return this.guard(() =>
+      this.sql.transaction(() => {
+        const w = this.begin(ctx);
+        const id = action.kind === "open" ? this.openThread(w, action) : this.actOn(w, action);
+        const view = this.threadViews(this.threadRows("t.id = ?", [id]), true)[0];
+        if (!view) throw new Error("thread vanished");
+        return { request_id: ctx.request_id, seq: this.headSeq(), thread: view };
+      }),
+    );
+  }
+
+  private openThread(w: WriteState, a: Extract<CommentAction, { kind: "open" }>): string {
+    const p = normalizePath(a.path);
+    const row = p ? this.lookupRow(p) : undefined;
+    if (row?.kind !== "concept") throw notFound(a.path);
+    const body = commentBody(a.body, true) as string;
+    let anchor: StoredAnchor | null = null;
+    if (a.anchor) {
+      const quote = checkQuote(a.anchor.quote);
+      const text = this.bodyOf(row);
+      const starts = occurrences(text, quote);
+      const hint = a.anchor.from;
+      let at: number | undefined;
+      if (typeof hint === "number" && text.startsWith(quote, hint)) at = hint;
+      else if (starts.length === 1 || (starts.length > 1 && typeof hint === "number")) {
+        at = starts.reduce((best, s) =>
+          Math.abs(s - (hint ?? 0)) < Math.abs(best - (hint ?? 0)) ? s : best,
+        );
+      } else if (starts.length > 1) {
+        throw new OkfError(
+          409,
+          "quote_ambiguous",
+          `The quote occurs ${starts.length} times in ${row.path}; quote more of the sentence so it occurs once.`,
+        );
+      }
+      if (at === undefined) {
+        throw new OkfError(
+          409,
+          "quote_not_found",
+          `The quote is not in the current body of ${row.path}; read it again and quote it exactly, or comment on the whole concept.`,
+        );
+      }
+      anchor = { ...selectorAt(text, at, at + quote.length), seq: this.headSeq() };
+    }
+    const id = crypto.randomUUID();
+    const commentId = crypto.randomUUID();
+    const seq = this.appendEvent(w.ctx, w.now, {
+      op: "comment",
+      path: row.path,
+      prev_hash: row.hash,
+      hash: row.hash,
+      concept_id: row.concept_id,
+      meta: {
+        comment: {
+          kind: "open",
+          thread: id,
+          id: commentId,
+          body,
+          anchor: anchor as unknown as JsonObject | null,
+        },
+      },
+    });
+    this.sql.run(
+      `INSERT INTO threads (id, concept_id, actor, anchor, status, created_seq, last_seq, last_actor)
+       VALUES (?, ?, ?, ?, 'open', ?, ?, ?)`,
+      id,
+      row.concept_id,
+      w.ctx.actor,
+      anchor ? JSON.stringify(anchor) : null,
+      seq,
+      seq,
+      w.ctx.actor,
+    );
+    this.addComment(commentId, id, w, body, seq);
+    return id;
+  }
+
+  private actOn(w: WriteState, a: Exclude<CommentAction, { kind: "open" }>): string {
+    const t = this.sql.all<{ id: string; concept_id: string; status: ThreadStatus }>(
+      "SELECT id, concept_id, status FROM threads WHERE id = ?",
+      a.thread,
+    )[0];
+    const row = t
+      ? this.sql.all<PathRow>(
+          "SELECT path, concept_id, hash, kind, last_seq AS seq, created_seq FROM paths WHERE concept_id = ?",
+          t.concept_id,
+        )[0]
+      : undefined;
+    // A thread on a deleted concept is kept (a revert brings both back) but takes no actions.
+    if (!t || !row) throw new OkfError(404, "not_found", `No comment thread ${a.thread}.`);
+    const body = commentBody(a.body, a.kind === "reply");
+    if (a.kind === "resolve" && t.status === "resolved") {
+      throw new OkfError(409, "already_resolved", "The thread is already resolved.");
+    }
+    if (a.kind === "reopen" && t.status === "open") {
+      throw new OkfError(409, "already_open", "The thread is already open.");
+    }
+    const commentId = body ? crypto.randomUUID() : null;
+    const seq = this.appendEvent(w.ctx, w.now, {
+      op: "comment",
+      path: row.path,
+      prev_hash: row.hash,
+      hash: row.hash,
+      concept_id: row.concept_id,
+      meta: {
+        comment: {
+          kind: a.kind,
+          thread: t.id,
+          ...(commentId ? { id: commentId, body } : {}),
+        },
+      },
+    });
+    if (commentId && body) this.addComment(commentId, t.id, w, body, seq);
+    if (a.kind === "resolve") {
+      this.sql.run(
+        "UPDATE threads SET status = 'resolved', resolved_by = ?, resolved_seq = ? WHERE id = ?",
+        w.ctx.actor,
+        seq,
+        t.id,
+      );
+    } else if (a.kind === "reopen") {
+      this.sql.run(
+        "UPDATE threads SET status = 'open', resolved_by = NULL, resolved_seq = NULL WHERE id = ?",
+        t.id,
+      );
+    }
+    this.sql.run(
+      `UPDATE threads SET last_seq = ?, last_actor = ?, replies = replies + ? WHERE id = ?`,
+      seq,
+      w.ctx.actor,
+      commentId ? 1 : 0,
+      t.id,
+    );
+    return t.id;
+  }
+
+  private addComment(id: string, thread: string, w: WriteState, body: string, seq: number) {
+    this.sql.run(
+      "INSERT INTO comments (id, thread_id, actor, body, ts, seq) VALUES (?, ?, ?, ?, ?, ?)",
+      id,
+      thread,
+      w.ctx.actor,
+      body,
+      w.now,
+      seq,
+    );
+  }
+
+  /** A concept's body at head as readers see it (links rendered), which anchors quote. */
+  private bodyOf(e: Entry): string {
+    return parseConcept(this.renderEntry(this.snapshot(), e, false)).body;
+  }
+
+  private threadRows(where: string, params: SqlValue[], tail = "") {
+    return this.sql.all<ThreadRow>(
+      `SELECT t.*, p.path, p.hash, p.kind, p.last_seq AS seq FROM threads t
+       JOIN paths p ON p.concept_id = t.concept_id
+       WHERE ${where} ${tail}`,
+      ...params,
+    );
+  }
+
+  /** Threads as returned: their comments, and anchors located in each concept's current body. */
+  private threadViews(rows: ThreadRow[], withComments: boolean): ThreadView[] {
+    const byThread = new Map<string, CommentView[]>();
+    if (rows.length > 0 && withComments) {
+      const comments = this.sql.all<CommentView & { thread_id: string }>(
+        `SELECT id, thread_id, actor, body, ts, seq FROM comments
+         WHERE thread_id IN (${rows.map(() => "?").join(", ")}) ORDER BY seq`,
+        ...rows.map((r) => r.id),
+      );
+      for (const c of comments) {
+        const list = byThread.get(c.thread_id) ?? [];
+        list.push({ id: c.id, actor: c.actor, body: c.body, ts: c.ts, seq: c.seq });
+        byThread.set(c.thread_id, list);
+      }
+    }
+    // One render per concept, however many of its threads are on the page.
+    const bodies = new Map<string, string>();
+    return rows.map((r) => {
+      const anchor = r.anchor ? (JSON.parse(r.anchor) as StoredAnchor) : null;
+      let located: { from: number; to: number } | null = null;
+      if (anchor) {
+        let text = bodies.get(r.concept_id);
+        if (text === undefined) {
+          text = this.bodyOf(r);
+          bodies.set(r.concept_id, text);
+        }
+        located = locate(text, anchor);
+      }
+      return {
+        id: r.id,
+        path: r.path,
+        status: r.status,
+        actor: r.actor,
+        created_seq: r.created_seq,
+        last_seq: r.last_seq,
+        last_actor: r.last_actor,
+        resolved_by: r.resolved_by,
+        resolved_seq: r.resolved_seq,
+        replies: r.replies,
+        anchor,
+        located,
+        outdated: anchor !== null && located === null,
+        comments: byThread.get(r.id) ?? [],
+      };
+    });
+  }
+
+  /**
+   * GET /comments: threads on concepts that exist, most recent activity first, each with its
+   * comments. `path` narrows to one concept; `status` is open (default), resolved or all;
+   * `before` is a last_seq cursor for the next page.
+   */
+  comments(opts: { path?: string; status?: string; limit?: number; before?: number } = {}) {
+    const status = opts.status ?? "open";
+    if (!["open", "resolved", "all"].includes(status)) {
+      throw new OkfError(400, "bad_param", "`status` is open, resolved or all.");
+    }
+    const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
+    const where: string[] = ["t.last_seq < ?"];
+    const params: SqlValue[] = [opts.before ?? Number.MAX_SAFE_INTEGER];
+    let path: string | null = null;
+    if (opts.path !== undefined) {
+      const p = normalizePath(opts.path);
+      const row = p ? this.lookupRow(p) : undefined;
+      if (!row) throw notFound(opts.path);
+      path = row.path;
+      where.push("t.concept_id = ?");
+      params.push(row.concept_id);
+    }
+    if (status !== "all") {
+      where.push("t.status = ?");
+      params.push(status);
+    }
+    const rows = this.threadRows(
+      where.join(" AND "),
+      [...params, limit],
+      "ORDER BY t.last_seq DESC LIMIT ?",
+    );
+    const last = rows.at(-1)?.last_seq;
+    return {
+      head: this.headSeq(),
+      path,
+      threads: this.threadViews(rows, true),
+      next: rows.length === limit && last ? last : null,
+    };
+  }
+
+  /** GET /comments/{thread}: one thread with its comments. */
+  thread(id: string): ThreadView {
+    const view = this.threadViews(this.threadRows("t.id = ?", [id]), true)[0];
+    if (!view) throw new OkfError(404, "not_found", `No comment thread ${id}.`);
+    return view;
+  }
+
+  /** Open threads per concept path, for the tree. */
+  private openThreadCounts(): Map<string, number> {
+    const rows = this.sql.all<{ concept_id: string; n: number }>(
+      "SELECT concept_id, COUNT(*) AS n FROM threads WHERE status = 'open' GROUP BY concept_id",
+    );
+    return new Map(rows.map((r) => [r.concept_id, r.n]));
+  }
+
+  /** How many open threads a concept has (for `read`'s header). */
+  openThreads(input: string): number {
+    const p = normalizePath(input);
+    const row = p ? this.lookupRow(p) : undefined;
+    if (!row) return 0;
+    return (
+      this.sql.all<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM threads WHERE concept_id = ? AND status = 'open'",
+        row.concept_id,
+      )[0]?.n ?? 0
     );
   }
 
@@ -2163,6 +2509,9 @@ export class LibraryStore {
       attachments,
       types,
       open_work: this.work({ limit: 1 }).total,
+      open_comments: [...this.openThreadCounts().entries()]
+        .filter(([id]) => snap.byId.has(id))
+        .reduce((n, [, c]) => n + c, 0),
     };
   }
 
@@ -2215,6 +2564,14 @@ export interface WorkItem {
   detail: string;
   suggested_action: string;
   inbound_links: number;
+  /** For a `comment` item: the thread to answer. */
+  thread?: string;
+}
+
+/** `s` on one line, cut to `n` characters. */
+function clip(s: string, n: number): string {
+  const line = s.replace(/\s+/g, " ").trim();
+  return line.length > n ? `${line.slice(0, n - 1)}…` : line;
 }
 
 function b64url(bytes: Uint8Array): string {
@@ -2236,6 +2593,20 @@ function equalBytes(a: string, b: string): boolean {
 }
 
 type WriteMode = "write" | "import";
+
+/** A threads row joined with its concept's current path. */
+interface ThreadRow extends Entry {
+  id: string;
+  actor: string;
+  anchor: string | null;
+  status: ThreadStatus;
+  created_seq: number;
+  last_seq: number;
+  last_actor: string;
+  resolved_by: string | null;
+  resolved_seq: number | null;
+  replies: number;
+}
 
 interface WriteState {
   ctx: RequestContext;

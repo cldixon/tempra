@@ -26,6 +26,10 @@ export const LIBRARY_METHODS = [
   "diff",
   "work",
   "verify",
+  "comment",
+  "comments",
+  "thread",
+  "openThreads",
   "summary",
   "signDownload",
   "openDownload",
@@ -133,7 +137,7 @@ export async function verifyBlobs(
  * always go through, so a full library can be cleared.
  */
 function grows(method: LibraryMethod, args: unknown[]): boolean {
-  if (method === "import" || method === "revert") return true;
+  if (method === "import" || method === "revert" || method === "comment") return true;
   if (method !== "apply") return false;
   const ops = (args[1] ?? []) as { op?: string }[];
   return ops.some((o) => o.op !== "delete" && o.op !== "move");

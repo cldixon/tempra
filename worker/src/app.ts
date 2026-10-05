@@ -553,6 +553,69 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     return c.json(await c.var.lib.verify(requestContext(c), path));
   });
 
+  // ------------------------------------------------------------------ comments
+
+  // Threads on concepts (tempra-dev: app/comments). Every post is one `comment` event.
+  app.get(`${BASE}/comments`, async (c) =>
+    c.json(
+      await c.var.lib.comments({
+        path: c.req.query("path"),
+        status: c.req.query("status"),
+        limit: num(c, "limit"),
+        before: num(c, "before"),
+      }),
+    ),
+  );
+
+  app.post(`${BASE}/comments`, async (c) => {
+    const body = await json<{
+      path?: string;
+      body?: string;
+      anchor?: { quote?: string; from?: number } | null;
+    }>(c);
+    if (typeof body.path !== "string") {
+      throw new OkfError(400, "bad_request", "Give the concept's `path`.");
+    }
+    requireWrite(c, body.path);
+    const anchor = body.anchor
+      ? {
+          quote: String(body.anchor.quote ?? ""),
+          from: typeof body.anchor.from === "number" ? body.anchor.from : undefined,
+        }
+      : null;
+    const res = await c.var.lib.comment(requestContext(c), {
+      kind: "open",
+      path: body.path,
+      body: String(body.body ?? ""),
+      anchor,
+    });
+    return c.json(res, 201);
+  });
+
+  app.get(`${BASE}/comments/:thread`, async (c) =>
+    c.json(await c.var.lib.thread(c.req.param("thread"))),
+  );
+
+  /** Reply (`POST /comments/{thread}`), resolve or reopen, each with an optional body. */
+  const act = (kind: "reply" | "resolve" | "reopen") => async (c: C) => {
+    const id = c.req.param("thread") ?? "";
+    const { path } = await c.var.lib.thread(id);
+    requireWrite(c, path);
+    // The body is optional for resolve and reopen: no JSON at all is fine.
+    const sent = (await c.req.text()).trim();
+    let raw: { body?: unknown } = {};
+    try {
+      raw = sent ? JSON.parse(sent) : {};
+    } catch {
+      throw new OkfError(400, "bad_json", "The request body must be JSON.");
+    }
+    const text = typeof raw.body === "string" ? raw.body : "";
+    return c.json(await c.var.lib.comment(requestContext(c), { kind, thread: id, body: text }));
+  };
+  app.post(`${BASE}/comments/:thread`, act("reply"));
+  app.post(`${BASE}/comments/:thread/resolve`, act("resolve"));
+  app.post(`${BASE}/comments/:thread/reopen`, act("reopen"));
+
   // ------------------------------------------------------------------ signed downloads
 
   /** Short-lived download URLs for exports and attachments; the signature is the credential. */

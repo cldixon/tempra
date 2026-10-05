@@ -4,7 +4,7 @@ import type { SqlHandle } from "./sql";
  * The Library DO schema (spec: Data model). `blobs` and `events` are the source of truth and are
  * append-only; every other table is derived and can be rebuilt by replaying `events`.
  */
-export const SCHEMA_VERSION = 3;
+export const SCHEMA_VERSION = 4;
 
 const V1 = `
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -100,6 +100,39 @@ const V2 = `ALTER TABLE links ADD COLUMN kind TEXT NOT NULL DEFAULT 'body';`;
 /** v3: one access_log row per day, concept and actor, so reads can be counted with an upsert. */
 const V3 = `CREATE UNIQUE INDEX IF NOT EXISTS access_log_key ON access_log(day, concept_id, actor);`;
 
+/**
+ * v4: comment threads (tempra-dev: app/comments). Derived from `comment` events, whose meta
+ * carries each action in full; written in the same transaction as the event. The partial index
+ * keeps open-thread queries (work queue, tree counts) independent of resolved history.
+ */
+const V4 = `
+CREATE TABLE IF NOT EXISTS threads (
+  id           TEXT PRIMARY KEY,
+  concept_id   TEXT NOT NULL,
+  actor        TEXT NOT NULL,
+  anchor       TEXT,
+  status       TEXT NOT NULL,
+  created_seq  INTEGER NOT NULL,
+  last_seq     INTEGER NOT NULL,
+  last_actor   TEXT NOT NULL,
+  resolved_by  TEXT,
+  resolved_seq INTEGER,
+  replies      INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS threads_concept ON threads(concept_id, last_seq);
+CREATE INDEX IF NOT EXISTS threads_last ON threads(last_seq);
+CREATE INDEX IF NOT EXISTS threads_open ON threads(concept_id) WHERE status = 'open';
+CREATE TABLE IF NOT EXISTS comments (
+  id        TEXT PRIMARY KEY,
+  thread_id TEXT NOT NULL,
+  actor     TEXT NOT NULL,
+  body      TEXT NOT NULL,
+  ts        TEXT NOT NULL,
+  seq       INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS comments_thread ON comments(thread_id, seq);
+`;
+
 /** Creates or migrates the schema forward; a no-op when already current. */
 export function migrate(sql: SqlHandle): void {
   sql.script("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);");
@@ -110,6 +143,7 @@ export function migrate(sql: SqlHandle): void {
     if (current < 1) sql.script(V1);
     if (current < 2) sql.script(V2);
     if (current < 3) sql.script(V3);
+    if (current < 4) sql.script(V4);
     sql.run(
       "INSERT INTO meta (key, value) VALUES ('schema_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
       String(SCHEMA_VERSION),

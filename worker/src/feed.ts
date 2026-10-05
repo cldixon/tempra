@@ -19,6 +19,8 @@ export interface FeedEvent {
   note: string | null;
   /** For a move: where the file was. */
   from_path: string | null;
+  /** For a comment: what was done, to which thread. */
+  comment: { kind: string; thread: string } | null;
 }
 
 /** What the feed sends: on connect, the head; after each write, its events. */
@@ -46,7 +48,7 @@ export const FEED_MAX_AGE_MS = 10 * 60_000;
 export const FEED_REAUTHORIZE = 4001;
 
 /** The DO's write methods: a call to one of these may add events. */
-export const WRITE_METHODS = new Set(["apply", "import", "revert", "verify"]);
+export const WRITE_METHODS = new Set(["apply", "import", "revert", "verify", "comment"]);
 
 export function feedEvent(e: EventRow): FeedEvent {
   const meta = e.meta ?? {};
@@ -61,7 +63,16 @@ export function feedEvent(e: EventRow): FeedEvent {
     hash: e.hash,
     note: typeof meta.note === "string" ? meta.note : null,
     from_path: typeof meta.from_path === "string" ? meta.from_path : null,
+    comment: commentOf(meta.comment),
   };
+}
+
+function commentOf(v: unknown): FeedEvent["comment"] {
+  if (!v || typeof v !== "object") return null;
+  const c = v as { kind?: unknown; thread?: unknown };
+  return typeof c.kind === "string" && typeof c.thread === "string"
+    ? { kind: c.kind, thread: c.thread }
+    : null;
 }
 
 /** The prefix a socket asked for, normalized the way the store normalizes directories. */
