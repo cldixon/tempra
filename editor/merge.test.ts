@@ -1,5 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import type { LinkTarget } from "./src/links";
 import { conflicts, merge3, mergeFields, resolve } from "./src/merge";
+import { linkParam } from "./src/parse";
 
 const text = (...lines: string[]) => lines.join("\n");
 
@@ -69,5 +71,28 @@ describe("mergeFields", () => {
       value: "draft",
     });
     expect(out.find((f) => f.key === "tags")?.kind).toBe("conflict");
+  });
+});
+
+describe("links made in the editor (linkParam)", () => {
+  const opts = {
+    path: "dir/a.md",
+    href: (t: LinkTarget | null) =>
+      t === null ? null : t.kind === "internal" ? `/app/${t.path}` : t.href,
+  };
+  test("an internal target is drawn as the parser draws it", () => {
+    expect(linkParam(opts, "/dir/b.md")).toEqual({
+      url: "/dir/b.md",
+      title: null,
+      href: "/app/dir/b.md",
+      path: "dir/b.md",
+      broken: false,
+    });
+  });
+  test("schemes a browser must not follow get no href", () => {
+    for (const bad of ["javascript:alert(1)", "data:text/html,x", "vbscript:x"]) {
+      expect(linkParam(opts, bad).href).toBeNull();
+    }
+    expect(linkParam(opts, "https://example.com").href).toBe("https://example.com");
   });
 });

@@ -651,9 +651,27 @@ async function browserRenders(
         await edit();
         if (shots) await page.screenshot({ path: `${shots}/editor.png` });
         await typeInto(" Edited by a person.");
+        // A link made with Ctrl+K on a selected word, to another concept by its bundle path.
+        // The caret is after "person.": step over the full stop and select the word.
+        await page.keyboard.press("ArrowLeft");
+        await page.keyboard.press("Control+Shift+ArrowLeft");
+        await page.keyboard.press("Control+k");
+        const target = concepts.find((x) => x !== concept) ?? concept;
+        await page.locator(".link-dialog input[name='url']").fill(`/${target}`);
+        await page.keyboard.press("Enter");
+        await body
+          .locator(`a[href$="${enc(target)}"]`)
+          .first()
+          .waitFor({ timeout: 5_000 });
         await save("gate: a person edits");
         await page.getByText("Saved.").waitFor({ timeout: 10_000 });
         await body.getByText("Edited by a person.").waitFor({ timeout: 10_000 });
+        const saved = await (
+          await fetch(`${libApi}/files/${enc(concept)}`, { headers: bearer })
+        ).text();
+        if (!saved.includes(`[person](/${target})`)) {
+          throw new Error("the link was not saved as a bundle path");
+        }
         const ev = (await (
           await fetch(`${libApi}/history/${enc(concept)}`, { headers: bearer })
         ).json()) as { events: { actor: string; meta: { note?: string } | null }[] };
@@ -666,14 +684,14 @@ async function browserRenders(
           method: "PATCH",
           headers: { ...bearer, "Content-Type": "application/json" },
           body: JSON.stringify({
-            edits: [{ old: "Edited by a person.", new: "Edited by a person, then an agent." }],
+            edits: [{ old: "Edited by a [person]", new: "Edited by an agent and a [person]" }],
             note: "gate: an agent edits after",
           }),
         });
         if (!agentEdit.ok)
           throw new Error(`agent edit: ${agentEdit.status} ${await agentEdit.text()}`);
         await page.getByRole("button", { name: "Show new version" }).click();
-        await body.getByText("then an agent.").waitFor({ timeout: 10_000 });
+        await body.getByText("Edited by an agent and a").waitFor({ timeout: 10_000 });
         // A write meanwhile: the save meets a 412 and merges, keeping both changes.
         await edit();
         // In the first paragraph: the agent's write lands at the end of the body, so they combine.

@@ -153,10 +153,12 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
     return () => document.removeEventListener("keydown", onKey);
   }, [drawer, contextEl]);
 
-  // Ctrl or Cmd+K opens the quick switcher, from anywhere in the workspace.
+  // Ctrl or Cmd+K opens the quick switcher, from anywhere in the workspace except a body being
+  // edited, where it makes a link.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+      const editing = e.target instanceof Element && e.target.closest("[contenteditable='true']");
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k" && !editing) {
         e.preventDefault();
         setSwitching(true);
       }

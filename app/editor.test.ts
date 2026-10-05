@@ -17,24 +17,51 @@ const fm: Frontmatter = {
 };
 
 describe("the frontmatter form (tempra-dev: app/editor)", () => {
-  test("round-trips: stamped fields dropped, unknown fields kept", () => {
-    const out = frontmatterOf(fm, formOf(fm));
-    const { generated: _g, verified: _v, ...rest } = fm;
-    expect(out).toEqual(rest);
+  test("untouched, every field keeps its exact value; stamped fields are dropped", () => {
+    const odd: Frontmatter = {
+      ...fm,
+      tags: "finance",
+      stale_after: "2026-12-31T12:34:56+02:00",
+      sources: [{ id: "s1", resource: "https://x.test", author: "A. N.", usage_count: 3 }],
+    };
+    const { generated: _g, verified: _v, ...rest } = odd;
+    expect(frontmatterOf(odd, formOf(odd))).toEqual(rest);
   });
 
-  test("empty fields are removed, tags split, stale_after written in UTC with Z", () => {
+  test("changed fields: empty removed, tags split, stale_after in UTC with Z, to the second", () => {
     const form = {
       ...formOf(fm),
       description: " ",
       tags: "a, , b",
-      staleAfter: "2027-03-04T05:06",
+      staleAfter: "2027-03-04T05:06:07",
     };
     const out = frontmatterOf(fm, form);
     expect(out.description).toBeUndefined();
     expect(out.tags).toEqual(["a", "b"]);
-    expect(out.stale_after).toBe("2027-03-04T05:06:00Z");
+    expect(out.stale_after).toBe("2027-03-04T05:06:07Z");
+    expect(frontmatterOf(fm, { ...form, staleAfter: "2027-03-04T05:06" }).stale_after).toBe(
+      "2027-03-04T05:06:00Z",
+    );
     expect(frontmatterOf(fm, { ...form, staleAfter: "", tags: "" })).not.toContainKey("tags");
+  });
+
+  test("an edited source keeps its other keys; an empty field is left out, not written empty", () => {
+    const base: Frontmatter = {
+      ...fm,
+      sources: [{ id: "s1", title: "Ledger", resource: "https://l.test", author: "A. N." }],
+    };
+    const form = formOf(base);
+    const out = frontmatterOf(base, {
+      ...form,
+      sources: [
+        { ...(form.sources[0] as (typeof form.sources)[0]), title: "", resource: "https://m.test" },
+        { id: "s2", title: "Only a title", resource: "" },
+      ],
+    });
+    expect(out.sources).toEqual([
+      { id: "s1", resource: "https://m.test", author: "A. N." },
+      { id: "s2", title: "Only a title" },
+    ]);
   });
 
   test("status stable is not added where there was none; blank source rows go", () => {
@@ -85,5 +112,21 @@ describe("merging with a version saved meanwhile", () => {
       value: "Mine",
     });
     expect(m.fields.some((f) => f.key === "verified" || f.key === "generated")).toBe(false);
+  });
+
+  test("fields the person left alone never overwrite what was changed meanwhile", () => {
+    const base = { path: "a.md", hash: "h0", body: "x\n", frontmatter: fm };
+    const theirs = {
+      ...base,
+      hash: "h1",
+      frontmatter: { ...fm, tags: ["finance"], stale_after: "2027-01-01T00:00:00Z" },
+    };
+    const mine = frontmatterOf(fm, { ...formOf(fm), title: "Mine" });
+    const m = startMerge(base, "x\n", mine, theirs);
+    expect(m.fields.filter((f) => f.kind === "conflict")).toEqual([]);
+    const value = (k: string) => m.fields.find((f) => f.key === k);
+    expect(value("tags")).toMatchObject({ kind: "same", value: ["finance"] });
+    expect(value("stale_after")).toMatchObject({ value: "2027-01-01T00:00:00Z" });
+    expect(value("title")).toMatchObject({ value: "Mine" });
   });
 });

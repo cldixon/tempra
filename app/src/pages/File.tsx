@@ -1,6 +1,8 @@
 import {
   type LinkTarget,
+  linkParam,
   type Parsed,
+  type ParseOptions,
   parse,
   toHTML,
   type WordDiff,
@@ -464,10 +466,10 @@ function ConceptView(props: {
   useTitle(`${title} · ${urls.slug}`);
   const status = typeof fm.status === "string" ? fm.status : "stable";
 
-  const parsed = useMemo(() => {
+  const parseOptions = useMemo((): ParseOptions => {
     const ids = new Set(sources.sources.map((s) => s.id).filter((id) => typeof id === "string"));
     const broken = new Set(links.broken.map((b) => b.path));
-    return parse(c.body, {
+    return {
       path: c.path,
       href: bodyHref(urls),
       exists: (path) => !broken.has(path),
@@ -477,8 +479,9 @@ function ConceptView(props: {
           : defined
             ? `#${anchorId("fn", label)}`
             : null,
-    });
-  }, [c, urls, sources, links]);
+    };
+  }, [c.path, urls, sources, links]);
+  const parsed = useMemo(() => parse(c.body, parseOptions), [c.body, parseOptions]);
   // A leading heading that repeats the title is not shown twice (the stored body is unchanged).
   const first = parsed.headings[0];
   const hideFirst =
@@ -499,6 +502,7 @@ function ConceptView(props: {
     end: () => setFrozen(null),
     onSaved: props.onVerified,
     onEditing: props.onEditing,
+    parseOptions,
   });
 
   // Comments: each thread's quote found in the body on screen, highlighted while open.
@@ -588,7 +592,8 @@ function ConceptView(props: {
       </div>
       {/* The workspace's right panel (tempra-dev: app/workspace). */}
       <ContextPanel>
-        <Verify urls={urls} concept={c} head={head} onVerified={props.onVerified} />
+        {/* Verifying is for a saved version, not one being edited. */}
+        {!editing && <Verify urls={urls} concept={c} head={head} onVerified={props.onVerified} />}
         {(props.threads || props.threadsError) && (
           <CommentsPanel
             urls={urls}
@@ -1126,6 +1131,8 @@ function useEditing(o: {
   end(): void;
   onSaved(): void;
   onEditing(on: boolean): void;
+  /** How the body's links are drawn: a link made in the editor is drawn the same way. */
+  parseOptions: ParseOptions;
 }) {
   const { urls } = o;
   const reader = useRef<ReaderHandle | null>(null);
@@ -1138,6 +1145,8 @@ function useEditing(o: {
   const [error, setError] = useState<string | null>(null);
   const [merge, setMerge] = useState<Merge | null>(null);
   const [saved, setSaved] = useState<{ lint: { code: string; message: string }[] } | null>(null);
+  /** Images on their way: a save waits for them, so none is left out of the body. */
+  const [uploading, setUploading] = useState(0);
   const dirty = useRef(false);
   /** The version the edit started from. */
   const base = useRef<Base | null>(null);
@@ -1156,8 +1165,14 @@ function useEditing(o: {
         );
         return outline;
       },
-      linkTarget: (raw) => linkTarget(urls, raw),
+      // Drawn as the body's own links are; a target a browser must not follow is refused.
+      link: (raw) => {
+        const param = linkParam(o.parseOptions, linkTarget(urls, raw));
+        return param.href === null ? null : param;
+      },
       upload: (file) => uploadImage(urls, path, file),
+      onUploads: setUploading,
+      onError: setError,
       onChange: () => {
         dirty.current = true;
       },
@@ -1223,8 +1238,18 @@ function useEditing(o: {
     } catch (err) {
       if (isConflict(err)) {
         // Someone saved meanwhile: merge with the version there now.
-        const now = await api<FileJson>(urls.api(`files/${enc(o.concept.path)}`));
-        if (now.kind !== "concept") {
+        const now: FileJson | null | { failed: string } = await api<FileJson>(
+          urls.api(`files/${enc(o.concept.path)}`),
+        ).catch((e: unknown) =>
+          e instanceof ApiError && e.status === 404
+            ? null
+            : { failed: e instanceof Error ? e.message : String(e) },
+        );
+        if (now !== null && "failed" in now) {
+          setError(`Someone saved meanwhile, and their version could not be loaded: ${now.failed}`);
+        } else if (now === null) {
+          setError("This concept was deleted or moved meanwhile; copy your text before leaving.");
+        } else if (now.kind !== "concept") {
           setError("The file is no longer a concept; copy your text and reload.");
         } else {
           const theirs: Base = {
@@ -1245,6 +1270,7 @@ function useEditing(o: {
 
   const save = (e: FormEvent) => {
     e.preventDefault();
+    if (uploading > 0) return setError("Wait for the images to finish uploading.");
     if (!note.trim()) return setError("Say what you changed in a one-line note.");
     if (!form?.type.trim()) return setError("A concept needs a type.");
     const b = base.current;
@@ -1258,6 +1284,8 @@ function useEditing(o: {
 
   const bar = merge ? (
     <MergeView
+      // A new merge (after another write meanwhile) starts with nothing picked.
+      key={merge.theirs.hash}
       merge={merge}
       busy={busy}
       error={error}
@@ -1286,8 +1314,8 @@ function useEditing(o: {
               required
             />
           </label>{" "}
-          <button className="primary" type="submit" disabled={busy}>
-            Save
+          <button className="primary" type="submit" disabled={busy || uploading > 0}>
+            {uploading > 0 ? "Uploading…" : "Save"}
           </button>{" "}
           <button type="button" onClick={cancel} disabled={busy}>
             Cancel

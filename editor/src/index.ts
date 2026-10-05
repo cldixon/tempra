@@ -18,6 +18,7 @@ export {
 } from "./merge";
 export {
   type Footnote,
+  linkParam,
   type Parsed,
   type ParseOptions,
   parse,

@@ -160,8 +160,8 @@ let shown = typeof location === "undefined" ? "" : location.href;
 /** Goes to a URL without reloading when the app draws it, otherwise loads it in full. */
 export function navigate(href: string, opts: { replace?: boolean } = {}) {
   const url = new URL(href, location.href);
-  // Staying on the page (a #fragment, a query on the same file) needs no leave.
-  const leaving = url.pathname !== location.pathname;
+  // A #fragment stays on the page; another path or query (?at=, ?done=) draws a new one.
+  const leaving = url.pathname + url.search !== location.pathname + location.search;
   if (leaving && leaveGuard && !leaveGuard()) return;
   if (url.origin !== location.origin || !match(url)) {
     location.assign(url.href);
@@ -182,7 +182,8 @@ export function useLocation(): URL {
     const update = () => setUrl(new URL(location.href));
     const back = () => {
       // Back or forward cannot be cancelled: refused, the page's address is put back.
-      if (leaveGuard && new URL(location.href).pathname !== new URL(shown).pathname) {
+      const was = new URL(shown);
+      if (leaveGuard && location.pathname + location.search !== was.pathname + was.search) {
         if (!leaveGuard()) {
           history.pushState(null, "", shown);
           return;

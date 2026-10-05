@@ -31,11 +31,12 @@ const STAMPED = new Set(["generated", "verified"]);
 
 export const STATUSES = ["stable", "draft", "deprecated"] as const;
 
-/** A source row in the form. */
+/** A source row in the form; `original` is the source as loaded (its other keys are kept). */
 export interface SourceRow {
   id: string;
   title: string;
   resource: string;
+  original?: Frontmatter;
 }
 
 /** The form's state: the fields people edit, as strings. */
@@ -45,12 +46,14 @@ export interface FormState {
   description: string;
   tags: string;
   status: string;
-  /** `datetime-local` value (UTC), or "". */
+  /** `datetime-local` value (UTC, to the second), or "". */
   staleAfter: string;
   sources: SourceRow[];
 }
 
 const str = (v: Json | undefined) => (typeof v === "string" ? v : v == null ? "" : String(v));
+const isObject = (v: Json | undefined): v is Frontmatter =>
+  v !== null && typeof v === "object" && !Array.isArray(v);
 
 export function formOf(fm: Frontmatter): FormState {
   const stale = str(fm.stale_after);
@@ -61,21 +64,31 @@ export function formOf(fm: Frontmatter): FormState {
     description: str(fm.description),
     tags: Array.isArray(fm.tags) ? fm.tags.map(str).join(", ") : str(fm.tags),
     status: str(fm.status) || "stable",
-    staleAfter: date && !Number.isNaN(date.getTime()) ? date.toISOString().slice(0, 16) : "",
+    staleAfter: date && !Number.isNaN(date.getTime()) ? date.toISOString().slice(0, 19) : "",
     sources: Array.isArray(fm.sources)
       ? fm.sources.map((s) => {
-          const o = (s && typeof s === "object" && !Array.isArray(s) ? s : {}) as Frontmatter;
-          return { id: str(o.id), title: str(o.title), resource: str(o.resource) };
+          const o = isObject(s) ? s : {};
+          return { id: str(o.id), title: str(o.title), resource: str(o.resource), original: o };
         })
       : [],
   };
 }
 
+const sameRows = (a: SourceRow[], b: SourceRow[]) =>
+  a.length === b.length &&
+  a.every((r, i) => {
+    const o = b[i];
+    return !!o && r.id === o.id && r.title === o.title && r.resource === o.resource;
+  });
+
 /**
- * The frontmatter to write: the loaded one without the stamped fields, with the form's fields
- * put over it (an empty field is removed; unknown fields are kept as they were).
+ * The frontmatter to write: the loaded one without the stamped fields, with what the person
+ * changed in the form put over it. A field left as it was keeps its exact loaded value (its
+ * spelling, its other keys), so a save, and a merge, only carries real changes; a field emptied
+ * is removed.
  */
 export function frontmatterOf(base: Frontmatter, form: FormState): Frontmatter {
+  const was = formOf(base);
   const out: Frontmatter = {};
   for (const [k, v] of Object.entries(base)) if (!STAMPED.has(k)) out[k] = v;
   const set = (key: string, value: Json | undefined) => {
@@ -83,35 +96,46 @@ export function frontmatterOf(base: Frontmatter, form: FormState): Frontmatter {
       delete out[key];
     } else out[key] = value;
   };
-  set("type", form.type.trim());
-  set("title", form.title.trim());
-  set("description", form.description.trim());
-  set(
-    "tags",
-    form.tags
-      .split(",")
-      .map((t) => t.trim())
-      .filter(Boolean),
-  );
-  set("status", form.status === "stable" && base.status === undefined ? undefined : form.status);
-  set(
-    "stale_after",
-    form.staleAfter
-      ? `${new Date(`${form.staleAfter}:00Z`).toISOString().slice(0, 19)}Z`
-      : undefined,
-  );
-  set(
-    "sources",
-    form.sources
-      .filter((s) => s.resource.trim() || s.id.trim() || s.title.trim())
-      .map((s) => {
-        const o: Frontmatter = {};
-        if (s.id.trim()) o.id = s.id.trim();
-        if (s.title.trim()) o.title = s.title.trim();
-        o.resource = s.resource.trim();
-        return o;
-      }),
-  );
+  const text = (key: "type" | "title" | "description") => {
+    if (form[key] !== was[key]) set(key, form[key].trim());
+  };
+  text("type");
+  text("title");
+  text("description");
+  if (form.tags !== was.tags) {
+    set(
+      "tags",
+      form.tags
+        .split(",")
+        .map((t) => t.trim())
+        .filter(Boolean),
+    );
+  }
+  if (form.status !== was.status) set("status", form.status);
+  if (form.staleAfter !== was.staleAfter) {
+    const v = form.staleAfter.length === 16 ? `${form.staleAfter}:00` : form.staleAfter;
+    const date = v ? new Date(`${v}Z`) : null;
+    set(
+      "stale_after",
+      date && !Number.isNaN(date.getTime()) ? `${date.toISOString().slice(0, 19)}Z` : undefined,
+    );
+  }
+  if (!sameRows(form.sources, was.sources)) {
+    set(
+      "sources",
+      form.sources
+        .filter((s) => s.resource.trim() || s.id.trim() || s.title.trim())
+        .map((s) => {
+          const o: Frontmatter = { ...(s.original ?? {}) };
+          for (const key of ["id", "title", "resource"] as const) {
+            const v = s[key].trim();
+            if (v) o[key] = v;
+            else delete o[key];
+          }
+          return o;
+        }),
+    );
+  }
   return out;
 }
 
@@ -137,6 +161,8 @@ export function linkTarget(urls: Urls, raw: string): string {
   return `/${text}`;
 }
 
+let uploads = 0;
+
 /** Stores an image beside the concept, as its own ledger request; its bundle path and URL. */
 export async function uploadImage(urls: Urls, conceptPath: string, file: File) {
   const dir = dirOf(conceptPath);
@@ -144,7 +170,8 @@ export async function uploadImage(urls: Urls, conceptPath: string, file: File) {
   const ext = (file.name.match(/\.([a-z0-9]+)$/i)?.[1] ?? file.type.split("/")[1] ?? "png")
     .toLowerCase()
     .replace("jpeg", "jpg");
-  const name = `${stem}-${Date.now().toString(36)}.${ext}`;
+  // Two images in the same instant still get names of their own.
+  const name = `${stem}-${Date.now().toString(36)}${(++uploads).toString(36)}.${ext}`;
   const path = dir ? `${dir}/${name}` : name;
   await api(urls.api(`files/${enc(path)}`), {
     method: "PUT",
@@ -251,7 +278,12 @@ export function FrontmatterForm(props: {
       </label>
       <label>
         Stale after (UTC)
-        <input type="datetime-local" value={form.staleAfter} onChange={field("staleAfter")} />
+        <input
+          type="datetime-local"
+          step={1}
+          value={form.staleAfter}
+          onChange={field("staleAfter")}
+        />
       </label>
       <div>
         Sources
@@ -335,12 +367,15 @@ export function MergeView(props: {
   const { merge } = props;
   const body = conflicts(merge.segments);
   const fieldConflicts = merge.fields.filter((f) => f.kind === "conflict");
-  const [picks, setPicks] = useState<Pick[]>(() => body.map(() => "mine"));
-  const [fieldPicks, setFieldPicks] = useState<("mine" | "theirs")[]>(() =>
-    fieldConflicts.map(() => "mine"),
+  // Nothing is picked for the person: each overlap needs a choice before the merge is saved.
+  const [picks, setPicks] = useState<(Pick | null)[]>(() => body.map(() => null));
+  const [fieldPicks, setFieldPicks] = useState<("mine" | "theirs" | null)[]>(() =>
+    fieldConflicts.map(() => null),
   );
+  const undecided = picks.includes(null) || fieldPicks.includes(null);
   const submit = (e: FormEvent) => {
     e.preventDefault();
+    if (undecided) return;
     const text = resolve(merge.segments, (i) => picks[i] ?? "mine");
     const fm: Frontmatter = {};
     let n = 0;
@@ -359,7 +394,7 @@ export function MergeView(props: {
         Someone saved this concept after you started.{" "}
         {clean
           ? "Your changes and theirs touch different lines, so they combine."
-          : "Pick a side where you both changed the same lines; everything else combines."}
+          : "Pick a side for each place you both changed; everything else combines."}
       </p>
       {fieldConflicts.map((f, i) => (
         <fieldset key={f.key} className="conflict">
@@ -401,7 +436,7 @@ export function MergeView(props: {
         </fieldset>
       ))}
       {props.error && <div className="notice">{props.error}</div>}
-      <button className="primary" type="submit" disabled={props.busy}>
+      <button className="primary" type="submit" disabled={props.busy || undecided}>
         Save merged
       </button>{" "}
       <button type="button" onClick={props.onCancel} disabled={props.busy}>

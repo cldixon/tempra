@@ -7,7 +7,7 @@ import type { Leaf, Mark } from "wordgard/doc";
 import { Decoration, PointSet, RangeSet, Tooltip, Widget, Wordgard } from "wordgard/editor";
 import { GardState, Transaction } from "wordgard/state";
 import type { WordDiff } from "./diff";
-import { type EditOptions, editing } from "./edit";
+import { type Editing, type EditOptions, editing } from "./edit";
 import type { Parsed } from "./parse";
 import { serialize } from "./serialize";
 
@@ -254,6 +254,7 @@ export function mountReader(opts: ReaderOptions): Reader {
     }, 120);
   };
   if (tools) document.addEventListener("selectionchange", follow);
+  let session: Editing | null = null;
   return {
     dom: wg.dom,
     highlight: (marks) =>
@@ -261,8 +262,10 @@ export function mountReader(opts: ReaderOptions): Reader {
     selection,
     setEditable: (on, editOpts) => {
       editingNow = on;
+      session?.close();
+      session = on ? editing(editOpts ?? {}) : null;
       wg.dispatch({
-        effects: [mode.reconfigure(on ? editing(editOpts ?? {}) : reading), setTools.of(null)],
+        effects: [mode.reconfigure(session ? session.extensions : reading), setTools.of(null)],
       });
       // No focus here: the person clicks where they mean to type (focusing would put the caret
       // at the start of the body, and on a fresh view could land after their click).
@@ -275,6 +278,7 @@ export function mountReader(opts: ReaderOptions): Reader {
     },
     // A Wordgard disconnects (listeners, tooltips) when its element leaves the document.
     destroy: () => {
+      session?.close();
       clearTimeout(timer);
       document.removeEventListener("selectionchange", follow);
       wg.dom.removeEventListener("click", click);
