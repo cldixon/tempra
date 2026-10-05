@@ -1,5 +1,5 @@
 import type { Context, Hono } from "hono";
-import { signupMode, type User } from "./accounts";
+import { type SignupMode, signupMode, type User } from "./accounts";
 import type { Deps } from "./app";
 import { LEGAL } from "./legal";
 import { esc, messagePage, page } from "./oauth/pages";
@@ -84,8 +84,43 @@ export async function sendLink(
   }
 }
 
-function html(body: string, status = 200, headers: Record<string, string> = {}): Response {
-  return new Response(page("Sign in", body), {
+/**
+ * Runs work after the response when the platform allows (so the sign-in page answers in the
+ * same time whatever the email is), otherwise now. Failures are logged, never shown.
+ */
+function afterResponse(c: C, work: Promise<unknown>) {
+  const logged = work.catch((e) => console.error(JSON.stringify({ after_response: String(e) })));
+  try {
+    c.executionCtx.waitUntil(logged);
+  } catch {
+    // No execution context (tests): the promise already runs; nothing waits on it.
+  }
+}
+
+/** The operator's email (Worker secret OPERATOR_EMAIL), normalized like sign-in emails. */
+export const operatorEmail = (env: Cloudflare.Env) =>
+  env.OPERATOR_EMAIL?.trim().toLowerCase() || null;
+
+/** Tells the operator a new email joined the waitlist (v2 spec: Accounts, The waitlist). */
+async function notifyOperator(env: Cloudflare.Env, d: Deps, email: string, origin: string) {
+  const to = operatorEmail(env);
+  if (!to || !d.mailer) return;
+  await d.mailer.send({
+    to,
+    subject: `Tempra waitlist: ${email}`,
+    text: `${email} asked to join Tempra.\n\nApprove or dismiss: ${origin}/waitlist\n`,
+  });
+  d.meter?.({ kind: "email", account: to });
+}
+
+/** A server-rendered page with the strict headers sign-in uses: no script, no framing, no cache. */
+export function html(
+  body: string,
+  status = 200,
+  headers: Record<string, string> = {},
+  title = "Sign in",
+): Response {
+  return new Response(page(title, body), {
     status,
     headers: {
       "Content-Type": "text/html; charset=utf-8",
@@ -106,10 +141,14 @@ function sameOrigin(c: C): boolean {
 
 const EMAIL = /^[^\s@]+@[^\s@]+$/;
 
-function signInForm(next: string, opts: { email?: string; error?: string } = {}) {
+function signInForm(next: string, mode: SignupMode, opts: { email?: string; error?: string } = {}) {
   const err = opts.error ? `<p><strong>${esc(opts.error)}</strong></p>` : "";
+  const intro =
+    mode === "invite"
+      ? "Tempra is in private beta. Enter your email: if you are in, we email you a link; if not, you join the waitlist and we email you once you are approved."
+      : "We email you a link. New here? The same link creates your account.";
   return `<h1>Sign in to Tempra</h1>
-<p>We email you a link. New here? The same link creates your account.</p>
+<p>${intro}</p>
 ${err}<form method="post" action="/sign-in">
 <input type="hidden" name="next" value="${esc(next)}">
 <p><label for="email">Email</label>
@@ -134,7 +173,7 @@ export function registerSignInRoutes<E extends AppEnv>(
         503,
       );
     }
-    return html(signInForm(next));
+    return html(signInForm(next, signupMode(c.env.SIGNUP)));
   });
 
   app.post("/sign-in", async (c) => {
@@ -148,7 +187,10 @@ export function registerSignInRoutes<E extends AppEnv>(
       .toLowerCase();
     if (!EMAIL.test(email) || email.length > 254) {
       return html(
-        signInForm(next, { email, error: "That does not look like an email address." }),
+        signInForm(next, signupMode(c.env.SIGNUP), {
+          email,
+          error: "That does not look like an email address.",
+        }),
         400,
       );
     }
@@ -158,7 +200,9 @@ export function registerSignInRoutes<E extends AppEnv>(
     }
     const ip = c.req.header("CF-Connecting-IP") ?? null;
     const allowed = await d.accounts.mayJoin(email, signupMode(c.env.SIGNUP));
-    if (!allowed) await d.accounts.joinWaitlist(email, ip);
+    if (!allowed && (await d.accounts.joinWaitlist(email, ip))) {
+      afterResponse(c as unknown as C, notifyOperator(c.env, d, email, new URL(c.req.url).origin));
+    }
     const secret = allowed ? await d.sessions.createLink(email, ip) : null;
     let shown = "";
     if (secret) {

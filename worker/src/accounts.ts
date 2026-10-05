@@ -57,8 +57,18 @@ export interface Accounts {
    * account always may; open lets anyone in, invite only emails on the invite list.
    */
   mayJoin(email: string, mode: SignupMode): Promise<boolean>;
-  /** Records an email that asked to sign in without an invite. */
-  joinWaitlist(email: string, ip: string | null): Promise<void>;
+  /**
+   * Records an email that asked to sign in without an invite. True when it is new and the
+   * operator should be told: it takes one of the day's notices (WAITLIST_NOTICES_PER_DAY).
+   */
+  joinWaitlist(email: string, ip: string | null): Promise<boolean>;
+  /** Emails waiting for the operator's decision, oldest first. */
+  waitlist(): Promise<WaitlistEntry[]>;
+  /**
+   * Decides a waiting email: `invited` also puts it on the invite list. False when it is not
+   * waiting (unknown, or decided already).
+   */
+  decideWaitlist(email: string, decision: "invited" | "dismissed"): Promise<boolean>;
   /** The account by its users row id; null when there is none or it is suspended. */
   account(userId: string): Promise<User | null>;
   /** The libraries the user owns, by name. */
@@ -174,6 +184,14 @@ export function checkSlug(slug: string): string {
 
 export type SignupMode = "open" | "invite" | "closed";
 
+export interface WaitlistEntry {
+  email: string;
+  created: string;
+}
+
+/** At most this many waitlist notices a day reach the operator; the digest counts the rest. */
+export const WAITLIST_NOTICES_PER_DAY = 10;
+
 /** The deployment's SIGNUP var; anything unknown counts as invite. */
 export function signupMode(value: string | undefined): SignupMode {
   return value === "open" || value === "closed" ? value : "invite";
@@ -245,10 +263,53 @@ export function d1Accounts(db: D1Database): Accounts {
       return invited !== null;
     },
     async joinWaitlist(email, ip) {
-      await db
+      const now = new Date();
+      const added = await db
         .prepare("INSERT OR IGNORE INTO waitlist (email, created, ip) VALUES (?, ?, ?)")
-        .bind(email, new Date().toISOString(), ip)
+        .bind(email, now.toISOString(), ip)
         .run();
+      if (!added.meta.changes) return false;
+      const dayAgo = new Date(now.getTime() - 86_400_000).toISOString();
+      const claimed = await db
+        .prepare(
+          `UPDATE waitlist SET notified = ?1 WHERE email = ?2
+             AND (SELECT COUNT(*) FROM waitlist WHERE notified > ?3) < ?4`,
+        )
+        .bind(now.toISOString(), email, dayAgo, WAITLIST_NOTICES_PER_DAY)
+        .run();
+      return claimed.meta.changes > 0;
+    },
+    async waitlist() {
+      const r = await db
+        .prepare(
+          `SELECT email, created FROM waitlist w WHERE decision IS NULL
+             AND NOT EXISTS (SELECT 1 FROM invites i WHERE i.email = w.email)
+             AND NOT EXISTS (SELECT 1 FROM users u WHERE u.email = w.email)
+           ORDER BY created`,
+        )
+        .all<WaitlistEntry>();
+      return r.results;
+    },
+    async decideWaitlist(email, decision) {
+      const now = new Date().toISOString();
+      const decide = db
+        .prepare(
+          "UPDATE waitlist SET decision = ?, decided = ? WHERE email = ? AND decision IS NULL",
+        )
+        .bind(decision, now, email);
+      const [r] = await db.batch(
+        decision === "invited"
+          ? [
+              decide,
+              db
+                .prepare(
+                  "INSERT OR IGNORE INTO invites (email, created) SELECT email, ? FROM waitlist WHERE email = ? AND decision = 'invited'",
+                )
+                .bind(now, email),
+            ]
+          : [decide],
+      );
+      return (r?.meta.changes ?? 0) > 0;
     },
     async account(userId) {
       return db

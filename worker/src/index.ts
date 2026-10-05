@@ -184,6 +184,9 @@ export default {
       storageLimitBytes: storageLimitBytes(env),
       now: new Date(),
     });
+    // The waitlist (v2 spec: Accounts and sign-in): the digest counts who waits, past the notice cap.
+    const waiting = (await d1Accounts(env.DB).waitlist()).length;
+    if (waiting) result.attention.push(`${waiting} waiting on the waitlist: /waitlist`);
     console.log(JSON.stringify({ sweep: result }));
     const mailer = mailerFor(env);
     if (result.attention.length && env.OPERATOR_EMAIL && mailer) {
