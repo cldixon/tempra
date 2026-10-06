@@ -61,7 +61,7 @@ Gross margin equals recognized [revenue](/metrics/revenue.md) minus full COGS.[^
 ## Editing
 
 - `edit` for small changes: find-and-replace on the document as `read` shows it, frontmatter included. Each `old` must match once; quote enough context.
-- Bodies are stored in a canonical form: `-` bullets, `*` emphasis, ATX headings, fenced code, padded tables, short YAML lists and mappings in flow style. What you write reads back normalized, and is byte-stable after that; when it differs from what you sent, the write result says so and shows the diff. Quote `old` from what `read` shows, not from what you sent.
+- Bodies are stored in a canonical form: `-` bullets, `*` emphasis, ATX headings, fenced code, padded tables; in the frontmatter, a list of mappings such as `sources` one key per line, and a list of scalars such as `tags` on one line (`[a, b]`). What you write reads back normalized, and is byte-stable after that; when it differs from what you sent, the write result says so and shows the diff. Quote `old` from what `read` shows, not from what you sent.
 - `write` for a new concept or a full rewrite. Replacing needs `if_match`.
 - `batch` for related changes (a new concept plus the links to it; a rename plus fixes) so they land as one request.
 - `move` renames a file or a whole directory. Links keep working; do not fix them by hand.

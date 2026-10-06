@@ -427,12 +427,18 @@ describe("tier 2", () => {
     const s = newStore();
     const sources = [
       "sources:",
-      "  - { id: abs, resource: /pol/a.md }",
-      "  - { id: root, resource: pol/b.md }",
-      "  - { id: rel, resource: ../pol/c.md#part }",
-      "  - { id: gone, resource: /pol/missing.md }",
-      "  - { id: ext, resource: https://e.com/pol/a.md }",
-      "  - { id: word, resource: the orders table }",
+      "  - id: abs",
+      "    resource: /pol/a.md",
+      "  - id: root",
+      "    resource: pol/b.md",
+      "  - id: rel",
+      "    resource: ../pol/c.md#part",
+      "  - id: gone",
+      "    resource: /pol/missing.md",
+      "  - id: ext",
+      "    resource: https://e.com/pol/a.md",
+      "  - id: word",
+      "    resource: the orders table",
       "",
     ].join("\n");
     s.apply(ctx(), [

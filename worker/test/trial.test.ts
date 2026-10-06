@@ -305,6 +305,35 @@ describe("MCP trial 2026-10-06, through the MCP tools", () => {
   });
 });
 
+describe("TEMPRA-42", () => {
+  test("a list of mappings reads back in block style, however short; scalars stay on one line", () => {
+    const s = newStore();
+    // In OKF key order, as an agent following the instructions writes it.
+    const sent =
+      "---\ntype: Memo\ndescription: A test concept.\ntags: [x, y]\nstatus: stable\nsources:\n  - id: a\n    resource: https://e.com\n---\nCited.[^a]\n\n[^a]: A.\n";
+    const r = s.apply(ctx(), [{ op: "write", path: "a.md", content: sent }]).results[0];
+    // What an agent naturally writes is the canonical form: nothing to normalize.
+    expect(r?.notices).toBeUndefined();
+    const md2 = concept(s, "a.md").markdown;
+    expect(md2).toContain(
+      "tags: [x, y]\nstatus: stable\nsources:\n  - id: a\n    resource: https://e.com\n",
+    );
+    expect(md2).toMatch(/^generated: \{ by: claude-code\/test, at: \S+ \}$/m);
+    // A one-line entry is written back in block style.
+    const flow = s.apply(ctx(), [
+      {
+        op: "write",
+        path: "b.md",
+        content: md(
+          "Cited.[^a]\n\n[^a]: A.\n",
+          "sources:\n  - { id: a, resource: https://e.com }\n",
+        ),
+      },
+    ]).results[0];
+    expect(flow?.normalized).toContain("+  - id: a\n+    resource: https://e.com");
+  });
+});
+
 describe("TEMPRA-41", () => {
   test("a link to a heading is linted from the target's current headings", () => {
     const s = newStore();
