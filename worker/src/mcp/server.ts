@@ -269,6 +269,7 @@ export function buildServer(ctx: McpContext): McpServer {
         "- `browse` a directory before reading; follow links; check frontmatter (type, status, trust, stale) before relying on a body.",
         "- `edit` for small changes, `write` for new concepts or rewrites, `batch` for related changes. Pass `if_match` from your last read; on a 412, re-read and reapply.",
         "- A one-line `note` on every write. Fix the `lint` each write returns. Never write index.md or log.md, and never set generated or verified.",
+        "- A concept needs frontmatter with a `type`, or the write is refused. A concept with open comment threads cannot be deleted until they are resolved.",
       ];
       if (tier2) {
         lines.push(
@@ -463,7 +464,7 @@ export function buildServer(ctx: McpContext): McpServer {
       const { token, lib } = pick(library);
       checkWrite(token, from, to);
       const res = await lib.apply(request(note), [{ op: "move", path: from, to }]);
-      return text(writeText("Moved to", res));
+      return text(writeText("Moved", res));
     }),
   );
 
@@ -607,7 +608,7 @@ export function buildServer(ctx: McpContext): McpServer {
         const r = await pick(library).lib.concepts(args);
         const lines = r.items.map(
           (c) =>
-            `${c.path} · ${c.type || "(no type)"} · ${c.status} · ${c.trust_tier}${c.stale ? " · STALE" : ""} — ${c.title ?? ""}${c.description ? `: ${c.description}` : ""}`,
+            `${c.path} · ${c.type || "(no type)"} · ${c.status}${c.status_set === false ? " (not set)" : ""} · ${c.trust_tier}${c.stale ? " · STALE" : ""} — ${c.title ?? ""}${c.description ? `: ${c.description}` : ""}`,
         );
         lines.unshift(
           `${r.total} matching concept${r.total === 1 ? "" : "s"}${r.next_offset !== null ? ` (next offset ${r.next_offset})` : ""}:`,
@@ -615,7 +616,7 @@ export function buildServer(ctx: McpContext): McpServer {
         if (r.types) {
           lines.push(
             r.types.length > 0
-              ? `No concept has type ${JSON.stringify(args.type)}. Types here: ${r.types.join(", ")}.`
+              ? `No concept has type ${JSON.stringify(args.type)}. ${r.types_near ? "Closest types" : "Types here"}: ${r.types.join(", ")}.`
               : "The library has no concepts yet.",
           );
         }

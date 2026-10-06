@@ -127,7 +127,8 @@ export function parseConcept(md: string): ParsedConcept {
     // The frontmatter starts on the file's second line, after the opening `---`.
     const line = err?.linePos?.[0]?.line;
     const where = line ? ` (line ${line + 1} of the file)` : "";
-    out.fmError = `The frontmatter is not valid YAML${where}: ${why.replace(/ at line \d+, column \d+:?$/, "")}`;
+    const what = why.replace(/ at line \d+, column \d+:?$/, "").trimEnd();
+    out.fmError = `The frontmatter is not valid YAML${where}: ${what}${/[.!?]$/.test(what) ? "" : "."}`;
     return out;
   }
   if (hasComments(doc)) {

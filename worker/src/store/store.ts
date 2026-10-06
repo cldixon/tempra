@@ -205,6 +205,8 @@ export interface ConceptRow {
   title?: string | null;
   description?: string | null;
   status?: string;
+  /** False when the concept has no `status`, which reads as stable (OKF §5.4). */
+  status_set?: boolean;
   tags?: string[];
   trust_tier?: TrustTier;
   stale?: boolean;
@@ -541,19 +543,44 @@ export class LibraryStore {
   /** Applies ops as one all-or-nothing request (spec: Write path, Tier 1; POST /batch). */
   apply(ctx: RequestContext, ops: WriteOp[]): WriteResult {
     if (ops.length === 0) throw new OkfError(400, "empty_request", "No operations to apply.");
-    return this.guard(() =>
-      this.sql.transaction(() => {
-        const w = this.begin(ctx);
-        const n = ops.length;
-        for (const [i, op] of ops.entries()) this.atOp(n, i, op, () => this.planCreate(w, op));
-        const results = ops.flatMap((op, i) => this.atOp(n, i, op, () => this.applyOp(w, op)));
-        return {
-          request_id: ctx.request_id,
-          seq: this.headSeq(),
-          results: this.finish(w, results),
-        };
-      }),
-    );
+    try {
+      return this.guard(() =>
+        this.sql.transaction(() => {
+          const w = this.begin(ctx);
+          const n = ops.length;
+          for (const [i, op] of ops.entries()) this.atOp(n, i, op, () => this.planCreate(w, op));
+          const results = ops.flatMap((op, i) => this.atOp(n, i, op, () => this.applyOp(w, op)));
+          return {
+            request_id: ctx.request_id,
+            seq: this.headSeq(),
+            results: this.finish(w, results),
+          };
+        }),
+      );
+    } catch (e) {
+      throw this.asCommitted(e, ops);
+    }
+  }
+
+  /**
+   * An error from a request of several ops, with `current_hash` and `current` as committed. Built
+   * inside the transaction, they would show what earlier ops of the request did, which the
+   * rollback undid (TEMPRA-44).
+   */
+  private asCommitted(e: unknown, ops: WriteOp[]): unknown {
+    if (!(e instanceof OkfError) || ops.length < 2) return e;
+    if (e.extra.current_hash === undefined && e.extra.current === undefined) return e;
+    const op = typeof e.extra.op_index === "number" ? ops[e.extra.op_index] : undefined;
+    const p = op ? normalizePath(op.path) : null;
+    if (!p) return e;
+    const row = this.lookupRow(p);
+    const extra: Record<string, unknown> = { ...e.extra, current_hash: row?.hash ?? null };
+    if (typeof e.extra.current === "string") {
+      if (row?.kind === "concept") {
+        extra.current = this.renderEntry(this.snapshot(undefined, true), row, false);
+      } else delete extra.current;
+    }
+    return new OkfError(e.status, e.code, e.message, extra);
   }
 
   /**
@@ -847,16 +874,32 @@ export class LibraryStore {
           .replace(/^\uFEFF/, "")
           .replace(/\r\n?/g, "\n")
           .trimEnd();
+      // Spacing only: blanks and the length of table rules, as in a table's padding.
+      const squash = (t: string) =>
+        tidy(t)
+          .split("\n")
+          .map((l) => l.replace(/\s+/g, "").replace(/-+/g, "-"))
+          .join("\n");
       if (tidy(asSent) !== tidy(markdown)) {
-        result.normalized = unifiedDiff(`${tidy(markdown)}\n`, `${tidy(asSent)}\n`, {
-          from: "sent",
-          to: "stored",
-        });
-        notices.push({
-          code: "normalized",
-          message:
-            "Stored in canonical form, which differs from what you sent (see the diff); `edit` against the stored text, as `read` shows it.",
-        });
+        if (squash(asSent) === squash(markdown)) {
+          notices.push({
+            code: "normalized",
+            message:
+              "Stored in canonical form; only spacing changed (table padding, indentation). `edit` against the stored text, as `read` shows it.",
+          });
+        } else {
+          // The diff shows what is stored, server-owned fields included (TEMPRA-45).
+          const stored = renderConcept(built.record, { verified });
+          result.normalized = unifiedDiff(`${tidy(markdown)}\n`, `${tidy(stored)}\n`, {
+            from: "sent",
+            to: "stored",
+          });
+          notices.push({
+            code: "normalized",
+            message:
+              "Stored in canonical form, which differs from what you sent (see the diff); `edit` against the stored text, as `read` shows it.",
+          });
+        }
       }
     }
     if (prev && curConcept && hash !== curConcept.hash) {
@@ -1117,7 +1160,28 @@ export class LibraryStore {
       concept_id: row.concept_id,
     });
     this.dropPath(w, row);
-    return { op: "delete", path: row.path, hash: null, seq, lint: [] };
+    return { op: "delete", path: row.path, hash: null, seq, lint: [], ...this.brokenBy(row) };
+  }
+
+  /** A note naming the concepts whose links a removal just broke (TEMPRA-49). */
+  private brokenBy(row: PathRow): Pick<OpResult, "notices"> {
+    const from = this.sql
+      .all<{ path: string }>(
+        `SELECT DISTINCT p.path FROM links l JOIN paths p ON p.concept_id = l.from_id
+         WHERE l.to_id = ? AND l.from_id <> ? ORDER BY p.path`,
+        row.concept_id,
+        row.concept_id,
+      )
+      .map((r) => r.path);
+    if (from.length === 0) return {};
+    return {
+      notices: [
+        {
+          code: "broken_links",
+          message: `${from.length} concept${from.length === 1 ? " now links" : "s now link"} to ${row.path}, which is gone: ${from.join(", ")}. Fix the links, or revert the delete.`,
+        },
+      ],
+    };
   }
 
   /**
@@ -1247,8 +1311,9 @@ export class LibraryStore {
       meta: { reverted_seq: revertedSeq },
     });
     if (hash === null) {
-      if (cur) this.dropPath(w, cur);
-      return { op: "revert", path, hash, seq, lint: [] };
+      if (!cur) return { op: "revert", path, hash, seq, lint: [] };
+      this.dropPath(w, cur);
+      return { op: "revert", path, hash, seq, lint: [], ...this.brokenBy(cur) };
     }
     const info = this.blobInfo(hash);
     const kind: Kind = info.location === "r2" ? "attachment" : "concept";
@@ -1542,6 +1607,24 @@ export class LibraryStore {
     return target;
   }
 
+  /**
+   * Stored lint with its `relative_link` items written anew from each link's current target, so
+   * the path they suggest follows moves of either end (TEMPRA-46). Only where a write stored them.
+   */
+  private freshLint(snap: Snapshot, e: Entry, lint: LintWarning[]): LintWarning[] {
+    if (!lint.some((l) => l.code === "relative_link")) return lint;
+    const out = lint.filter((l) => l.code !== "relative_link");
+    for (const l of this.record(e.hash).links) {
+      if (l.form !== "relative" || isDerivedTarget(l)) continue;
+      const target = this.targetAt(snap, l);
+      out.push({
+        code: "relative_link",
+        message: `Link ${this.href(snap, e, l)} is relative; write it as /${target?.path ?? l.path}${l.anchor ?? ""} so it reads the same from anywhere.`,
+      });
+    }
+    return out;
+  }
+
   /** Field lint of a content version, as a write of it would report (spec: OKF conformance). */
   private fieldLint(
     r: ConceptRecord,
@@ -1678,7 +1761,7 @@ export class LibraryStore {
         )[0]
       : undefined;
     const lint: LintWarning[] = atHead
-      ? JSON.parse(lintRow?.lint ?? "[]")
+      ? this.freshLint(snap, e, JSON.parse(lintRow?.lint ?? "[]"))
       : this.lintAt(snap, e, r, verified);
     return {
       kind: "concept",
@@ -1838,6 +1921,7 @@ export class LibraryStore {
       title: str(field(r, "title")),
       description: str(field(r, "description")),
       status: effectiveStatus(field(r, "status")),
+      status_set: typeof field(r, "status") === "string" && field(r, "status") !== "",
       tags: tagsOf(r),
       trust_tier: trustTier(r.generated, this.verifiedAt(e.concept_id, snap.seq)),
       stale: isStale(field(r, "stale_after"), this.clock().getTime()),
@@ -1921,12 +2005,12 @@ export class LibraryStore {
       total: rows.length,
       items,
       next_offset: offset + limit < rows.length ? offset + limit : null,
-      ...(rows.length === 0 && q.type !== undefined ? { types: this.typesLike(snap, q.type) } : {}),
+      ...(rows.length === 0 && q.type !== undefined ? this.typesLike(snap, q.type) : {}),
     };
   }
 
   /** The library's types closest to `want`, for a query that matched nothing. */
-  private typesLike(snap: Snapshot, want: string): string[] {
+  private typesLike(snap: Snapshot, want: string): { types: string[]; types_near: boolean } {
     const types = new Set<string>();
     for (const e of snap.sorted()) {
       if (e.kind !== "concept") continue;
@@ -1939,7 +2023,9 @@ export class LibraryStore {
       const l = t.toLowerCase();
       return l.includes(w) || w.includes(l);
     });
-    return (near.length > 0 ? near : all).slice(0, 20);
+    return near.length > 0
+      ? { types: near.slice(0, 20), types_near: true }
+      : { types: all.slice(0, 20), types_near: false };
   }
 
   /** GET /search: FTS over title, body and tags at head, ranked, with snippets. */
@@ -1971,7 +2057,9 @@ export class LibraryStore {
     // FTS5 marks each matched token alone; adjacent ones become one highlight.
     const results = rows.map((r) => ({
       ...r,
+      // The text's own backslashes and asterisks are escaped, so only highlights read as **.
       snippet: r.snippet
+        .replace(/[\\*]/g, "\\$&")
         .replace(ADJACENT_MARKS, "$1")
         .replaceAll(MARK_OPEN, "**")
         .replaceAll(MARK_CLOSE, "**"),
@@ -2276,8 +2364,9 @@ export class LibraryStore {
       if (e.kind === "concept") return this.renderEntry(snap, e, false, true);
       return `(attachment ${e.hash})\n`;
     };
+    // Each side is labelled by its own version's seq, not the library's.
     const label = (e: Entry | undefined, seq: number) =>
-      e ? `${e.path}@${seq}` : `/dev/null@${seq}`;
+      e ? `${e.path}@${e.seq}` : `/dev/null@${seq}`;
     return {
       path: (b ?? a)?.path ?? p,
       from,
@@ -2355,7 +2444,9 @@ export class LibraryStore {
         action =
           "Write the missing concept, point the link at an existing one, or remove the link.";
       } else if (f.kind === "lint") {
-        detail = (JSON.parse(f.detail) as LintWarning[]).map((l) => l.message).join(" ");
+        detail = this.freshLint(snap, e, JSON.parse(f.detail) as LintWarning[])
+          .map((l) => l.message)
+          .join(" ");
       }
       items.push({
         kind: f.kind,
