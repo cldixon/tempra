@@ -3,6 +3,8 @@
  * (worker/src/okf/paths.ts), so the reader and the server agree;
  * kept here, DOM-free, because the reader needs them in the browser.
  */
+import type { PhrasingContent } from "mdast";
+import { type Doc, type DocNode, walk } from "./tree";
 
 /** Where a link or image target written in a concept body points. */
 export type LinkTarget =
@@ -104,4 +106,32 @@ export function slugger(): (text: string) => string {
     seen.set(base, n + 1);
     return n === 0 ? base : `${base}-${n}`;
   };
+}
+
+/** A heading's text as its anchor is made from: footnote references as `[label]`, images by alt. */
+export function headingText(nodes: readonly PhrasingContent[]): string {
+  return nodes
+    .map((n): string => {
+      if (n.type === "text" || n.type === "inlineCode") return n.value;
+      if (n.type === "footnoteReference") return `[${n.label ?? n.identifier}]`;
+      if (n.type === "image") return n.alt ?? "";
+      if ("children" in n) return headingText(n.children as PhrasingContent[]);
+      return "";
+    })
+    .join("");
+}
+
+/** Every heading anchor of a document, as the reader gives them (footnote definitions aside). */
+export function headingIds(doc: Doc): Set<string> {
+  const anchor = slugger();
+  const ids = new Set<string>();
+  walk(doc, (n: DocNode) => {
+    if (n.type === "footnoteDefinition") return false;
+    if (n.type === "heading") {
+      ids.add(anchor(headingText(n.children)));
+      return false;
+    }
+    return undefined;
+  });
+  return ids;
 }

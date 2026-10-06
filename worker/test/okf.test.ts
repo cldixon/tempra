@@ -61,11 +61,10 @@ describe("parse", () => {
     });
     expect(built.record.generated).toEqual({ by: "claude-code/test", at: "2026-09-29T00:00:00Z" });
     const codes = built.lint.map((l) => l.code).sort();
-    expect(codes).toEqual([
-      "footnote_unmatched",
+    expect(codes).toEqual(["footnote_unmatched", "invalid_status", "missing_description"]);
+    // Ignored server-owned fields are notices for the writer, not lint left on the concept.
+    expect(built.notices.map((l) => l.code).sort()).toEqual([
       "generated_ignored",
-      "invalid_status",
-      "verified_bare_mapping",
       "verified_ignored",
     ]);
   });
@@ -153,12 +152,15 @@ describe("links", () => {
     );
     const lint = built.lint.map((l) => [l.code, l.message]);
     expect(lint.map(([c]) => c)).toEqual([
+      "generic_type",
+      "missing_description",
+      "missing_status",
       "timestamp_offset",
       "footnote_undefined",
       "footnote_unmatched",
     ]);
-    expect(lint[0]?.[1]).toContain("2026-12-31T00:00:00Z; a plain date is not enough");
-    expect(lint[1]?.[1]).toContain("[^a]");
+    expect(lint[3]?.[1]).toContain("2026-12-31T00:00:00Z; a plain date is not enough");
+    expect(lint[4]?.[1]).toContain("[^a]");
   });
 
   test("path helpers", () => {

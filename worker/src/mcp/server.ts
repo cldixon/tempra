@@ -36,10 +36,10 @@ How to work:
 1. Call \`start\` first. It opens your library, or lists the libraries you can reach when there are several; then pass \`library\` (owner/slug) on every call. Then \`browse\` a directory before reading, follow links, and \`read\` what you need. Check frontmatter (type, status, trust tier, stale) before relying on a body.
 2. Write conformant concepts: a non-empty \`type\` naming what kind of thing it is (Metric, Protocol, Decision; never a generic word like concept, page or note, and reuse the types \`start\` lists), a \`title\` and one-line \`description\`, absolute links like [x](/dir/x.md), footnotes [^id] keyed to \`sources[].id\`, one idea per concept.
 3. Prefer \`edit\` for small changes, \`write\` for new concepts or rewrites, \`batch\` for related changes so they land as one request. Pass \`if_match\` (the hash from your last read); on a conflict, re-read and reapply. Bodies are stored in a canonical form (\`-\` bullets, \`*\` emphasis, padded tables): what you write reads back normalized, so \`edit\` the text as \`read\` shows it.
-4. Put a one-line \`note\` on every write. Read the \`lint\` in every write result and fix what it reports. Keep concepts under 100 KB; split big ones into linked concepts.
+4. Put a one-line \`note\` on every write. Read the \`lint\` in every write result and fix what it reports; the result's notes say what else to know (ignored fields, the stored form, open comments). A concept with no frontmatter, invalid YAML or no \`type\` is refused. Keep concepts under 100 KB; split big ones into linked concepts.
 5. Never write index.md or log.md (the server synthesizes them). Never set \`generated\` (the server stamps it) or \`verified\` (not yours to claim). Set \`status\` and \`stale_after\` honestly. Timestamps are full ISO 8601 datetimes with an offset (\`stale_after: 2026-12-31T00:00:00Z\`); a plain date is flagged.
 6. Use \`work\` to find what needs doing: open comments, stale concepts, broken links, lint.
-7. Comments are how people ask you for changes. Before editing a concept, read its open threads with \`comments\`; make the change a comment asks for, then answer it with \`comment\` (reply, and resolve what you fixed). Ask with a reply when unsure; never resolve a thread you did not address.`;
+7. Comments are how people ask you for changes. Before editing a concept, read its open threads with \`comments\`; make the change a comment asks for, then answer it with \`comment\` (reply, and resolve what you fixed). Ask with a reply when unsure; never resolve a thread you did not address. A concept with open threads cannot be deleted until they are resolved.`;
 
 const text = (t: string): CallToolResult => ({ content: [{ type: "text", text: t }] });
 
@@ -54,6 +54,11 @@ function errorResult(e: unknown): CallToolResult {
   }
   if (e.status === 412)
     lines.push("", "Re-read the file, reapply your change, and pass the new hash as if_match.");
+  if (e.code === "exists")
+    lines.push(
+      "",
+      "To replace it, pass current_hash as if_match; to keep both, pick another path.",
+    );
   return { isError: true, content: [{ type: "text", text: lines.join("\n") }] };
 }
 
@@ -64,13 +69,33 @@ function lintText(lint: LintWarning[]): string {
 
 function writeText(verb: string, res: WriteResult): string {
   const lines = res.results.map((r) => {
-    if (r.hash === null) return `${verb} ${r.path} (${r.op}, seq ${r.seq}).`;
-    return `${verb} ${r.path} (${r.op}, seq ${r.seq}): hash ${r.hash}`;
+    const what = r.from ? `${r.from} → ${r.path}` : r.path;
+    if (r.hash === null) return `${verb} ${what} (${r.op}, seq ${r.seq}).`;
+    return `${verb} ${what} (${r.op}, seq ${r.seq}): hash ${r.hash}`;
   });
+  const seqs = res.results.map((r) => r.seq);
+  const range =
+    res.results.length > 1
+      ? ` (${res.results.length} files, seq ${Math.min(...seqs)}–${Math.max(...seqs)})`
+      : "";
   const lint = res.results.flatMap((r) =>
     r.lint.map((l) => ({ ...l, message: `${r.path}: ${l.message}` })),
   );
-  return [...lines, `Request ${res.request_id}.`, lintText(lint)].join("\n");
+  const notices = res.results.flatMap((r) =>
+    (r.notices ?? []).map((l) => `- ${l.code}: ${r.path}: ${l.message}`),
+  );
+  const diffs = res.results.flatMap((r) =>
+    r.normalized
+      ? ["", `Stored form of ${r.path} (diff from what you sent):`, "", r.normalized.trimEnd()]
+      : [],
+  );
+  return [
+    ...lines,
+    `Request ${res.request_id}${range}.`,
+    lintText(lint),
+    ...(notices.length > 0 ? ["Notes:", ...notices] : []),
+    ...diffs,
+  ].join("\n");
 }
 
 const json = (v: unknown) => JSON.stringify(v, null, 2);
@@ -323,7 +348,9 @@ export function buildServer(ctx: McpContext): McpServer {
         );
       }
       const status =
-        typeof view.frontmatter.status === "string" ? view.frontmatter.status : "stable";
+        typeof view.frontmatter.status === "string"
+          ? view.frontmatter.status
+          : "not set (reads as stable)";
       return text(
         [
           `path: ${view.path}`,
@@ -348,7 +375,7 @@ export function buildServer(ctx: McpContext): McpServer {
     {
       title: "Create or replace a concept",
       description:
-        "Write a whole concept as OKF markdown: a YAML frontmatter block with a non-empty `type` that names what kind of thing this is, e.g. `Metric`, `BigQuery Table`, `Decision`, not a generic `concept` or `note` (plus `title`, one-line `description`, optional `tags`, `resource`, `sources`, `status`, `stale_after`), then a markdown body. `stale_after` and other timestamps are full ISO 8601 datetimes with an offset, e.g. 2026-12-31T00:00:00Z (a plain date is flagged). Prefer absolute links like [orders](/tables/orders.md); cite sources with footnotes: [^id] in the text, matching a `sources[].id`, plus a `[^id]: …` definition line at the end of the body. Without `if_match` it creates and fails if the path exists; to replace, pass the hash from your last read. The server stamps `generated` from your token; `verified` is not yours to set. Prefer `edit` for small changes. Read the lint in the result and fix it.",
+        "Write a whole concept as OKF markdown: a YAML frontmatter block with a non-empty `type` that names what kind of thing this is, e.g. `Metric`, `BigQuery Table`, `Decision`, not a generic `concept` or `note` (plus `title`, one-line `description`, optional `tags`, `resource`, `sources`, `status`, `stale_after`), then a markdown body. `stale_after` and other timestamps are full ISO 8601 datetimes with an offset, e.g. 2026-12-31T00:00:00Z (a plain date is flagged). Prefer absolute links like [orders](/tables/orders.md); cite sources with footnotes: [^id] in the text, matching a `sources[].id`, plus a `[^id]: …` definition line at the end of the body. A file with no frontmatter, frontmatter that is not valid YAML, or no `type` is refused (400) and nothing is written. Without `if_match` it creates and fails if the path exists; to replace, pass the hash from your last read. The server stamps `generated` from your token; `verified` is not yours to set. The concept is stored in a canonical form (`-` bullets, `*` emphasis, flow-style short YAML); when that differs from what you sent, the result shows the diff, so `edit` the stored text. Prefer `edit` for small changes. Read the lint and notes in the result and fix the lint.",
       inputSchema: {
         path: z.string().describe("Where to write, e.g. `metrics/revenue.md`."),
         content: z.string().describe("The full OKF markdown document."),
@@ -374,7 +401,7 @@ export function buildServer(ctx: McpContext): McpServer {
     {
       title: "Edit a concept",
       description:
-        "Find-and-replace on the rendered document, frontmatter included, like an Edit tool. Each `old` must match exactly once; include enough surrounding text to make it unique. Edits apply in order. `if_match` is optional because the quoted text guards the edit. Preferred for small changes. On a mismatch the error includes the current document.",
+        "Find-and-replace on the rendered document, frontmatter included, like an Edit tool. Each `old` must match exactly once; include enough surrounding text to make it unique; match the text as `read` shows it (stored in canonical form, which may differ from what was written). Edits apply in order. `if_match` is optional because the quoted text guards the edit. Preferred for small changes. On a mismatch the error includes the current document. The result names the concept's open comment threads and any whose quote the edit removed.",
       inputSchema: {
         path: z.string(),
         edits: z.array(EditSchema).min(1),
@@ -423,7 +450,7 @@ export function buildServer(ctx: McpContext): McpServer {
     {
       title: "Move or rename",
       description:
-        "Move or rename a file, or a whole directory when `from` is a directory prefix (one request, one ledger event per file). Links keep working: they are stored by identity, not path, and render with the new path. Fails if a destination is taken.",
+        "Move or rename a file, or a whole directory when `from` is a directory prefix (one request, one ledger event per file; the result lists each file moved). Links keep working: they are stored by identity, not path, and render with the new path. Fails if a destination is taken.",
       inputSchema: {
         from: z.string(),
         to: z.string(),
@@ -445,7 +472,7 @@ export function buildServer(ctx: McpContext): McpServer {
     {
       title: "Delete a file",
       description:
-        "Delete a concept or attachment. Requires `if_match` with its current hash. History is kept: the ledger records the delete and it can be reverted. Links pointing here become broken and show up in the work queue.",
+        "Delete a concept or attachment. Requires `if_match` with its current hash. A concept with open comment threads is not deleted (409 `open_comments`): resolve them first. History is kept: the ledger records the delete and it can be reverted. Links pointing here become broken and show up in the work queue.",
       inputSchema: {
         path: z.string(),
         if_match: z.string(),
@@ -467,7 +494,7 @@ export function buildServer(ctx: McpContext): McpServer {
     {
       title: "Several changes as one",
       description:
-        "Apply writes, edits, moves and deletes as one all-or-nothing request, like a commit: related changes land together in the ledger and one failure applies none. Each op has its own path and, where needed, if_match.",
+        "Apply writes, edits, moves and deletes as one all-or-nothing request, like a commit: related changes land together in the ledger and one failure applies none (the error says which op, as `Op n of m`). Each op has its own path and, where needed, if_match.",
       inputSchema: {
         ops: z.array(BatchOpSchema).min(1),
         note: z.string().optional().describe("One line for the ledger, for the whole request."),
@@ -585,6 +612,13 @@ export function buildServer(ctx: McpContext): McpServer {
         lines.unshift(
           `${r.total} matching concept${r.total === 1 ? "" : "s"}${r.next_offset !== null ? ` (next offset ${r.next_offset})` : ""}:`,
         );
+        if (r.types) {
+          lines.push(
+            r.types.length > 0
+              ? `No concept has type ${JSON.stringify(args.type)}. Types here: ${r.types.join(", ")}.`
+              : "The library has no concepts yet.",
+          );
+        }
         return text(lines.join("\n"));
       }),
     );
@@ -761,11 +795,16 @@ export function buildServer(ctx: McpContext): McpServer {
         const out = r.threads.map((t) => {
           const head = `## Thread ${t.id} · ${t.path} · ${t.status}${t.outdated ? " · outdated (the quote is no longer in the body)" : ""}`;
           const quote = t.anchor ? [`> ${t.anchor.quote.replace(/\n/g, "\n> ")}`] : [];
-          const said = t.comments.map(
-            (c) => `- ${c.actor} at ${c.ts}:\n  ${c.body.replace(/\n/g, "\n  ")}`,
-          );
-          const resolved = t.resolved_by ? [`Resolved by ${t.resolved_by}.`] : [];
-          return [head, ...quote, ...said, ...resolved].join("\n");
+          // Every action in order: who said what, and when it was resolved and reopened.
+          const bodies = new Map(t.comments.map((c) => [c.id, c.body]));
+          const said = t.actions.map((a) => {
+            const body = a.comment ? bodies.get(a.comment) : undefined;
+            const verb =
+              a.kind === "resolve" ? " resolved it" : a.kind === "reopen" ? " reopened it" : "";
+            const text = body ? `\n  ${body.replace(/\n/g, "\n  ")}` : "";
+            return `- ${a.actor}${verb} at ${a.ts}${text ? ":" : "."}${text}`;
+          });
+          return [head, ...quote, ...said].join("\n");
         });
         if (r.next) out.push(`More: pass before=${r.next}.`);
         return text(out.join("\n\n"));

@@ -17,7 +17,7 @@ import type {
   TableCell,
 } from "mdast";
 import { Leaf, Mark, type Node, type Plot } from "wordgard/doc";
-import { type LinkTarget, linkTarget, slugger } from "./links";
+import { headingText, type LinkTarget, linkTarget, slugger } from "./links";
 import {
   BlockId,
   Blockquote,
@@ -341,19 +341,6 @@ export function linkParam(opts: ParseOptions, url: string, title: string | null 
       ? target.href
       : null;
   return { url, title, href, path, broken };
-}
-
-/** A heading's text as the server anchors it: text and code, footnote references as `[x]`. */
-function headingText(nodes: readonly PhrasingContent[]): string {
-  return nodes
-    .map((n): string => {
-      if (n.type === "text" || n.type === "inlineCode") return n.value;
-      if (n.type === "footnoteReference") return `[${n.label ?? n.identifier}]`;
-      if (n.type === "image") return n.alt ?? "";
-      if ("children" in n) return headingText(n.children as PhrasingContent[]);
-      return "";
-    })
-    .join("");
 }
 
 /** The text offset of a document position, by {@link Parsed.starts}; -1 outside every textblock. */

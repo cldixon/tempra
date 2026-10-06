@@ -47,7 +47,15 @@ export interface LogRequest {
   ts: string;
   actor: string;
   note: string | null;
-  events: { op: string; path: string; created: boolean; fromPath?: string | null }[];
+  events: {
+    op: string;
+    path: string;
+    created: boolean;
+    /** move: where the file came from. */
+    fromPath?: string | null;
+    /** Where the file is now, or null once it is gone; the entry links there. Defaults to `path`. */
+    current?: string | null;
+  }[];
 }
 
 const LABELS: Record<string, string> = {
@@ -60,7 +68,21 @@ const LABELS: Record<string, string> = {
   verify: "Verification",
 };
 
-/** Requests newest first, grouped by UTC day; one bullet per request. */
+const VERBS: Record<string, string> = {
+  create: "created",
+  put: "updated",
+  delete: "deleted",
+  move: "moved",
+  import: "imported",
+  revert: "reverted",
+  verify: "verified",
+};
+
+/**
+ * Requests newest first, grouped by UTC day; one bullet per request. A request of one kind is
+ * labelled by it; a mixed one says what happened to each file. Moves name both paths. Each file
+ * links to where it is now, so links keep working after a move; a file that is gone is plain text.
+ */
 export function renderLog(requests: LogRequest[], title = "Library log"): string {
   const out: string[] = [`# ${title}\n`];
   let day = "";
@@ -70,11 +92,25 @@ export function renderLog(requests: LogRequest[], title = "Library log"): string
       out.push(`## ${d}\n`);
       day = d;
     }
-    const kinds = new Set(r.events.map((e) => (e.op === "put" && e.created ? "create" : e.op)));
-    const label = kinds.size === 1 ? (LABELS[[...kinds][0] ?? ""] ?? "Update") : "Update";
-    const paths = [...new Set(r.events.map((e) => e.path))];
-    const shown = paths.slice(0, 10).map((p) => `[${escapeLabel(p)}](/${encodeHref(p)})`);
-    if (paths.length > 10) shown.push(`and ${paths.length - 10} more`);
+    // One entry per file: its first event in the request says what happened to it.
+    const files = new Map<string, LogRequest["events"][number] & { kind: string }>();
+    for (const e of r.events) {
+      if (files.has(e.path)) continue;
+      files.set(e.path, { ...e, kind: e.op === "put" && e.created ? "create" : e.op });
+    }
+    const entries = [...files.values()];
+    const kinds = new Set(entries.map((e) => e.kind));
+    const single = kinds.size === 1 ? [...kinds][0] : undefined;
+    const label = single ? (LABELS[single] ?? "Update") : "Changes";
+    const shown = entries.slice(0, 10).map((e) => {
+      const current = e.current === undefined ? e.path : e.current;
+      const name = current
+        ? `[${escapeLabel(e.path)}](/${encodeHref(current)})`
+        : `\`${e.path.replace(/`/g, "")}\``;
+      const what = e.kind === "move" && e.fromPath ? `${e.fromPath} → ${name}` : name;
+      return single ? what : `${VERBS[e.kind] ?? e.kind} ${what}`;
+    });
+    if (entries.length > 10) shown.push(`and ${entries.length - 10} more`);
     const note = r.note ? ` ${oneLine(r.note)}` : "";
     out.push(`* **${label}** by \`${r.actor}\`:${note} ${shown.join(", ")}`);
     const next = requests[requests.indexOf(r) + 1];

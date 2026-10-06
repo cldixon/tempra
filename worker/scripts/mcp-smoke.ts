@@ -49,7 +49,7 @@ export async function mcpSmoke(opts: {
 
   if (!opts.readOnly) {
     const path = `_smoke/note-${Date.now()}.md`;
-    const doc = `---\ntype: Note\ntitle: Smoke\ndescription: MCP smoke test.\n---\nHello [self](/${path}).\n`;
+    const doc = `---\ntype: Smoke Test\ntitle: Smoke\ndescription: MCP smoke test.\nstatus: draft\n---\nHello [self](/${path}).\n`;
     await call("write", { path, content: doc, note: "mcp smoke test" });
     await call("write", { path, content: doc }, true); // exists: needs if_match
     const read = await call("read", { path });

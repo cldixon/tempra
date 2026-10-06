@@ -23,7 +23,7 @@ async function connect(app: ReturnType<typeof setup>["app"], token = "writer") {
 const hashOf = (text: string) => /hash: ([0-9a-f]{64})/.exec(text)?.[1] ?? "";
 
 const doc = (title: string, body: string) =>
-  `---\ntype: Note\ntitle: ${title}\ndescription: About ${title}.\n---\n${body}`;
+  `---\ntype: Memo\ntitle: ${title}\ndescription: About ${title}.\nstatus: stable\n---\n${body}`;
 
 describe("MCP server", () => {
   test("tiers: tool lists depend on the token", async () => {
@@ -109,7 +109,7 @@ describe("MCP server", () => {
     expect(r.text).toContain("Current document:");
 
     expect((await call("grep", { pattern: "received" })).text).toBe(
-      "metrics/revenue.md:7: Money received. See [orders](/tables/orders.md).",
+      "metrics/revenue.md:8: Money received. See [orders](/tables/orders.md).",
     );
     expect((await call("browse", { dir: "metrics" })).text).toBe(
       "# Concepts\n\n* [Revenue](revenue.md) - About Revenue.\n",
@@ -134,7 +134,7 @@ describe("MCP server", () => {
 
     const start = (await call("start")).text;
     expect(start).toContain("Concepts: 3 · attachments: 0");
-    expect(start).toContain("Types: Note 3");
+    expect(start).toContain("Types: Memo 3");
   });
 
   test("beyond files: search, query, links, log, history, diff, revert, work", async () => {
@@ -151,7 +151,7 @@ describe("MCP server", () => {
     });
 
     expect((await call("search", { q: "alpha" })).text).toContain("x.md — X");
-    expect((await call("query", { type: "Note" })).text).toContain("2 matching concepts");
+    expect((await call("query", { type: "Memo" })).text).toContain("2 matching concepts");
     expect(JSON.parse((await call("links", { path: "y.md" })).text).inbound[0].path).toBe("x.md");
     const log = (await call("log")).text;
     expect(log.split("\n")[0]).toContain("claude-code/test · delta");

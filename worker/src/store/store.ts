@@ -2,8 +2,10 @@ import { hmac } from "@noble/hashes/hmac.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, hexToBytes, randomBytes } from "@noble/hashes/utils.js";
 import {
+  ATOM,
   type Doc,
   docText,
+  headingIds,
   locate,
   occurrences,
   quoteText,
@@ -15,6 +17,7 @@ import {
   buildRecord,
   deserializeRecord,
   field,
+  type ParsedConcept,
   parseConcept,
   renderConcept,
   renderDoc,
@@ -57,6 +60,7 @@ import {
   checkQuote,
   commentBody,
   type StoredAnchor,
+  type ThreadAction,
   type ThreadStatus,
   type ThreadView,
 } from "./comments";
@@ -101,9 +105,18 @@ export type WriteOp =
 export interface OpResult {
   op: string;
   path: string;
+  /** move: where the file was. */
+  from?: string;
   hash: string | null;
   seq: number;
   lint: LintWarning[];
+  /**
+   * What the writer should know that is not stored as lint: fields the server ignored, a
+   * `stale_after` already past, the concept's open comment threads, a link to a missing heading.
+   */
+  notices?: LintWarning[];
+  /** A unified diff from what was sent to what is stored, when the server normalized it. */
+  normalized?: string;
 }
 
 export interface WriteResult {
@@ -290,6 +303,40 @@ function isDerivedTarget(link: { raw: string; path: string }): boolean {
   return isReserved(link.path) || raw.endsWith("/");
 }
 
+/**
+ * Refuses a written concept that has no usable frontmatter or no `type` (tempra-dev:
+ * decisions/write-refuses-invalid-concepts). Imports keep such files, with lint.
+ */
+function refuseInvalid(path: string, parsed: ParsedConcept, lint: LintWarning[]) {
+  if (parsed.fmError !== null) {
+    throw new OkfError(
+      400,
+      parsed.rawFm === null ? "missing_type" : "bad_frontmatter",
+      `${path}: ${parsed.fmError} Nothing was written.`,
+    );
+  }
+  if (lint.some((l) => l.code === "missing_type")) {
+    throw new OkfError(
+      400,
+      "missing_type",
+      `${path}: \`type\` is required, a non-empty string naming what kind of thing this is (Metric, Decision, Runbook; reuse a type \`start\` lists). Nothing was written.`,
+    );
+  }
+}
+
+/** Search snippet markers: control characters, which concept text never holds. */
+const MARK_OPEN = "\u0002";
+const MARK_CLOSE = "\u0003";
+/** A match's end, white space, and the next match's start: one highlight. */
+const ADJACENT_MARKS = new RegExp(`${MARK_CLOSE}(\\s+)${MARK_OPEN}`, "g");
+
+/** What search indexes of a body: its text as the reader shows it, footnote definitions too. */
+function searchText(doc: Doc): string {
+  const notes = doc.children.flatMap((n) => (n.type === "footnoteDefinition" ? n.children : []));
+  const text = [docText(doc).text, docText({ type: "root", children: notes } as Doc).text];
+  return text.join("\n").replaceAll(ATOM, " ");
+}
+
 /** The markdown of a tree the app sent; refused when it is not one. */
 function bodyOf(doc: unknown): string {
   const bad = () =>
@@ -322,6 +369,29 @@ export class LibraryStore {
     this.clock = opts.now ?? (() => new Date());
     this.size = opts.size ?? null;
     migrate(sql);
+    this.reindexSearch();
+  }
+
+  /**
+   * Search indexes a concept's text, not its markdown, so markup and link targets are neither
+   * matched nor highlighted (TEMPRA-28). Libraries indexed before that are reindexed once.
+   */
+  private reindexSearch() {
+    const done = this.sql.all("SELECT 1 FROM meta WHERE key = 'fts_text'").length > 0;
+    if (done) return;
+    this.sql.transaction(() => {
+      const rows = this.sql.all<{ concept_id: string; hash: string }>(
+        "SELECT concept_id, hash FROM paths WHERE kind = 'concept'",
+      );
+      for (const row of rows) {
+        this.sql.run(
+          "UPDATE fts SET body = ? WHERE concept_id = ?",
+          searchText(this.record(row.hash).doc),
+          row.concept_id,
+        );
+      }
+      this.sql.run("INSERT INTO meta (key, value) VALUES ('fts_text', '1')");
+    });
   }
 
   // ---------------------------------------------------------------- ledger primitives
@@ -474,8 +544,9 @@ export class LibraryStore {
     return this.guard(() =>
       this.sql.transaction(() => {
         const w = this.begin(ctx);
-        for (const op of ops) this.planCreate(w, op);
-        const results = ops.map((op) => this.applyOp(w, op));
+        const n = ops.length;
+        for (const [i, op] of ops.entries()) this.atOp(n, i, op, () => this.planCreate(w, op));
+        const results = ops.flatMap((op, i) => this.atOp(n, i, op, () => this.applyOp(w, op)));
         return {
           request_id: ctx.request_id,
           seq: this.headSeq(),
@@ -514,7 +585,7 @@ export class LibraryStore {
         for (const op of ops) this.planCreate(w, op);
         const results = this.finish(
           w,
-          ops.map((op) => this.applyOp(w, op)),
+          ops.flatMap((op) => this.applyOp(w, op)),
         );
         return {
           request_id: ctx.request_id,
@@ -587,18 +658,36 @@ export class LibraryStore {
     }
   }
 
-  private applyOp(w: WriteState, op: WriteOp): OpResult {
+  /** Runs one op of a request; in a request of several, its errors say which op failed. */
+  private atOp<T>(n: number, i: number, op: WriteOp, fn: () => T): T {
+    try {
+      return fn();
+    } catch (e) {
+      if (n < 2 || !(e instanceof OkfError)) throw e;
+      throw new OkfError(
+        e.status,
+        e.code,
+        `Op ${i + 1} of ${n} (${op.op} ${op.path}): ${e.message}`,
+        {
+          ...e.extra,
+          op_index: i,
+        },
+      );
+    }
+  }
+
+  private applyOp(w: WriteState, op: WriteOp): OpResult[] {
     switch (op.op) {
       case "write":
-        return this.writeConcept(w, op.path, op.content, op.if_match, op.if_none_match);
+        return [this.writeConcept(w, op.path, op.content, op.if_match, op.if_none_match)];
       case "attach":
-        return this.writeAttachment(w, op.path, op.blob, op.if_match, op.if_none_match);
+        return [this.writeAttachment(w, op.path, op.blob, op.if_match, op.if_none_match)];
       case "edit":
-        return this.edit(w, op.path, op.edits, op.if_match);
+        return [this.edit(w, op.path, op.edits, op.if_match)];
       case "move":
         return this.move(w, op.path, op.to);
       case "delete":
-        return this.remove(w, op.path, op.if_match);
+        return [this.remove(w, op.path, op.if_match)];
       default:
         throw new OkfError(400, "bad_op", `Unknown op ${(op as { op: string }).op}.`);
     }
@@ -632,7 +721,12 @@ export class LibraryStore {
     if (mode === "import") return;
     const current_hash = cur?.hash ?? null;
     if (ifNoneMatch && cur) {
-      throw new OkfError(412, "exists", `${path} already exists.`, { current_hash });
+      throw new OkfError(
+        409,
+        "exists",
+        `${path} already exists; to replace it, send its current hash as if_match.`,
+        { current_hash },
+      );
     }
     if (ifMatch) {
       if (!cur || cur.hash !== ifMatch) {
@@ -642,9 +736,9 @@ export class LibraryStore {
       }
     } else if (cur) {
       throw new OkfError(
-        412,
+        409,
         "exists",
-        `${path} already exists; send its current hash as If-Match to replace it.`,
+        `${path} already exists; to replace it, send its current hash as if_match.`,
         { current_hash },
       );
     }
@@ -670,7 +764,8 @@ export class LibraryStore {
     const curConcept = cur?.kind === "concept" ? cur : undefined;
     const storedVerified = curConcept ? this.verifiedAt(curConcept.concept_id, cur?.seq ?? 0) : [];
     const prev = curConcept ? this.record(curConcept.hash) : null;
-    const built = buildRecord(parseConcept(markdown), {
+    const parsed = parseConcept(markdown);
+    const built = buildRecord(parsed, {
       path,
       mode: w.mode === "import" ? "import" : "write",
       actor: w.ctx.actor,
@@ -679,6 +774,7 @@ export class LibraryStore {
       prev: prev?.doc ?? null,
       hints: typeof content === "string" ? null : content.doc,
     });
+    if (w.mode !== "import") refuseInvalid(path, parsed, built.lint);
     // An ordinary write lapses every earlier verification (spec: What the service derives); with
     // one-second timestamps, keep the new stamp strictly after the latest one.
     const generated = built.record.generated;
@@ -723,7 +819,104 @@ export class LibraryStore {
       }
     }
     w.written.set(path, conceptId);
-    return { op: w.mode === "import" ? "import" : "put", path, hash, seq, lint: built.lint };
+    const result: OpResult = {
+      op: w.mode === "import" ? "import" : "put",
+      path,
+      hash,
+      seq,
+      lint: built.lint,
+    };
+    if (w.mode === "import") return result;
+    const notices = [...built.notices];
+    const staleAfter = field(built.record, "stale_after");
+    if (isStale(staleAfter, this.clock().getTime())) {
+      notices.push({
+        code: "stale_on_write",
+        message: `stale_after ${String(staleAfter)} has already passed, so the concept is stale (and in \`work\`) from now on; move it forward if it holds.`,
+      });
+    }
+    if (typeof content === "string") {
+      // Compared with the server-owned fields as the writer sent them, so an edit of the rendered
+      // document (which carries the old stamp) is not reported, nor are ignored fields twice.
+      const asSent = renderConcept(
+        { ...built.record, generated: parsed.generated },
+        { verified: parsed.verified ?? [] },
+      );
+      const tidy = (t: string) =>
+        t
+          .replace(/^\uFEFF/, "")
+          .replace(/\r\n?/g, "\n")
+          .trimEnd();
+      if (tidy(asSent) !== tidy(markdown)) {
+        result.normalized = unifiedDiff(`${tidy(markdown)}\n`, `${tidy(asSent)}\n`, {
+          from: "sent",
+          to: "stored",
+        });
+        notices.push({
+          code: "normalized",
+          message:
+            "Stored in canonical form, which differs from what you sent (see the diff); `edit` against the stored text, as `read` shows it.",
+        });
+      }
+    }
+    if (prev && curConcept && hash !== curConcept.hash) {
+      notices.push(...this.threadNotices(conceptId, prev, built.record));
+    }
+    notices.push(...this.anchorNotices(built.record));
+    if (notices.length > 0) result.notices = notices;
+    return result;
+  }
+
+  /** The open threads on a concept being changed, and the ones this change left outdated. */
+  private threadNotices(conceptId: string, prev: ConceptRecord, next: ConceptRecord) {
+    const open = this.sql.all<{ id: string; anchor: string | null }>(
+      "SELECT id, anchor FROM threads WHERE concept_id = ? AND status = 'open' ORDER BY created_seq",
+      conceptId,
+    );
+    if (open.length === 0) return [];
+    const out: LintWarning[] = [
+      {
+        code: "open_comments",
+        message: `${open.length} open comment thread${open.length === 1 ? "" : "s"} on this concept (${open.map((t) => t.id).join(", ")}): read them with \`comments\`, and answer what your change addressed.`,
+      },
+    ];
+    const before = docText(prev.doc);
+    const after = docText(next.doc);
+    for (const t of open) {
+      if (!t.anchor) continue;
+      const anchor = JSON.parse(t.anchor) as StoredAnchor;
+      if (locate(before, anchor) && !locate(after, anchor)) {
+        out.push({
+          code: "comment_outdated",
+          message: `Thread ${t.id} was on “${clip(anchor.quote, 80)}”, which is no longer in the body; the thread is now outdated. Reply on it if your change addressed it.`,
+        });
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Links to a heading their target does not have, reported with the write (not stored as lint,
+   * which would go stale when the target changes).
+   */
+  private anchorNotices(r: ConceptRecord): LintWarning[] {
+    const out: LintWarning[] = [];
+    for (const l of r.links) {
+      if (!l.anchor || l.anchor === "#" || !l.target) continue;
+      const row = this.sql.all<{ path: string; hash: string; kind: Kind }>(
+        "SELECT path, hash, kind FROM paths WHERE concept_id = ?",
+        l.target,
+      )[0];
+      if (row?.kind !== "concept") continue;
+      const id = safeDecode(l.anchor.slice(1));
+      if (!headingIds(this.record(row.hash).doc).has(id)) {
+        out.push({
+          code: "missing_heading",
+          message: `Link ${l.raw} names a heading /${row.path} does not have (#${id}).`,
+        });
+      }
+    }
+    return out;
   }
 
   private recordVerification(
@@ -841,7 +1034,7 @@ export class LibraryStore {
   }
 
   /** Moves a file, or every file under a directory prefix, one event each (spec: Moves). */
-  private move(w: WriteState, input: string, toInput: string): OpResult {
+  private move(w: WriteState, input: string, toInput: string): OpResult[] {
     const from = normalizePath(input);
     const to = normalizePath(toInput);
     if (!from || !to) throw new OkfError(400, "bad_path", "Move needs valid `path` and `to`.");
@@ -877,7 +1070,7 @@ export class LibraryStore {
       }
     }
     for (const [row] of pairs) this.sql.run("DELETE FROM paths WHERE path = ?", row.path);
-    let last: OpResult | null = null;
+    const results: OpResult[] = [];
     for (const [row, dest] of pairs) {
       const seq = this.appendEvent(w.ctx, w.now, {
         op: "move",
@@ -895,10 +1088,10 @@ export class LibraryStore {
         seq,
       );
       this.healLinksTo(w, dest, row.concept_id);
-      last = { op: "move", path: dest, hash: row.hash, seq, lint: [] };
+      results.push({ op: "move", path: dest, from: row.path, hash: row.hash, seq, lint: [] });
     }
-    if (!last) throw notFound(input);
-    return pairs.length === 1 ? last : { ...last, path: to };
+    if (results.length === 0) throw notFound(input);
+    return results;
   }
 
   private remove(w: WriteState, input: string, ifMatch?: string | null): OpResult {
@@ -915,6 +1108,7 @@ export class LibraryStore {
         current_hash: row.hash,
       });
     }
+    this.refuseOpenThreads(row, "deleting it");
     const seq = this.appendEvent(w.ctx, w.now, {
       op: "delete",
       path: row.path,
@@ -924,6 +1118,25 @@ export class LibraryStore {
     });
     this.dropPath(w, row);
     return { op: "delete", path: row.path, hash: null, seq, lint: [] };
+  }
+
+  /**
+   * A concept with open comment threads is not deleted (tempra-dev: app/comments, TEMPRA-26): the
+   * threads are people's requests, and a deleted concept's threads are listed nowhere.
+   */
+  private refuseOpenThreads(row: PathRow, doing: string) {
+    const open = this.sql.all<{ id: string }>(
+      "SELECT id FROM threads WHERE concept_id = ? AND status = 'open' ORDER BY created_seq",
+      row.concept_id,
+    );
+    if (open.length === 0) return;
+    const ids = open.map((t) => t.id);
+    throw new OkfError(
+      409,
+      "open_comments",
+      `${row.path} has ${ids.length} open comment thread${ids.length === 1 ? "" : "s"} (${ids.join(", ")}); resolve ${ids.length === 1 ? "it" : "them"} before ${doing}. Read them with \`comments\`.`,
+      { threads: ids },
+    );
   }
 
   private dropPath(w: WriteState, row: PathRow) {
@@ -998,10 +1211,7 @@ export class LibraryStore {
       if (!b && now) results.push(this.restore(w, id, now.path, null, base));
     }
     for (const { before: b, now } of plan) {
-      if (b && now && now.path !== b.path) {
-        const r = this.move(w, now.path, b.path);
-        results.push(r);
-      }
+      if (b && now && now.path !== b.path) results.push(...this.move(w, now.path, b.path));
     }
     for (const { id, before: b } of plan) {
       if (!b) continue;
@@ -1027,6 +1237,7 @@ export class LibraryStore {
     if (cur && cur.concept_id !== conceptId) {
       throw new OkfError(409, "path_occupied", `Cannot restore ${path}: another file is there.`);
     }
+    if (hash === null && cur) this.refuseOpenThreads(cur, "reverting it away");
     const seq = this.appendEvent(w.ctx, w.now, {
       op: "revert",
       path,
@@ -1049,7 +1260,7 @@ export class LibraryStore {
     let lint: LintWarning[] = [];
     if (kind === "concept") {
       const r = this.record(hash);
-      lint = this.fieldLint(r, path, this.verifiedAt(conceptId, seq));
+      lint = this.fieldLint(r, path, this.verifiedAt(conceptId, seq), true);
       this.indexConcept(conceptId, path, r, lint, seq);
       w.written.set(path, conceptId);
     }
@@ -1206,7 +1417,7 @@ export class LibraryStore {
       "INSERT INTO fts (concept_id, title, body, tags) VALUES (?, ?, ?, ?)",
       id,
       str(field(r, "title")) ?? "",
-      r.body,
+      searchText(r.doc),
       tags.join(" "),
     );
 
@@ -1232,7 +1443,11 @@ export class LibraryStore {
     this.sql.run("DELETE FROM fts WHERE concept_id = ?", id);
   }
 
-  /** Points links written before `path` existed (or whose target was deleted) at its concept. */
+  /**
+   * Points links written before `path` existed (or whose target was deleted) at its concept, and
+   * marks every concept linking to it for a refresh: a restored concept's inbound links still
+   * name it by ID, and their broken-link lint must clear (TEMPRA-25).
+   */
   private healLinksTo(w: WriteState, path: string, id: string) {
     const variants = [path, path.endsWith(".md") ? path.slice(0, -3) : `${path}.md`];
     const where = `(to_path = ? OR to_path = ?) AND (to_id IS NULL OR to_id NOT IN (SELECT concept_id FROM paths))`;
@@ -1240,9 +1455,15 @@ export class LibraryStore {
       `SELECT DISTINCT from_id FROM links WHERE ${where}`,
       ...variants,
     );
-    if (from.length === 0) return;
-    this.sql.run(`UPDATE links SET to_id = ? WHERE ${where}`, id, ...variants);
+    if (from.length > 0) this.sql.run(`UPDATE links SET to_id = ? WHERE ${where}`, id, ...variants);
     for (const r of from) w.affected.add(r.from_id);
+    for (const r of this.sql.all<{ from_id: string }>(
+      "SELECT DISTINCT from_id FROM links WHERE to_id = ? AND from_id <> ?",
+      id,
+      id,
+    )) {
+      w.affected.add(r.from_id);
+    }
   }
 
   /**
@@ -1322,13 +1543,18 @@ export class LibraryStore {
   }
 
   /** Field lint of a content version, as a write of it would report (spec: OKF conformance). */
-  private fieldLint(r: ConceptRecord, path: string, verified: Verification[]): LintWarning[] {
+  private fieldLint(
+    r: ConceptRecord,
+    path: string,
+    verified: Verification[],
+    strict = false,
+  ): LintWarning[] {
     if (r.raw_fm !== null) {
       return [
         { code: "unparseable_frontmatter", message: "Frontmatter could not be parsed as YAML." },
       ];
     }
-    return lintFields(r.fm, r.generated, verified, scanDoc(r.doc, path));
+    return lintFields(r.fm, r.generated, verified, scanDoc(r.doc, path), { strict });
   }
 
   /** Lint of a past version: its field lint and its links that were broken as of the snapshot. */
@@ -1340,8 +1566,9 @@ export class LibraryStore {
     return lint;
   }
 
-  private renderEntry(snap: Snapshot, e: Entry, computed: boolean): string {
-    const r = this.record(e.hash);
+  private renderEntry(snap: Snapshot, e: Entry, computed: boolean, unstamped = false): string {
+    const stored = this.record(e.hash);
+    const r = unstamped ? { ...stored, generated: null } : stored;
     const verified = this.verifiedAt(e.concept_id, snap.seq);
     return renderConcept(r, {
       verified,
@@ -1422,7 +1649,7 @@ export class LibraryStore {
       };
     }
     const e = snap.lookup(path);
-    if (!e) throw notFound(input);
+    if (!e) throw this.gone(input, path, snap.seq);
     if (e.kind === "attachment") {
       const info = this.blobInfo(e.hash);
       return {
@@ -1469,6 +1696,41 @@ export class LibraryStore {
     };
   }
 
+  /**
+   * A 404 for a path with nothing there now that says what became of it: moved (and where), or
+   * deleted (and how to bring it back). Saves a `log` or `grep` call.
+   */
+  private gone(input: string, path: string, at: number): OkfError {
+    const variants = [path, path.endsWith(".md") ? path.slice(0, -3) : `${path}.md`];
+    const last = this.sql.all<{ seq: number; op: string; path: string; concept_id: string }>(
+      `SELECT seq, op, path, concept_id FROM events
+       WHERE seq <= ? AND op != 'comment' AND (path IN (?, ?) OR json_extract(meta, '$.from_path') IN (?, ?))
+       ORDER BY seq DESC LIMIT 1`,
+      at,
+      ...variants,
+      ...variants,
+    )[0];
+    if (!last) return notFound(input);
+    const now = this.snapshot(at).byId.get(last.concept_id);
+    if (now && now.path !== path) {
+      return new OkfError(
+        404,
+        "moved",
+        `No file at ${input}: it moved to ${now.path} (seq ${last.seq}). Read it there.`,
+        { moved_to: now.path, seq: last.seq },
+      );
+    }
+    if (last.op === "delete" || (last.op === "revert" && !now)) {
+      return new OkfError(
+        404,
+        "deleted",
+        `No file at ${input}: it was deleted at seq ${last.seq}. \`revert\` with to_seq ${last.seq - 1} brings it back.`,
+        { seq: last.seq },
+      );
+    }
+    return notFound(input);
+  }
+
   /** The synthesized index.md for a directory (spec: Tier 2). */
   index(dirInput: string, snapOrAt?: Snapshot | number): string {
     const snap = snapOrAt instanceof Snapshot ? snapOrAt : this.snapshot(snapOrAt);
@@ -1508,11 +1770,19 @@ export class LibraryStore {
     const at = opts.at ?? this.headSeq();
     const prefix = normalizeDir(opts.prefix);
     const reqs = this.requestsUpTo(at, prefix);
+    const snap = this.snapshot(at);
     const out: LogRequest[] = reqs.map((r) => ({
       ts: r.ts,
       actor: r.actor,
       note: r.note,
-      events: r.events.map((e) => ({ op: e.op, path: e.path, created: e.prev_hash === null })),
+      events: r.events.map((e) => ({
+        op: e.op,
+        path: e.path,
+        created: e.prev_hash === null,
+        fromPath: typeof e.meta?.from_path === "string" ? e.meta.from_path : null,
+        // Entries link to where the file is now (as of `at`), or to nothing once it is gone.
+        current: snap.byId.get(e.concept_id)?.path ?? null,
+      })),
     }));
     return renderLog(out, prefix ? `Log: ${prefix}` : "Library log");
   }
@@ -1639,7 +1909,7 @@ export class LibraryStore {
       .map((e) => this.row(snap, e))
       .filter(
         (r) =>
-          (q.type === undefined || r.type === q.type) &&
+          (q.type === undefined || (r.type ?? "").toLowerCase() === q.type.trim().toLowerCase()) &&
           (q.tag === undefined || (r.tags ?? []).includes(q.tag)) &&
           (q.status === undefined || r.status === q.status) &&
           (q.trust === undefined || r.trust_tier === q.trust) &&
@@ -1651,7 +1921,25 @@ export class LibraryStore {
       total: rows.length,
       items,
       next_offset: offset + limit < rows.length ? offset + limit : null,
+      ...(rows.length === 0 && q.type !== undefined ? { types: this.typesLike(snap, q.type) } : {}),
     };
+  }
+
+  /** The library's types closest to `want`, for a query that matched nothing. */
+  private typesLike(snap: Snapshot, want: string): string[] {
+    const types = new Set<string>();
+    for (const e of snap.sorted()) {
+      if (e.kind !== "concept") continue;
+      const t = str(field(this.record(e.hash), "type"));
+      if (t) types.add(t);
+    }
+    const w = want.trim().toLowerCase();
+    const all = [...types].sort();
+    const near = all.filter((t) => {
+      const l = t.toLowerCase();
+      return l.includes(w) || w.includes(l);
+    });
+    return (near.length > 0 ? near : all).slice(0, 20);
   }
 
   /** GET /search: FTS over title, body and tags at head, ranked, with snippets. */
@@ -1670,7 +1958,7 @@ export class LibraryStore {
     const limit = Math.min(Math.max(opts.limit ?? 20, 1), 200);
     const rows = this.sql.all<{ path: string; title: string; snippet: string; score: number }>(
       `SELECT paths.path AS path, fts.title AS title,
-              snippet(fts, 2, '**', '**', '…', 16) AS snippet, bm25(fts) AS score
+              snippet(fts, 2, char(2), char(3), '…', 16) AS snippet, bm25(fts) AS score
        FROM fts JOIN paths ON paths.concept_id = fts.concept_id
        WHERE fts MATCH ? AND (? = '' OR paths.path = ? OR paths.path LIKE ? ESCAPE '\\')
        ORDER BY score LIMIT ?`,
@@ -1680,7 +1968,15 @@ export class LibraryStore {
       `${escapeLike(prefix)}/%`,
       limit,
     );
-    return { seq: this.headSeq(), results: rows };
+    // FTS5 marks each matched token alone; adjacent ones become one highlight.
+    const results = rows.map((r) => ({
+      ...r,
+      snippet: r.snippet
+        .replace(ADJACENT_MARKS, "$1")
+        .replaceAll(MARK_OPEN, "**")
+        .replaceAll(MARK_CLOSE, "**"),
+    }));
+    return { seq: this.headSeq(), results };
   }
 
   /** GET /grep: literal or regex match over rendered concepts, frontmatter included, like grep -n. */
@@ -1729,25 +2025,43 @@ export class LibraryStore {
     const e = snap.lookup(normalizePath(input) ?? "");
     if (e?.kind !== "concept") throw notFound(input);
     const r = this.record(e.hash);
+    // `raw` is each link as `read` renders it: its target's current path, in its written form.
     const outbound: { raw: string; path: string; anchor: string | null; kind: LinkKind }[] = [];
     const broken: { raw: string; path: string; kind: LinkKind }[] = [];
     for (const [l, kind] of linkGraph(r)) {
       const target = this.targetAt(snap, l);
-      if (target) outbound.push({ raw: l.raw, path: target.path, anchor: l.anchor, kind });
-      else broken.push({ raw: l.raw, path: l.path, kind });
+      const raw = this.href(snap, e, l);
+      if (target) outbound.push({ raw, path: target.path, anchor: l.anchor, kind });
+      else broken.push({ raw, path: l.path, kind });
     }
     const inbound =
       snap.seq !== this.headSeq()
         ? []
         : this.sql
-            .all<{ from_id: string; raw: string; anchor: string | null; kind: LinkKind }>(
-              "SELECT from_id, raw, anchor, kind FROM links WHERE to_id = ? AND from_id <> ?",
+            .all<{
+              from_id: string;
+              to_path: string;
+              raw: string;
+              anchor: string | null;
+              form: StoredLink["form"] | StoredSource["form"];
+              kind: LinkKind;
+            }>(
+              "SELECT from_id, to_path, raw, anchor, form, kind FROM links WHERE to_id = ? AND from_id <> ?",
               e.concept_id,
               e.concept_id,
             )
             .flatMap((l) => {
-              const from = snap.byId.get(l.from_id)?.path;
-              return from ? [{ path: from, raw: l.raw, anchor: l.anchor, kind: l.kind }] : [];
+              const from = snap.byId.get(l.from_id);
+              if (!from) return [];
+              const link = {
+                raw: l.raw,
+                path: l.to_path,
+                anchor: l.anchor,
+                form: l.form,
+                target: e.concept_id,
+              } as StoredSource;
+              const raw = this.href(snap, from, link);
+              return [{ path: from.path, raw, anchor: l.anchor, kind: l.kind }];
             })
             .sort((a, b) => (a.path < b.path ? -1 : 1));
     return { path: e.path, outbound, inbound, broken };
@@ -1956,9 +2270,10 @@ export class LibraryStore {
     const snapFrom = this.snapshot(from);
     const a = snapFrom.byId.get(id);
     const b = snapTo.byId.get(id);
+    // Without the `generated` stamp, which changes with every write and says nothing new.
     const text = (snap: Snapshot, e: Entry | undefined) => {
       if (!e) return "";
-      if (e.kind === "concept") return this.renderEntry(snap, e, false);
+      if (e.kind === "concept") return this.renderEntry(snap, e, false, true);
       return `(attachment ${e.hash})\n`;
     };
     const label = (e: Entry | undefined, seq: number) =>
@@ -2082,7 +2397,7 @@ export class LibraryStore {
         const on = quote ? ` on “${clip(quote, 80)}”` : "";
         const replies =
           t.replies > 0
-            ? `; ${t.replies} ${t.replies === 1 ? "reply" : "replies"}, last by ${t.last_actor}`
+            ? ` (${t.replies} ${t.replies === 1 ? "reply" : "replies"}, last by ${t.last_actor})`
             : "";
         items.push({
           kind: "comment",
@@ -2313,7 +2628,30 @@ export class LibraryStore {
   /** Threads as returned: their comments, and anchors located in each concept's current body. */
   private threadViews(rows: ThreadRow[], withComments: boolean): ThreadView[] {
     const byThread = new Map<string, CommentView[]>();
+    const actions = new Map<string, ThreadAction[]>();
     if (rows.length > 0 && withComments) {
+      // Every action from the ledger, where resolve and reopen are recorded too.
+      const ids = [...new Set(rows.map((r) => r.concept_id))];
+      const events = this.sql.all<{ seq: number; actor: string; ts: string; meta: string | null }>(
+        `SELECT seq, actor, ts, meta FROM events
+         WHERE op = 'comment' AND concept_id IN (${ids.map(() => "?").join(", ")}) ORDER BY seq`,
+        ...ids,
+      );
+      for (const e of events) {
+        const c = (e.meta ? (JSON.parse(e.meta) as JsonObject) : {}).comment as
+          | { kind?: string; thread?: string; id?: string }
+          | undefined;
+        if (!c?.thread || !c.kind) continue;
+        const list = actions.get(c.thread) ?? [];
+        list.push({
+          kind: c.kind as ThreadAction["kind"],
+          actor: e.actor,
+          ts: e.ts,
+          seq: e.seq,
+          comment: c.id ?? null,
+        });
+        actions.set(c.thread, list);
+      }
       const comments = this.sql.all<CommentView & { thread_id: string }>(
         `SELECT id, thread_id, actor, body, ts, seq FROM comments
          WHERE thread_id IN (${rows.map(() => "?").join(", ")}) ORDER BY seq`,
@@ -2353,6 +2691,7 @@ export class LibraryStore {
         located,
         outdated: anchor !== null && located === null,
         comments: byThread.get(r.id) ?? [],
+        actions: actions.get(r.id) ?? [],
       };
     });
   }

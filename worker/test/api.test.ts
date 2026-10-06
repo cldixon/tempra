@@ -50,7 +50,7 @@ describe("files", () => {
     expect(r.status).toBe(200);
     const created = (await r.json()) as { hash: string; seq: number; lint: { code: string }[] };
     expect(created.seq).toBe(1);
-    expect(created.lint.map((l) => l.code)).toEqual(["broken_link"]);
+    expect(created.lint.map((l) => l.code)).toContain("broken_link");
 
     r = await req("/files/notes/a");
     expect(r.headers.get("ETag")).toBe(`"${created.hash}"`);
@@ -65,7 +65,7 @@ describe("files", () => {
 
     // Replace needs the right If-Match.
     r = await req("/files/notes/a.md", { method: "PUT", body: doc("v2") });
-    expect(r.status).toBe(412);
+    expect(r.status).toBe(409);
     expect(((await r.json()) as { current_hash: string }).current_hash).toBe(created.hash);
     r = await req("/files/notes/a.md", {
       method: "PUT",

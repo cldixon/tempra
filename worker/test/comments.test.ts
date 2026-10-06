@@ -201,22 +201,47 @@ describe("comment threads", () => {
     );
   });
 
-  test("threads follow a move and hide with a delete; a revert brings them back", () => {
+  test("threads follow a move; a concept with open threads is not deleted", () => {
     const s = seeded();
     const t = s.comment(human(), { kind: "open", path: "metrics/margin.md", body: "Hm." }).thread;
     s.apply(ctx(), [{ op: "move", path: "metrics/margin.md", to: "finance/margin.md" }]);
     expect(s.thread(t.id).path).toBe("finance/margin.md");
     const cur = s.read("finance/margin.md");
-    const del = s.apply(ctx(), [
-      { op: "delete", path: "finance/margin.md", if_match: cur.kind === "concept" ? cur.hash : "" },
-    ]);
-    expect(s.comments().threads).toHaveLength(0);
+    const hash = cur.kind === "concept" ? cur.hash : "";
+    const head = s.headSeq();
+    // Refused while the thread is open, alone or in a batch, and nothing changes.
+    const refused = errorOf(() =>
+      s.apply(ctx(), [{ op: "delete", path: "finance/margin.md", if_match: hash }]),
+    );
+    expect([refused.status, refused.code]).toEqual([409, "open_comments"]);
+    expect(refused.message).toContain(t.id);
+    expect(refused.extra.threads).toEqual([t.id]);
+    const inBatch = errorOf(() =>
+      s.apply(ctx(), [
+        { op: "write", path: "other.md", content: doc("Other.\n") },
+        { op: "delete", path: "finance/margin.md", if_match: hash },
+      ]),
+    );
+    expect(inBatch.code).toBe("open_comments");
+    expect(inBatch.message).toContain("Op 2 of 2 (delete finance/margin.md)");
+    expect(s.headSeq()).toBe(head);
+    // Resolved, it can go; a revert brings the concept and its (resolved) thread back.
+    s.comment(human(), { kind: "resolve", thread: t.id, body: "" });
+    const del = s.apply(ctx(), [{ op: "delete", path: "finance/margin.md", if_match: hash }]);
+    expect(s.comments({ status: "all" }).threads).toHaveLength(0);
     expect(errorOf(() => s.thread(t.id)).status).toBe(404);
-    expect(
-      errorOf(() => s.comment(human(), { kind: "reply", thread: t.id, body: "?" })).status,
-    ).toBe(404);
     s.revert(ctx(), { request_id: del.request_id });
-    expect(s.comments().threads.map((x) => x.id)).toEqual([t.id]);
+    expect(s.comments({ status: "all" }).threads.map((x) => x.id)).toEqual([t.id]);
+  });
+
+  test("a revert that would delete a concept with open threads is refused", () => {
+    const s = seeded();
+    const made = s.apply(ctx(), [{ op: "write", path: "new.md", content: doc("New.\n") }]);
+    const t = s.comment(human(), { kind: "open", path: "new.md", body: "Keep this?" }).thread;
+    const e = errorOf(() => s.revert(ctx(), { request_id: made.request_id }));
+    expect([e.status, e.code]).toEqual([409, "open_comments"]);
+    expect(e.message).toContain(t.id);
+    expect(s.read("new.md").kind).toBe("concept");
   });
 
   test("comment events do not disturb snapshots, diffs or reverts", () => {
