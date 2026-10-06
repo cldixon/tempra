@@ -618,6 +618,47 @@ async function browserRenders(
         const thread = await mark.first().getAttribute("data-thread");
         await markStay();
         await page.waitForTimeout(300);
+        // An agent writes a new paragraph above it (TEMPRA-22): the commented block keeps its
+        // ID, the thread stays on it, and the highlight follows the quote on the open page.
+        type Anchored = { anchor: { block: string | null } | null; outdated: boolean };
+        const threadNow = async () =>
+          (await (
+            await fetch(`${libApi}/comments/${thread}`, { headers: bearer })
+          ).json()) as Anchored;
+        const block = (await threadNow()).anchor?.block;
+        if (!block) throw new Error("the comment's anchor names no block");
+        const before = await fetch(api, { headers: auth });
+        const md = await before.text();
+        const end = md.indexOf("\n---\n", 3) + 5;
+        const opening = "An agent's new opening paragraph.";
+        const inserted = await fetch(api, {
+          method: "PUT",
+          headers: {
+            ...auth,
+            "Content-Type": "text/markdown",
+            "If-Match": before.headers.get("ETag") ?? "",
+            "X-Note": "gate: an agent writes above a comment",
+          },
+          body: `${md.slice(0, end)}${opening}\n\n${md.slice(end)}`,
+        });
+        if (!inserted.ok)
+          throw new Error(`agent write: ${inserted.status} ${await inserted.text()}`);
+        const after = (await (
+          await fetch(api, { headers: { ...auth, Accept: "application/json" } })
+        ).json()) as { doc: unknown };
+        if (!JSON.stringify(after.doc).includes(`"id":"${block}"`)) {
+          throw new Error("the commented block lost its ID in the agent's write");
+        }
+        const moved = await threadNow();
+        if (moved.outdated || moved.anchor?.block !== block) {
+          throw new Error(`the thread lost its place: ${JSON.stringify(moved)}`);
+        }
+        await page.getByRole("button", { name: "Show new version" }).click();
+        await page.locator(".body").getByText(opening).waitFor({ timeout: 10_000 });
+        await mark.first().waitFor({ timeout: 10_000 });
+        if (!(await mark.first().innerText()).includes(quote.trim().slice(0, 8))) {
+          throw new Error(`highlight after the agent's write: ${await mark.first().innerText()}`);
+        }
         for (const [suffix, body] of [
           ["", { body: "Checked it; it holds." }],
           ["/resolve", {}],

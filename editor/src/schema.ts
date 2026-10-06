@@ -12,7 +12,6 @@ export {
   Code,
   CodeBlock,
   CodeBlockLanguage,
-  Doc,
   Emphasis,
   HeaderCell,
   Heading,
@@ -112,28 +111,44 @@ export const SoftBreak = Leaf.define("softBreak", {
 });
 
 /**
- * Anything inline the schema does not model (raw HTML, reference links), kept as its exact
- * source: shown as code, never rendered, serialized verbatim.
+ * A node the schema does not model (raw HTML, reference links and definitions): the tree node
+ * itself, written back unchanged, and the markdown it reads as, shown as code, never rendered.
  */
-export const RawInline = Leaf.Type.define<string>("rawInline", {
+export interface RawParam {
+  node: unknown;
+  text: string;
+}
+
+/** Anything inline the schema does not model, as a {@link RawParam}. */
+export const RawInline = Leaf.Type.define<RawParam>("rawInline", {
   inline: true,
   group: [Node.Group.Inline],
-  validate: "string",
-  shape: { structure: (src: string) => Elt.mk("code", { class: "raw" }, [src]) },
-  toText: (n: Leaf) => n.param as string,
+  shape: { structure: (p: RawParam) => Elt.mk("code", { class: "raw" }, [p.text]) },
+  toText: (n: Leaf) => (n.param as RawParam).text,
 });
 
 /** The block counterpart of {@link RawInline}: raw HTML blocks, definitions, anything else. */
-export const RawBlock = Leaf.Type.define<string>("rawBlock", {
+export const RawBlock = Leaf.Type.define<RawParam>("rawBlock", {
   group: [Node.Group.Content],
-  validate: "string",
   shape: {
-    structure: (src: string) => Elt.mk("pre", { class: "raw" }, [Elt.mk("code", [src])]),
+    structure: (p: RawParam) => Elt.mk("pre", { class: "raw" }, [Elt.mk("code", [p.text])]),
   },
-  toText: (n: Leaf) => n.param as string,
+  toText: (n: Leaf) => (n.param as RawParam).text,
 });
 
-/** A heading's anchor, as the server slugs it (worker/src/ui/markdown.ts). Not serialized. */
+/**
+ * A block's ID in the stored tree (tempra-dev: decisions/structured-documents). A block split in
+ * two keeps it in the first half only; a block whose type changes keeps it.
+ */
+export const BlockId = Mark.Type.define<string>("blockId", {
+  target: [Node.Group.Content, T.ListItem],
+  validate: "string",
+  keepOnSplit: false,
+  keepOnTypeChange: true,
+  shape: { attribute: "data-block", value: 0 },
+});
+
+/** A heading's anchor, as the server slugs it. Not stored. */
 export const HeadingId = Mark.Type.define<string>("headingId", {
   target: T.Heading,
   validate: "string",
@@ -195,6 +210,7 @@ export const elements: Schema.Element[] = [
   RawInline,
   RawBlock,
   HeadingId,
+  BlockId,
   CellAlign,
   CodeMeta,
   Loose,

@@ -3,7 +3,7 @@
  * checks that need no database. The store records each action as a `comment` event and keeps
  * the `threads` and `comments` tables in step with it.
  */
-import { MAX_QUOTE, type QuoteSelector } from "@tempra/editor/anchor";
+import { MAX_QUOTE, type QuoteSelector } from "@tempra/editor/doc";
 import { OkfError } from "./errors";
 
 /** Longest comment body, in characters. */
@@ -19,7 +19,11 @@ export type CommentAction =
       kind: "open";
       path: string;
       body: string;
-      /** The quoted body text; `from` (an offset in the body) picks among repeats. */
+      /**
+       * What is quoted. With `from` (the app), the document's text and where in it the quote
+       * starts, which picks among repeats; without it (agents), markdown as `read` shows it,
+       * matched by the text it reads as.
+       */
       anchor?: { quote: string; from?: number } | null;
     }
   | { kind: "reply"; thread: string; body: string }
@@ -50,7 +54,7 @@ export interface ThreadView {
   resolved_seq: number | null;
   replies: number;
   anchor: StoredAnchor | null;
-  /** Where the quote is in the concept's current body; null when outdated or unanchored. */
+  /** Where the quote is in the current document's text; null when outdated or unanchored. */
   located: { from: number; to: number } | null;
   /** Anchored, but the quoted text is gone from the current body. */
   outdated: boolean;

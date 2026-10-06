@@ -35,7 +35,7 @@ export const INSTRUCTIONS = `This server holds OKF (Open Knowledge Format) libra
 How to work:
 1. Call \`start\` first. It opens your library, or lists the libraries you can reach when there are several; then pass \`library\` (owner/slug) on every call. Then \`browse\` a directory before reading, follow links, and \`read\` what you need. Check frontmatter (type, status, trust tier, stale) before relying on a body.
 2. Write conformant concepts: a non-empty \`type\` naming what kind of thing it is (Metric, Protocol, Decision; never a generic word like concept, page or note, and reuse the types \`start\` lists), a \`title\` and one-line \`description\`, absolute links like [x](/dir/x.md), footnotes [^id] keyed to \`sources[].id\`, one idea per concept.
-3. Prefer \`edit\` for small changes, \`write\` for new concepts or rewrites, \`batch\` for related changes so they land as one request. Pass \`if_match\` (the hash from your last read); on a conflict, re-read and reapply.
+3. Prefer \`edit\` for small changes, \`write\` for new concepts or rewrites, \`batch\` for related changes so they land as one request. Pass \`if_match\` (the hash from your last read); on a conflict, re-read and reapply. Bodies are stored in a canonical form (\`-\` bullets, \`*\` emphasis, padded tables): what you write reads back normalized, so \`edit\` the text as \`read\` shows it.
 4. Put a one-line \`note\` on every write. Read the \`lint\` in every write result and fix what it reports. Keep concepts under 100 KB; split big ones into linked concepts.
 5. Never write index.md or log.md (the server synthesizes them). Never set \`generated\` (the server stamps it) or \`verified\` (not yours to claim). Set \`status\` and \`stale_after\` honestly. Timestamps are full ISO 8601 datetimes with an offset (\`stale_after: 2026-12-31T00:00:00Z\`); a plain date is flagged.
 6. Use \`work\` to find what needs doing: open comments, stale concepts, broken links, lint.
@@ -776,7 +776,7 @@ export function buildServer(ctx: McpContext): McpServer {
       "comment",
       {
         title: "Comment, reply or resolve",
-        description: `${BEYOND}answer a comment thread or start one. \`reply\` adds to a thread; \`resolve\` closes it (with an optional closing reply, e.g. what you changed); \`reopen\` opens it again; \`open\` starts a thread on a concept, optionally on a \`quote\` copied exactly from its body (it must occur once; quote more of the sentence if it repeats). Resolve only what you actually addressed. Comments never change the concept; edit it with the write tools.`,
+        description: `${BEYOND}answer a comment thread or start one. \`reply\` adds to a thread; \`resolve\` closes it (with an optional closing reply, e.g. what you changed); \`reopen\` opens it again; \`open\` starts a thread on a concept, optionally on a \`quote\` copied from its body as \`read\` shows it (matched by the text it reads as, markup aside; it must occur once; quote more of the sentence if it repeats). Resolve only what you actually addressed. Comments never change the concept; edit it with the write tools.`,
         inputSchema: {
           action: z.enum(["reply", "resolve", "reopen", "open"]),
           thread: z.string().optional().describe("reply, resolve, reopen: the thread id."),
@@ -784,7 +784,9 @@ export function buildServer(ctx: McpContext): McpServer {
           quote: z
             .string()
             .optional()
-            .describe("open: text copied exactly from the body to anchor the comment on."),
+            .describe(
+              "open: text copied from the body, as `read` shows it, to anchor the comment on.",
+            ),
           body: z
             .string()
             .optional()

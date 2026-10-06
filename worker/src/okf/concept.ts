@@ -1,4 +1,14 @@
 import {
+  carryIds,
+  type Doc,
+  inlineText,
+  parseMarkdown,
+  reconcile,
+  toMarkdown,
+  walk,
+} from "@tempra/editor/doc";
+import type { RootContent } from "mdast";
+import {
   Document,
   isMap,
   isScalar,
@@ -9,7 +19,7 @@ import {
   type YAMLSeq,
 } from "yaml";
 import { lintFields } from "./lint";
-import { findSection, scanBody } from "./markdown";
+import { scanDoc, takeSection, targets } from "./markdown";
 import {
   isExternal,
   isReserved,
@@ -161,6 +171,10 @@ export interface BuildOptions {
   now: string;
   /** Current server-owned values, for lint when the writer's copy differs. */
   stored?: { generated: JsonObject | null; verified: Verification[] } | null;
+  /** The stored body this version follows, whose block IDs it keeps where blocks match. */
+  prev?: Doc | null;
+  /** The tree the app sent, whose block IDs are kept where they name blocks of `prev`. */
+  hints?: Doc | null;
 }
 
 export interface BuiltConcept {
@@ -172,14 +186,16 @@ export interface BuiltConcept {
 }
 
 /**
- * Builds a content version from parsed markdown: applies v0.1 migrations (OKF §13), stamps
- * `generated` on ordinary writes, scans links and footnotes, and lints. Link targets are left
- * unresolved (null); the store resolves them against the library.
+ * Builds a content version from parsed markdown: parses the body into the stored tree (block IDs
+ * carried over from `prev`), applies v0.1 migrations (OKF §13), stamps `generated` on ordinary
+ * writes, scans links and footnotes, and lints. Link targets are left unresolved (null); the store
+ * resolves them against the library.
  */
 export function buildRecord(parsed: ParsedConcept, opts: BuildOptions): BuiltConcept {
   const lint = [...parsed.lint];
   let entries = parsed.entries.map(([k, v]) => [k, v] as [string, Json]);
-  let body = parsed.body;
+  const doc = parseMarkdown(parsed.body);
+  if (opts.hints) carryIds(opts.hints, doc);
 
   // v0.1: `timestamp` is superseded by generated.at.
   let legacyTimestamp: string | null = null;
@@ -193,10 +209,9 @@ export function buildRecord(parsed: ParsedConcept, opts: BuildOptions): BuiltCon
     });
   }
   // v0.1: a `# Citations` body list is superseded by `sources`.
-  const migrated = migrateCitations(body, entries);
+  const migrated = migrateCitations(doc, entries);
   if (migrated) {
-    body = migrated.body;
-    entries = migrated.entries;
+    entries = migrated;
     lint.push({
       code: "v01_citations",
       message: "v0.1 `# Citations` list migrated into `sources` (OKF §13).",
@@ -228,61 +243,72 @@ export function buildRecord(parsed: ParsedConcept, opts: BuildOptions): BuiltCon
     }
   }
 
-  const scan = scanBody(body, opts.path);
+  reconcile(opts.prev ?? null, doc);
+  const scan = scanDoc(doc, opts.path);
   const links: StoredLink[] = scan.links.map((l) => ({ ...l, target: null }));
   const verified = opts.mode === "import" ? (parsed.verified ?? []) : [];
   if (parsed.rawFm === null) lint.push(...lintFields(entries, generated, verified, scan));
   const record: ConceptRecord = {
-    v: 1,
     fm: entries,
     raw_fm: parsed.rawFm,
     generated,
-    body,
+    doc,
+    body: toMarkdown(doc),
     links,
   };
   return { record, lint, verified, footnoteRefs: scan.footnoteRefs };
 }
 
-function migrateCitations(body: string, entries: [string, Json][]) {
-  const section = findSection(body, "Citations");
-  if (!section) return null;
-  const text = body.slice(section.start, section.end);
+/** A v0.1 `# Citations` list, taken out of the body into `sources`; null when there is none. */
+function migrateCitations(doc: Doc, entries: [string, Json][]): [string, Json][] | null {
+  const existing = entries.find(([k]) => k === "sources");
+  if (existing && !Array.isArray(existing[1])) return null;
   const cited: JsonObject[] = [];
-  for (const line of text.split("\n")) {
-    const item = /^\s*[-*+]\s+(.+?)\s*$/.exec(line)?.[1];
-    if (!item) continue;
-    const link = /\[([^\]]*)\]\(([^)\s]+)\)/.exec(item);
-    if (link?.[2])
-      cited.push(link[1] ? { resource: link[2], title: link[1] } : { resource: link[2] });
-    else cited.push({ resource: item });
+  const probe: Doc = { type: "root", children: [...doc.children] };
+  for (const node of takeSection(probe, "Citations") ?? []) {
+    walk(node, (n) => {
+      if (n.type !== "listItem") return undefined;
+      const para = n.children.find((c) => c.type === "paragraph");
+      if (para?.type !== "paragraph") return false;
+      const link = para.children.find((c) => c.type === "link");
+      if (link?.type === "link") {
+        // An autolink's text is its URL: no title.
+        const title = inlineText(link.children).trim();
+        cited.push(
+          title && title !== link.url ? { resource: link.url, title } : { resource: link.url },
+        );
+      } else {
+        const text = inlineText(para.children).trim();
+        if (text) cited.push({ resource: text });
+      }
+      return false;
+    });
   }
   if (cited.length === 0) return null;
+  doc.children = probe.children as RootContent[];
   const next = entries.map(([k, v]) => [k, v] as [string, Json]);
-  const existing = next.find(([k]) => k === "sources");
-  if (existing && Array.isArray(existing[1])) existing[1] = [...existing[1], ...cited];
-  else if (!existing) next.push(["sources", cited]);
-  else return null;
-  return { body: body.slice(0, section.start) + body.slice(section.end), entries: next };
+  const sources = next.find(([k]) => k === "sources");
+  if (sources && Array.isArray(sources[1])) sources[1] = [...sources[1], ...cited];
+  else next.push(["sources", cited]);
+  return next;
 }
 
 /** Canonical serialization of a record; its SHA-256 is the content-version hash. */
 export function serializeRecord(r: ConceptRecord): string {
   return JSON.stringify({
-    v: r.v,
     fm: r.fm,
     raw_fm: r.raw_fm,
     generated: r.generated,
+    doc: r.doc,
     body: r.body,
     links: r.links.map((l) => ({
-      start: l.start,
-      end: l.end,
+      at: l.at,
       raw: l.raw,
       path: l.path,
       anchor: l.anchor,
       form: l.form,
       target: l.target,
     })),
-    // Only when present, so records without internal sources keep the hashes they always had.
     ...(r.sources?.length
       ? {
           sources: r.sources.map((x) => ({
@@ -407,15 +433,31 @@ function renderSources(r: ConceptRecord, sourceHref?: (s: StoredSource) => strin
   });
 }
 
+/**
+ * The body with each link at the target `href` gives it (its target's current path): the stored
+ * markdown when no link moved, else the tree written anew.
+ */
 export function renderBody(r: ConceptRecord, href?: (link: StoredLink) => string): string {
-  if (!href || r.links.length === 0) return r.body;
-  let out = "";
-  let pos = 0;
-  for (const link of r.links) {
-    out += r.body.slice(pos, link.start) + href(link);
-    pos = link.end;
+  if (!href) return r.body;
+  const doc = renderDoc(r, href);
+  return doc === r.doc ? r.body : toMarkdown(doc);
+}
+
+/** The tree with each link at the target `href` gives it; the stored tree itself when none moved. */
+export function renderDoc(r: ConceptRecord, href?: (link: StoredLink) => string): Doc {
+  if (!href) return r.doc;
+  const moved = r.links.flatMap((l) => {
+    const url = href(l);
+    return url === l.raw ? [] : [[l.at, url] as const];
+  });
+  if (moved.length === 0) return r.doc;
+  const doc = structuredClone(r.doc);
+  const nodes = targets(doc);
+  for (const [at, url] of moved) {
+    const node = nodes[at];
+    if (node) node.url = url;
   }
-  return out + r.body.slice(pos);
+  return doc;
 }
 
 function stringifyFrontmatter(entries: [string, Json][]): string {

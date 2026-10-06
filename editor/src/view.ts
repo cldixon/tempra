@@ -6,10 +6,10 @@
 import type { Leaf, Mark } from "wordgard/doc";
 import { Decoration, PointSet, RangeSet, Tooltip, Widget, Wordgard } from "wordgard/editor";
 import { GardState, Transaction } from "wordgard/state";
+import { type Parsed, toTree } from "./bridge";
 import type { WordDiff } from "./diff";
 import { type Editing, type EditOptions, editing } from "./edit";
-import type { Parsed } from "./parse";
-import { serialize } from "./serialize";
+import type { Doc } from "./tree";
 
 export type { EditOptions } from "./edit";
 
@@ -65,8 +65,8 @@ export interface Reader {
   setEditable(on: boolean, opts?: EditOptions): void;
   /** Whether the body differs from the version the reader was built from. */
   dirty(): boolean;
-  /** The body as markdown: unchanged blocks byte for byte as loaded (see serialize). */
-  markdown(): string;
+  /** The body as a tree, with the IDs of the blocks it kept, for saving. */
+  tree(): Doc;
   /** Puts the loaded version back, dropping every edit. */
   reset(): void;
   destroy(): void;
@@ -272,7 +272,7 @@ export function mountReader(opts: ReaderOptions): Reader {
       // at the start of the body, and on a fresh view could land after their click).
     },
     dirty: () => !wg.state.doc.eq(opts.parsed.doc),
-    markdown: () => serialize(wg.state.doc, opts.parsed),
+    tree: () => toTree(wg.state.doc, opts.parsed.footnotes),
     reset: () => {
       const doc = wg.state.doc;
       wg.dispatch({ changes: { from: 0, to: doc.length, insert: opts.parsed.doc.slice(0) } });

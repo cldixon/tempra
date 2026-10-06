@@ -1,56 +1,97 @@
 import { describe, expect, test } from "bun:test";
+import { linkParam } from "./src/bridge";
 import type { LinkTarget } from "./src/links";
-import { conflicts, merge3, mergeFields, resolve } from "./src/merge";
-import { linkParam } from "./src/parse";
-
-const text = (...lines: string[]) => lines.join("\n");
+import { conflicts, merge3, mergeDocs, mergeFields, resolve } from "./src/merge";
+import { reconcile } from "./src/reconcile";
+import { type Doc, parseMarkdown, toMarkdown } from "./src/tree";
 
 describe("merge3", () => {
-  const base = text("# Margin", "", "Margin is revenue minus cost.", "", "Reported monthly.", "");
+  const key = (x: string) => x;
+  const base = ["# Margin", "Margin is revenue minus cost.", "", "Reported monthly."];
+  const swap = (lines: string[], from: string, to: string) => lines.map((l) => l.replace(from, to));
 
-  test("edits on different lines merge by themselves", () => {
-    const mine = base.replace("revenue minus cost", "net sales minus COGS");
-    const theirs = base.replace("Reported monthly.", "Reported monthly, in USD.");
-    const segs = merge3(base, mine, theirs);
+  test("edits to different items merge by themselves", () => {
+    const mine = swap(base, "revenue minus cost", "net sales minus COGS");
+    const theirs = swap(base, "Reported monthly.", "Reported monthly, in USD.");
+    const segs = merge3(base, mine, theirs, key);
     expect(conflicts(segs)).toHaveLength(0);
-    expect(resolve(segs, () => "mine")).toBe(
-      text("# Margin", "", "Margin is net sales minus COGS.", "", "Reported monthly, in USD.", ""),
-    );
+    expect(resolve(segs, () => "mine")).toEqual([
+      "# Margin",
+      "Margin is net sales minus COGS.",
+      "",
+      "Reported monthly, in USD.",
+    ]);
   });
 
   test("an insertion and an edit elsewhere both land", () => {
-    const mine = base.replace("# Margin\n", "# Margin\n\nAn intro.\n");
-    const theirs = base.replace("Reported monthly.", "Reported weekly.");
-    const out = resolve(merge3(base, mine, theirs), () => "mine");
-    expect(out).toContain("An intro.");
-    expect(out).toContain("Reported weekly.");
+    const mine = ["# Margin", "An intro.", ...base.slice(1)];
+    const theirs = swap(base, "monthly", "weekly");
+    const out = resolve(merge3(base, mine, theirs, key), () => "mine");
+    expect(out).toEqual([
+      "# Margin",
+      "An intro.",
+      "Margin is revenue minus cost.",
+      "",
+      "Reported weekly.",
+    ]);
   });
 
-  test("the same line changed both ways is a conflict with both sides", () => {
-    const mine = base.replace("revenue minus cost", "net sales minus COGS");
-    const theirs = base.replace("revenue minus cost", "revenue less returns");
-    const segs = merge3(base, mine, theirs);
+  test("the same item changed both ways is a conflict with both sides", () => {
+    const mine = swap(base, "revenue minus cost", "net sales minus COGS");
+    const theirs = swap(base, "revenue minus cost", "revenue less returns");
+    const segs = merge3(base, mine, theirs, key);
     const c = conflicts(segs);
     expect(c).toHaveLength(1);
     expect(c[0]?.mine).toEqual(["Margin is net sales minus COGS."]);
     expect(c[0]?.theirs).toEqual(["Margin is revenue less returns."]);
-    expect(resolve(segs, () => "theirs")).toBe(theirs);
-    expect(resolve(segs, () => "mine")).toBe(mine);
+    expect(resolve(segs, () => "theirs")).toEqual(theirs);
+    expect(resolve(segs, () => "mine")).toEqual(mine);
   });
 
   test("the same change on both sides is no conflict; unchanged sides return the other", () => {
-    const edited = base.replace("monthly", "weekly");
-    expect(conflicts(merge3(base, edited, edited))).toHaveLength(0);
-    expect(resolve(merge3(base, base, edited), () => "mine")).toBe(edited);
-    expect(resolve(merge3(base, edited, base), () => "mine")).toBe(edited);
+    const edited = swap(base, "monthly", "weekly");
+    expect(conflicts(merge3(base, edited, edited, key))).toHaveLength(0);
+    expect(resolve(merge3(base, base, edited, key), () => "mine")).toEqual(edited);
+    expect(resolve(merge3(base, edited, base, key), () => "mine")).toEqual(edited);
   });
 
   test("a deletion on one side and an edit elsewhere", () => {
-    const mine = base.replace("Reported monthly.\n", "");
-    const theirs = base.replace("# Margin", "# Gross margin");
-    expect(resolve(merge3(base, mine, theirs), () => "mine")).toBe(
-      text("# Gross margin", "", "Margin is revenue minus cost.", "", ""),
+    const mine = base.slice(0, 3);
+    const theirs = swap(base, "# Margin", "# Gross margin");
+    expect(resolve(merge3(base, mine, theirs, key), () => "mine")).toEqual([
+      "# Gross margin",
+      "Margin is revenue minus cost.",
+      "",
+    ]);
+  });
+});
+
+describe("mergeDocs", () => {
+  const body = "# Margin\n\nMargin is revenue minus cost.\n\nReported monthly.";
+  const edit = (doc: Doc, from: string, to: string): Doc =>
+    reconcile(doc, parseMarkdown(toMarkdown(doc).replace(from, to)));
+
+  test("a person and an agent editing different blocks merge without asking", () => {
+    const base = reconcile(null, parseMarkdown(body));
+    const mine = edit(base, "revenue minus cost", "net sales minus COGS");
+    const theirs = edit(base, "monthly", "weekly");
+    const segs = mergeDocs(base, mine, theirs);
+    expect(conflicts(segs)).toHaveLength(0);
+    const merged: Doc = { type: "root", children: resolve(segs, () => "mine") };
+    expect(toMarkdown(merged)).toBe(
+      "# Margin\n\nMargin is net sales minus COGS.\n\nReported weekly.\n",
     );
+  });
+
+  test("both editing one block is a conflict over that block", () => {
+    const base = reconcile(null, parseMarkdown(body));
+    const mine = edit(base, "revenue minus cost", "net sales");
+    const theirs = edit(base, "revenue minus cost", "turnover");
+    const c = conflicts(mergeDocs(base, mine, theirs));
+    expect(c).toHaveLength(1);
+    expect(c[0]?.mine.map((n) => (n as { id?: string }).id)).toEqual([
+      (base.children[1] as { id?: string }).id,
+    ]);
   });
 });
 

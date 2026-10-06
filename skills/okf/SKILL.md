@@ -60,6 +60,7 @@ Gross margin equals recognized [revenue](/metrics/revenue.md) minus full COGS.[^
 ## Editing
 
 - `edit` for small changes: find-and-replace on the document as `read` shows it, frontmatter included. Each `old` must match once; quote enough context.
+- Bodies are stored in a canonical form: `-` bullets, `*` emphasis, ATX headings, fenced code, padded tables. What you write reads back normalized, and is byte-stable after that; quote `old` from what `read` shows, not from what you sent.
 - `write` for a new concept or a full rewrite. Replacing needs `if_match`.
 - `batch` for related changes (a new concept plus the links to it; a rename plus fixes) so they land as one request.
 - `move` renames a file or a whole directory. Links keep working; do not fix them by hand.
@@ -97,7 +98,7 @@ Comments are how people ask you for changes. A thread sits on a concept, often o
 - Make the change the thread asks for with the normal write tools, then `comment` with `reply` saying what you did, and `resolve` (a resolve can carry that closing reply).
 - Unsure what is meant? `reply` with a question and leave the thread open. If the last reply is yours, wait for an answer.
 - Resolve only what you addressed. `reopen` a thread you resolved by mistake.
-- You can start a thread too (`comment` with `open`, a `path` and optionally a `quote` copied exactly from the body), to ask a person something you cannot decide.
+- You can start a thread too (`comment` with `open`, a `path` and optionally a `quote` copied from the body as `read` shows it; it is matched by the text it reads as, markup aside), to ask a person something you cannot decide.
 - An outdated thread's quote is gone from the body; it may already be fixed. Check, then answer it.
 
 ## When to split a concept

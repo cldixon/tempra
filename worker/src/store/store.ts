@@ -1,7 +1,15 @@
 import { hmac } from "@noble/hashes/hmac.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex, hexToBytes, randomBytes } from "@noble/hashes/utils.js";
-import { locate, occurrences, selectorAt } from "@tempra/editor/anchor";
+import {
+  type Doc,
+  docText,
+  locate,
+  occurrences,
+  quoteText,
+  selectorAt,
+  toMarkdown,
+} from "@tempra/editor/doc";
 import { stringify as yamlStringify } from "yaml";
 import {
   buildRecord,
@@ -9,6 +17,7 @@ import {
   field,
   parseConcept,
   renderConcept,
+  renderDoc,
   serializeRecord,
   sourceCandidates,
 } from "../okf/concept";
@@ -16,7 +25,7 @@ import { type LogRequest, renderIndex, renderLog } from "../okf/derived";
 import { unifiedDiff } from "../okf/diff";
 import { sha256Hex } from "../okf/hash";
 import { lintFields } from "../okf/lint";
-import { scanBody } from "../okf/markdown";
+import { scanDoc } from "../okf/markdown";
 import {
   basename,
   dirname,
@@ -70,7 +79,11 @@ export interface BlobRef {
   media: string | null;
 }
 
-export type ConceptContent = string | { frontmatter: JsonObject; body: string };
+/**
+ * A concept to write: OKF markdown (agents, import), or the app's frontmatter and stored tree,
+ * whose block IDs are kept where they name blocks of the current version.
+ */
+export type ConceptContent = string | { frontmatter: JsonObject; doc: Doc };
 
 export type WriteOp =
   | {
@@ -194,7 +207,8 @@ export type FileView =
       seq: number;
       markdown: string;
       frontmatter: JsonObject;
-      body: string;
+      /** The body as a tree, links at their targets' current paths. */
+      doc: Doc;
       lint: LintWarning[];
       trust_tier: TrustTier;
       stale: boolean;
@@ -272,8 +286,21 @@ function brokenLink(kind: string, raw: string, path: string): LintWarning {
 
 /** Links to `index.md`, `log.md` or a directory name synthesized files, not concepts. */
 function isDerivedTarget(link: { raw: string; path: string }): boolean {
-  const raw = splitAnchor(link.raw.replace(/^<|>$/g, "")).path;
+  const raw = splitAnchor(link.raw).path;
   return isReserved(link.path) || raw.endsWith("/");
+}
+
+/** The markdown of a tree the app sent; refused when it is not one. */
+function bodyOf(doc: unknown): string {
+  const bad = () =>
+    new OkfError(400, "bad_doc", "`doc` must be a body tree as the API returns it.");
+  if (!doc || typeof doc !== "object" || (doc as Doc).type !== "root") throw bad();
+  if (!Array.isArray((doc as Doc).children)) throw bad();
+  try {
+    return toMarkdown(doc as Doc);
+  } catch {
+    throw bad();
+  }
 }
 
 /**
@@ -639,17 +666,18 @@ export class LibraryStore {
     const markdown =
       typeof content === "string"
         ? content
-        : `---\n${yamlStringify(content.frontmatter ?? {})}---\n${content.body ?? ""}`;
+        : `---\n${yamlStringify(content.frontmatter ?? {})}---\n${bodyOf(content.doc)}`;
     const curConcept = cur?.kind === "concept" ? cur : undefined;
     const storedVerified = curConcept ? this.verifiedAt(curConcept.concept_id, cur?.seq ?? 0) : [];
+    const prev = curConcept ? this.record(curConcept.hash) : null;
     const built = buildRecord(parseConcept(markdown), {
       path,
       mode: w.mode === "import" ? "import" : "write",
       actor: w.ctx.actor,
       now: w.now,
-      stored: curConcept
-        ? { generated: this.record(curConcept.hash).generated, verified: storedVerified }
-        : null,
+      stored: prev ? { generated: prev.generated, verified: storedVerified } : null,
+      prev: prev?.doc ?? null,
+      hints: typeof content === "string" ? null : content.doc,
     });
     // An ordinary write lapses every earlier verification (spec: What the service derives); with
     // one-second timestamps, keep the new stamp strictly after the latest one.
@@ -1156,7 +1184,7 @@ export class LibraryStore {
     this.sql.run("DELETE FROM sources WHERE concept_id = ?", id);
     const sources = field(r, "sources");
     if (Array.isArray(sources)) {
-      const counts = scanBody(r.body, path).footnoteCounts;
+      const counts = scanDoc(r.doc, path).footnoteCounts;
       sources.forEach((s, i) => {
         if (!s || typeof s !== "object" || Array.isArray(s)) return;
         const resource = str(s.resource);
@@ -1264,9 +1292,7 @@ export class LibraryStore {
     if (isDerivedTarget(link)) return link.raw;
     const target = this.targetAt(snap, link);
     if (!target) return link.raw;
-    const source = "index" in link;
-    const angle = !source && link.raw.startsWith("<") && link.raw.endsWith(">");
-    const written = splitAnchor(angle ? link.raw.slice(1, -1) : link.raw).path;
+    const written = splitAnchor(link.raw).path;
     const resolved =
       link.form === "root"
         ? normalizePath(safeDecode(written))
@@ -1281,11 +1307,7 @@ export class LibraryStore {
     }
     // A link written as a concept ID (no `.md`) keeps that form.
     if (!written.endsWith(".md") && next.endsWith(".md")) next = next.slice(0, -3);
-    // A frontmatter value needs no URL escaping.
-    if (source) return next + (link.anchor ?? "");
-    next = angle ? next : next.replace(/[ ()]/g, (c) => encodeURIComponent(c));
-    const out = next + (link.anchor ?? "");
-    return angle ? `<${out}>` : out;
+    return next + (link.anchor ?? "");
   }
 
   /** A link's target as of the snapshot: by ID, else by path, else through a redirect. */
@@ -1306,7 +1328,7 @@ export class LibraryStore {
         { code: "unparseable_frontmatter", message: "Frontmatter could not be parsed as YAML." },
       ];
     }
-    return lintFields(r.fm, r.generated, verified, scanBody(r.body, path));
+    return lintFields(r.fm, r.generated, verified, scanDoc(r.doc, path));
   }
 
   /** Lint of a past version: its field lint and its links that were broken as of the snapshot. */
@@ -1438,7 +1460,7 @@ export class LibraryStore {
       seq: e.seq,
       markdown,
       frontmatter,
-      body: parsed.body,
+      doc: renderDoc(r, (l) => this.href(snap, e, l)),
       lint,
       trust_tier: trustTier(r.generated, verified),
       stale: isStale(field(r, "stale_after"), this.clock().getTime()),
@@ -1877,7 +1899,7 @@ export class LibraryStore {
     const e = snap.lookup(normalizePath(input) ?? "");
     if (e?.kind !== "concept") throw notFound(input);
     const r = this.record(e.hash);
-    const counts = scanBody(r.body, e.path).footnoteCounts;
+    const counts = scanDoc(r.doc, e.path).footnoteCounts;
     const list = field(r, "sources");
     const ids = new Set<string>();
     const sources: JsonObject[] = [];
@@ -2136,11 +2158,14 @@ export class LibraryStore {
     const body = commentBody(a.body, true) as string;
     let anchor: StoredAnchor | null = null;
     if (a.anchor) {
-      const quote = checkQuote(a.anchor.quote);
-      const text = this.bodyOf(row);
-      const starts = occurrences(text, quote);
-      // Where the client saw the quote: a whole offset inside the body, or nothing.
       const raw = a.anchor.from;
+      // The app sends the document's text and where it saw it; an agent, markdown as read.
+      const quote = checkQuote(
+        typeof raw === "number" ? a.anchor.quote : quoteText(String(a.anchor.quote ?? "")),
+      );
+      const doc = this.textOf(row);
+      const text = doc.text;
+      const starts = occurrences(text, quote);
       const hint =
         typeof raw === "number" && Number.isInteger(raw) && raw >= 0 && raw <= text.length
           ? raw
@@ -2165,7 +2190,7 @@ export class LibraryStore {
           `The quote is not in the current body of ${row.path}; read it again and quote it exactly, or comment on the whole concept.`,
         );
       }
-      anchor = { ...selectorAt(text, at, at + quote.length), seq: this.headSeq() };
+      anchor = { ...selectorAt(doc, at, at + quote.length), seq: this.headSeq() };
     }
     const id = crypto.randomUUID();
     const commentId = crypto.randomUUID();
@@ -2271,9 +2296,9 @@ export class LibraryStore {
     );
   }
 
-  /** A concept's body at head as readers see it (links rendered), which anchors quote. */
-  private bodyOf(e: Entry): string {
-    return parseConcept(this.renderEntry(this.snapshot(), e, false)).body;
+  /** A concept's text at head, which anchors quote. */
+  private textOf(e: Entry) {
+    return docText(this.record(e.hash).doc);
   }
 
   private threadRows(where: string, params: SqlValue[], tail = "") {
@@ -2300,16 +2325,16 @@ export class LibraryStore {
         byThread.set(c.thread_id, list);
       }
     }
-    // One render per concept, however many of its threads are on the page.
-    const bodies = new Map<string, string>();
+    // One text per concept, however many of its threads are on the page.
+    const texts = new Map<string, ReturnType<typeof docText>>();
     return rows.map((r) => {
       const anchor = r.anchor ? (JSON.parse(r.anchor) as StoredAnchor) : null;
       let located: { from: number; to: number } | null = null;
       if (anchor) {
-        let text = bodies.get(r.concept_id);
+        let text = texts.get(r.concept_id);
         if (text === undefined) {
-          text = this.bodyOf(r);
-          bodies.set(r.concept_id, text);
+          text = this.textOf(r);
+          texts.set(r.concept_id, text);
         }
         located = locate(text, anchor);
       }

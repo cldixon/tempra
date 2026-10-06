@@ -27,7 +27,7 @@ export function Reader(props: {
   onMark?(id: string | null): void;
   /** Offers Comment on selected text (the reader's selection toolbar). */
   onComment?(range: { from: number; to: number }): void;
-  /** Set to the mounted reader, for editing (setEditable, markdown, reset). */
+  /** Set to the mounted reader, for editing (setEditable, tree, reset). */
   handle?: RefObject<ReaderHandle | null>;
 }) {
   const host = useRef<HTMLDivElement>(null);

@@ -2,11 +2,15 @@ import type { SqlHandle } from "./sql";
 
 /**
  * The Library DO schema (spec: Data model). `blobs` and `events` are the source of truth and are
- * append-only; every other table is derived and can be rebuilt by replaying `events`.
+ * append-only; every other table is derived and can be rebuilt by replaying `events`. A concept's
+ * blob is its record: the stored tree and its markdown (tempra-dev: decisions/structured-documents);
+ * `fts` indexes the markdown.
+ *
+ * Version 1 is a restart (TEMPRA-22): libraries stored in an earlier format are not read.
  */
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 1;
 
-const V1 = `
+const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 
 CREATE TABLE IF NOT EXISTS blobs (
@@ -60,13 +64,15 @@ CREATE TABLE IF NOT EXISTS verifications (
 );
 CREATE INDEX IF NOT EXISTS verifications_concept ON verifications(concept_id, seq);
 CREATE TABLE IF NOT EXISTS tags (concept_id TEXT, tag TEXT, PRIMARY KEY (concept_id, tag));
+-- Body links and internal \`sources[].resource\` citations, told apart by \`kind\`.
 CREATE TABLE IF NOT EXISTS links (
   from_id    TEXT NOT NULL,
   to_id      TEXT,
   to_path    TEXT,
   anchor     TEXT,
   form       TEXT NOT NULL,
-  raw        TEXT NOT NULL
+  raw        TEXT NOT NULL,
+  kind       TEXT NOT NULL DEFAULT 'body'
 );
 CREATE INDEX IF NOT EXISTS links_from_id ON links(from_id);
 CREATE INDEX IF NOT EXISTS links_to_id ON links(to_id);
@@ -87,25 +93,14 @@ CREATE INDEX IF NOT EXISTS sources_concept ON sources(concept_id);
 CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(concept_id UNINDEXED, title, body, tags);
 
 CREATE TABLE IF NOT EXISTS cursors (maintainer TEXT PRIMARY KEY, seq INTEGER NOT NULL);
+-- One row per day, concept and actor, so reads are counted with an upsert.
 CREATE TABLE IF NOT EXISTS access_log (day TEXT, concept_id TEXT, actor TEXT, reads INTEGER);
+CREATE UNIQUE INDEX IF NOT EXISTS access_log_key ON access_log(day, concept_id, actor);
 CREATE TABLE IF NOT EXISTS flags (
   concept_id TEXT, kind TEXT, since_seq INTEGER, detail TEXT,
   PRIMARY KEY (concept_id, kind)
 );
-`;
 
-/** v2: links also carry internal `sources[].resource` citations, told apart by `kind`. */
-const V2 = `ALTER TABLE links ADD COLUMN kind TEXT NOT NULL DEFAULT 'body';`;
-
-/** v3: one access_log row per day, concept and actor, so reads can be counted with an upsert. */
-const V3 = `CREATE UNIQUE INDEX IF NOT EXISTS access_log_key ON access_log(day, concept_id, actor);`;
-
-/**
- * v4: comment threads (tempra-dev: app/comments). Derived from `comment` events, whose meta
- * carries each action in full; written in the same transaction as the event. The partial index
- * keeps open-thread queries (work queue, tree counts) independent of resolved history.
- */
-const V4 = `
 CREATE TABLE IF NOT EXISTS threads (
   id           TEXT PRIMARY KEY,
   concept_id   TEXT NOT NULL,
@@ -136,20 +131,21 @@ CREATE INDEX IF NOT EXISTS comments_thread ON comments(thread_id, seq);
 CREATE INDEX IF NOT EXISTS events_content ON events(concept_id, seq, op) WHERE op != 'comment';
 `;
 
-/** Creates or migrates the schema forward; a no-op when already current. */
+/**
+ * Creates the schema in a new library; a no-op when it is current. A library stored in another
+ * version is refused: there is no migration across the TEMPRA-22 restart.
+ */
 export function migrate(sql: SqlHandle): void {
   sql.script("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);");
   const row = sql.all<{ value: string }>("SELECT value FROM meta WHERE key = 'schema_version'")[0];
-  const current = row ? Number(row.value) : 0;
-  if (current >= SCHEMA_VERSION) return;
-  sql.transaction(() => {
-    if (current < 1) sql.script(V1);
-    if (current < 2) sql.script(V2);
-    if (current < 3) sql.script(V3);
-    if (current < 4) sql.script(V4);
-    sql.run(
-      "INSERT INTO meta (key, value) VALUES ('schema_version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-      String(SCHEMA_VERSION),
+  if (row && Number(row.value) === SCHEMA_VERSION) return;
+  if (row) {
+    throw new Error(
+      `Library schema version ${row.value} is not ${SCHEMA_VERSION}; it predates the TEMPRA-22 restart and must be deleted.`,
     );
+  }
+  sql.transaction(() => {
+    sql.script(SCHEMA);
+    sql.run("INSERT INTO meta (key, value) VALUES ('schema_version', ?)", String(SCHEMA_VERSION));
   });
 }

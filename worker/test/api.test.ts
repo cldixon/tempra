@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { type Doc, parseMarkdown, toMarkdown } from "@tempra/editor/doc";
 import { parseConcept } from "../src/okf/concept";
 import { readTar, writeTar } from "../src/util/tar";
 import { compareBundle } from "./compare";
@@ -68,7 +69,7 @@ describe("files", () => {
     expect(((await r.json()) as { current_hash: string }).current_hash).toBe(created.hash);
     r = await req("/files/notes/a.md", {
       method: "PUT",
-      body: JSON.stringify({ frontmatter: { type: "Note", title: "A" }, body: "v2\n" }),
+      body: JSON.stringify({ frontmatter: { type: "Note", title: "A" }, doc: parseMarkdown("v2") }),
       headers: { "Content-Type": "application/json", "If-Match": `"${created.hash}"` },
     });
     expect(r.status).toBe(200);
@@ -94,9 +95,9 @@ describe("files", () => {
       await req("/files/notes/c.md", { headers: { Accept: "application/json" } })
     ).json()) as {
       hash: string;
-      body: string;
+      doc: Doc;
     };
-    expect(moved.body).toBe("v3\n");
+    expect(toMarkdown(moved.doc)).toBe("v3\n");
 
     expect((await req("/files/notes/c.md", { method: "DELETE" })).status).toBe(428);
     r = await req("/files/notes/c.md", { method: "DELETE", headers: { "If-Match": moved.hash } });

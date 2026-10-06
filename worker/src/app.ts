@@ -1,4 +1,5 @@
 import * as design from "@tempra/design";
+import { type Doc, parseMarkdown } from "@tempra/editor/doc";
 import { type Context, Hono } from "hono";
 import { registerAccountApi } from "./account-api";
 import { type Accounts, checkNewToken, type LibraryRef, type User } from "./accounts";
@@ -14,6 +15,7 @@ import {
 import { registerLegalRoutes } from "./legal";
 import { deleteLibrary } from "./lifecycle";
 import { registerAppRoutes } from "./oauth/routes";
+import { splitFrontmatter } from "./okf/concept";
 import { normalizePath, underPrefix } from "./okf/paths";
 import type { JsonObject } from "./okf/types";
 import { fromThisSite } from "./origin";
@@ -258,7 +260,9 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     }
     if (view.kind === "derived") {
       if (wantsJson) {
-        return c.json({ kind: view.kind, path: view.path, seq: view.seq, markdown: view.markdown });
+        // The app draws it like a concept body: as a tree.
+        const doc = parseMarkdown(splitFrontmatter(view.markdown).body);
+        return c.json({ kind: view.kind, path: view.path, seq: view.seq, doc });
       }
       return c.body(view.markdown, 200, { "Content-Type": "text/markdown; charset=utf-8" });
     }
@@ -290,7 +294,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     } else if (isMarkdownRequest(c, path)) {
       const type = (c.req.header("Content-Type") ?? "").toLowerCase();
       const content: ConceptContent = type.startsWith("application/json")
-        ? await json<{ frontmatter: JsonObject; body: string }>(c)
+        ? await json<{ frontmatter: JsonObject; doc: Doc }>(c)
         : await c.req.text();
       op = { op: "write", path, content, if_match: ifMatch, if_none_match: ifNoneMatch };
     } else {

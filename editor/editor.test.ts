@@ -1,25 +1,27 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import type { Nodes } from "mdast";
-import { Leaf, serialize as toHtmlFragment } from "wordgard/doc";
+import { type Leaf, serialize as toHtmlFragment } from "wordgard/doc";
 import {
+  type Doc,
+  docText,
   documentPos,
+  fromTree,
   linkTarget,
-  markdownOffset,
-  Paragraph,
-  parse,
-  parseMdast,
-  serialize,
+  normalize,
+  parseMarkdown,
+  reconcile,
+  textOffset,
   toHTML,
-  toMdast,
+  toMarkdown,
+  toTree,
   wordDiff,
 } from "./src/index";
 
 const FIXTURES = join(import.meta.dir, "..", "fixtures");
 
 /** Every concept body in Google's sample bundles, frontmatter removed. */
-function bodies(): { file: string; body: string }[] {
+export function bodies(): { file: string; body: string }[] {
   const walk = (d: string): string[] =>
     readdirSync(d).flatMap((f) => {
       const p = join(d, f);
@@ -33,16 +35,16 @@ function bodies(): { file: string; body: string }[] {
     }));
 }
 
-/** mdast without positions, for comparing trees. */
-function strip(node: Nodes): unknown {
-  const { position: _p, ...rest } = node as Nodes & { position?: unknown };
-  if ("children" in rest) {
-    return { ...rest, children: (rest.children as Nodes[]).map(strip) };
-  }
-  return rest;
+/** A stored tree for some markdown: parsed, with IDs. */
+const stored = (md: string): Doc => reconcile(null, parseMarkdown(md));
+
+/** The tree survives the trip into Wordgard and back unchanged, IDs included. */
+function bridges(tree: Doc) {
+  const p = fromTree(tree);
+  expect(toTree(p.doc, p.footnotes)).toEqual(tree);
 }
 
-describe("round trip on the sample bundles", () => {
+describe("the sample bundles", () => {
   const all = bodies();
 
   test("there are bodies to test", () => {
@@ -51,89 +53,32 @@ describe("round trip on the sample bundles", () => {
 
   for (const { file, body } of all) {
     test(file, () => {
-      const parsed = parse(body, { path: file });
-      // Unchanged, the body comes back byte for byte.
-      expect(serialize(parsed.doc, parsed)).toBe(body);
-      // Written from scratch, it parses to the same tree.
-      const canonical = serialize(parsed.doc);
-      const again = parseMdast(
-        `${canonical}${parsed.footnotes.length ? "\n\n" : ""}${parsed.footnotes
-          .map((f) => body.slice(f.from, f.to))
-          .join("\n\n")}`,
-      );
-      const original = parseMdast(body);
-      expect(strip(again)).toEqual(strip(original));
-      // And through mdast directly, footnotes included.
-      expect(
-        strip(
-          toMdast(
-            parsed.doc,
-            parsed.footnotes.map((f) => f.mdast),
-          ) as never,
-        ),
-      ).toEqual(
-        strip({
-          ...original,
-          children: [
-            ...original.children.filter((c) => c.type !== "footnoteDefinition"),
-            ...original.children.filter((c) => c.type === "footnoteDefinition"),
-          ],
-        }),
-      );
+      // Normalized once, then byte-stable: written, parsed and written again, the same bytes.
+      const once = normalize(body);
+      expect(normalize(once)).toBe(once);
+      // The canonical form means the same as what was written.
+      expect(parseMarkdown(once)).toEqual(parseMarkdown(body));
+      const tree = stored(body);
+      bridges(tree);
+      // Every textblock of the reader is as long as its text, and every run of text sits where
+      // the document's text has it.
+      const p = fromTree(tree);
+      p.text.blocks.forEach((tb, i) => {
+        const block = p.doc.resolve(p.starts[i] as number).parent.node;
+        const size = block.content.reduce((n, c) => n + c.length, 0);
+        expect({ file, i, size }).toEqual({ file, i, size: tb.to - tb.from });
+      });
+      p.doc.iterate((node, pos) => {
+        if (!node.isText) return;
+        const run = (node as Leaf<string>).param;
+        const at = textOffset(p, pos);
+        expect(p.text.text.slice(at, at + run.length)).toBe(run);
+      });
     });
   }
 });
 
-describe("byte-stable serialization", () => {
-  const body = [
-    "# Title",
-    "",
-    "Some *odd*   spacing and a [link](../x.md 'T').",
-    "",
-    "* star bullets",
-    "* kept",
-    "",
-    "Setext heading",
-    "==============",
-    "",
-    "Cites a source.[^s]",
-    "",
-    "[^s]: The source.",
-    "",
-  ].join("\n");
-
-  test("an untouched body is unchanged", () => {
-    const p = parse(body);
-    expect(serialize(p.doc, p)).toBe(body);
-  });
-
-  test("changing one block rewrites only that block", () => {
-    const p = parse(body);
-    const blocks = [...p.doc.content];
-    blocks[1] = Paragraph.create([Leaf.text("A new paragraph.")]);
-    const doc = p.doc.schema.doc(blocks);
-    const out = serialize(doc, p);
-    expect(out).toBe(
-      body.replace("Some *odd*   spacing and a [link](../x.md 'T').", "A new paragraph."),
-    );
-  });
-
-  test("removing the last block keeps the footnotes", () => {
-    const p = parse(body);
-    const doc = p.doc.schema.doc(p.doc.content.slice(0, -1));
-    const out = serialize(doc, p);
-    expect(out).toContain("Setext heading\n==============");
-    expect(out).not.toContain("Cites a source.");
-    expect(out.endsWith("[^s]: The source.\n")).toBe(true);
-  });
-
-  test("an empty body", () => {
-    const p = parse("");
-    expect(serialize(p.doc, p)).toBe("");
-  });
-});
-
-describe("constructs the schema does not model are kept as source", () => {
+describe("constructs the schema does not model are kept", () => {
   const cases = [
     "Inline <span class=x>html</span> stays.",
     "<div>\nA block of HTML\n</div>",
@@ -148,12 +93,14 @@ describe("constructs the schema does not model are kept as source", () => {
     "> quote\n>\n> - in a list",
     "~~struck~~ and ***both*** and *a **b***",
     "Autolink https://example.com and <mailto:a@b.c>.",
+    "Cites [^src] with no definition, and \\[^not] a reference.",
   ];
   for (const md of cases) {
     test(JSON.stringify(md.slice(0, 30)), () => {
-      const p = parse(md);
-      expect(serialize(p.doc, p)).toBe(md);
-      expect(strip(parseMdast(serialize(p.doc)))).toEqual(strip(parseMdast(md)));
+      const once = normalize(md);
+      expect(normalize(once)).toBe(once);
+      expect(parseMarkdown(once)).toEqual(parseMarkdown(md));
+      bridges(stored(md));
     });
   }
 
@@ -161,17 +108,26 @@ describe("constructs the schema does not model are kept as source", () => {
     for (let i = 0; i < 200; i++) {
       const tag = `x${Math.random().toString(36).slice(2, 7)}`;
       const md = `Before <${tag} data-n="${i}">mid</${tag}> after ${i}.`;
-      const p = parse(md);
-      expect(serialize(p.doc, p)).toBe(md);
-      expect(serialize(p.doc)).toBe(`${md}\n`);
+      expect(normalize(md)).toBe(`${md}\n`);
+      bridges(stored(md));
     }
+  });
+
+  test("a footnote reference written with no definition stays one", () => {
+    expect(normalize("See [^a].")).toBe("See [^a].\n");
+    expect(normalize("Not \\[^a].")).toBe("Not \\[^a].\n");
+  });
+
+  test("an empty body is empty", () => {
+    expect(normalize("")).toBe("");
+    expect(toTree(fromTree(stored("")).doc)).toEqual({ type: "root", children: [] });
   });
 });
 
 describe("links, footnotes and headings for the reader", () => {
   test("hrefs come from the caller; unsafe schemes never reach the document", () => {
     const md = "[a](/x.md) [b](javascript:alert(1)) [c](https://e.com) ![i](/img.png) [d](y.md#h)";
-    const p = parse(md, {
+    const p = fromTree(stored(md), {
       path: "dir/c.md",
       href: (t, _raw, kind) =>
         t === null
@@ -187,29 +143,39 @@ describe("links, footnotes and headings for the reader", () => {
     expect(html).toContain('href="https://e.com" rel="noopener noreferrer"');
     expect(html).toContain('src="/lib/img.png?raw"');
     expect(html).toContain('class="internal broken"');
-    // Serialization keeps what was written, whatever the reader made of it.
-    expect(serialize(p.doc, p)).toBe(md);
-    expect(strip(parseMdast(serialize(p.doc)))).toEqual(strip(parseMdast(md)));
+    // The tree keeps what was written, whatever the reader made of it.
+    expect(toMarkdown(toTree(p.doc, p.footnotes))).toBe(normalize(md));
   });
 
   test("footnote references point where the caller says; headings get the server's anchors", () => {
     const md = "# Intro\n\n## Intro\n\n## `code` & more!\n\nSee [^a] and [^b].\n\n[^a]: Note.";
-    const p = parse(md, { footnote: (label, defined) => (defined ? `#src-${label}` : null) });
+    const p = fromTree(stored(md), {
+      footnote: (label, defined) => (defined ? `#src-${label}` : null),
+    });
     const html = toHtmlFragment(p.doc).toHTML();
-    expect(html).toContain('<h1 id="intro">');
-    expect(html).toContain('<h2 id="intro-1">');
-    expect(html).toContain('<h2 id="code-more">');
+    expect(html).toContain(`id="intro">`);
+    expect(html).toContain(`id="intro-1">`);
+    expect(html).toContain(`id="code-more">`);
     expect(html).toContain('<sup class="fnref" data-label="a"><a href="#src-a">[a]</a></sup>');
-    // GFM leaves a reference with no definition as literal text, as the server shows it.
-    expect(html).toContain("and [^b].");
+    // A reference with no definition is still a reference, with no link.
+    expect(html).toContain('<sup class="fnref" data-label="b">[b]</sup>');
     expect(p.headings.map((h) => h.id)).toEqual(["intro", "intro-1", "code-more"]);
     expect(p.footnotes.map((f) => f.label)).toEqual(["a"]);
-    expect(toHtmlFragment(p.footnotes[0]?.doc as never).toHTML()).toBe("<p>Note.</p>");
+    expect(toHtmlFragment(p.footnotes[0]?.doc as never).toHTML()).toMatch(
+      /^<p data-block="\w+">Note.<\/p>$/,
+    );
+  });
+
+  test("blocks carry their IDs into the reader", () => {
+    const tree = stored("One.\n\nTwo.");
+    const ids = tree.children.map((c) => (c as { id?: string }).id);
+    const html = toHTML(fromTree(tree).doc);
+    for (const id of ids) expect(html).toContain(`data-block="${id}"`);
   });
 
   test("attribute values are escaped", () => {
-    const p = parse(
-      '[x](https://e.com/"onmouseover="alert(1)) ![a"b](https://e.com/i.png "t\\"x")',
+    const p = fromTree(
+      stored('[x](https://e.com/"onmouseover="alert(1)) ![a"b](https://e.com/i.png "t\\"x")'),
     );
     const html = toHTML(p.doc);
     expect(html).not.toMatch(/"\s*onmouseover=/);
@@ -217,7 +183,9 @@ describe("links, footnotes and headings for the reader", () => {
   });
 
   test("raw HTML is shown as code, never rendered", () => {
-    const html = toHtmlFragment(parse('Hi <img src=x onerror="alert(1)"> there').doc).toHTML();
+    const html = toHtmlFragment(
+      fromTree(stored('Hi <img src=x onerror="alert(1)"> there')).doc,
+    ).toHTML();
     expect(html).toContain('<code class="raw">&lt;img src=x onerror="alert(1)"></code>');
     expect(html).not.toContain("<img");
   });
@@ -240,29 +208,35 @@ describe("links, footnotes and headings for the reader", () => {
   });
 });
 
-describe("the position map", () => {
-  test("document text and markdown offsets agree, both ways", () => {
-    for (const { file, body } of bodies()) {
-      const p = parse(body, { path: file });
-      for (const s of p.segments) {
-        const text = p.doc.textContent({ from: s.pos, to: s.end });
-        if (s.end - s.pos === s.to - s.from) {
-          expect({ file, text }).toEqual({ file, text: body.slice(s.from, s.to) });
-          const mid = s.pos + Math.floor((s.end - s.pos) / 2);
-          expect(documentPos(p, markdownOffset(p, mid))).toBe(mid);
-        }
-      }
+describe("text offsets and document positions", () => {
+  test("agree both ways inside every textblock of every fixture", () => {
+    for (const { body } of bodies()) {
+      const p = fromTree(stored(body));
+      p.text.blocks.forEach((tb, i) => {
+        const mid = tb.from + Math.floor((tb.to - tb.from) / 2);
+        const pos = documentPos(p, mid);
+        expect(pos).toBe((p.starts[i] as number) + (mid - tb.from));
+        expect(textOffset(p, pos)).toBe(mid);
+      });
     }
+  });
+
+  test("the text reads as the page does", () => {
+    const t = docText(
+      parseMarkdown("# A *b*\n\n- `c` [d](/e.md)\n\n| x | y |\n| - | - |\n| 1 | 2 |"),
+    );
+    expect(t.text).toBe("A b\nc d\nx\ny\n1\n2");
   });
 });
 
 describe("word diff", () => {
-  const text = (doc: import("wordgard/doc").Plot.Doc, r: { from: number; to: number }) =>
-    doc.textContent({ from: r.from, to: r.to });
+  const doc = (md: string) => fromTree(stored(md)).doc;
+  const text = (d: import("wordgard/doc").Plot.Doc, r: { from: number; to: number }) =>
+    d.textContent({ from: r.from, to: r.to });
 
   test("added words are ranges in the newer document; removed words sit where they were", () => {
-    const older = parse("The margin is 40 percent.\n\nSecond paragraph stays.").doc;
-    const newer = parse("The gross margin is 42 percent.\n\nSecond paragraph stays.").doc;
+    const older = doc("The margin is 40 percent.\n\nSecond paragraph stays.");
+    const newer = doc("The gross margin is 42 percent.\n\nSecond paragraph stays.");
     const d = wordDiff(older, newer);
     expect(d.added.map((r) => text(newer, r))).toEqual(["gross ", "42 "]);
     expect(d.removed.map((r) => r.text)).toEqual(["40"]);
@@ -271,16 +245,16 @@ describe("word diff", () => {
   });
 
   test("identical versions have no changes; a whole new block is added", () => {
-    const a = parse("Same words here.").doc;
-    expect(wordDiff(a, parse("Same words here.").doc)).toEqual({ added: [], removed: [] });
-    const b = parse("Same words here.\n\nA new block.").doc;
+    const a = doc("Same words here.");
+    expect(wordDiff(a, doc("Same words here."))).toEqual({ added: [], removed: [] });
+    const b = doc("Same words here.\n\nA new block.");
     expect(wordDiff(a, b).added.map((r) => text(b, r))).toEqual(["A new block."]);
   });
 
   test("works across every fixture against an edited copy", () => {
     for (const { body } of bodies().slice(0, 10)) {
-      const older = parse(body).doc;
-      const newer = parse(`${body.trimEnd()}\n\nAn added paragraph.\n`).doc;
+      const older = doc(body);
+      const newer = doc(`${body.trimEnd()}\n\nAn added paragraph.\n`);
       const d = wordDiff(older, newer);
       expect(d.added.map((r) => text(newer, r)).join("")).toBe("An added paragraph.");
       expect(wordDiff(older, older)).toEqual({ added: [], removed: [] });

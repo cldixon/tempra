@@ -1,23 +1,26 @@
 /**
  * Three-way merge for a person's edit that met a newer version (tempra-dev: app/editor): base is
- * the version the edit started from, mine the edit, theirs the version now in the library.
- * Changes on different lines merge by themselves; where both sides changed the same lines the
- * result holds a conflict for the person to settle. Plain strings, no Wordgard.
+ * the version the edit started from, mine the edit, theirs the version now in the library. The
+ * body merges block by block: changes to different blocks merge by themselves; where both sides
+ * changed the same blocks the result holds a conflict for the person to settle. Frontmatter merges
+ * field by field. No Wordgard.
  */
+import type { RootContent } from "mdast";
+import { type Doc, idOf, signature } from "./tree";
 
-export type Segment =
-  | { kind: "same"; lines: string[] }
-  | { kind: "conflict"; base: string[]; mine: string[]; theirs: string[] };
+export type Segment<T> =
+  | { kind: "same"; items: T[] }
+  | { kind: "conflict"; base: T[]; mine: T[]; theirs: T[] };
 
 const equal = (a: readonly string[], b: readonly string[]) =>
   a.length === b.length && a.every((x, i) => x === b[i]);
 
 /**
- * For each line of `a`, the index of the line of `b` it is matched to in a longest common
+ * For each item of `a`, the index of the item of `b` it is matched to in a longest common
  * subsequence (undefined when unmatched). Common prefix and suffix are matched first, so the
  * quadratic table only covers the part that differs.
  */
-function matches(a: readonly string[], b: readonly string[]): (number | undefined)[] {
+export function lcs(a: readonly string[], b: readonly string[]): (number | undefined)[] {
   const out: (number | undefined)[] = new Array(a.length).fill(undefined);
   let start = 0;
   while (start < a.length && start < b.length && a[start] === b[start]) {
@@ -58,43 +61,51 @@ function matches(a: readonly string[], b: readonly string[]): (number | undefine
   return out;
 }
 
-/** Merges two edits of `base` line by line (diff3). */
-export function merge3(base: string, mine: string, theirs: string): Segment[] {
-  const B = base.split("\n");
-  const M = mine.split("\n");
-  const T = theirs.split("\n");
-  const toMine = matches(B, M);
-  const toTheirs = matches(B, T);
-  const out: Segment[] = [];
-  const same = (lines: string[]) => {
-    if (lines.length === 0) return;
+/** Merges two edits of `base` item by item (diff3), items being equal when their keys are. */
+export function merge3<T>(
+  base: readonly T[],
+  mine: readonly T[],
+  theirs: readonly T[],
+  key: (item: T) => string,
+): Segment<T>[] {
+  const [B, M, T] = [base.map(key), mine.map(key), theirs.map(key)];
+  const toMine = lcs(B, M);
+  const toTheirs = lcs(B, T);
+  const out: Segment<T>[] = [];
+  const same = (items: readonly T[]) => {
+    if (items.length === 0) return;
     const last = out.at(-1);
-    if (last?.kind === "same") last.lines.push(...lines);
-    else out.push({ kind: "same", lines: [...lines] });
-  };
-  const chunk = (b: string[], m: string[], t: string[]) => {
-    if (equal(m, b)) same(t);
-    else if (equal(t, b) || equal(m, t)) same(m);
-    else out.push({ kind: "conflict", base: b, mine: m, theirs: t });
+    if (last?.kind === "same") last.items.push(...items);
+    else out.push({ kind: "same", items: [...items] });
   };
   let iB = 0;
   let iM = 0;
   let iT = 0;
   while (iB < B.length || iM < M.length || iT < T.length) {
-    // A stable line: matched on both sides, right where each side stands.
+    // A stable item: matched on both sides, right where each side stands.
     if (iB < B.length && toMine[iB] === iM && toTheirs[iB] === iT) {
-      same([B[iB] as string]);
+      same([base[iB] as T]);
       iB++;
       iM++;
       iT++;
       continue;
     }
-    // The next base line both sides kept ends the unstable chunk.
+    // The next base item both sides kept ends the unstable chunk.
     let j = iB;
     while (j < B.length && (toMine[j] === undefined || toTheirs[j] === undefined)) j++;
     const endM = j < B.length ? (toMine[j] as number) : M.length;
     const endT = j < B.length ? (toTheirs[j] as number) : T.length;
-    chunk(B.slice(iB, j), M.slice(iM, endM), T.slice(iT, endT));
+    const [b, m, t] = [B.slice(iB, j), M.slice(iM, endM), T.slice(iT, endT)];
+    if (equal(m, b)) same(theirs.slice(iT, endT));
+    else if (equal(t, b) || equal(m, t)) same(mine.slice(iM, endM));
+    else {
+      out.push({
+        kind: "conflict",
+        base: base.slice(iB, j),
+        mine: mine.slice(iM, endM),
+        theirs: theirs.slice(iT, endT),
+      });
+    }
     iB = j;
     iM = endM;
     iT = endT;
@@ -102,26 +113,58 @@ export function merge3(base: string, mine: string, theirs: string): Segment[] {
   return out;
 }
 
-/** Whether a merge needs the person: any conflict left. */
-export const conflicts = (segments: readonly Segment[]) =>
-  segments.filter((s): s is Extract<Segment, { kind: "conflict" }> => s.kind === "conflict");
-
-/** The merged text, each conflict settled by `pick(conflict index)`: mine, theirs, or both. */
-export function resolve(
-  segments: readonly Segment[],
-  pick: (index: number) => "mine" | "theirs" | "both",
-): string {
-  const lines: string[] = [];
-  let n = 0;
-  for (const s of segments) {
-    if (s.kind === "same") lines.push(...s.lines);
-    else {
-      const choice = pick(n++);
-      if (choice === "mine" || choice === "both") lines.push(...s.mine);
-      if (choice === "theirs" || choice === "both") lines.push(...s.theirs);
+/**
+ * Merges two edits of a body block by block. The order of blocks merges by ID; then each block
+ * either side changed takes that side's content, and a block both changed differently is a
+ * conflict of its own, so edits to neighbouring blocks never collide.
+ */
+export function mergeDocs(base: Doc, mine: Doc, theirs: Doc): Segment<RootContent>[] {
+  const id = (n: RootContent) => idOf(n) ?? signature(n);
+  const index = (d: Doc) => new Map(d.children.map((n) => [id(n), n]));
+  const [B, M, T] = [index(base), index(mine), index(theirs)];
+  const out: Segment<RootContent>[] = [];
+  const same = (n: RootContent) => {
+    const last = out.at(-1);
+    if (last?.kind === "same") last.items.push(n);
+    else out.push({ kind: "same", items: [n] });
+  };
+  for (const seg of merge3(base.children, mine.children, theirs.children, id)) {
+    if (seg.kind === "conflict") {
+      out.push(seg);
+      continue;
+    }
+    for (const n of seg.items) {
+      const k = id(n);
+      const [b, m, t] = [B.get(k), M.get(k), T.get(k)] as [RootContent, RootContent, RootContent];
+      const [sb, sm, st] = [signature(b), signature(m), signature(t)];
+      if (sm === sb) same(t);
+      else if (st === sb || sm === st) same(m);
+      else out.push({ kind: "conflict", base: [b], mine: [m], theirs: [t] });
     }
   }
-  return lines.join("\n");
+  return out;
+}
+
+/** The conflicts left in a merge: the person settles each. */
+export const conflicts = <T>(segments: readonly Segment<T>[]) =>
+  segments.filter((s): s is Extract<Segment<T>, { kind: "conflict" }> => s.kind === "conflict");
+
+/** The merged items, each conflict settled by `pick(conflict index)`: mine, theirs, or both. */
+export function resolve<T>(
+  segments: readonly Segment<T>[],
+  pick: (index: number) => "mine" | "theirs" | "both",
+): T[] {
+  const out: T[] = [];
+  let n = 0;
+  for (const s of segments) {
+    if (s.kind === "same") out.push(...s.items);
+    else {
+      const choice = pick(n++);
+      if (choice === "mine" || choice === "both") out.push(...s.mine);
+      if (choice === "theirs" || choice === "both") out.push(...s.theirs);
+    }
+  }
+  return out;
 }
 
 export type FieldMerge =

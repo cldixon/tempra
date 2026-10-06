@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { normalize, parseMarkdown } from "@tempra/editor/doc";
 import {
   buildRecord,
   jsonEqual,
@@ -7,7 +8,7 @@ import {
   serializeRecord,
   splitFrontmatter,
 } from "../src/okf/concept";
-import { scanBody } from "../src/okf/markdown";
+import { scanDoc } from "../src/okf/markdown";
 import { isConceptPath, relativePath, resolveLinkPath } from "../src/okf/paths";
 import { trustTier } from "../src/okf/trust";
 import { BUNDLES, loadBundle, text } from "./fixtures";
@@ -31,7 +32,8 @@ describe("OKF module round-trips the sample bundles in memory", () => {
         ).toBe(true);
         expect(jsonEqual(again.generated, parsed.generated)).toBe(true);
         expect(again.verified).toEqual(parsed.verified);
-        expect(again.body).toBe(parsed.body);
+        // The body comes back normalized: written once in the canonical form.
+        expect(again.body).toBe(normalize(parsed.body));
         expect(built.lint.filter((l) => l.code === "missing_type")).toEqual([]);
       }
     });
@@ -87,13 +89,13 @@ describe("parse", () => {
         [{ resource: "https://a.example/x" }, { resource: "https://b.example", title: "B" }],
       ],
     ]);
-    expect(built.record.body).toBe("\n# Definition\nX\n\n");
+    expect(built.record.body).toBe("# Definition\n\nX\n");
   });
 
-  test("record serialization is stable", () => {
+  test("record serialization is stable: the same content again is the same record", () => {
     const md = "---\ntype: A\n---\nx";
     const a = buildRecord(parseConcept(md), { ...opts, path: "a.md" });
-    const b = buildRecord(parseConcept(md), { ...opts, path: "a.md" });
+    const b = buildRecord(parseConcept(md), { ...opts, path: "a.md", prev: a.record.doc });
     expect(serializeRecord(a.record)).toBe(serializeRecord(b.record));
   });
 });
@@ -111,15 +113,14 @@ describe("links", () => {
       "[r]: <d e.md>",
       "[^foot]: text",
     ].join("\n");
-    const scan = scanBody(body, "dir/sub/me.md");
-    expect(scan.links.map((l) => [l.raw, l.path, l.anchor, l.form])).toEqual([
-      ["./a.md", "dir/sub/a.md", null, "relative"],
-      ["../x/b.md#h", "dir/x/b.md", "#h", "relative"],
-      ["/t/c.md", "t/c.md", null, "absolute"],
-      ["pic.png", "dir/sub/pic.png", null, "relative"],
-      ["<d e.md>", "dir/sub/d e.md", null, "relative"],
+    const scan = scanDoc(parseMarkdown(body), "dir/sub/me.md");
+    expect(scan.links.map((l) => [l.at, l.raw, l.path, l.anchor, l.form])).toEqual([
+      [0, "./a.md", "dir/sub/a.md", null, "relative"],
+      [1, "../x/b.md#h", "dir/x/b.md", "#h", "relative"],
+      [2, "/t/c.md", "t/c.md", null, "absolute"],
+      [4, "pic.png", "dir/sub/pic.png", null, "relative"],
+      [5, "d e.md", "dir/sub/d e.md", null, "relative"],
     ]);
-    for (const l of scan.links) expect(body.slice(l.start, l.end)).toBe(l.raw);
     expect(scan.footnoteRefs).toEqual(["foot"]);
   });
 
@@ -134,7 +135,7 @@ describe("links", () => {
       "[^a]: defined",
       "[^z]: defined but unused",
     ].join("\n");
-    const scan = scanBody(body, "x.md");
+    const scan = scanDoc(parseMarkdown(body), "x.md");
     expect(scan.footnoteRefs).toEqual(["a", "b"]);
     expect([...scan.footnoteCounts]).toEqual([
       ["a", 2],
