@@ -18,6 +18,18 @@ const HOUR = 3600;
  */
 const LOOPBACK = new Set(["localhost", "127.0.0.1", "[::1]"]);
 
+/** RFC 6750's answer to a token that no longer works: a Bearer challenge naming the metadata. */
+function invalidToken(origin: string, why: string): Response {
+  const e = new OkfError(401, "invalid_token", why);
+  return Response.json(e.toJSON(), {
+    status: 401,
+    headers: {
+      "WWW-Authenticate": `Bearer realm="OAuth", resource_metadata="${origin}/.well-known/oauth-protected-resource/mcp", error="invalid_token", error_description="${why}"`,
+      "Cache-Control": "no-store",
+    },
+  });
+}
+
 export function createWorker(deps: (env: Cloudflare.Env) => Deps): {
   fetch: NonNullable<ExportedHandler<Env>["fetch"]>;
 } {
@@ -41,10 +53,9 @@ export function createWorker(deps: (env: Cloudflare.Env) => Deps): {
           if (props.grant) {
             const g = props.grant;
             const reach = await grantLibraries(d.accounts, g);
-            if (!reach) {
-              const e = new OkfError(401, "suspended", "This account is suspended or deleted.");
-              return Response.json(e.toJSON(), { status: e.status });
-            }
+            // The account is gone (deleted, or a data reset) or suspended: the token is dead.
+            // Say so as OAuth does, so the client signs in again instead of showing no tools.
+            if (!reach) return invalidToken(origin, "This account is suspended or deleted.");
             who = { key: `grant:${g.id}|${g.actor}`, account: reach.user.handle };
             caller = {
               actor: g.actor,
