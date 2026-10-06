@@ -83,7 +83,7 @@ worker/src/store/        Library schema and LibraryStore (writes, ledger, snapsh
 worker/src/util/tar.ts   Tar reader and writer for import and export
 worker/src/mcp/server.ts MCP server at /mcp: stateless Streamable HTTP, tier 1 and tier 2 tools, okf:// resources
 worker/cloudflare.config.ts  The Worker for cf: bindings, Durable Object exports, compatibility
-worker/scripts/          cf.ts (runs cf, reads the config), mcp.ts (`bun run mcp`), deploy.ts, logs.ts, seed.ts (`bun run seed`), admin.ts (`bun run admin`), gate.ts (`bun run gate`), preview.ts (`bun run preview`), mcp-smoke.ts (MCP flow against any URL), restore-smoke.ts (PITR restore and undo against a deployed Worker), agents.ts with agents/ (scripted MCP agents: runner, scenarios)
+worker/scripts/          cf.ts (runs cf, reads the config; cf-retry.ts: which failed calls are retried), mcp.ts (`bun run mcp`), deploy.ts, logs.ts, seed.ts (`bun run seed`), admin.ts (`bun run admin`), gate.ts (`bun run gate`), preview.ts (`bun run preview`), mcp-smoke.ts (MCP flow against any URL), restore-smoke.ts (PITR restore and undo against a deployed Worker), agents.ts with agents/ (scripted MCP agents: runner, scenarios)
 worker/migrations/       D1 migrations (account layer)
 worker/test/             bun tests; worker/test/tsconfig.json adds bun types
 design/                  @tempra/design: tokens, base, prose, reader and workspace CSS (src/), build.ts generates dist/tempra.css and dist/tempra.ts (css, hash, href)

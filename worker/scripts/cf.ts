@@ -7,6 +7,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import config from "../cloudflare.config";
+import { retryDelayMs, transientCfError } from "./cf-retry";
 
 export const WORKER_DIR = new URL("..", import.meta.url).pathname;
 
@@ -36,7 +37,10 @@ export interface CfOptions {
   /** Local state directory; defaults to LOCAL_STATE. */
   persistTo?: string;
   cwd?: string;
-  /** Per attempt; a call that times out is retried twice. Default 20 s local, 120 s remote. */
+  /**
+   * Per attempt; a call that times out, or fails with a transient API error, is retried twice.
+   * Default 20 s local, 120 s remote.
+   */
   timeoutMs?: number;
 }
 
@@ -57,7 +61,9 @@ function completeJson(text: string): boolean {
  * confirmation prompt it already answered keeps it alive (seen on `d1 migrations apply`, and
  * now and then on `d1 raw`). So once stdout holds a complete JSON result and cf has been quiet
  * for a moment, the result counts and the process is stopped. A call that still hangs times out
- * and is retried; every call made through this helper must be safe to repeat.
+ * and is retried, and so is one that fails with a transient error from Cloudflare's API (a
+ * timeout, a reset connection, a 5xx, a 429; TEMPRA-52); every call made through this helper
+ * must be safe to repeat.
  */
 export async function cf(args: string[], opts: CfOptions = {}): Promise<string> {
   const full = ["bunx", "cf", ...args];
@@ -116,6 +122,14 @@ export async function cf(args: string[], opts: CfOptions = {}): Promise<string> 
         console.error(
           `cf ${args.slice(0, 3).join(" ")} timed out; retrying (${attempt}/${attempts - 1})`,
         );
+        continue;
+      }
+      if (!timedOut && attempt < attempts && transientCfError(`${err}\n${out}`)) {
+        const wait = retryDelayMs(attempt);
+        console.error(
+          `cf ${args.slice(0, 3).join(" ")} failed with a transient error; retrying in ${wait / 1000} s (${attempt}/${attempts - 1})`,
+        );
+        await Bun.sleep(wait);
         continue;
       }
       const why = timedOut ? "timed out" : `exited ${p.exitCode}`;
