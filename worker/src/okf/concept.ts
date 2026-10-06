@@ -497,20 +497,14 @@ function stringifyFrontmatter(entries: [string, Json][]): string {
     .replace(/^(\s*(?:- )?[^\s:][^:]*: )\[ (.*) \]$/gm, "$1[$2]");
 }
 
-/** Flow style for short collections, as in OKF's own examples (`tags: [a, b]`, `{ by, at }`). */
+/** Flow style for lists of scalars and for `generated`, as in OKF's own examples (`tags: [a, b]`, `{ by, at }`). */
 function styleNode(node: unknown, key: string | null) {
   if (isSeq(node)) {
     const seq = node as YAMLSeq;
     if (seq.items.every((i) => isScalar(i))) seq.flow = seq.items.length > 0;
-    for (const item of seq.items) {
-      if (
-        isMap(item) &&
-        item.items.every((p) => isScalar(p.value)) &&
-        item.toString().length < 72
-      ) {
-        item.flow = true;
-      } else styleNode(item, null);
-    }
+    // A list of mappings (`sources`, `verified`) stays block style, one key per line, as agents
+    // write it, whatever its length (tempra-dev: decisions/structured-documents, TEMPRA-42).
+    for (const item of seq.items) styleNode(item, null);
   } else if (isMap(node)) {
     if (key === "generated" || key === "usage_window") node.flow = true;
     for (const pair of node.items) styleNode(pair.value, null);
