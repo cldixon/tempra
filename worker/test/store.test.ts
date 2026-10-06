@@ -188,6 +188,7 @@ describe("links", () => {
     if (lint.kind !== "concept") throw new Error();
     expect(withoutRelative(lint.lint).map((l) => [l.code, l.target])).toEqual([
       ["broken_link", "a/missing.md"],
+      ["missing_heading", "a/two.md"],
     ]);
     expect(bodyOf(lint)).toContain("[two](./two.md)");
 

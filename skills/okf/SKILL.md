@@ -56,7 +56,7 @@ Gross margin equals recognized [revenue](/metrics/revenue.md) minus full COGS.[^
 - Timestamps (`stale_after`, `sources[].last_modified`) are ISO 8601 datetimes with an offset (`2026-06-30T14:00:00Z`). A plain date such as `2026-12-31` is flagged.
 - Set `status` and `stale_after` honestly: `draft` when unsure; a `stale_after` when the content depends on something that changes.
 - Do not write `generated` or `verified`. The server ignores them and says so in the write result's notes.
-- A file with no frontmatter, frontmatter that is not valid YAML, or no `type` is refused (400) and nothing is written; fix it and write again. The rest of this list is lint: a generic `type`, no `description` or `status`, a relative link, an uncited footnote definition. A link to a heading the target lacks, and a `stale_after` already past, come back as notes.
+- A file with no frontmatter, frontmatter that is not valid YAML, or no `type` is refused (400) and nothing is written; fix it and write again. The rest of this list is lint: a generic `type`, no `description` or `status`, a relative link, an uncited footnote definition, and a link to a heading its target does not have (rechecked whenever you read, so it follows changes to the target). A `stale_after` already past comes back as a note.
 
 ## Editing
 
