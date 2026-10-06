@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    html, body { margin: 0; height: 100%; }
+    body { background: light-dark(#f3f3f1, #121214); }
+    a { color: inherit; text-decoration: none; }
+    a:hover { text-decoration: underline; text-underline-offset: 2px; }
+    ::selection { background: light-dark(#dededa, #3a3a3d); }
+    textarea, input, button, select { font: inherit; color: inherit; }
+    @keyframes tempra-pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+  </style>
+</helmet>
+<div style="color-scheme: {{ scheme }}; --bg: light-dark(#ffffff, #1b1b1d); --bg2: light-dark(#f3f3f1, #121214); --fg: light-dark(#1a1a1b, #ececea); --fg2: light-dark(#6f6f73, #9a9a9e); --fg3: light-dark(#a3a3a7, #68686c); --line: light-dark(#e8e8e4, #2a2a2d); --line2: light-dark(#d2d2ce, #3c3c40); --hover: light-dark(#e9e9e6, #222225); --sel: light-dark(#e1e1dd, #2a2a2e); --shadow: 0 1px 2px light-dark(rgba(0,0,0,.04), rgba(0,0,0,.4)), 0 6px 24px light-dark(rgba(0,0,0,.04), rgba(0,0,0,.35)); --ui: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, 'Segoe UI', Helvetica, sans-serif; --serif: 'Iowan Old Style', 'Palatino Linotype', Charter, Georgia, 'Times New Roman', serif; --mono: ui-monospace, 'SF Mono', Menlo, monospace; font-family: var(--ui); font-size: 14px; line-height: 1.5; color: var(--fg); background: var(--bg2); min-height: 100vh; display: flex; flex-direction: column; -webkit-font-smoothing: antialiased;">
+
+  <!-- Prototype switcher (not part of the app) -->
+  <div style="display: flex; align-items: center; gap: 4px; padding: 6px 12px; font-size: 12px; color: var(--fg2);">
+    <span style="margin-right: 8px; color: var(--fg3); letter-spacing: .04em; text-transform: uppercase; font-size: 11px;">Take 2</span>
+    <sc-for list="{{ screens }}" as="s" hint-placeholder-count="4">
+      <button type="button" onClick="{{ s.pick }}" style="border: 0; background: {{ s.bg }}; color: {{ s.color }}; padding: 4px 11px; border-radius: 999px; cursor: pointer; font-size: 12px;">{{ s.label }}</button>
+    </sc-for>
+    <span style="flex: 1;"></span>
+    <a href="Tempra Layout.dc.html" style="color: var(--fg3); padding: 4px 8px;">Take 1 ↗</a>
+    <button type="button" onClick="{{ toggleScheme }}" style="border: 0; background: transparent; color: var(--fg2); padding: 4px 10px; border-radius: 999px; cursor: pointer; font-size: 12px;" style-hover="background: var(--hover);">{{ schemeLabel }}</button>
+  </div>
+
+  <!-- ================= LIBRARY LIST ================= -->
+  <sc-if value="{{ isHome }}" hint-placeholder-val="{{ false }}">
+    <div style="flex: 1; display: flex; flex-direction: column; margin: 0 10px 10px;">
+      <header style="display: flex; align-items: center; gap: 16px; height: 52px; padding: 0 20px;">
+        <a href="#" style="font-weight: 600; letter-spacing: -.01em;">Tempra</a>
+        <span style="flex: 1;"></span>
+        <a href="#" style="color: var(--fg2);">Connect an agent</a>
+        <button type="button" title="cl_dixon · Settings" style="border: 0; background: var(--sel); width: 26px; height: 26px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 600; color: var(--fg); cursor: pointer;">CD</button>
+      </header>
+      <main style="width: 100%; max-width: 720px; margin: 0 auto; padding: 72px 24px 96px; box-sizing: border-box;">
+        <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 16px; margin-bottom: 28px;">
+          <h1 style="font: 500 28px/1.2 var(--ui); letter-spacing: -.02em; margin: 0;">Libraries</h1>
+          <button type="button" style="display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--line); background: #ffffff; color: #161617; padding: 6px 12px 6px 8px; border-radius: 999px; cursor: pointer; font-size: 13px; box-shadow: var(--shadow);" style-hover="background: #f3f3f1;"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><circle cx="8" cy="8" r="6.25"></circle><path d="M8 5.2v5.6M5.2 8h5.6"></path></svg>New</button>
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 6px;">
+          <sc-for list="{{ libraries }}" as="l" hint-placeholder-count="3">
+            <a href="#" onClick="{{ l.open }}" style="display: block; padding: 16px 18px; border-radius: 12px; text-decoration: none; min-width: 0;" style-hover="background: var(--hover); text-decoration: none;">
+              <span style="font-weight: 500; font-size: 15px;">{{ l.slug }}</span><span style="display: block; color: var(--fg2); font-size: 13px; margin-top: 2px;">{{ l.description }}</span>
+            </a>
+          </sc-for>
+        </div>
+        <p style="margin: 32px 18px 0; color: var(--fg2); font-size: 13px;">Agents write to a library over MCP. <a href="#" style="text-decoration: underline; text-underline-offset: 2px;">Connect an agent</a> or <a href="#" style="text-decoration: underline; text-underline-offset: 2px;">mint a token</a>.</p>
+      </main>
+    </div>
+  </sc-if>
+
+  <!-- ================= WORKSPACE ================= -->
+  <sc-if value="{{ isWorkspace }}" hint-placeholder-val="{{ true }}">
+    <div style="flex: none; display: grid; grid-template-columns: {{ gridCols }}; grid-template-rows: 48px minmax(0,1fr); grid-template-areas: {{ gridAreas }}; column-gap: 10px; padding: 0 10px 10px; height: calc(100vh - 33px); min-height: 0; overflow: hidden; box-sizing: border-box; ">
+
+      <!-- Header -->
+      <header style="grid-area: header; display: flex; align-items: center; gap: 10px; padding: 0 6px 0 10px; min-width: 0;">
+        <a href="#" onClick="{{ goHome }}" style="font-weight: 600; letter-spacing: -.01em;">Tempra</a>
+        <span style="color: var(--fg3);">/</span>
+        <button type="button" style="display: inline-flex; align-items: center; gap: 6px; border: 0; background: transparent; padding: 4px 8px; border-radius: 999px; cursor: pointer; color: var(--fg2);" style-hover="background: var(--hover);">tempra-dev <span style="color: var(--fg3); font-size: 10px;">▾</span></button>
+        <span style="flex: 1;"></span>
+        <button type="button" title="cl_dixon · Settings" style="border: 0; background: var(--sel); width: 26px; height: 26px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 600; color: var(--fg); cursor: pointer;">CD</button>
+      </header>
+
+      <!-- Sidebar: no card, no borders, sits on the ground -->
+      <sc-if value="{{ wide }}" hint-placeholder-val="{{ true }}">
+        <nav aria-label="Files" style="grid-area: sidebar; display: flex; flex-direction: column; min-width: 0; min-height: 0; padding: 8px 4px 0;">
+          <button type="button" style="display: flex; align-items: center; gap: 8px; width: 100%; box-sizing: border-box; border: 1px solid var(--line); background: var(--bg); color: var(--fg3); padding: 6px 8px 6px 12px; border-radius: 999px; cursor: pointer; font-size: 13px; text-align: left; margin-bottom: 10px; box-shadow: var(--shadow);"><span style="flex: 1;">Search tempra-dev…</span><kbd style="font: 11px var(--ui); color: var(--fg3); background: var(--bg2); border-radius: 999px; padding: 1px 7px;">⌘K</kbd></button>
+          <div style="flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 2px; padding-bottom: 16px;">
+          <sc-for list="{{ tree }}" as="row" hint-placeholder-count="12">
+            <a href="#" style="display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 10px 0 {{ row.indent }}; border-radius: 8px; font-size: 13px; color: {{ row.color }}; background: {{ row.bg }}; font-weight: {{ row.weight }}; white-space: nowrap; min-width: 0;" style-hover="background: var(--hover); text-decoration: none;">
+              <span style="width: 12px; flex: none; color: var(--fg3); font-size: 10px; text-align: center;">{{ row.glyph }}</span>
+              <span style="flex: 1; overflow: hidden; text-overflow: ellipsis;">{{ row.label }}</span>
+              <span style="flex: none; font-size: 11px; color: var(--fg3); font-variant-numeric: tabular-nums;">{{ row.mark }}</span>
+            </a>
+          </sc-for>
+          <div style="margin-top: 20px; display: flex; flex-direction: column; gap: 2px;">
+            <sc-for list="{{ views }}" as="v" hint-placeholder-count="3">
+              <a href="#" style="display: flex; align-items: center; justify-content: space-between; height: 30px; padding: 0 10px 0 28px; border-radius: 8px; font-size: 13px; color: var(--fg2);" style-hover="background: var(--hover); text-decoration: none;"><span>{{ v.label }}</span><span style="font-size: 11px; color: var(--fg3); font-variant-numeric: tabular-nums;">{{ v.count }}</span></a>
+            </sc-for>
+          </div>
+          </div>
+        </nav>
+      </sc-if>
+
+      <!-- Main: the floating sheet -->
+      <main style="grid-area: main; overflow: hidden auto; position: relative; min-width: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow);">
+
+        <!-- Panel cluster: hovers over the sheet; one panel open at a time; tap the active one to close -->
+        <div role="toolbar" aria-label="Panels" style="position: sticky; top: 12px; z-index: 3; width: max-content; margin: 12px 12px -50px auto; display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: var(--bg); border: 1px solid var(--line); box-shadow: var(--shadow);">
+          <sc-if value="{{ showBanner }}" hint-placeholder-val="{{ false }}">
+            <button type="button" title="New version · claude-code/laptop · tighten the merge section" style="border: 0; width: 30px; height: 30px; border-radius: 999px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; background: transparent; color: var(--fg);" style-hover="background: var(--hover);">
+              <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round" style="animation: tempra-pulse 1.6s ease-in-out infinite;"><path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9"></path><path d="M13.5 2.5v2.5H11"></path></svg>
+            </button>
+            <span style="width: 1px; height: 18px; background: var(--line); align-self: center; margin: 0 3px;"></span>
+          </sc-if>
+          <button type="button" onClick="{{ toggleEditing }}" title="Edit" aria-pressed="{{ editing }}" style="border: 0; width: 30px; height: 30px; border-radius: 999px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; background: {{ editBg }}; color: {{ editFg }};" style-hover="background: var(--hover);">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M11.3 2.7l2 2L5 13H3v-2z"></path><path d="M9.8 4.2l2 2"></path></svg>
+          </button>
+          <span style="width: 1px; height: 18px; background: var(--line); align-self: center; margin: 0 3px;"></span>
+          <button type="button" onClick="{{ pickComments }}" title="Comments" aria-pressed="{{ panel.comments }}" style="position: relative; border: 0; width: 30px; height: 30px; border-radius: 999px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; background: {{ pbg.comments }}; color: {{ pfg.comments }};" style-hover="background: var(--hover);">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M3 3.5h10A1.5 1.5 0 0 1 14.5 5v5a1.5 1.5 0 0 1-1.5 1.5H7L3.5 14v-2.5H3A1.5 1.5 0 0 1 1.5 10V5A1.5 1.5 0 0 1 3 3.5z"></path></svg>
+            <span style="position: absolute; top: 5px; right: 5px; width: 6px; height: 6px; border-radius: 50%; background: var(--fg); border: 1.5px solid var(--bg);"></span>
+          </button>
+          <button type="button" onClick="{{ pickContents }}" title="Contents & sources" aria-pressed="{{ panel.contents }}" style="border: 0; width: 30px; height: 30px; border-radius: 999px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; background: {{ pbg.contents }}; color: {{ pfg.contents }};" style-hover="background: var(--hover);">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M3 4h10M3 8h7M3 12h10"></path></svg>
+          </button>
+          <button type="button" onClick="{{ pickWork }}" title="Work" aria-pressed="{{ panel.work }}" style="border: 0; width: 30px; height: 30px; border-radius: 999px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; background: {{ pbg.work }}; color: {{ pfg.work }};" style-hover="background: var(--hover);">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"></circle><path d="M5.5 8.2l1.7 1.7 3.3-3.6"></path></svg>
+          </button>
+          <button type="button" onClick="{{ pickHistory }}" title="History" aria-pressed="{{ panel.history }}" style="border: 0; width: 30px; height: 30px; border-radius: 999px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; background: {{ pbg.history }}; color: {{ pfg.history }};" style-hover="background: var(--hover);">
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"></circle><path d="M8 4.6V8l2.3 1.5"></path></svg>
+          </button>
+        </div>
+
+        <sc-if value="{{ editing }}" hint-placeholder-val="{{ false }}">
+          <div style="position: sticky; top: 0; z-index: 2; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; padding: 10px 204px 10px 24px; background: var(--bg); border-bottom: 1px solid var(--line);">
+            <span style="flex: 1 0 8px;"></span>
+            <input type="text" placeholder="What you changed, in one line" style="flex: 1 1 120px; min-width: 0; max-width: 360px; box-sizing: border-box; border: 0; background: var(--bg2); border-radius: 999px; padding: 6px 12px; font-size: 13px; outline: none;" />
+            <button type="button" style="border: 0; background: var(--fg); color: var(--bg); padding: 6px 14px; border-radius: 999px; cursor: pointer; font-size: 13px; font-weight: 500;">Save</button>
+            <button type="button" onClick="{{ pickReading }}" style="border: 0; background: transparent; color: var(--fg2); padding: 6px 10px; border-radius: 999px; cursor: pointer; font-size: 13px;" style-hover="background: var(--hover);">Cancel</button>
+          </div>
+        </sc-if>
+
+
+        <article style="max-width: 680px; margin: 0 auto; padding: 56px clamp(16px, 5%, 40px) 140px; box-sizing: border-box; min-width: 0;">
+          <div style="font-size: 12px; color: var(--fg3); display: flex; gap: 6px; margin-bottom: 24px;"><a href="#">app</a><span>/</span><span style="color: var(--fg2);">editor.md</span></div>
+
+          <header style="margin-bottom: 32px;">
+            <h1 style="font: 500 36px/1.15 var(--serif); letter-spacing: -.01em; margin: 0 0 12px;">Editing a concept</h1>
+            <p style="font: 17px/1.5 var(--serif); color: var(--fg2); margin: 0;">How a person edits a concept in the app, and how a save meets a write that landed meanwhile.</p>
+          </header>
+
+          <div style="font: 17px/1.7 var(--serif); color: var(--fg);">
+            <h2 id="in-place" style="font: 500 22px/1.3 var(--serif); margin: 40px 0 12px; letter-spacing: -.01em;">The reader, made editable</h2>
+            <p style="margin: 0 0 18px;">Edit does not open a different page. The same reader that drew the concept turns editable in place, so the person's eye never leaves the paragraph they were reading. Wordgard's compartment flips a facet; the document, its decorations and the comment anchors stay where they are.</p>
+            <p style="margin: 0 0 18px;">The frontmatter sits above the body as a plain form. Fields the service stamps (<code style="font: 15px var(--mono); background: var(--bg2); padding: 1px 6px; border-radius: 5px;">verified</code>, <code style="font: 15px var(--mono); background: var(--bg2); padding: 1px 6px; border-radius: 5px;">generated</code>) are shown but never sent back.<sup style="font-size: 11px; color: var(--fg2); margin-left: 2px;"><a href="#src-okf">1</a></sup></p>
+            <h2 id="saving" style="font: 500 22px/1.3 var(--serif); margin: 40px 0 12px; letter-spacing: -.01em;">Saving with a note</h2>
+            <p style="margin: 0 0 18px;">Save needs a one-line note, the same note an agent writes in <code style="font: 15px var(--mono); background: var(--bg2); padding: 1px 6px; border-radius: 5px;">X-Note</code>. <sc-if value="{{ commenting }}" hint-placeholder-val="{{ false }}"><mark style="background: var(--sel); color: inherit; border-radius: 3px; position: relative;">The ledger records a human edit exactly as it records an agent's: who, when, the note, the files touched.<span style="position: absolute; right: 0; top: -44px; display: inline-flex; gap: 2px; padding: 3px; border: 1px solid var(--line); background: var(--bg); border-radius: 999px; font: 12px var(--ui); white-space: nowrap; box-shadow: var(--shadow);"><button type="button" style="border: 0; background: var(--fg); color: var(--bg); padding: 4px 12px; border-radius: 999px; cursor: pointer; font-size: 12px; font-weight: 500;">Comment</button><button type="button" style="border: 0; background: transparent; padding: 4px 10px; border-radius: 999px; cursor: pointer; font-size: 12px; color: var(--fg2);">Copy link</button></span></mark></sc-if><sc-if value="{{ notCommenting }}" hint-placeholder-val="{{ true }}"><mark style="background: transparent; color: inherit; text-decoration: underline dotted; text-decoration-thickness: 1px; text-underline-offset: .22em; cursor: pointer;" title="1 open comment">The ledger records a human edit exactly as it records an agent's: who, when, the note, the files touched.</mark></sc-if> There is no separate human history.</p>
+            <p style="margin: 0 0 18px;">The request carries <code style="font: 15px var(--mono); background: var(--bg2); padding: 1px 6px; border-radius: 5px;">If-Match</code> with the hash the edit started from. Most saves succeed. The interesting case is the one that does not.</p>
+            <h2 id="merge" style="font: 500 22px/1.3 var(--serif); margin: 40px 0 12px; letter-spacing: -.01em;">When someone wrote meanwhile</h2>
+            <p style="margin: 0 0 18px;">A 412 means the concept moved under the edit. The app fetches the version there now and merges three ways: the base, the person's text, and theirs. Changes on different lines combine without a word. Overlapping changes are shown side by side, and the person picks.<sup style="font-size: 11px; color: var(--fg2); margin-left: 2px;"><a href="#src-live">2</a></sup></p>
+            <blockquote style="margin: 24px 0; padding: 2px 0 2px 22px; border-left: 2px solid var(--line2); color: var(--fg2); font-style: italic;">The edit keeps its base. Saving again after a second write meets the 412 again and merges again; nothing written meanwhile is ever overwritten.</blockquote>
+            <p style="margin: 0 0 18px;">While an edit is open, the page is frozen on the version it started from. A write by someone else shows the banner and waits; it is merged at save, never swapped in under the person's hands. See <a href="#" style="text-decoration: underline; text-underline-offset: 3px; text-decoration-color: var(--line2);">Live feed</a> for how the banner arrives.</p>
+            <h2 id="leaving" style="font: 500 22px/1.3 var(--serif); margin: 40px 0 12px; letter-spacing: -.01em;">Leaving</h2>
+            <p style="margin: 0 0 18px;">Leaving with unsaved edits asks first, in the app's router and in the tab itself. Cancel drops the edit after the same question. Escape does nothing: it is too easy to press.</p>
+          </div>
+        </article>
+      </main>
+
+      <!-- One floating panel at a time -->
+      <sc-if value="{{ panelOpen }}" hint-placeholder-val="{{ true }}">
+        <aside aria-label="{{ panelTitle }}" style="{{ asideStyle }}">
+          <div style="display: flex; align-items: center; gap: 8px; padding: 14px 16px 10px;">
+            <span style="font-weight: 500; font-size: 13px;">{{ panelTitle }}</span>
+            <span style="color: var(--fg3); font-size: 12px; font-variant-numeric: tabular-nums;">{{ panelCount }}</span>
+            <span style="flex: 1;"></span>
+            <button type="button" onClick="{{ closePanel }}" title="Close" style="border: 0; background: transparent; color: var(--fg3); width: 24px; height: 24px; border-radius: 999px; cursor: pointer; font-size: 14px; line-height: 1;" style-hover="background: var(--hover); color: var(--fg);">×</button>
+          </div>
+
+          <!-- Comments -->
+          <sc-if value="{{ panel.comments }}" hint-placeholder-val="{{ true }}">
+            <div style="padding: 0 16px 16px; display: flex; flex-direction: column; gap: 12px;">
+              <sc-if value="{{ commenting }}" hint-placeholder-val="{{ false }}">
+                <div style="border-radius: 12px; padding: 12px 14px; background: var(--bg2);">
+                  <blockquote style="margin: 0 0 8px; padding-left: 10px; border-left: 2px solid var(--line2); color: var(--fg2); font-size: 12px; font-style: italic; line-height: 1.45;">The ledger records a human edit exactly as it records an agent's…</blockquote>
+                  <textarea placeholder="Comment on the selection" style="display: block; width: 100%; box-sizing: border-box; min-height: 64px; border: 0; background: transparent; padding: 0; resize: vertical; outline: none; font-size: 13px; line-height: 1.5;">Should this say the note is required for humans but optional for agents? The MCP write tool accepts an empty note today.</textarea>
+                  <div style="display: flex; gap: 6px; justify-content: flex-end; margin-top: 8px;">
+                    <button type="button" onClick="{{ pickReading }}" style="border: 0; background: transparent; padding: 4px 10px; border-radius: 999px; cursor: pointer; font-size: 12px; color: var(--fg2);" style-hover="background: var(--hover);">Cancel</button>
+                    <button type="button" style="border: 0; background: var(--fg); color: var(--bg); padding: 4px 12px; border-radius: 999px; cursor: pointer; font-size: 12px; font-weight: 500;">Comment</button>
+                  </div>
+                </div>
+              </sc-if>
+              <sc-if value="{{ notCommenting }}" hint-placeholder-val="{{ true }}">
+                <button type="button" onClick="{{ pickCommenting }}" style="display: block; width: 100%; box-sizing: border-box; text-align: left; border: 0; background: var(--bg2); border-radius: 999px; padding: 8px 14px; cursor: text; font-size: 13px; color: var(--fg3);">Comment on this concept, or select text…</button>
+              </sc-if>
+              <div style="padding: 4px 2px;">
+                <blockquote style="margin: 0 0 10px; padding-left: 10px; border-left: 2px solid var(--line2); color: var(--fg2); font-size: 12px; font-style: italic; line-height: 1.45;">Changes on different lines combine without a word.</blockquote>
+                <div style="display: flex; align-items: baseline; gap: 6px; font-size: 12px;"><strong style="font-weight: 500;">cl_dixon</strong><span style="color: var(--fg3);">yesterday</span></div>
+                <p style="margin: 2px 0 10px; line-height: 1.45; font-size: 13px;">"Without a word" is doing a lot here. Say what the person sees: nothing, a count, a toast?</p>
+                <div style="display: flex; align-items: baseline; gap: 6px; font-size: 12px; padding-left: 12px;"><strong style="font-weight: 500;">claude-code/laptop</strong><span style="color: var(--fg3);">2 h ago</span></div>
+                <p style="margin: 2px 0 12px 12px; line-height: 1.45; font-size: 13px;">Added a sentence to the merge section (seq 212). Leaving open for you to confirm.</p>
+                <div style="display: flex; gap: 6px; align-items: center;">
+                  <input type="text" placeholder="Reply" style="flex: 1; min-width: 0; border: 0; background: var(--bg2); border-radius: 999px; padding: 5px 12px; font-size: 12px; outline: none;" />
+                  <button type="button" style="border: 0; background: transparent; color: var(--fg2); padding: 5px 10px; border-radius: 999px; cursor: pointer; font-size: 12px;" style-hover="background: var(--hover);">Resolve</button>
+                </div>
+              </div>
+              <details style="font-size: 12px; color: var(--fg3); padding: 0 2px;"><summary style="cursor: pointer;">Resolved (3)</summary></details>
+            </div>
+          </sc-if>
+
+          <!-- Contents & sources -->
+          <sc-if value="{{ panel.contents }}" hint-placeholder-val="{{ false }}">
+            <div style="padding: 0 16px 16px; display: flex; flex-direction: column; gap: 20px;">
+              <ol style="list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px;">
+                <li><a href="#in-place" style="display: block; padding: 4px 0 4px 10px; border-left: 2px solid var(--fg); color: var(--fg);">The reader, made editable</a></li>
+                <li><a href="#saving" style="display: block; padding: 4px 0 4px 10px; border-left: 2px solid var(--line); color: var(--fg2);">Saving with a note</a></li>
+                <li><a href="#merge" style="display: block; padding: 4px 0 4px 10px; border-left: 2px solid var(--line); color: var(--fg2);">When someone wrote meanwhile</a></li>
+                <li><a href="#leaving" style="display: block; padding: 4px 0 4px 10px; border-left: 2px solid var(--line); color: var(--fg2);">Leaving</a></li>
+              </ol>
+              <div>
+                <div style="font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--fg3); margin-bottom: 8px;">Sources</div>
+                <ol style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 10px;">
+                  <li id="src-okf" style="display: grid; grid-template-columns: 16px 1fr; gap: 6px; font-size: 12px; line-height: 1.45;"><span style="color: var(--fg3);">1</span><span><a href="#" style="color: var(--fg);">OKF Knowledge Service — Spec</a><span style="display: block; color: var(--fg3);">external · cited 1×</span></span></li>
+                  <li id="src-live" style="display: grid; grid-template-columns: 16px 1fr; gap: 6px; font-size: 12px; line-height: 1.45;"><span style="color: var(--fg3);">2</span><span><a href="#" style="color: var(--fg);">Live feed</a><span style="display: block; color: var(--fg3);">app/live.md · human-reviewed · cited 1×</span></span></li>
+                </ol>
+              </div>
+              <div>
+                <div style="font-size: 11px; letter-spacing: .04em; text-transform: uppercase; color: var(--fg3); margin-bottom: 8px;">Linked from</div>
+                <ul style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 4px; font-size: 12px;">
+                  <li><a href="#">app/overview.md</a></li>
+                  <li><a href="#">app/comments.md</a></li>
+                  <li><a href="#">decisions/editor-wordgard.md</a> <span style="color: var(--fg3);">cites it</span></li>
+                </ul>
+              </div>
+            </div>
+          </sc-if>
+
+          <!-- Work -->
+          <sc-if value="{{ panel.work }}" hint-placeholder-val="{{ false }}">
+            <div style="padding: 0 16px 16px; display: flex; flex-direction: column; gap: 10px;">
+              <div style="display: flex; gap: 10px; align-items: baseline; padding: 10px 12px; border-radius: 12px; background: var(--bg2);"><span style="font-size: 11px; background: var(--bg); border-radius: 999px; padding: 1px 7px; color: var(--fg2); flex: none;">lint</span><span style="color: var(--fg2); font-size: 12px; line-height: 1.45;">Heading "Leaving" has no body text after it. → Add a sentence or remove the heading.</span></div>
+              <a href="#" style="font-size: 12px; color: var(--fg3); padding: 0 2px;">All open work in tempra-dev (6)</a>
+            </div>
+          </sc-if>
+
+          <!-- History -->
+          <sc-if value="{{ panel.history }}" hint-placeholder-val="{{ false }}">
+            <div style="padding: 0 16px 16px;">
+              <div style="display: flex; align-items: center; gap: 8px; padding: 0 2px 10px; font-size: 12px;">
+                <span style="width: 7px; height: 7px; border-radius: 50%; background: var(--fg); flex: none;"></span>
+                <span style="color: var(--fg2);">Verified by cl_dixon, 2026-10-05 17:51. No content change since.</span>
+              </div>
+              <ol style="margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column;">
+                <sc-for list="{{ history }}" as="h" hint-placeholder-count="4">
+                  <li style="display: grid; grid-template-columns: 36px 1fr auto; gap: 8px; padding: 7px 2px; font-size: 12px; border-top: 1px solid var(--line); line-height: 1.4;">
+                    <a href="#" style="font-variant-numeric: tabular-nums; color: var(--fg2); font-weight: {{ h.weight }};">{{ h.seq }}</a>
+                    <span style="min-width: 0;"><span style="color: var(--fg);">{{ h.op }}</span> <span style="color: var(--fg2);">{{ h.actor }}</span><span style="display: block; color: var(--fg3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{ h.note }}</span></span>
+                    <span style="color: var(--fg3); white-space: nowrap;">{{ h.when }}</span>
+                  </li>
+                </sc-for>
+                <li style="padding: 10px 2px 0; font-size: 12px; color: var(--fg3); display: flex; gap: 12px;"><a href="#">All 9</a><a href="#">View at seq…</a><a href="#">Raw</a></li>
+              </ol>
+            </div>
+          </sc-if>
+        </aside>
+      </sc-if>
+    </div>
+
+  </sc-if>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;showBanner&quot;:{&quot;editor&quot;:&quot;boolean&quot;,&quot;default&quot;:true,&quot;tsType&quot;:&quot;boolean&quot;,&quot;section&quot;:&quot;States&quot;}}">
+class Component extends DCLogic {
+  state = { screen: "reading", scheme: "light", panel: "comments", wide: true, roomy: true };
+  componentDidMount() {
+    try {
+      const s = JSON.parse(localStorage.getItem("tempra-layout-v2:state") || "null");
+      if (s) this.setState({ ...s, fmOpen: false });
+    } catch {}
+    this.onKey = (e) => { if (e.key === "Escape" && this.state.panel) this.save({ panel: null }); };
+    this.onResize = () => {
+      const w = window.innerWidth, wide = w >= 900, roomy = w >= 1100;
+      if (wide !== this.state.wide || roomy !== this.state.roomy) this.setState({ wide, roomy });
+    };
+    document.addEventListener("keydown", this.onKey);
+    window.addEventListener("resize", this.onResize);
+    this.onResize();
+  }
+  componentWillUnmount() { document.removeEventListener("keydown", this.onKey); window.removeEventListener("resize", this.onResize); }
+  save(patch) {
+    this.setState(patch, () => {
+      const { screen, scheme, panel } = this.state;
+      try { localStorage.setItem("tempra-layout-v2:state", JSON.stringify({ screen, scheme, panel })); } catch {}
+    });
+  }
+  renderVals() {
+    const { screen, scheme, wide } = this.state;
+    const pick = (s) => () => this.save(s === "commenting" ? { screen: s, panel: "comments" } : { screen: s });
+    const screensDef = [["home", "Library list"], ["reading", "Reading"], ["commenting", "Commenting"], ["editing", "Editing"]];
+    const screens = screensDef.map(([id, label]) => {
+      const on = screen === id;
+      return { id, label, pick: pick(id), bg: on ? "var(--fg)" : "transparent", color: on ? "var(--bg)" : "var(--fg2)" };
+    });
+    const row = (label, depth, kind, opts = {}) => ({
+      label, indent: `${10 + depth * 14}px`,
+      glyph: kind === "dir" ? (opts.closed ? "▸" : "▾") : "",
+      color: opts.current ? "var(--fg)" : kind === "dir" ? "var(--fg)" : "var(--fg2)",
+      bg: opts.current ? "var(--sel)" : "transparent",
+      weight: opts.current || kind === "dir" ? 500 : 400,
+      mark: opts.mark ?? "",
+    });
+    const tree = [
+      row("tempra-dev", 0, "dir"), row("Guide", 1, "file"), row("app", 1, "dir"),
+      row("Overview", 2, "file"), row("Workspace", 2, "file", { mark: "●" }), row("Reader", 2, "file"),
+      row("Comments", 2, "file", { mark: "2" }), row("Editing a concept", 2, "file", { current: true, mark: "1" }),
+      row("Live feed", 2, "file", { mark: "∗" }), row("Markdown bridge", 2, "file"),
+      row("decisions", 1, "dir", { closed: true }), row("delivery", 1, "dir", { closed: true }), row("process", 1, "dir", { closed: true }),
+      row("v2", 1, "dir"), row("Design system", 2, "file", { mark: "∗" }), row("Onboarding", 2, "file"),
+    ];
+    const views = [{ label: "Ledger", count: "seq 214" }, { label: "Work queue", count: "6" }];
+    const libraries = [
+      { slug: "tempra-dev", description: "Tempra's own spec: the service as built, decisions, delivery.", concepts: 41, work: "6 open", workColor: "var(--fg)", last: "12 s ago", open: pick("reading") },
+      { slug: "developers", description: "Notes on the people and tools we work with.", concepts: 12, work: "No open work", workColor: "var(--fg3)", last: "yesterday", open: pick("reading") },
+      { slug: "agents", description: "Scripted agents' scratch library (previews only).", concepts: 103, work: "2 open", workColor: "var(--fg)", last: "3 d ago", open: pick("reading") },
+    ];
+    const history = [
+      { seq: 214, op: "put", actor: "claude-code/laptop", note: "tighten the merge section", when: "12 s", weight: 400 },
+      { seq: 213, op: "comment", actor: "claude-code/laptop", note: "reply on 'without a word'", when: "2 h", weight: 400 },
+      { seq: 212, op: "verify", actor: "human:cl_dixon", note: "read through after the editor shipped", when: "2 h", weight: 600 },
+      { seq: 209, op: "put", actor: "human:cl_dixon", note: "merge section: say what the person sees", when: "1 d", weight: 400 },
+    ];
+    const formatTools = [
+      { glyph: "¶", title: "Paragraph", font: "14px var(--serif)" }, { glyph: "H2", title: "Heading", font: "600 11px var(--ui)" }, { glyph: "H3", title: "Subheading", font: "600 11px var(--ui)" },
+      { glyph: "B", title: "Bold", font: "700 13px var(--ui)" }, { glyph: "I", title: "Italic", font: "italic 13px var(--serif)" }, { glyph: "</>", title: "Code", font: "11px var(--mono)" },
+      { glyph: "“", title: "Quote", font: "18px var(--serif)" }, { glyph: "•", title: "List", font: "14px var(--ui)" }, { glyph: "⌘K", title: "Link", font: "11px var(--ui)" },
+    ];
+    const panelId = this.state.panel;
+    const panelOpen = !!panelId;
+    const ids = ["comments", "contents", "work", "history"];
+    const panel = {}, pbg = {}, pfg = {};
+    ids.forEach((k) => { const on = panelId === k; panel[k] = on; pbg[k] = on ? "var(--fg)" : "transparent"; pfg[k] = on ? "var(--bg)" : "var(--fg2)"; });
+    const togglePanel = (k) => () => this.save({ panel: panelId === k ? null : k });
+    const titles = { comments: "Comments", contents: "Contents & sources", work: "Work", history: "History" };
+    const counts = { comments: "1 open", contents: "", work: "1", history: "seq 214" };
+    const cardStyle = "background: var(--bg); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); overflow: auto; font-size: 13px;";
+    const docked = wide && this.state.roomy;
+    const asideStyle = docked
+      ? `grid-area: context; ${cardStyle}`
+      : `position: fixed; right: 10px; top: 142px; bottom: 10px; width: min(320px, calc(100vw - 20px)); z-index: 5; ${cardStyle}`;
+    const gridCols = wide ? `232px minmax(0,1fr)${docked && panelOpen ? " 320px" : ""}` : "minmax(0,1fr)";
+    const gridAreas = wide ? (docked && panelOpen ? "'header header header' 'sidebar main context'" : "'header header' 'sidebar main'") : "'header' 'main'";
+    const editing = screen === "editing";
+    return {
+      scheme, schemeLabel: scheme === "dark" ? "Light" : "Dark",
+      toggleScheme: () => this.save({ scheme: scheme === "dark" ? "light" : "dark" }),
+      screens, tree, views, libraries, history, formatTools, wide,
+      isHome: screen === "home", isWorkspace: screen !== "home",
+      editing, notEditing: !editing,
+      editBg: editing ? "var(--fg)" : "transparent", editFg: editing ? "var(--bg)" : "var(--fg2)",
+      toggleEditing: pick(editing ? "reading" : "editing"),
+      commenting: screen === "commenting", notCommenting: screen !== "commenting",
+      showBanner: screen === "reading" && (this.props.showBanner ?? true),
+      goHome: pick("home"), pickReading: pick("reading"), pickEditing: pick("editing"), pickCommenting: pick("commenting"),
+      panel, pbg, pfg, panelOpen, panelTitle: titles[panelId] || "", panelCount: counts[panelId] || "",
+      pickComments: togglePanel("comments"), pickContents: togglePanel("contents"), pickWork: togglePanel("work"), pickHistory: togglePanel("history"),
+      closePanel: () => this.save({ panel: null }),
+      asideStyle, gridCols, gridAreas,
+    };
+  }
+}
+</script>
+</body>
+</html>

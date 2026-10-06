@@ -6,7 +6,13 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["**", "!**/worker-configuration.d.ts", "!fixtures", "!design/dist"]
+    "includes": [
+      "**",
+      "!**/worker-configuration.d.ts",
+      "!fixtures",
+      "!design/dist",
+      "!design/handoff"
+    ]
   },
   "formatter": {
     "indentStyle": "space",
