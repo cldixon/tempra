@@ -8,7 +8,6 @@
   "scripts": {
     "build": "bun build.ts",
     "dev": "bun build.ts --watch",
-    "postinstall": "bun build.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit"
   },
