@@ -112,6 +112,13 @@ export function formatSize(n: number): string {
   return `${(n / 1024 / 1024).toFixed(1)} MB`;
 }
 
+/** The quick switcher's shortcut as this platform writes it (⌘K on Apple devices). */
+export const switcherKey = () =>
+  typeof navigator !== "undefined" &&
+  /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent)
+    ? "⌘K"
+    : "Ctrl K";
+
 export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /** An element id for a footnote label or source id (as the server's anchorId). */

@@ -1,12 +1,14 @@
 import {
   type LinkTarget,
+  linkParam,
   type Parsed,
+  type ParseOptions,
   parse,
   toHTML,
   type WordDiff,
   wordDiff,
 } from "@tempra/editor";
-import type { Hovered } from "@tempra/editor/view";
+import type { Hovered, Reader as ReaderHandle } from "@tempra/editor/view";
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ApiError, api, prefetch, useLoad } from "../api";
 import {
@@ -17,11 +19,27 @@ import {
   useDraft,
   useThreads,
 } from "../Comments";
+import {
+  type Base,
+  type Frontmatter as FmObject,
+  type FormState,
+  FrontmatterForm,
+  formOf,
+  frontmatterOf,
+  isConflict,
+  libraryTypes,
+  linkTarget,
+  type Merge,
+  MergeView,
+  saveConcept,
+  startMerge,
+  uploadImage,
+} from "../Editor";
 import { type FeedEvent, useFeed } from "../live";
 import { registerPrefetch } from "../prefetch";
 import { el, Reader } from "../Reader";
 import { pushRecent } from "../recent";
-import { navigate } from "../router";
+import { navigate, setLeaveGuard } from "../router";
 import {
   AtNotice,
   anchorId,
@@ -226,7 +244,9 @@ export function File(props: { urls: Urls; path: string; done: string | null; act
     if (change && shown && change.seq <= shown.head) setChange(null);
   }, [change, shown]);
   const idle = useIdle(15_000);
-  const swappable = change !== null && change.op !== "delete" && change.op !== "move";
+  // While someone edits, a new version never swaps in by itself (the merge happens at save).
+  const [editing, setEditing] = useState(false);
+  const swappable = !editing && change !== null && change.op !== "delete" && change.op !== "move";
   useEffect(() => {
     if (swappable && idle) swap();
   }, [swappable, idle, swap]);
@@ -236,7 +256,12 @@ export function File(props: { urls: Urls; path: string; done: string | null; act
       {/* A concept's context panel keeps its place while the page loads (no column jump). */}
       {loaded.state === "loading" && isConceptPath(path) && <ContextPanel>{null}</ContextPanel>}
       {change && shown && (
-        <ChangeBanner urls={urls} change={change} shownSeq={shown.file.seq} onSwap={swap} />
+        <ChangeBanner
+          urls={urls}
+          change={change}
+          shownSeq={shown.file.seq}
+          onSwap={editing ? null : swap}
+        />
       )}
       <Status loaded={loaded}>
         {(d) =>
@@ -258,6 +283,7 @@ export function File(props: { urls: Urls; path: string; done: string | null; act
                 threadsError={threads.state === "error" ? threads.error.message : null}
                 onCommented={threads.reload}
                 onVerified={loaded.reload}
+                onEditing={setEditing}
               />
             )
           )
@@ -308,7 +334,13 @@ function ago(ts: string, now: number): string {
 }
 
 /** "claude-ai/connector changed this 4 s ago, seq 41. Show diff · Show new version" */
-function ChangeBanner(props: { urls: Urls; change: FeedEvent; shownSeq: number; onSwap(): void }) {
+function ChangeBanner(props: {
+  urls: Urls;
+  change: FeedEvent;
+  shownSeq: number;
+  /** Null while editing: the change is merged at save instead. */
+  onSwap: (() => void) | null;
+}) {
   const { urls, change: e } = props;
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
@@ -338,9 +370,13 @@ function ChangeBanner(props: { urls: Urls; change: FeedEvent; shownSeq: number; 
               <a href={urls.diff(e.path, props.shownSeq, e.seq)}>Show diff</a> ·{" "}
             </>
           )}
-          <button type="button" onClick={props.onSwap}>
-            Show new version
-          </button>
+          {props.onSwap ? (
+            <button type="button" onClick={props.onSwap}>
+              Show new version
+            </button>
+          ) : (
+            "Your edit will be merged with it when you save."
+          )}
         </>
       )}
     </div>
@@ -410,17 +446,32 @@ function ConceptView(props: {
   threadsError: string | null;
   onCommented(): void;
   onVerified(): void;
+  /** Editing started or ended (the page then holds new versions back). */
+  onEditing(on: boolean): void;
 }) {
-  const { urls, concept: c, head, sources, links } = props;
+  const { urls, head } = props;
+  // While editing, the page keeps the version the edit started from (a refresh must not
+  // redraw the body under the person's hands).
+  // The file as stored (frontmatter and body), shown in place of the reader.
+  const [markdown, setMarkdown] = useState(false);
+  const [frozen, setFrozen] = useState<{
+    concept: Concept;
+    sources: Sources;
+    links: Links;
+  } | null>(null);
+  const c = frozen?.concept ?? props.concept;
+  const sources = frozen?.sources ?? props.sources;
+  const links = frozen?.links ?? props.links;
+  const editing = frozen !== null;
   const fm = c.frontmatter;
   const title = typeof fm.title === "string" && fm.title ? fm.title : baseName(c.path);
   useTitle(`${title} · ${urls.slug}`);
   const status = typeof fm.status === "string" ? fm.status : "stable";
 
-  const parsed = useMemo(() => {
+  const parseOptions = useMemo((): ParseOptions => {
     const ids = new Set(sources.sources.map((s) => s.id).filter((id) => typeof id === "string"));
     const broken = new Set(links.broken.map((b) => b.path));
-    return parse(c.body, {
+    return {
       path: c.path,
       href: bodyHref(urls),
       exists: (path) => !broken.has(path),
@@ -430,8 +481,9 @@ function ConceptView(props: {
           : defined
             ? `#${anchorId("fn", label)}`
             : null,
-    });
-  }, [c, urls, sources, links]);
+    };
+  }, [c.path, urls, sources, links]);
+  const parsed = useMemo(() => parse(c.body, parseOptions), [c.body, parseOptions]);
   // A leading heading that repeats the title is not shown twice (the stored body is unchanged).
   const first = parsed.headings[0];
   const hideFirst =
@@ -442,6 +494,18 @@ function ConceptView(props: {
   );
   const tooltip = useTooltips(urls, sources, footnotes);
   const changes = useVerificationDiff(urls, c, parsed, props.history, head);
+  const edit = useEditing({
+    urls,
+    concept: c,
+    start: () => {
+      changes.off();
+      setFrozen({ concept: props.concept, sources: props.sources, links: props.links });
+    },
+    end: () => setFrozen(null),
+    onSaved: props.onVerified,
+    onEditing: props.onEditing,
+    parseOptions,
+  });
 
   // Comments: each thread's quote found in the body on screen, highlighted while open.
   const writable = urls.at === undefined || urls.at >= head;
@@ -488,18 +552,47 @@ function ConceptView(props: {
           )}
           {status !== "stable" && <Chip text={status} tone="warn" />}
           {c.lint.length > 0 && <Chip text={`${c.lint.length} lint`} tone="warn" />}
+          {!editing && (
+            <button type="button" aria-pressed={markdown} onClick={() => setMarkdown((m) => !m)}>
+              Markdown
+            </button>
+          )}
+          {writable && !editing && (
+            <button
+              type="button"
+              onClick={() => {
+                setMarkdown(false);
+                edit.start();
+              }}
+            >
+              Edit
+            </button>
+          )}
         </div>
         <AtNotice urls={urls} head={head} current={urls.pinned(undefined).file(c.path)} />
-        {changes.toggle}
-        <Reader
-          parsed={parsed}
-          tooltip={tooltip}
-          diff={changes.diff}
-          hideFirst={hideFirst}
-          highlights={highlights}
-          onMark={setActive}
-          onComment={writable ? startDraft : undefined}
-        />
+        {edit.saved && (
+          <div className="notice ok" role="status">
+            Saved.
+            {edit.saved.lint.length > 0 &&
+              ` Lint: ${edit.saved.lint.map((l) => l.message).join(" ")}`}
+          </div>
+        )}
+        {editing ? edit.bar : !markdown && changes.toggle}
+        {markdown && !editing && <RawMarkdown urls={urls} path={c.path} hash={c.hash} />}
+        {/* Kept mounted under the markdown, so comments and the editor keep their reader. */}
+        <div hidden={markdown && !editing}>
+          <Reader
+            key={edit.generation}
+            parsed={parsed}
+            tooltip={tooltip}
+            diff={editing ? null : changes.diff}
+            hideFirst={hideFirst}
+            highlights={highlights}
+            onMark={setActive}
+            onComment={writable ? startDraft : undefined}
+            handle={edit.reader}
+          />
+        </div>
         {c.lint.length > 0 && (
           <>
             <h2 id="lint">Lint</h2>
@@ -516,7 +609,8 @@ function ConceptView(props: {
       </div>
       {/* The workspace's right panel (tempra-dev: app/workspace). */}
       <ContextPanel>
-        <Verify urls={urls} concept={c} head={head} onVerified={props.onVerified} />
+        {/* Verifying is for a saved version, not one being edited. */}
+        {!editing && <Verify urls={urls} concept={c} head={head} onVerified={props.onVerified} />}
         {(props.threads || props.threadsError) && (
           <CommentsPanel
             urls={urls}
@@ -660,7 +754,7 @@ function useVerificationDiff(
   parsed: Parsed,
   events: HistoryEvent[],
   head: number,
-): { toggle: React.ReactNode; diff: WordDiff | null } {
+): { toggle: React.ReactNode; diff: WordDiff | null; off(): void } {
   const [on, setOn] = useState(false);
   const [diff, setDiff] = useState<WordDiff | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -685,8 +779,10 @@ function useVerificationDiff(
       live = false;
     };
   }, [on, verified, urls, c.path, parsed]);
-  if (!changed || !current || !verified) return { toggle: null, diff: null };
+  const off = () => setOn(false);
+  if (!changed || !current || !verified) return { toggle: null, diff: null, off };
   return {
+    off,
     toggle: (
       <p className="small">
         <label>
@@ -1036,5 +1132,240 @@ function History(props: { urls: Urls; concept: Concept; head: number; events: Hi
         )}
       </p>
     </section>
+  );
+}
+
+/**
+ * Editing a concept (tempra-dev: app/editor): the reader made editable in place, the frontmatter
+ * as a form, a required note, save with If-Match, and a merge when someone saved meanwhile.
+ */
+function useEditing(o: {
+  urls: Urls;
+  concept: Concept;
+  /** Freezes the page on the version being edited. */
+  start(): void;
+  /** Lets the page follow the library again. */
+  end(): void;
+  onSaved(): void;
+  onEditing(on: boolean): void;
+  /** How the body's links are drawn: a link made in the editor is drawn the same way. */
+  parseOptions: ParseOptions;
+}) {
+  const { urls } = o;
+  const reader = useRef<ReaderHandle | null>(null);
+  const [active, setActive] = useState(false);
+  const [generation, setGeneration] = useState(0);
+  const [form, setForm] = useState<FormState | null>(null);
+  const [note, setNote] = useState("");
+  const [types, setTypes] = useState<string[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [merge, setMerge] = useState<Merge | null>(null);
+  const [saved, setSaved] = useState<{ lint: { code: string; message: string }[] } | null>(null);
+  /** Images on their way: a save waits for them, so none is left out of the body. */
+  const [uploading, setUploading] = useState(0);
+  const dirty = useRef(false);
+  /** The version the edit started from. */
+  const base = useRef<Base | null>(null);
+
+  // The reader turns editable once it is (re)mounted for the frozen version.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on each start, and on a remount.
+  useEffect(() => {
+    if (!active) return;
+    const path = o.concept.path;
+    let outline: Promise<string[]> | null = null;
+    reader.current?.setEditable(true, {
+      paths: () => {
+        outline ??= api<{ files: { path: string; kind: string }[] }>(urls.api("outline")).then(
+          (r) => r.files.filter((f) => f.kind === "concept").map((f) => f.path),
+          () => [],
+        );
+        return outline;
+      },
+      // Drawn as the body's own links are; a target a browser must not follow is refused.
+      link: (raw) => {
+        const param = linkParam(o.parseOptions, linkTarget(urls, raw));
+        return param.href === null ? null : param;
+      },
+      upload: (file) => uploadImage(urls, path, file),
+      onUploads: setUploading,
+      onError: setError,
+      onChange: () => {
+        dirty.current = true;
+      },
+    });
+  }, [active, generation]);
+
+  // Leaving with unsaved edits asks first: links and back in the app, and the tab itself.
+  useEffect(() => {
+    if (!active) return;
+    const unguard = setLeaveGuard(
+      () => !dirty.current || confirm("Leave this page? Your edits are not saved."),
+    );
+    const unload = (e: BeforeUnloadEvent) => {
+      if (dirty.current) e.preventDefault();
+    };
+    window.addEventListener("beforeunload", unload);
+    return () => {
+      unguard();
+      window.removeEventListener("beforeunload", unload);
+    };
+  }, [active]);
+
+  const begin = () => {
+    const c = o.concept;
+    base.current = { path: c.path, hash: c.hash, body: c.body, frontmatter: c.frontmatter };
+    dirty.current = false;
+    setSaved(null);
+    setError(null);
+    setMerge(null);
+    setNote("");
+    setForm(formOf(c.frontmatter));
+    o.start();
+    setActive(true);
+    o.onEditing(true);
+    libraryTypes(urls).then(setTypes, () => {});
+  };
+
+  const stop = () => {
+    dirty.current = false;
+    reader.current?.setEditable(false);
+    setActive(false);
+    setMerge(null);
+    o.onEditing(false);
+    o.end();
+    // A fresh reader for whatever the page shows next.
+    setGeneration((g) => g + 1);
+  };
+
+  const cancel = () => {
+    if (dirty.current && !confirm("Drop your edits?")) return;
+    stop();
+  };
+
+  /** Saves `body` and `fm` as an edit of `from`; a 412 merges them with the version there now. */
+  const write = async (from: Base, body: string, fm: FmObject) => {
+    setBusy(true);
+    setError(null);
+    try {
+      const r = await saveConcept(urls, o.concept.path, from.hash, fm, body, note.trim());
+      setSaved({ lint: r.lint });
+      stop();
+      o.onSaved();
+    } catch (err) {
+      if (isConflict(err)) {
+        // Someone saved meanwhile: merge with the version there now.
+        const now: FileJson | null | { failed: string } = await api<FileJson>(
+          urls.api(`files/${enc(o.concept.path)}`),
+        ).catch((e: unknown) =>
+          e instanceof ApiError && e.status === 404
+            ? null
+            : { failed: e instanceof Error ? e.message : String(e) },
+        );
+        if (now !== null && "failed" in now) {
+          setError(`Someone saved meanwhile, and their version could not be loaded: ${now.failed}`);
+        } else if (now === null) {
+          setError("This concept was deleted or moved meanwhile; copy your text before leaving.");
+        } else if (now.kind !== "concept") {
+          setError("The file is no longer a concept; copy your text and reload.");
+        } else {
+          const theirs: Base = {
+            path: now.path,
+            hash: now.hash,
+            body: now.body,
+            frontmatter: now.frontmatter as FmObject,
+          };
+          // The edit itself keeps its base: saving it again (after "Back to editing") meets
+          // the 412 again and merges again, never overwriting what was written meanwhile.
+          setMerge(startMerge(from, body, fm, theirs));
+        }
+      } else setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const save = (e: FormEvent) => {
+    e.preventDefault();
+    if (uploading > 0) return setError("Wait for the images to finish uploading.");
+    if (!note.trim()) return setError("Say what you changed in a one-line note.");
+    if (!form?.type.trim()) return setError("A concept needs a type.");
+    const b = base.current;
+    if (!b || !reader.current) return;
+    void write(b, reader.current.markdown(), frontmatterOf(b.frontmatter, form));
+  };
+
+  const stamped: FmObject = Object.fromEntries(
+    Object.entries(o.concept.frontmatter).filter(([k]) => k === "generated" || k === "verified"),
+  ) as FmObject;
+
+  const bar = merge ? (
+    <MergeView
+      // A new merge (after another write meanwhile) starts with nothing picked.
+      key={merge.theirs.hash}
+      merge={merge}
+      busy={busy}
+      error={error}
+      onSave={(body, fm) => void write(merge.theirs, body, fm)}
+      onCancel={() => setMerge(null)}
+    />
+  ) : (
+    form && (
+      <form className="edit-bar" onSubmit={save}>
+        <FrontmatterForm
+          form={form}
+          types={types}
+          stamped={stamped}
+          onChange={(f) => {
+            setForm(f);
+            dirty.current = true;
+          }}
+        />
+        <div className="edit-actions">
+          <label>
+            Note{" "}
+            <input
+              value={note}
+              onChange={(e) => setNote(e.currentTarget.value)}
+              placeholder="What you changed, in one line"
+              required
+            />
+          </label>{" "}
+          <button className="primary" type="submit" disabled={busy || uploading > 0}>
+            {uploading > 0 ? "Uploading…" : "Save"}
+          </button>{" "}
+          <button type="button" onClick={cancel} disabled={busy}>
+            Cancel
+          </button>
+        </div>
+        {error && <div className="notice">{error}</div>}
+      </form>
+    )
+  );
+
+  return { start: begin, bar, reader, generation, saved };
+}
+
+/** The file as stored: what agents read and write, frontmatter and all. */
+function RawMarkdown(props: { urls: Urls; path: string; hash: string }) {
+  const { urls, path, hash } = props;
+  const url = urls.api(`files/${enc(path)}`, { at: urls.at });
+  const loaded = useLoad(`markdown ${url} ${hash}`, async () => {
+    const res = await fetch(url, {
+      credentials: "same-origin",
+      headers: { Accept: "text/markdown" },
+    });
+    if (!res.ok) throw new ApiError(res.status, "error", res.statusText);
+    return res.text();
+  });
+  return (
+    <Status loaded={loaded}>
+      {(text) => (
+        <div className="raw-markdown">
+          <pre>{text}</pre>
+          <a href={urls.raw(path)}>Open as plain text</a>
+        </div>
+      )}
+    </Status>
   );
 }

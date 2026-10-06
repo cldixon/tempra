@@ -380,15 +380,26 @@ class Builder {
     return target && target.kind !== "internal" ? target.href : null;
   }
 
-  private link(url: string, title: string | null, kind: "link") {
-    const target = this.target(url);
-    const path = target?.kind === "internal" ? target.path : null;
-    const broken =
-      target?.kind === "internal" && this.opts.exists
-        ? !this.opts.exists(target.path, target.dir)
-        : false;
-    return { url, title, href: this.href(target, url, kind), path, broken };
+  private link(url: string, title: string | null, _kind: "link") {
+    return linkParam(this.opts, url, title);
   }
+}
+
+/**
+ * A link's parameters as the reader draws it, by the same rules as `parse` (an editor making a
+ * link uses this too). `href` is null for a target a browser must not follow.
+ */
+export function linkParam(opts: ParseOptions, url: string, title: string | null = null) {
+  const target = linkTarget(opts.path ?? "", url);
+  const path = target?.kind === "internal" ? target.path : null;
+  const broken =
+    target?.kind === "internal" && opts.exists ? !opts.exists(target.path, target.dir) : false;
+  const href = opts.href
+    ? opts.href(target, url, "link")
+    : target && target.kind !== "internal"
+      ? target.href
+      : null;
+  return { url, title, href, path, broken };
 }
 
 /** A heading's text as the server anchors it: text and code, footnote references as `[x]`. */

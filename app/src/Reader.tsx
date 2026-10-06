@@ -5,7 +5,7 @@ import {
   mountReader,
   type Reader as ReaderHandle,
 } from "@tempra/editor/view";
-import { useEffect, useRef } from "react";
+import { type RefObject, useEffect, useRef } from "react";
 
 /** The page's CSP nonce, which the SPA shell puts in a meta tag for Wordgard's styles. */
 function nonce(): string {
@@ -27,6 +27,8 @@ export function Reader(props: {
   onMark?(id: string | null): void;
   /** Offers Comment on selected text (the reader's selection toolbar). */
   onComment?(range: { from: number; to: number }): void;
+  /** Set to the mounted reader, for editing (setEditable, markdown, reset). */
+  handle?: RefObject<ReaderHandle | null>;
 }) {
   const host = useRef<HTMLDivElement>(null);
   const tooltip = useRef(props.tooltip);
@@ -39,7 +41,7 @@ export function Reader(props: {
   const highlights = useRef(props.highlights);
   highlights.current = props.highlights;
   const current = useRef<ReaderHandle | null>(null);
-  const { parsed, diff, hideFirst } = props;
+  const { parsed, diff, hideFirst, handle } = props;
   useEffect(() => {
     if (!host.current) return;
     const reader = mountReader({
@@ -53,12 +55,14 @@ export function Reader(props: {
       onComment: commentable ? (range) => onComment.current?.(range) : undefined,
     });
     current.current = reader;
+    if (handle) handle.current = reader;
     if (highlights.current?.length) reader.highlight(highlights.current);
     return () => {
       reader.destroy();
       current.current = null;
+      if (handle) handle.current = null;
     };
-  }, [parsed, diff, hideFirst, commentable]);
+  }, [parsed, diff, hideFirst, commentable, handle]);
   useEffect(() => {
     current.current?.highlight(props.highlights ?? []);
   }, [props.highlights]);

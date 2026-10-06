@@ -203,14 +203,26 @@ async function openBrowser() {
   });
   page.on("response", (r) => {
     const path = new URL(r.url()).pathname;
-    if (r.status() >= 400 && path !== "/favicon.ico") problems.push(`${r.status()} ${path}`);
+    // A save that meets someone's write answers 412 on purpose (the editor then merges).
+    const expected = r.status() === 412 && r.request().method() === "PUT";
+    if (r.status() >= 400 && path !== "/favicon.ico" && !expected) {
+      problems.push(`${r.status()} ${path}`);
+    }
   });
   page.on("pageerror", (e) => problems.push(`page error: ${e.message}`));
+  let failures = 0;
   const step = async (what: string, run: () => Promise<unknown>) => {
     try {
       await run();
     } catch (e) {
       problems.push(`${what}: ${String(e).split("\n")[0]}`);
+      // GATE_SCREENSHOTS: what the page showed when the step failed.
+      const shots = process.env.GATE_SCREENSHOTS;
+      if (shots) {
+        await page
+          .screenshot({ path: `${shots}/failed-${++failures}.png`, fullPage: true })
+          .catch(() => {});
+      }
     }
   };
   /** Signs in the way a person does: the email form, then the (dev, on-page) link. */
@@ -378,8 +390,24 @@ async function browserRenders(
         })
       ).json()) as { frontmatter?: { title?: string } };
       const word = String(meta.frontmatter?.title ?? "").split(/\s+/)[0] ?? "";
+      const dialog = page.getByRole("dialog", { name: "Open a file" });
+      const box = dialog.getByRole("combobox");
+      // It closes every way a person tries: Escape, the same keys, Close, a click outside.
+      const closes = async (how: string, close: () => Promise<void>) => {
+        await page.keyboard.press("Control+k");
+        await box.waitFor({ timeout: 5000 }).catch(() => {
+          throw new Error(`the switcher did not open (before ${how})`);
+        });
+        await close();
+        await dialog.waitFor({ state: "hidden", timeout: 5000 }).catch(() => {
+          throw new Error(`the switcher did not close with ${how}`);
+        });
+      };
+      await closes("Escape", () => box.press("Escape"));
+      await closes("the same keys", () => page.keyboard.press("Control+k"));
+      await closes("Close", () => dialog.getByRole("button", { name: "Close" }).click());
+      await closes("a click outside", () => page.mouse.click(5, 5));
       await page.keyboard.press("Control+k");
-      const box = page.getByRole("dialog", { name: "Open a file" }).getByRole("combobox");
       await box.fill(word);
       const option = page.locator('.switcher [role="option"]', { hasText: first }).first();
       await option.waitFor({ timeout: 5000 });
@@ -603,6 +631,136 @@ async function browserRenders(
         }
         await page.getByText("Resolved (1)").waitFor({ timeout: 10_000 });
         await mark.first().waitFor({ state: "detached", timeout: 10_000 });
+        if (!(await stayed())) throw new Error("the page reloaded");
+      },
+    );
+    // The editor (TEMPRA-15): a person edits the body in place and saves with a note; an agent's
+    // edit on that text still matches; an edit that meets an agent's write is merged at save.
+    await step(
+      "editor: edit, save with a note, an agent edits after, a write meanwhile merges",
+      async () => {
+        await page.goto(url);
+        const body = page.locator(".body .prose");
+        await body.waitFor({ timeout: 15_000 });
+        await markStay();
+        // Markdown shows the file as stored, frontmatter first, in place of the reader.
+        const asMarkdown = page.getByRole("button", { name: "Markdown", exact: true });
+        await asMarkdown.click();
+        const stored = page.locator(".raw-markdown pre");
+        await stored.waitFor({ timeout: 10_000 });
+        const text = await stored.innerText();
+        if (!text.startsWith("---\ntype:")) throw new Error(`markdown view: ${text.slice(0, 60)}`);
+        if (await body.isVisible()) throw new Error("the reader still shows beside the markdown");
+        await asMarkdown.click();
+        await body.waitFor({ state: "visible" });
+        const edit = async () => {
+          await page.getByRole("button", { name: "Edit", exact: true }).click();
+          await page.locator(".body [contenteditable='true']").first().waitFor({ timeout: 5_000 });
+        };
+        /** Clicks into a paragraph of the body, goes to the end of that line, and types. */
+        const typeInto = async (text: string, which: "first" | "last" = "last") => {
+          // A paragraph with words in it (code blocks and tables hold none).
+          const target = body.locator("p", { hasText: /\w{4,}/ })[which]();
+          await target.click();
+          // The editor takes up the click's selection on the next selectionchange; a person
+          // never types within the same frame, so wait until the caret is in the paragraph.
+          const inside = () =>
+            target.evaluate((p) => {
+              const node = p.ownerDocument.getSelection()?.anchorNode ?? null;
+              return node !== null && p.contains(node);
+            });
+          for (let i = 0; !(await inside()) && i < 20; i++) await page.waitForTimeout(50);
+          await page.waitForTimeout(100);
+          await page.keyboard.press("End");
+          await page.keyboard.type(text);
+        };
+        const save = async (note: string) => {
+          await page.getByPlaceholder("What you changed, in one line").fill(note);
+          await page
+            .locator(".edit-bar")
+            .getByRole("button", { name: "Save", exact: true })
+            .click();
+        };
+        await edit();
+        if (shots) await page.screenshot({ path: `${shots}/editor.png` });
+        await typeInto(" Edited by a person.");
+        // The drawn caret sits on the line being typed, not above it.
+        const caret = await page.locator("wg-cursor").evaluate((c) => {
+          const range = c.ownerDocument.getSelection()?.getRangeAt(0);
+          const text = range?.getClientRects()[0] ?? range?.getBoundingClientRect();
+          return { caret: c.getBoundingClientRect().top, text: text?.top ?? Number.NaN };
+        });
+        if (!(Math.abs(caret.caret - caret.text) <= 4)) {
+          throw new Error(`the caret is drawn ${caret.text - caret.caret}px off the line`);
+        }
+        // A link made with Ctrl+K on a selected word, to another concept by its bundle path.
+        // The caret is after "person.": step over the full stop and select the word.
+        await page.keyboard.press("ArrowLeft");
+        await page.keyboard.press("Control+Shift+ArrowLeft");
+        await page.keyboard.press("Control+k");
+        const target = concepts.find((x) => x !== concept) ?? concept;
+        await page.locator(".link-dialog input[name='url']").fill(`/${target}`);
+        await page.keyboard.press("Enter");
+        await body
+          .locator(`a[href$="${enc(target)}"]`)
+          .first()
+          .waitFor({ timeout: 5_000 });
+        await save("gate: a person edits");
+        await page.getByText("Saved.").waitFor({ timeout: 10_000 });
+        await body.getByText("Edited by a person.").waitFor({ timeout: 10_000 });
+        const saved = await (
+          await fetch(`${libApi}/files/${enc(concept)}`, { headers: bearer })
+        ).text();
+        if (!saved.includes(`[person](/${target})`)) {
+          throw new Error("the link was not saved as a bundle path");
+        }
+        const ev = (await (
+          await fetch(`${libApi}/history/${enc(concept)}`, { headers: bearer })
+        ).json()) as { events: { actor: string; meta: { note?: string } | null }[] };
+        const last = ev.events.at(-1);
+        if (!last?.actor.startsWith("human:") || last.meta?.note !== "gate: a person edits") {
+          throw new Error(`ledger: ${JSON.stringify(last)}`);
+        }
+        // An agent's find-and-replace on the text the person wrote still finds it.
+        const agentEdit = await fetch(`${libApi}/files/${enc(concept)}`, {
+          method: "PATCH",
+          headers: { ...bearer, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            edits: [{ old: "Edited by a [person]", new: "Edited by an agent and a [person]" }],
+            note: "gate: an agent edits after",
+          }),
+        });
+        if (!agentEdit.ok)
+          throw new Error(`agent edit: ${agentEdit.status} ${await agentEdit.text()}`);
+        await page.getByRole("button", { name: "Show new version" }).click();
+        await body.getByText("Edited by an agent and a").waitFor({ timeout: 10_000 });
+        // A write meanwhile: the save meets a 412 and merges, keeping both changes.
+        await edit();
+        // In the first paragraph: the agent's write lands at the end of the body, so they combine.
+        await typeInto(" A second edit.", "first");
+        // The caret is where the person clicked, not at the start of the body.
+        if ((await body.locator("p", { hasText: "A second edit." }).count()) !== 1) {
+          const where = await body
+            .locator(":scope > *", { hasText: "A second edit." })
+            .evaluateAll((els) => els.map((e) => `${e.tagName}: ${e.textContent?.slice(0, 80)}`));
+          throw new Error(`the typed text is not in the paragraph clicked: ${where.join(" | ")}`);
+        }
+        await agentAppends("An agent wrote while the person edited.");
+        await save("gate: a person edits again");
+        await page
+          .getByRole("heading", { name: "Changed while you edited" })
+          .waitFor({ timeout: 10_000 });
+        if (shots) await page.screenshot({ path: `${shots}/merge.png` });
+        // Back to editing and Save again merges again: the agent's write is never overwritten.
+        await page.getByRole("button", { name: "Back to editing" }).click();
+        await save("gate: a person edits again");
+        await page
+          .getByRole("heading", { name: "Changed while you edited" })
+          .waitFor({ timeout: 10_000 });
+        await page.getByRole("button", { name: "Save merged" }).click();
+        await page.getByText("Saved.").waitFor({ timeout: 10_000 });
+        await body.getByText("A second edit.").waitFor({ timeout: 10_000 });
+        await body.getByText("An agent wrote while the person edited.").waitFor();
         if (!(await stayed())) throw new Error("the page reloaded");
       },
     );

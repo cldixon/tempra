@@ -14,7 +14,7 @@ import { api, useLoad } from "./api";
 import { lastNavigation, navigate } from "./router";
 import { Switcher } from "./Switcher";
 import { type OutlineFile, Tree } from "./Tree";
-import type { Me } from "./ui";
+import { type Me, switcherKey } from "./ui";
 import { Urls } from "./urls";
 
 /** Where the open page is in its library: a file, a folder, or one of the library's views. */
@@ -153,12 +153,15 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
     return () => document.removeEventListener("keydown", onKey);
   }, [drawer, contextEl]);
 
-  // Ctrl or Cmd+K opens the quick switcher, from anywhere in the workspace.
+  // Ctrl or Cmd+K opens the quick switcher, from anywhere in the workspace except a body being
+  // edited, where it makes a link.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+      const editing = e.target instanceof Element && e.target.closest("[contenteditable='true']");
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k" && !editing) {
         e.preventDefault();
-        setSwitching(true);
+        // The same keys close it again.
+        setSwitching((on) => !on);
       }
     };
     document.addEventListener("keydown", onKey);
@@ -213,7 +216,7 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
         <a href="/">Libraries</a>
         <LibrarySwitch urls={urls} />
         <button type="button" onClick={() => setSwitching(true)}>
-          Open… <kbd>Ctrl K</kbd>
+          Open… <kbd>{switcherKey()}</kbd>
         </button>
         <span className="ws-spacer" />
         {hasContext && (

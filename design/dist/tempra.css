@@ -141,13 +141,18 @@ img {
 div.body > * {
   --wg-panel-color: var(--tempra-color-bg);
   --wg-border-color: var(--tempra-color-border);
-  --wg-highlight-color: var(--tempra-color-link);
+  --wg-highlight-color: var(--tempra-color-text);
+  --wg-menu-color: var(--tempra-color-text);
   --wg-dialog-font: inherit;
   border: 0;
 }
 
 div.body wg-content {
   padding: 0;
+  /* Without padding, the first block's top margin would collapse through the content's edge, and
+     Wordgard (which draws the caret from the scroller's top but measures it from the content's)
+     would draw every caret that much too high. A block formatting context keeps it inside. */
+  display: flow-root;
 }
 
 .tooltip {
@@ -248,6 +253,103 @@ mark.comment-draft {
   min-height: 3.5rem;
   margin-bottom: var(--tempra-space-1);
   font: inherit;
+}
+
+/*
+ * The editor (TEMPRA-15), lines only like the rest: the frontmatter as a plain form, the note and
+ * save bar, and the merge view's choices boxed in rules. Wordgard's menu bar and dialogs take
+ * their look from the --wg-* variables above.
+ */
+.edit-bar {
+  margin: var(--tempra-space-3) 0;
+  padding: var(--tempra-space-2) 0;
+  border-top: 1px solid var(--tempra-color-text);
+  border-bottom: 1px solid var(--tempra-color-text);
+}
+
+.frontmatter-form {
+  display: grid;
+  gap: var(--tempra-space-2);
+  margin: 0 0 var(--tempra-space-2);
+  padding: 0;
+  border: 0;
+}
+
+.frontmatter-form legend {
+  font-weight: bold;
+  margin-bottom: var(--tempra-space-1);
+}
+
+.frontmatter-form label {
+  display: grid;
+  gap: var(--tempra-space-1);
+}
+
+.frontmatter-form input,
+.frontmatter-form select,
+.edit-actions input {
+  font: inherit;
+  box-sizing: border-box;
+  max-width: 100%;
+}
+
+.source-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--tempra-space-1);
+  margin: var(--tempra-space-1) 0;
+}
+
+.edit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--tempra-space-2);
+}
+
+.edit-actions label {
+  flex: 1 1 20rem;
+  display: flex;
+  gap: var(--tempra-space-1);
+  align-items: center;
+}
+
+.edit-actions input {
+  flex: 1;
+}
+
+.merge {
+  margin: var(--tempra-space-3) 0;
+  padding: var(--tempra-space-2) 0;
+  border-top: 1px solid var(--tempra-color-text);
+  border-bottom: 1px solid var(--tempra-color-text);
+}
+
+.merge .conflict {
+  margin: var(--tempra-space-2) 0;
+  border: 1px solid var(--tempra-color-border);
+}
+
+.merge .conflict label {
+  display: block;
+  margin: var(--tempra-space-1) 0;
+}
+
+.merge-side {
+  margin: var(--tempra-space-1) 0 0;
+  padding: var(--tempra-space-1);
+  border: 1px solid var(--tempra-color-border);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--tempra-font-mono);
+}
+
+/* The concept as stored (the page's Markdown view): the file's own text, wrapped. */
+.raw-markdown pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: var(--tempra-space-2);
+  border: 1px solid var(--tempra-color-border);
 }
 
 /*
@@ -395,8 +497,14 @@ body:has(> #root > .workspace) {
   background: rgb(0 0 0 / 0.3);
 }
 
-.switcher input {
-  width: 100%;
+.switcher-head {
+  display: flex;
+  gap: var(--tempra-space-2);
+}
+
+.switcher-head input {
+  flex: 1;
+  min-width: 0;
 }
 
 .switcher [role="listbox"] {
