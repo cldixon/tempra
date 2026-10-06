@@ -186,12 +186,14 @@ describe("MCP trial 2026-10-06", () => {
       "missing_status",
       "footnote_uncited",
       "relative_link",
+      "missing_heading",
     ]);
-    expect(codes(r?.notices)).toEqual(["stale_on_write", "missing_heading"]);
-    expect(r?.notices?.[1]?.message).toContain("#no-such-heading");
+    expect(r?.lint.at(-1)?.message).toContain("#no-such-heading");
+    expect(codes(r?.notices)).toEqual(["stale_on_write"]);
 
+    // An import gets none of the writer's rules, only what is wrong whoever wrote it.
     const imported = s.import(ctx(), [{ path: "y.md", markdown: loose }]);
-    expect(imported.warnings).toEqual([]);
+    expect(imported.warnings.flatMap((w) => codes(w.lint))).toEqual(["missing_heading"]);
   });
 
   test("TEMPRA-38: a write reports when it was stored in a different form", () => {
@@ -300,6 +302,54 @@ describe("MCP trial 2026-10-06, through the MCP tools", () => {
     expect(transcript).toMatch(/- claude-code\/test at \S+:\n {2}Add a status\./);
     expect(transcript).toMatch(/- claude-code\/test resolved it at \S+:\n {2}Done\./);
     expect(transcript).toMatch(/- claude-code\/test reopened it at \S+\./);
+  });
+});
+
+describe("TEMPRA-41", () => {
+  test("a link to a heading is linted from the target's current headings", () => {
+    const s = newStore();
+    s.apply(ctx(), [
+      { op: "write", path: "b.md", content: md("# Setup\n\nSteps.\n") },
+      { op: "write", path: "a.md", content: md("See [setup](/b.md#setup).\n") },
+    ]);
+    expect(concept(s, "a.md").lint).toEqual([]);
+    const v1 = s.headSeq();
+
+    // B renames the heading: A's link no longer finds it, in read and in work.
+    s.apply(ctx(), [
+      {
+        op: "write",
+        path: "b.md",
+        content: md("# Install\n\nSteps.\n"),
+        if_match: concept(s, "b.md").hash,
+      },
+    ]);
+    expect(codes(concept(s, "a.md").lint)).toEqual(["missing_heading"]);
+    expect(concept(s, "a.md").lint[0]?.message).toBe(
+      "Link /b.md#setup names a heading /b.md does not have (#setup).",
+    );
+    expect(s.work({ kind: "lint" }).items.map((i) => [i.path, i.detail])).toEqual([
+      ["a.md", "Link /b.md#setup names a heading /b.md does not have (#setup)."],
+    ]);
+
+    // Reverting B brings the heading back, and A's lint clears.
+    s.revert(ctx(), { path: "b.md", to_seq: v1 });
+    expect(concept(s, "a.md").lint).toEqual([]);
+    expect(s.work({ kind: "lint" }).items).toEqual([]);
+
+    // It follows a move of the target too.
+    s.apply(ctx(), [{ op: "move", path: "b.md", to: "docs/b.md" }]);
+    expect(concept(s, "a.md").lint).toEqual([]);
+    s.apply(ctx(), [
+      {
+        op: "edit",
+        path: "docs/b.md",
+        edits: [{ old: "# Setup", new: "# Other" }],
+      },
+    ]);
+    expect(concept(s, "a.md").lint[0]?.message).toBe(
+      "Link /docs/b.md#setup names a heading /docs/b.md does not have (#setup).",
+    );
   });
 });
 

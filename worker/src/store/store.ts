@@ -720,14 +720,20 @@ export class LibraryStore {
     }
   }
 
-  /** Adds broken-link lint to each written concept and refreshes flags on affected concepts. */
+  /**
+   * Adds broken-link and missing-heading lint to each written concept and refreshes flags on
+   * affected concepts.
+   */
   private finish(w: WriteState, results: OpResult[]): OpResult[] {
     for (const id of w.affected) this.refreshBroken(id);
+    const snap = this.snapshot(undefined, true);
     for (const r of results) {
       const id = w.written.get(r.path);
       if (!id || r.hash === null) continue;
       const broken = this.refreshBroken(id);
-      if (broken.length > 0) r.lint = [...r.lint, ...broken];
+      const e = snap.byId.get(id);
+      const anchors = e?.kind === "concept" ? this.anchorLint(snap, e) : [];
+      if (broken.length + anchors.length > 0) r.lint = [...r.lint, ...broken, ...anchors];
     }
     return results;
   }
@@ -905,7 +911,6 @@ export class LibraryStore {
     if (prev && curConcept && hash !== curConcept.hash) {
       notices.push(...this.threadNotices(conceptId, prev, built.record));
     }
-    notices.push(...this.anchorNotices(built.record));
     if (notices.length > 0) result.notices = notices;
     return result;
   }
@@ -939,25 +944,32 @@ export class LibraryStore {
   }
 
   /**
-   * Links to a heading their target does not have, reported with the write (not stored as lint,
-   * which would go stale when the target changes).
+   * Links to a heading their target does not have, worked out from the target's current headings
+   * whenever the linking concept's lint is read, never stored (tempra-dev:
+   * decisions/link-lint-at-read-time, TEMPRA-41). `headings` caches each target version's anchors.
    */
-  private anchorNotices(r: ConceptRecord): LintWarning[] {
+  private anchorLint(
+    snap: Snapshot,
+    e: Entry,
+    headings = new Map<string, Set<string>>(),
+  ): LintWarning[] {
     const out: LintWarning[] = [];
-    for (const l of r.links) {
-      if (!l.anchor || l.anchor === "#" || !l.target) continue;
-      const row = this.sql.all<{ path: string; hash: string; kind: Kind }>(
-        "SELECT path, hash, kind FROM paths WHERE concept_id = ?",
-        l.target,
-      )[0];
-      if (row?.kind !== "concept") continue;
-      const id = safeDecode(l.anchor.slice(1));
-      if (!headingIds(this.record(row.hash).doc).has(id)) {
-        out.push({
-          code: "missing_heading",
-          message: `Link ${l.raw} names a heading /${row.path} does not have (#${id}).`,
-        });
+    for (const l of this.record(e.hash).links) {
+      if (!l.anchor || l.anchor === "#" || isDerivedTarget(l)) continue;
+      const target = this.targetAt(snap, l);
+      if (target?.kind !== "concept") continue;
+      let ids = headings.get(target.hash);
+      if (!ids) {
+        ids = headingIds(this.record(target.hash).doc);
+        headings.set(target.hash, ids);
       }
+      const id = safeDecode(l.anchor.slice(1));
+      if (ids.has(id)) continue;
+      out.push({
+        code: "missing_heading",
+        message: `Link ${this.href(snap, e, l)} names a heading /${target.path} does not have (#${id}).`,
+        target: target.path,
+      });
     }
     return out;
   }
@@ -1760,9 +1772,12 @@ export class LibraryStore {
           e.concept_id,
         )[0]
       : undefined;
-    const lint: LintWarning[] = atHead
-      ? this.freshLint(snap, e, JSON.parse(lintRow?.lint ?? "[]"))
-      : this.lintAt(snap, e, r, verified);
+    const lint: LintWarning[] = [
+      ...(atHead
+        ? this.freshLint(snap, e, JSON.parse(lintRow?.lint ?? "[]"))
+        : this.lintAt(snap, e, r, verified)),
+      ...this.anchorLint(snap, e),
+    ];
     return {
       kind: "concept",
       path: e.path,
@@ -2421,6 +2436,19 @@ export class LibraryStore {
         });
       }
     }
+    // Missing-heading lint is not stored: work it out for every concept with an anchored link.
+    const anchorLint = new Map<string, LintWarning[]>();
+    if (want("lint")) {
+      const headings = new Map<string, Set<string>>();
+      for (const { from_id } of this.sql.all<{ from_id: string }>(
+        "SELECT DISTINCT from_id FROM links WHERE kind = 'body' AND anchor IS NOT NULL AND anchor <> '#'",
+      )) {
+        const e = snap.byId.get(from_id);
+        if (e?.kind !== "concept" || !mine(e.path)) continue;
+        const lint = this.anchorLint(snap, e, headings);
+        if (lint.length > 0) anchorLint.set(from_id, lint);
+      }
+    }
     const flags = this.sql.all<{
       concept_id: string;
       kind: string;
@@ -2429,6 +2457,12 @@ export class LibraryStore {
     }>(
       "SELECT f.concept_id, f.kind, f.since_seq, f.detail FROM flags f JOIN paths p ON p.concept_id = f.concept_id",
     );
+    // A concept with only missing-heading lint gets a lint item too, dated by its latest version.
+    for (const id of anchorLint.keys()) {
+      if (flags.some((f) => f.concept_id === id && f.kind === "lint")) continue;
+      const e = snap.byId.get(id);
+      if (e) flags.push({ concept_id: id, kind: "lint", since_seq: e.seq, detail: "[]" });
+    }
     for (const f of flags) {
       if (!want(f.kind)) continue;
       const e = snap.byId.get(f.concept_id);
@@ -2444,7 +2478,10 @@ export class LibraryStore {
         action =
           "Write the missing concept, point the link at an existing one, or remove the link.";
       } else if (f.kind === "lint") {
-        detail = this.freshLint(snap, e, JSON.parse(f.detail) as LintWarning[])
+        detail = [
+          ...this.freshLint(snap, e, JSON.parse(f.detail) as LintWarning[]),
+          ...(anchorLint.get(f.concept_id) ?? []),
+        ]
           .map((l) => l.message)
           .join(" ");
       }
