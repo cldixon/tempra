@@ -390,8 +390,24 @@ async function browserRenders(
         })
       ).json()) as { frontmatter?: { title?: string } };
       const word = String(meta.frontmatter?.title ?? "").split(/\s+/)[0] ?? "";
+      const dialog = page.getByRole("dialog", { name: "Open a file" });
+      const box = dialog.getByRole("combobox");
+      // It closes every way a person tries: Escape, the same keys, Close, a click outside.
+      const closes = async (how: string, close: () => Promise<void>) => {
+        await page.keyboard.press("Control+k");
+        await box.waitFor({ timeout: 5000 }).catch(() => {
+          throw new Error(`the switcher did not open (before ${how})`);
+        });
+        await close();
+        await dialog.waitFor({ state: "hidden", timeout: 5000 }).catch(() => {
+          throw new Error(`the switcher did not close with ${how}`);
+        });
+      };
+      await closes("Escape", () => box.press("Escape"));
+      await closes("the same keys", () => page.keyboard.press("Control+k"));
+      await closes("Close", () => dialog.getByRole("button", { name: "Close" }).click());
+      await closes("a click outside", () => page.mouse.click(5, 5));
       await page.keyboard.press("Control+k");
-      const box = page.getByRole("dialog", { name: "Open a file" }).getByRole("combobox");
       await box.fill(word);
       const option = page.locator('.switcher [role="option"]', { hasText: first }).first();
       await option.waitFor({ timeout: 5000 });
@@ -658,6 +674,15 @@ async function browserRenders(
         await edit();
         if (shots) await page.screenshot({ path: `${shots}/editor.png` });
         await typeInto(" Edited by a person.");
+        // The drawn caret sits on the line being typed, not above it.
+        const caret = await page.locator("wg-cursor").evaluate((c) => {
+          const range = c.ownerDocument.getSelection()?.getRangeAt(0);
+          const text = range?.getClientRects()[0] ?? range?.getBoundingClientRect();
+          return { caret: c.getBoundingClientRect().top, text: text?.top ?? Number.NaN };
+        });
+        if (!(Math.abs(caret.caret - caret.text) <= 4)) {
+          throw new Error(`the caret is drawn ${caret.text - caret.caret}px off the line`);
+        }
         // A link made with Ctrl+K on a selected word, to another concept by its bundle path.
         // The caret is after "person.": step over the full stop and select the word.
         await page.keyboard.press("ArrowLeft");

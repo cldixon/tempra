@@ -14,6 +14,10 @@ div.body > * {
 
 div.body wg-content {
   padding: 0;
+  /* Without padding, the first block's top margin would collapse through the content's edge, and
+     Wordgard (which draws the caret from the scroller's top but measures it from the content's)
+     would draw every caret that much too high. A block formatting context keeps it inside. */
+  display: flow-root;
 }
 
 .tooltip {

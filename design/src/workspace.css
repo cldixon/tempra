@@ -143,8 +143,14 @@ body:has(> #root > .workspace) {
   background: rgb(0 0 0 / 0.3);
 }
 
-.switcher input {
-  width: 100%;
+.switcher-head {
+  display: flex;
+  gap: var(--tempra-space-2);
+}
+
+.switcher-head input {
+  flex: 1;
+  min-width: 0;
 }
 
 .switcher [role="listbox"] {

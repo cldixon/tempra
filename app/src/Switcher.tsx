@@ -16,7 +16,7 @@ const MAX = 12;
 /**
  * The quick switcher (tempra-dev: app/workspace): Ctrl or Cmd+K, type a title or path, Enter.
  * Recent files first, then titles and paths from the library's index (instant), then the
- * library's search inside files. Keyboard only; Escape closes it.
+ * library's search inside files. Escape, the same keys, Close or a click outside the box closes it.
  */
 export function Switcher(props: {
   urls: Urls;
@@ -111,28 +111,57 @@ export function Switcher(props: {
     } else if (e.key === "Enter") {
       e.preventDefault();
       go(hits[selected]);
+    } else if (e.key === "Escape") {
+      // A search box would only clear itself on the first Escape; this one closes.
+      e.preventDefault();
+      onClose();
     }
   };
   const optionId = (i: number) => `${listId}-${i}`;
 
   return (
-    <dialog ref={dialog} className="switcher" aria-label="Open a file" onClose={onClose}>
-      <input
-        type="search"
-        role="combobox"
-        aria-expanded={hits.length > 0}
-        aria-controls={listId}
-        aria-activedescendant={hits.length > 0 ? optionId(selected) : undefined}
-        aria-autocomplete="list"
-        placeholder={`Open a file in ${urls.slug}`}
-        aria-label="File title or path"
-        value={q}
-        onChange={(e) => {
-          setQ(e.target.value);
-          setIndex(0);
-        }}
-        onKeyDown={keys}
-      />
+    // biome-ignore lint/a11y/useKeyWithClickEvents: Escape closes it from the keyboard.
+    <dialog
+      ref={dialog}
+      className="switcher"
+      aria-label="Open a file"
+      // The close event comes a moment after the dialog closes; if it opened again meanwhile
+      // (the keys pressed twice quickly), the late event must not close it.
+      onClose={(e) => {
+        if (!e.currentTarget.open) onClose();
+      }}
+      onClick={(e) => {
+        // A click on the backdrop lands on the dialog itself, outside its box.
+        const r = e.currentTarget.getBoundingClientRect();
+        const inside =
+          e.clientX >= r.left &&
+          e.clientX <= r.right &&
+          e.clientY >= r.top &&
+          e.clientY <= r.bottom;
+        if (e.target === e.currentTarget && !inside) onClose();
+      }}
+    >
+      <div className="switcher-head">
+        <input
+          type="search"
+          role="combobox"
+          aria-expanded={hits.length > 0}
+          aria-controls={listId}
+          aria-activedescendant={hits.length > 0 ? optionId(selected) : undefined}
+          aria-autocomplete="list"
+          placeholder={`Open a file in ${urls.slug}`}
+          aria-label="File title or path"
+          value={q}
+          onChange={(e) => {
+            setQ(e.target.value);
+            setIndex(0);
+          }}
+          onKeyDown={keys}
+        />
+        <button type="button" onClick={onClose}>
+          Close
+        </button>
+      </div>
       <div id={listId} role="listbox" aria-label="Files">
         {hits.map((h, i) => (
           // The input keeps the keyboard (combobox); a click opens the file too.

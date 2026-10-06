@@ -149,6 +149,10 @@ div.body > * {
 
 div.body wg-content {
   padding: 0;
+  /* Without padding, the first block's top margin would collapse through the content's edge, and
+     Wordgard (which draws the caret from the scroller's top but measures it from the content's)
+     would draw every caret that much too high. A block formatting context keeps it inside. */
+  display: flow-root;
 }
 
 .tooltip {
@@ -485,8 +489,14 @@ body:has(> #root > .workspace) {
   background: rgb(0 0 0 / 0.3);
 }
 
-.switcher input {
-  width: 100%;
+.switcher-head {
+  display: flex;
+  gap: var(--tempra-space-2);
+}
+
+.switcher-head input {
+  flex: 1;
+  min-width: 0;
 }
 
 .switcher [role="listbox"] {

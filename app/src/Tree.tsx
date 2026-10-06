@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
 import { type FeedEvent, lastSeen, useFeed } from "./live";
 import { prefetchFile } from "./prefetch";
+import { switcherKey } from "./ui";
 import { baseName, dirOf, type Urls } from "./urls";
 
 /** One file of `GET …/outline`: the library's index, without bodies. */
@@ -341,7 +342,7 @@ export function Tree(props: {
               </div>
             </li>
           ))}
-          <li className="muted small">Ctrl K also searches inside files.</li>
+          <li className="muted small">{switcherKey()} also searches inside files.</li>
         </ul>
       ) : (
         <ul className="tree">
