@@ -4,12 +4,17 @@
  * meantime. The body itself is edited in the reader (@tempra/editor/view, setEditable).
  */
 import {
+  type Block,
   conflicts,
+  type Doc,
   type FieldMerge,
-  merge3,
+  fromTree,
+  mergeDocs,
   mergeFields,
+  reconcile,
   resolve,
   type Segment,
+  toHTML,
 } from "@tempra/editor";
 import { type FormEvent, useState } from "react";
 import { ApiError, api } from "./api";
@@ -22,7 +27,7 @@ export type Frontmatter = { [k: string]: Json };
 export interface Base {
   path: string;
   hash: string;
-  body: string;
+  doc: Doc;
   frontmatter: Frontmatter;
 }
 
@@ -198,7 +203,7 @@ export async function saveConcept(
   path: string,
   ifMatch: string,
   frontmatter: Frontmatter,
-  body: string,
+  doc: Doc,
   note: string,
 ): Promise<Saved> {
   const r = await api<{ hash: string | null; lint?: Saved["lint"] }>(
@@ -206,7 +211,7 @@ export async function saveConcept(
     {
       method: "PUT",
       headers: { "If-Match": ifMatch, "X-Note": encodeURIComponent(note) },
-      body: JSON.stringify({ frontmatter, body }),
+      body: JSON.stringify({ frontmatter, doc }),
     },
   );
   return { hash: r.hash ?? "", lint: r.lint ?? [] };
@@ -338,19 +343,21 @@ export function FrontmatterForm(props: {
 
 // ------------------------------------------------------------------ merging
 
-/** A merge in progress: the body segments and the frontmatter fields, against `theirs`. */
+/** A merge in progress: the body's blocks and the frontmatter fields, against `theirs`. */
 export interface Merge {
   theirs: Base;
-  segments: Segment[];
+  segments: Segment<Block>[];
   fields: FieldMerge[];
 }
 
-export function startMerge(base: Base, mineBody: string, mineFm: Frontmatter, theirs: Base): Merge {
+export function startMerge(base: Base, mine: Doc, mineFm: Frontmatter, theirs: Base): Merge {
   const strip = (fm: Frontmatter) =>
     Object.fromEntries(Object.entries(fm).filter(([k]) => !STAMPED.has(k)));
+  // The edit's blocks matched to the version it started from, so a block it kept is that block.
+  const edited = reconcile(base.doc, structuredClone(mine));
   return {
     theirs,
-    segments: merge3(base.body, mineBody, theirs.body),
+    segments: mergeDocs(base.doc, edited, theirs.doc),
     fields: mergeFields(strip(base.frontmatter), strip(mineFm), strip(theirs.frontmatter)),
   };
 }
@@ -362,7 +369,7 @@ export function MergeView(props: {
   merge: Merge;
   busy: boolean;
   error: string | null;
-  onSave(body: string, frontmatter: Frontmatter): void;
+  onSave(doc: Doc, frontmatter: Frontmatter): void;
   onCancel(): void;
 }) {
   const { merge } = props;
@@ -377,7 +384,10 @@ export function MergeView(props: {
   const submit = (e: FormEvent) => {
     e.preventDefault();
     if (undecided) return;
-    const text = resolve(merge.segments, (i) => picks[i] ?? "mine");
+    const doc: Doc = {
+      type: "root",
+      children: resolve(merge.segments, (i) => picks[i] ?? "mine"),
+    };
     const fm: Frontmatter = {};
     let n = 0;
     for (const f of merge.fields) {
@@ -385,7 +395,7 @@ export function MergeView(props: {
         f.kind === "same" ? f.value : (fieldPicks[n++] ?? "mine") === "mine" ? f.mine : f.theirs;
       if (value !== undefined) fm[f.key] = value as Json;
     }
-    props.onSave(text, fm);
+    props.onSave(doc, fm);
   };
   const clean = body.length === 0 && fieldConflicts.length === 0;
   return (
@@ -394,7 +404,7 @@ export function MergeView(props: {
       <p className="small">
         Someone saved this concept after you started.{" "}
         {clean
-          ? "Your changes and theirs touch different lines, so they combine."
+          ? "Your changes and theirs touch different blocks, so they combine."
           : "Pick a side for each place you both changed; everything else combines."}
       </p>
       {fieldConflicts.map((f, i) => (
@@ -419,7 +429,7 @@ export function MergeView(props: {
       {body.map((c, i) => (
         // biome-ignore lint/suspicious/noArrayIndexKey: conflicts are positional.
         <fieldset key={i} className="conflict">
-          <legend>Lines both changed</legend>
+          <legend>A block both changed</legend>
           {(["mine", "theirs", "both"] as const).map((side) => (
             <label key={side}>
               <input
@@ -429,9 +439,7 @@ export function MergeView(props: {
                 onChange={() => setPicks((p) => p.map((x, j) => (j === i ? side : x)))}
               />{" "}
               {side === "mine" ? "Mine" : side === "theirs" ? "Theirs" : "Both, mine first"}
-              {side !== "both" && (
-                <pre className="merge-side">{c[side].join("\n") || "(removed)"}</pre>
-              )}
+              {side !== "both" && <Blocks blocks={c[side]} />}
             </label>
           ))}
         </fieldset>
@@ -445,6 +453,14 @@ export function MergeView(props: {
       </button>
     </form>
   );
+}
+
+/** One side of a conflict, drawn as the reader draws it (escaped by Wordgard). */
+function Blocks({ blocks }: { blocks: Block[] }) {
+  if (blocks.length === 0) return <div className="merge-side">(removed)</div>;
+  const html = toHTML(fromTree({ type: "root", children: blocks }).doc);
+  // biome-ignore lint/security/noDangerouslySetInnerHtml: Wordgard escapes every text and attribute.
+  return <div className="merge-side prose" dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
 /** A thrown save error: a 412 means someone wrote meanwhile. */

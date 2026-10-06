@@ -3,8 +3,7 @@
  * their quotes highlighted in the reader, and a comment on the selected text. Threads live in the
  * ledger; this loads them with `GET …/comments?path=` and reloads when the feed says one changed.
  */
-import { documentPos, markdownOffset, type Parsed } from "@tempra/editor";
-import { locate } from "@tempra/editor/anchor";
+import { documentPos, locate, type Parsed, type QuoteSelector, textOffset } from "@tempra/editor";
 import type { Highlight } from "@tempra/editor/view";
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, useAction, useLoad } from "./api";
@@ -28,11 +27,11 @@ export interface Thread {
   last_seq: number;
   resolved_by: string | null;
   replies: number;
-  anchor: { quote: string; prefix: string; suffix: string; from: number; seq: number } | null;
+  anchor: (QuoteSelector & { seq: number }) | null;
   comments: CommentT[];
 }
 
-/** Where a thread's quote is in the body on screen: markdown offsets and document positions. */
+/** Where a thread's quote is in the body on screen: text offsets and document positions. */
 export interface Placed extends Thread {
   at: { from: number; to: number; pos: number; end: number } | null;
 }
@@ -46,10 +45,10 @@ export function useThreads(urls: Urls, path: string | null) {
   );
 }
 
-/** Each thread's quote found in `body` (the version on screen), as the server would find it. */
-export function placeThreads(threads: Thread[], body: string, parsed: Parsed): Placed[] {
+/** Each thread's quote found in the version on screen, as the server would find it. */
+export function placeThreads(threads: Thread[], parsed: Parsed): Placed[] {
   return threads.map((t) => {
-    const found = t.anchor ? locate(body, t.anchor) : null;
+    const found = t.anchor ? locate(parsed.text, t.anchor) : null;
     if (!found) return { ...t, at: null };
     const pos = documentPos(parsed, found.from);
     const end = documentPos(parsed, found.to);
@@ -75,10 +74,10 @@ export function highlightsOf(
   return marks;
 }
 
-/** A comment being written on a quote: the body markdown, and where it is in the document. */
+/** A comment being written on a quote: the text quoted, and where it is in the document. */
 export interface Draft {
   quote: string;
-  /** Markdown offset of the quote in the body. */
+  /** Where the quote starts in the document's text. */
   from: number;
   /** Document positions, for the draft highlight. */
   pos: number;
@@ -96,10 +95,10 @@ export function useDraft(parsed: Parsed) {
   useEffect(() => setDraft(null), [parsed]);
   const start = useCallback(
     (range: { from: number; to: number }) => {
-      const from = markdownOffset(parsed, range.from);
-      const to = markdownOffset(parsed, range.to);
+      const from = textOffset(parsed, range.from);
+      const to = textOffset(parsed, range.to);
       if (from < 0 || to <= from) return;
-      const quote = parsed.source.slice(from, to);
+      const quote = parsed.text.text.slice(from, to);
       if (quote.trim()) setDraft({ quote, from, pos: range.from, end: range.to });
     },
     [parsed],

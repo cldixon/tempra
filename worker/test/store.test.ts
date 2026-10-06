@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { jsonEqual, parseConcept } from "../src/okf/concept";
+import { normalize } from "@tempra/editor/doc";
+import { jsonEqual, parseConcept, splitFrontmatter } from "../src/okf/concept";
 import { sha256Hex } from "../src/okf/hash";
 import { isConceptPath } from "../src/okf/paths";
 import { OkfError } from "../src/store/errors";
@@ -11,6 +12,9 @@ import {
 } from "../src/store/store";
 import { BUNDLES, loadBundle, text } from "./fixtures";
 import { bunSqlHandle } from "./sqlite";
+
+/** A concept's body as `read` renders it: its markdown without the frontmatter. */
+const bodyOf = (v: { kind: string; markdown?: string }) => splitFrontmatter(v.markdown ?? "").body;
 
 let n = 0;
 const ctx = (actor = "claude-code/test", note?: string): RequestContext => ({
@@ -126,7 +130,7 @@ describe("write path", () => {
     const v = s.read("a.md");
     if (v.kind !== "concept") throw new Error();
     expect(v.frontmatter.type).toBe("Memo");
-    expect(v.body).toBe("one 2\n");
+    expect(bodyOf(v)).toBe("one 2\n");
     const miss = errorOf(() =>
       s.apply(ctx(), [{ op: "edit", path: "a.md", edits: [{ old: "zzz", new: "" }] }]),
     );
@@ -167,22 +171,22 @@ describe("links", () => {
     const lint = s.read("a/one.md");
     if (lint.kind !== "concept") throw new Error();
     expect(lint.lint.map((l) => [l.code, l.target])).toEqual([["broken_link", "a/missing.md"]]);
-    expect(lint.body).toContain("[two](./two.md)");
+    expect(bodyOf(lint)).toContain("[two](./two.md)");
 
     s.apply(ctx(), [{ op: "move", path: "a/two.md", to: "b/deep/two.md" }]);
     const one = s.read("a/one.md");
     if (one.kind !== "concept") throw new Error();
-    expect(one.body).toBe(
+    expect(bodyOf(one)).toBe(
       "See [two](../b/deep/two.md), [abs](/b/deep/two.md#x) and [gone](missing.md).\n",
     );
     const two = s.read("b/deep/two.md");
     if (two.kind !== "concept") throw new Error();
-    expect(two.body).toBe("Back to [one](../../a/one.md).\n");
+    expect(bodyOf(two)).toBe("Back to [one](../../a/one.md).\n");
 
     // Reading as of before the move renders the links as they were then.
     const old = s.read("a/one.md", { at: 1 });
     if (old.kind !== "concept") throw new Error();
-    expect(old.body).toContain("[two](./two.md)");
+    expect(bodyOf(old)).toContain("[two](./two.md)");
 
     // Creating the missing target heals the broken link.
     s.apply(ctx(), [{ op: "write", path: "a/missing.md", content: md("Note", "now here\n") }]);
@@ -204,7 +208,7 @@ describe("links", () => {
     ]);
     const top = s.read("top.md");
     if (top.kind !== "concept") throw new Error();
-    expect(top.body).toBe("[x](e/f/x.md)");
+    expect(bodyOf(top)).toBe("[x](e/f/x.md)\n");
     // Collisions fail the whole move.
     s.apply(ctx(), [{ op: "write", path: "g/x.md", content: md("Note", "") }]);
     expect(errorOf(() => s.apply(ctx(), [{ op: "move", path: "e/f", to: "g" }])).status).toBe(409);
@@ -223,7 +227,7 @@ describe("ledger", () => {
     expect(rv.results[0]?.hash).toBe(h1);
     const v = s.read("a.md");
     if (v.kind !== "concept") throw new Error();
-    expect(v.body).toBe("v1\n");
+    expect(bodyOf(v)).toBe("v1\n");
     expect(v.frontmatter.generated).toEqual({ by: "claude-code/test", at: "2026-09-29T12:00:01Z" });
 
     // Revert the request that wrote v2: back to v1 is already true, so nothing to do.
@@ -372,7 +376,7 @@ describe("import and export round-trip the sample bundles (store level)", () => 
         expect(jsonEqual(Object.fromEntries(b.entries), Object.fromEntries(a.entries))).toBe(true);
         expect(jsonEqual(b.generated, a.generated)).toBe(true);
         expect(b.verified).toEqual(a.verified);
-        expect(b.body).toBe(a.body);
+        expect(b.body).toBe(normalize(a.body));
       }
       // Re-importing the same bundle changes nothing.
       const head = s.headSeq();

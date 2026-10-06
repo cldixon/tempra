@@ -1,9 +1,10 @@
 import {
+  type Doc,
+  fromTree,
   type LinkTarget,
   linkParam,
   type Parsed,
   type ParseOptions,
-  parse,
   toHTML,
   type WordDiff,
   wordDiff,
@@ -72,13 +73,14 @@ type FileJson =
       path: string;
       seq: number;
       hash: string;
-      body: string;
+      /** The body as stored: a tree, links at their targets' current paths. */
+      doc: Doc;
       frontmatter: JsonObject;
       lint: { code: string; message: string }[];
       trust_tier: string;
       stale: boolean;
     }
-  | { kind: "derived"; path: string; seq: number; markdown: string }
+  | { kind: "derived"; path: string; seq: number; doc: Doc }
   | {
       kind: "attachment";
       path: string;
@@ -418,7 +420,7 @@ function Derived(props: {
   const { urls, file } = props;
   useTitle(`${file.path} · ${urls.slug}`);
   const parsed = useMemo(
-    () => parse(file.markdown, { path: file.path, href: bodyHref(urls), footnote: () => null }),
+    () => fromTree(file.doc, { path: file.path, href: bodyHref(urls), footnote: () => null }),
     [file, urls],
   );
   return (
@@ -483,7 +485,7 @@ function ConceptView(props: {
             : null,
     };
   }, [c.path, urls, sources, links]);
-  const parsed = useMemo(() => parse(c.body, parseOptions), [c.body, parseOptions]);
+  const parsed = useMemo(() => fromTree(c.doc, parseOptions), [c.doc, parseOptions]);
   // A leading heading that repeats the title is not shown twice (the stored body is unchanged).
   const first = parsed.headings[0];
   const hideFirst =
@@ -510,10 +512,7 @@ function ConceptView(props: {
   // Comments: each thread's quote found in the body on screen, highlighted while open.
   const writable = urls.at === undefined || urls.at >= head;
   const [active, setActive] = useState<string | null>(null);
-  const placed = useMemo(
-    () => placeThreads(props.threads ?? [], c.body, parsed),
-    [props.threads, c.body, parsed],
-  );
+  const placed = useMemo(() => placeThreads(props.threads ?? [], parsed), [props.threads, parsed]);
   // Comment on selected text: the reader's toolbar starts a draft, shown in the panel.
   const draft = useDraft(parsed);
   const reveal = useRevealContext();
@@ -771,7 +770,7 @@ function useVerificationDiff(
       (old) => {
         if (!live) return;
         if (old.kind !== "concept") return setError("That version is not a concept.");
-        setDiff(wordDiff(parse(old.body).doc, parsed.doc));
+        setDiff(wordDiff(fromTree(old.doc).doc, parsed.doc));
       },
       (e: unknown) => live && setError(e instanceof ApiError ? e.message : String(e)),
     );
@@ -873,9 +872,9 @@ function Frontmatter({ fm }: { fm: JsonObject }) {
   );
 }
 
-/** Footnote definitions are HTML from the server's sanitizing renderer. */
+/** Footnote definitions as HTML from Wordgard (`toHTML`), which escapes every text and attribute. */
 function FootnoteHtml({ html }: { html: string }) {
-  // biome-ignore lint/security/noDangerouslySetInnerHtml: the server's sanitizing renderer made it.
+  // biome-ignore lint/security/noDangerouslySetInnerHtml: Wordgard escapes every text and attribute.
   return <div className="small" dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
@@ -1214,7 +1213,7 @@ function useEditing(o: {
 
   const begin = () => {
     const c = o.concept;
-    base.current = { path: c.path, hash: c.hash, body: c.body, frontmatter: c.frontmatter };
+    base.current = { path: c.path, hash: c.hash, doc: c.doc, frontmatter: c.frontmatter };
     dirty.current = false;
     setSaved(null);
     setError(null);
@@ -1243,12 +1242,12 @@ function useEditing(o: {
     stop();
   };
 
-  /** Saves `body` and `fm` as an edit of `from`; a 412 merges them with the version there now. */
-  const write = async (from: Base, body: string, fm: FmObject) => {
+  /** Saves `doc` and `fm` as an edit of `from`; a 412 merges them with the version there now. */
+  const write = async (from: Base, doc: Doc, fm: FmObject) => {
     setBusy(true);
     setError(null);
     try {
-      const r = await saveConcept(urls, o.concept.path, from.hash, fm, body, note.trim());
+      const r = await saveConcept(urls, o.concept.path, from.hash, fm, doc, note.trim());
       setSaved({ lint: r.lint });
       stop();
       o.onSaved();
@@ -1272,12 +1271,12 @@ function useEditing(o: {
           const theirs: Base = {
             path: now.path,
             hash: now.hash,
-            body: now.body,
+            doc: now.doc,
             frontmatter: now.frontmatter as FmObject,
           };
           // The edit itself keeps its base: saving it again (after "Back to editing") meets
           // the 412 again and merges again, never overwriting what was written meanwhile.
-          setMerge(startMerge(from, body, fm, theirs));
+          setMerge(startMerge(from, doc, fm, theirs));
         }
       } else setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -1292,7 +1291,7 @@ function useEditing(o: {
     if (!form?.type.trim()) return setError("A concept needs a type.");
     const b = base.current;
     if (!b || !reader.current) return;
-    void write(b, reader.current.markdown(), frontmatterOf(b.frontmatter, form));
+    void write(b, reader.current.tree(), frontmatterOf(b.frontmatter, form));
   };
 
   const stamped: FmObject = Object.fromEntries(
@@ -1306,7 +1305,7 @@ function useEditing(o: {
       merge={merge}
       busy={busy}
       error={error}
-      onSave={(body, fm) => void write(merge.theirs, body, fm)}
+      onSave={(doc, fm) => void write(merge.theirs, doc, fm)}
       onCancel={() => setMerge(null)}
     />
   ) : (

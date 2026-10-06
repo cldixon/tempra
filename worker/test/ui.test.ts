@@ -3,6 +3,14 @@ import * as app from "@tempra/app";
 import * as design from "@tempra/design";
 import { API, setup } from "./harness";
 
+/** A one-paragraph body as the API returns it, for toMatchObject (block IDs aside). */
+const says = (text: string) => ({
+  doc: {
+    type: "root",
+    children: [{ type: "paragraph", children: [{ type: "text", value: text }] }],
+  },
+});
+
 type S = ReturnType<typeof setup>;
 
 async function put(s: S, path: string, content: string, note = "test") {
@@ -125,9 +133,12 @@ describe("the app's pages (TEMPRA-9)", () => {
       headers: { "Content-Type": "text/markdown", "If-Match": `"${hash}"` },
       body: "---\ntype: Note\ntitle: A\n---\nSecond words.\n",
     });
-    // A concept: frontmatter and the markdown body the reader parses, at any sequence.
-    expect(await get(s, "/files/a.md")).toMatchObject({ kind: "concept", body: "Second words.\n" });
-    expect(await get(s, `/files/a.md?at=${seq}`)).toMatchObject({ body: "First words.\n" });
+    // A concept: frontmatter and the body as a tree, at any sequence.
+    expect(await get(s, "/files/a.md")).toMatchObject({
+      kind: "concept",
+      ...says("Second words."),
+    });
+    expect(await get(s, `/files/a.md?at=${seq}`)).toMatchObject(says("First words."));
     // An attachment: its description, not its bytes.
     const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
     const up = await s.req("/files/img/logo.png", {
@@ -235,14 +246,14 @@ describe("history, ledger and revert (Phase 3, slice 2)", () => {
     const target = { request_id: bad?.request_id, note: "x" };
     const forged = await send(s, "/revert", target, "https://evil.example");
     expect(forged.status).toBe(403);
-    expect(await s.store().read("a.md")).toMatchObject({ body: "Bad.\n" });
+    expect(await s.store().read("a.md")).toMatchObject(says("Bad."));
 
     const done = await send(s, "/revert", {
       request_id: bad?.request_id,
       note: "undo the bad edit",
     });
     expect(done.status).toBe(200);
-    expect(s.store().read("a.md")).toMatchObject({ body: "Good.\n" });
+    expect(s.store().read("a.md")).toMatchObject(says("Good."));
     expect((await get<Requests>(s, "/requests")).requests[0]).toMatchObject({
       actor: "human:owner",
       note: "undo the bad edit",
@@ -263,7 +274,7 @@ describe("history, ledger and revert (Phase 3, slice 2)", () => {
     expect(d.diff).toContain("+Second.");
     const done = await send(s, "/revert", { path: "a.md", to_seq: first, note: "back to first" });
     expect(done.status).toBe(200);
-    expect(s.store().read("a.md")).toMatchObject({ body: "First.\n" });
+    expect(s.store().read("a.md")).toMatchObject(says("First."));
     expect((await get<Requests>(s, "/requests")).requests[0]).toMatchObject({
       actor: "human:owner",
       note: "back to first",

@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { docText } from "@tempra/editor/doc";
 import { OkfError } from "../src/store/errors";
 import { LibraryStore, type RequestContext } from "../src/store/store";
 import { WRITE_TOOLS } from "../src/usage";
@@ -21,6 +22,10 @@ function newStore() {
     },
   });
 }
+
+/** A file's text, as anchors quote it. */
+const textOf = (v: ReturnType<LibraryStore["read"]>) =>
+  v.kind === "concept" ? docText(v.doc).text : "";
 
 const doc = (body: string) =>
   `---\ntype: Metric\ntitle: Margin\ndescription: Gross margin.\n---\n${body}`;
@@ -62,8 +67,7 @@ describe("comment threads", () => {
     expect(t.actor).toBe("human:ana");
     expect(t.anchor?.quote).toBe("revenue minus cost");
     expect(t.outdated).toBe(false);
-    const body = version.kind === "concept" ? version.body : "";
-    expect(body.slice(t.located?.from, t.located?.to)).toBe("revenue minus cost");
+    expect(textOf(version).slice(t.located?.from, t.located?.to)).toBe("revenue minus cost");
 
     s.comment(ctx("agent:a"), { kind: "reply", thread: t.id, body: "Fixed in the body." });
     s.comment(ctx("agent:a"), { kind: "resolve", thread: t.id });
@@ -114,9 +118,7 @@ describe("comment threads", () => {
         }),
       ).code,
     ).toBe("quote_not_found");
-    const view = s.read("metrics/margin.md");
-    const body = view.kind === "concept" ? view.body : "";
-    const second = body.lastIndexOf("Margin is");
+    const second = textOf(s.read("metrics/margin.md")).lastIndexOf("Margin is");
     const t = s.comment(human(), {
       kind: "open",
       path: "metrics/margin.md",
@@ -142,8 +144,7 @@ describe("comment threads", () => {
       },
     ]);
     const moved = s.thread(t.id);
-    const view = s.read("metrics/margin.md");
-    const body = view.kind === "concept" ? view.body : "";
+    const body = textOf(s.read("metrics/margin.md"));
     expect(body.slice(moved.located?.from, moved.located?.to)).toBe("revenue minus cost");
     expect(moved.located?.from).toBeGreaterThan(t.located?.from ?? 0);
 
@@ -165,6 +166,39 @@ describe("comment threads", () => {
     ]);
     expect(s.thread(t.id).outdated).toBe(true);
     expect(s.thread(t.id).located).toBeNull();
+  });
+
+  test("an anchor is on its block, and the block keeps its ID through an agent's edit", () => {
+    const s = seeded();
+    const before = s.read("metrics/margin.md");
+    const para = before.kind === "concept" ? before.doc.children[1] : undefined;
+    const block = (para as { id?: string } | undefined)?.id;
+    // An agent quotes markdown as `read` shows it; it is matched by the text it reads as.
+    const t = s.comment(ctx("agent:a"), {
+      kind: "open",
+      path: "metrics/margin.md",
+      body: "Which cost?",
+      anchor: { quote: "Margin is revenue minus **cost**" },
+    }).thread;
+    expect(t.anchor?.block).toBe(block ?? null);
+    expect(t.anchor?.offset).toBe(0);
+    s.apply(ctx("agent:b"), [
+      {
+        op: "write",
+        path: "metrics/margin.md",
+        content: doc(
+          "# Margin\n\nA new first paragraph.\n\nMargin is revenue minus cost. Margin is reported weekly.\n",
+        ),
+        if_match: before.kind === "concept" ? before.hash : "",
+      },
+    ]);
+    const after = s.read("metrics/margin.md");
+    const kept = after.kind === "concept" ? after.doc.children[2] : undefined;
+    expect((kept as { id?: string } | undefined)?.id).toBe(block);
+    const moved = s.thread(t.id);
+    expect(textOf(after).slice(moved.located?.from, moved.located?.to)).toBe(
+      "Margin is revenue minus cost",
+    );
   });
 
   test("threads follow a move and hide with a delete; a revert brings them back", () => {

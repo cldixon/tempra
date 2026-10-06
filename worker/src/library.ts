@@ -21,18 +21,26 @@ import { LibraryStore } from "./store/store";
 
 /** One OKF library: its blobs, ledger and derived indexes in the object's SQLite. */
 export class Library extends DurableObject<Env> {
-  private readonly store: LibraryStore;
+  private opened: LibraryStore | null = null;
   private alarmChecked = false;
   /** Set once a restore is armed: the object refuses work until it restarts into the restore. */
   private restarting = false;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
-    this.store = new LibraryStore(doSqlHandle(ctx.storage), {
-      size: () => ctx.storage.sql.databaseSize,
-    });
     // Keepalive pings are answered without waking a hibernated object.
     ctx.setWebSocketAutoResponse(new WebSocketRequestResponsePair("ping", "pong"));
+  }
+
+  /**
+   * The store, opened on first use: a library that cannot be opened (stored in an older format)
+   * can still be deleted.
+   */
+  private get store(): LibraryStore {
+    this.opened ??= new LibraryStore(doSqlHandle(this.ctx.storage), {
+      size: () => this.ctx.storage.sql.databaseSize,
+    });
+    return this.opened;
   }
 
   /** The single RPC entry point: runs a store method and returns its result or error as data. */

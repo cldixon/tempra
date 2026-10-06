@@ -1,4 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import {
+  carryIds,
+  conflicts,
+  type Doc,
+  parseMarkdown,
+  reconcile,
+  resolve,
+  toMarkdown,
+} from "@tempra/editor";
 import { type Frontmatter, formOf, frontmatterOf, linkTarget, startMerge } from "./src/Editor";
 import { Urls } from "./src/urls";
 
@@ -99,13 +108,27 @@ describe("link targets", () => {
 });
 
 describe("merging with a version saved meanwhile", () => {
-  test("separate changes combine; stamped fields are left out", () => {
-    const base = { path: "a.md", hash: "h0", body: "one\ntwo\nthree\n", frontmatter: fm };
-    const theirs = { ...base, hash: "h1", body: "one\ntwo\nthree, theirs\n" };
-    const m = startMerge(base, "one, mine\ntwo\nthree\n", { ...fm, title: "Mine" }, theirs);
-    expect(m.segments).toEqual([
-      { kind: "same", lines: ["one, mine", "two", "three, theirs", ""] },
-    ]);
+  test("the same block changed both ways is one conflict, about that block", () => {
+    const base = { path: "a.md", hash: "h0", doc: stored("one\n\ntwo"), frontmatter: fm };
+    const theirs = { ...base, hash: "h1", doc: stored("one, theirs\n\ntwo", base.doc) };
+    const mine = carryIds(base.doc, parseMarkdown("one, mine\n\ntwo"));
+    const c = conflicts(startMerge(base, mine, fm, theirs).segments);
+    expect(c).toHaveLength(1);
+    expect(toMarkdown({ type: "root", children: c[0]?.mine ?? [] })).toBe("one, mine\n");
+    expect(toMarkdown({ type: "root", children: c[0]?.theirs ?? [] })).toBe("one, theirs\n");
+  });
+
+  const stored = (md: string, prev: Doc | null = null) => reconcile(prev, parseMarkdown(md));
+
+  test("separate changes combine, even in neighbouring blocks; stamped fields are left out", () => {
+    const base = { path: "a.md", hash: "h0", doc: stored("one\n\ntwo\n\nthree"), frontmatter: fm };
+    const theirs = { ...base, hash: "h1", doc: stored("one\n\ntwo, theirs\n\nthree", base.doc) };
+    // The edit as the reader gives it back: the blocks it kept carry their IDs.
+    const mine = carryIds(base.doc, parseMarkdown("one, mine\n\ntwo\n\nthree"));
+    const m = startMerge(base, mine, { ...fm, title: "Mine" }, theirs);
+    expect(conflicts(m.segments)).toEqual([]);
+    const merged: Doc = { type: "root", children: resolve(m.segments, () => "mine") };
+    expect(toMarkdown(merged)).toBe("one, mine\n\ntwo, theirs\n\nthree\n");
     expect(m.fields.find((f) => f.key === "title")).toEqual({
       key: "title",
       kind: "same",
@@ -115,14 +138,14 @@ describe("merging with a version saved meanwhile", () => {
   });
 
   test("fields the person left alone never overwrite what was changed meanwhile", () => {
-    const base = { path: "a.md", hash: "h0", body: "x\n", frontmatter: fm };
+    const base = { path: "a.md", hash: "h0", doc: stored("x"), frontmatter: fm };
     const theirs = {
       ...base,
       hash: "h1",
       frontmatter: { ...fm, tags: ["finance"], stale_after: "2027-01-01T00:00:00Z" },
     };
     const mine = frontmatterOf(fm, { ...formOf(fm), title: "Mine" });
-    const m = startMerge(base, "x\n", mine, theirs);
+    const m = startMerge(base, base.doc, mine, theirs);
     expect(m.fields.filter((f) => f.kind === "conflict")).toEqual([]);
     const value = (k: string) => m.fields.find((f) => f.key === k);
     expect(value("tags")).toMatchObject({ kind: "same", value: ["finance"] });

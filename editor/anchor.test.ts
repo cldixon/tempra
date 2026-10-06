@@ -1,30 +1,41 @@
 import { describe, expect, test } from "bun:test";
-import { locate, selectorAt } from "./src/anchor";
+import { locate, type QuoteSelector, selectorAt } from "./src/anchor";
+import { reconcile } from "./src/reconcile";
+import { docText, quoteText } from "./src/text";
+import { parseMarkdown, toMarkdown } from "./src/tree";
 
 describe("quote anchors", () => {
-  const body = "Margin is revenue minus cost. Later, margin is reported monthly. margin is";
+  const md = "Margin is revenue minus cost.\n\nLater, margin is reported monthly. margin is";
+  const doc = reconcile(null, parseMarkdown(md));
+  const text = docText(doc);
+  const at = text.text.indexOf("margin is reported");
 
-  test("a selector finds its own text again", () => {
-    const from = body.indexOf("margin is reported");
-    const sel = selectorAt(body, from, from + 9);
-    expect(locate(body, sel)).toEqual({ from, to: from + 9 });
+  test("a selector finds its own text again, in the block it started in", () => {
+    const sel = selectorAt(text, at, at + 9);
+    expect(sel.block).toBe((doc.children[1] as { id?: string }).id ?? null);
+    expect(sel.offset).toBe(7);
+    expect(locate(text, sel)).toEqual({ from: at, to: at + 9 });
   });
 
-  test("context picks the right repeat after text moves", () => {
-    const from = body.indexOf("margin is reported");
-    const sel = selectorAt(body, from, from + 9);
-    const edited = `A new opening sentence. ${body}`;
-    const found = locate(edited, sel);
-    expect(found?.from).toBe(edited.indexOf("margin is reported"));
+  test("an agent's edit before it keeps it on its block", () => {
+    const sel = selectorAt(text, at, at + 9);
+    const next = reconcile(doc, parseMarkdown(`A new opening paragraph.\n\n${toMarkdown(doc)}`));
+    const t = docText(next);
+    expect(locate(t, sel)?.from).toBe(t.text.indexOf("margin is reported"));
   });
 
-  test("with no context, the nearest repeat to where it was", () => {
-    const sel = { quote: "margin is", prefix: "", suffix: "", from: body.length - 9 };
-    expect(locate(body, sel)?.from).toBe(body.length - 9);
+  test("with no context, the nearest repeat to where it was in its block", () => {
+    const end = text.text.length - 9;
+    const sel: QuoteSelector = { ...selectorAt(text, end, end + 9), prefix: "", suffix: "" };
+    expect(locate(text, sel)?.from).toBe(end);
   });
 
   test("a quote that is gone is outdated", () => {
-    const sel = selectorAt(body, 10, 28);
-    expect(locate("Margin is net sales less COGS.", sel)).toBeNull();
+    const sel = selectorAt(text, 10, 28);
+    expect(locate(docText(parseMarkdown("Margin is net sales less COGS.")), sel)).toBeNull();
+  });
+
+  test("an agent's markdown quote reads as the text", () => {
+    expect(quoteText("**revenue** minus [cost](/c.md)")).toBe("revenue minus cost");
   });
 });

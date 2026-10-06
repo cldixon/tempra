@@ -1,3 +1,5 @@
+import type { Doc } from "@tempra/editor/doc";
+
 export type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
 export type JsonObject = { [key: string]: Json };
 
@@ -8,10 +10,13 @@ export interface LintWarning {
   target?: string;
 }
 
-/** A body link as stored in a concept record: the written link plus its resolved target. */
+/**
+ * A body link as stored in a concept record: the written target plus what it resolved to. One per
+ * internal link, image or definition of the document, in document order.
+ */
 export interface StoredLink {
-  start: number;
-  end: number;
+  /** Which of the document's link targets (links, images, definitions in order) it is. */
+  at: number;
   raw: string;
   /** Bundle path the target resolved to at write time, without anchor. */
   path: string;
@@ -40,20 +45,23 @@ export interface StoredSource {
 }
 
 /**
- * A concept's content version (spec: Concept model). Hashing its canonical serialization gives the
- * content-version hash used by ETags, If-Match and the ledger. `verified` is not part of it.
+ * A concept's content version (spec: Concept model; tempra-dev: decisions/structured-documents).
+ * Hashing its canonical serialization gives the content-version hash used by ETags, If-Match and
+ * the ledger. `verified` is not part of it.
  */
 export interface ConceptRecord {
-  v: 1;
   /** Writer frontmatter in arrival order, minus server-owned and computed keys. */
   fm: [string, Json][];
   /** Frontmatter text kept verbatim when it could not be parsed as a YAML mapping. */
   raw_fm: string | null;
   /** Server-owned `generated`. */
   generated: JsonObject | null;
+  /** The body: the stored tree, every block with its ID. */
+  doc: Doc;
+  /** The body as markdown, generated from `doc` with links as written: what agents read. */
   body: string;
   links: StoredLink[];
-  /** Internal source resources; absent when there are none (and on records written before them). */
+  /** Internal source resources; absent when there are none. */
   sources?: StoredSource[];
 }
 
