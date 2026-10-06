@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
 import { type FeedEvent, lastSeen, useFeed } from "./live";
 import { prefetchFile } from "./prefetch";
-import { switcherKey } from "./ui";
 import { baseName, dirOf, type Urls } from "./urls";
 
 /** One file of `GET …/outline`: the library's index, without bodies. */
@@ -98,7 +97,6 @@ export function Tree(props: {
   const [expanded, setExpanded] = useState(() => loadExpanded(urls));
   const [seq, setSeq] = useState<number | null>(null);
   const [active, setActive] = useState<Map<string, { actor: string; at: number }>>(new Map());
-  const [filter, setFilter] = useState("");
   const [now, setNow] = useState(() => Date.now());
   const seen = lastSeen(urls);
   const dirs = useMemo(() => (files ? buildDirs(files) : null), [files]);
@@ -257,7 +255,7 @@ export function Tree(props: {
   const rows = (dir: string): React.ReactNode => {
     if (dirs === null && failed) {
       return (
-        <li className="small">
+        <li className="tree-note">
           Could not load the files.{" "}
           <button type="button" onClick={() => void load()}>
             Retry
@@ -265,13 +263,13 @@ export function Tree(props: {
         </li>
       );
     }
-    if (dirs === null) return <li className="muted small">Loading…</li>;
+    if (dirs === null) return <li className="tree-note">Loading…</li>;
     const entries = dirs[dir] ?? [];
-    if (entries.length === 0 && dir === "") return <li className="muted small">No files yet.</li>;
+    if (entries.length === 0 && dir === "") return <li className="tree-note">No files yet.</li>;
     return entries.map((e) =>
       e.kind === "dir" ? (
         <li key={e.path}>
-          <div className="tree-row">
+          <div className="tree-row dir">
             <button
               type="button"
               className="tree-toggle"
@@ -286,7 +284,7 @@ export function Tree(props: {
               aria-current={props.dir === e.path ? "page" : undefined}
               ref={props.dir === e.path ? currentRow : undefined}
             >
-              {baseName(e.path)}/
+              {baseName(e.path)}
             </a>
           </div>
           {expanded.has(e.path) && <ul>{rows(e.path)}</ul>}
@@ -311,56 +309,23 @@ export function Tree(props: {
     );
   };
 
-  const matches = useMemo(() => {
-    const q = filter.trim().toLowerCase();
-    if (!q) return null;
-    return (files ?? [])
-      .filter((e) => e.path.toLowerCase().includes(q) || (e.title ?? "").toLowerCase().includes(q))
-      .slice(0, 200);
-  }, [filter, files]);
-
   return (
     <nav aria-label="Files">
-      <input
-        className="ws-filter"
-        type="search"
-        placeholder="Filter files"
-        aria-label="Filter files"
-        value={filter}
-        onChange={(e) => setFilter(e.target.value)}
-      />
-      {matches ? (
-        <ul className="tree">
-          {matches.length === 0 && <li className="muted small">No match.</li>}
-          {matches.map((e) => (
-            <li key={e.path}>
-              <div className="tree-row">
-                <a href={urls.file(e.path)} title={e.path} {...ahead(e.path)}>
-                  {label(e)}
-                </a>
-                {mark(e)}
-              </div>
-            </li>
-          ))}
-          <li className="muted small">{switcherKey()} also searches inside files.</li>
-        </ul>
-      ) : (
-        <ul className="tree">
-          <li>
-            <div className="tree-row">
-              <span className="tree-leaf" />
-              <a
-                href={urls.tree("")}
-                aria-current={props.dir === "" ? "page" : undefined}
-                ref={props.dir === "" ? currentRow : undefined}
-              >
-                <strong>{urls.slug}</strong>
-              </a>
-            </div>
-          </li>
-          {rows("")}
-        </ul>
-      )}
+      <ul className="tree">
+        <li>
+          <div className="tree-row root">
+            <span className="tree-leaf" />
+            <a
+              href={urls.tree("")}
+              aria-current={props.dir === "" ? "page" : undefined}
+              ref={props.dir === "" ? currentRow : undefined}
+            >
+              {urls.slug}
+            </a>
+          </div>
+          <ul>{rows("")}</ul>
+        </li>
+      </ul>
     </nav>
   );
 }

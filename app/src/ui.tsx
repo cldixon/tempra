@@ -1,5 +1,6 @@
 import { Component, type ReactNode, useEffect } from "react";
 import type { ApiError, Loaded } from "./api";
+import { AccountMenu } from "./chrome";
 import { baseName, type Urls } from "./urls";
 
 /** The person the app acts for (GET /api/v1/me). */
@@ -9,21 +10,19 @@ export interface Me {
   actor: string;
 }
 
+/** The account pages' header: Tempra, Connect an agent, and the avatar's menu. */
 export function Header({ me }: { me: Me | null }) {
   return (
-    <>
-      <header>
-        Tempra: <a href="/">Libraries</a> | <a href="/connect">Connect</a> |{" "}
-        <a href="/tokens">Tokens</a> | <a href="/apps">Connected apps</a>
-        {me && (
-          <>
-            {" "}
-            | <a href="/account">{me.email}</a>
-          </>
-        )}
-      </header>
-      <hr />
-    </>
+    <header className="app-header">
+      <a className="brand" href="/">
+        Tempra
+      </a>
+      <span className="spacer" />
+      <a className="header-link" href="/connect">
+        Connect an agent
+      </a>
+      <AccountMenu me={me} />
+    </header>
   );
 }
 
@@ -125,8 +124,12 @@ export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" :
 export const anchorId = (prefix: string, label: string) =>
   `${prefix}-${label.replace(/[^\w.-]/g, "_")}`;
 
-/** Breadcrumbs from the library root to `path` (a directory, or a file when `file` is set). */
-export function Crumbs({ urls, path, file }: { urls: Urls; path: string; file: boolean }) {
+/**
+ * Breadcrumbs from the library root to `path` (a directory, or a file when `file` is set), and
+ * after them what the page adds (the concept's trust and staleness).
+ */
+export function Crumbs(props: { urls: Urls; path: string; file: boolean; children?: ReactNode }) {
+  const { urls, path, file } = props;
   const parts = path === "" ? [] : path.split("/");
   const items: ReactNode[] = [
     <a key="" href={urls.tree("")}>
@@ -135,10 +138,16 @@ export function Crumbs({ urls, path, file }: { urls: Urls; path: string; file: b
   ];
   parts.forEach((seg, i) => {
     const p = parts.slice(0, i + 1).join("/");
-    items.push(" / ");
+    items.push(
+      <span key={`/${p}`} aria-hidden="true">
+        /
+      </span>,
+    );
     items.push(
       i === parts.length - 1 && file ? (
-        seg
+        <span key={p} className="here">
+          {seg}
+        </span>
       ) : (
         <a key={p} href={urls.tree(p)}>
           {seg}
@@ -146,7 +155,12 @@ export function Crumbs({ urls, path, file }: { urls: Urls; path: string; file: b
       ),
     );
   });
-  return <div className="crumbs">{items}</div>;
+  return (
+    <nav className="crumbs" aria-label="Path">
+      {items}
+      {props.children}
+    </nav>
+  );
 }
 
 export function AtNotice({ urls, head, current }: { urls: Urls; head: number; current: string }) {

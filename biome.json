@@ -42,6 +42,16 @@
           }
         }
       }
+    },
+    {
+      "includes": ["design/src/**/*.css"],
+      "linter": {
+        "rules": {
+          "style": {
+            "noDescendingSpecificity": "off"
+          }
+        }
+      }
     }
   ]
 }

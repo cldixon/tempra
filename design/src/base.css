@@ -13,14 +13,50 @@ body {
   font-family: var(--tempra-font-body);
   font-size: var(--tempra-font-size);
   line-height: var(--tempra-line-height);
+  -webkit-font-smoothing: antialiased;
+}
+
+::selection {
+  background: var(--tempra-color-selection);
+}
+
+h1 {
+  margin: 0 0 var(--tempra-space-3);
+  font-size: var(--tempra-text-page);
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+h2 {
+  margin: var(--tempra-space-4) 0 var(--tempra-space-2);
+  font-size: var(--tempra-font-size);
+  font-weight: 600;
+}
+
+h3 {
+  font-size: var(--tempra-text-ui);
+  font-weight: 600;
 }
 
 a {
   color: var(--tempra-color-link);
+  text-decoration: underline;
+  text-decoration-color: var(--tempra-color-border-strong);
+  text-underline-offset: 2px;
 }
 
 a:visited {
   color: var(--tempra-color-link-visited);
+}
+
+a:hover {
+  text-decoration-color: currentcolor;
+}
+
+:focus-visible {
+  outline: 2px solid var(--tempra-color-text);
+  outline-offset: 2px;
 }
 
 code,
@@ -30,9 +66,88 @@ samp {
   font-family: var(--tempra-font-mono);
 }
 
+code {
+  font-size: 0.92em;
+}
+
+kbd {
+  padding: 1px 7px;
+  border-radius: var(--tempra-radius-pill);
+  background: var(--tempra-color-ground);
+  color: var(--tempra-color-faint);
+  font-family: inherit;
+  font-size: var(--tempra-text-label);
+}
+
 hr {
   border: 0;
   border-top: 1px solid var(--tempra-color-border);
+}
+
+/* Controls: pills. A plain button is a ghost; .primary is the one solid action. */
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  padding: 5px 12px;
+  border: 1px solid var(--tempra-color-border);
+  border-radius: var(--tempra-radius-pill);
+  background: var(--tempra-color-bg);
+  font-size: var(--tempra-text-ui);
+  cursor: pointer;
+}
+
+button:hover:not(:disabled) {
+  background: var(--tempra-color-hover);
+}
+
+button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+button.primary {
+  border-color: var(--tempra-color-text);
+  background: var(--tempra-color-text);
+  color: var(--tempra-color-bg);
+  font-weight: 500;
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--tempra-color-text);
+  opacity: 0.85;
+}
+
+/* A text-only button: a link's look, a button's job. */
+button.ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--tempra-color-muted);
+}
+
+input:not([type="checkbox"], [type="radio"], [type="file"]),
+select,
+textarea {
+  max-width: 100%;
+  padding: 5px 10px;
+  border: 1px solid var(--tempra-color-border-strong);
+  border-radius: var(--tempra-radius-row);
+  background: var(--tempra-color-bg);
+  font-size: var(--tempra-text-ui);
+}
+
+textarea {
+  line-height: 1.5;
+}
+
+fieldset {
+  border: 1px solid var(--tempra-color-border);
+  border-radius: var(--tempra-radius-box);
 }
 
 table {
@@ -50,11 +165,71 @@ img {
   max-width: 100%;
 }
 
+details > summary {
+  cursor: pointer;
+}
+
+/* Text roles used across pages. */
+.muted {
+  color: var(--tempra-color-muted);
+}
+
+.faint {
+  color: var(--tempra-color-faint);
+}
+
+.small {
+  font-size: var(--tempra-text-meta);
+}
+
+.warn {
+  font-weight: 500;
+}
+
+/* An uppercase label over a group (SOURCES, LINKED FROM). */
+.label {
+  margin: 0 0 var(--tempra-space-2);
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-label);
+  font-weight: 400;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* A message about the page (saved, an error, a version in the past). */
+.notice {
+  margin: var(--tempra-space-2) 0;
+  padding: 10px 12px;
+  border-radius: var(--tempra-radius-box);
+  background: var(--tempra-color-ground);
+  font-size: var(--tempra-text-ui);
+}
+
 /* A row of short labels (type, trust tier, status): kept apart, wrapping on narrow screens. */
 .chips {
   display: flex;
   flex-wrap: wrap;
+  align-items: center;
   gap: var(--tempra-space-1) var(--tempra-space-2);
+}
+
+.chip {
+  display: inline-block;
+  padding: 1px 7px;
+  border: 1px solid transparent;
+  border-radius: var(--tempra-radius-pill);
+  background: var(--tempra-color-ground);
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-label);
+  white-space: nowrap;
+}
+
+/* Something to act on: outlined, in the text colour (no colour until the palette). */
+.chip.warn,
+.chip.bad {
+  border-color: var(--tempra-color-border-strong);
+  color: var(--tempra-color-text);
+  font-weight: 400;
 }
 
 /* Text for screen readers only: what a symbol (a mark, an icon) means. */

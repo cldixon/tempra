@@ -129,7 +129,13 @@ function App() {
   if (library) {
     const { urls, place } = library;
     return (
-      <Workspace key={`${urls.owner}/${urls.slug}`} urls={urls} place={place} me={who}>
+      <Workspace
+        key={`${urls.owner}/${urls.slug}`}
+        urls={urls}
+        place={place}
+        me={who}
+        bare={route?.page === "file"}
+      >
         {boundary}
       </Workspace>
     );
@@ -137,7 +143,7 @@ function App() {
   return (
     <>
       <Header me={who} />
-      <main>{boundary}</main>
+      <main className="page">{boundary}</main>
     </>
   );
 }

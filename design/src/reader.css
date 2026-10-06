@@ -1,14 +1,15 @@
 /*
- * The concept reader (Wordgard, TEMPRA-11). Wordgard themes itself through --wg-* variables set
- * on its own element; these map them to Tempra's tokens and keep the body as plain as the rest of
- * the page. The selectors are one step more specific than Wordgard's injected theme.
+ * The concept reader (Wordgard, TEMPRA-11) and what sits around the body: tooltips, comment
+ * marks, the selection popover, comment threads, the editor's bar and merge view, the stored
+ * Markdown. Wordgard themes itself through --wg-* variables set on its own element; these map them
+ * to Tempra's tokens. The selectors are one step more specific than Wordgard's injected theme.
  */
 div.body > * {
   --wg-panel-color: var(--tempra-color-bg);
   --wg-border-color: var(--tempra-color-border);
   --wg-highlight-color: var(--tempra-color-text);
   --wg-menu-color: var(--tempra-color-text);
-  --wg-dialog-font: inherit;
+  --wg-dialog-font: var(--tempra-font-body);
   border: 0;
 }
 
@@ -20,12 +21,22 @@ div.body wg-content {
   display: flow-root;
 }
 
+div.body [contenteditable="true"]:focus {
+  outline: none;
+}
+
+/* Hover cards over footnotes and links, and the selection popover: white pills and cards. */
 .tooltip {
-  max-width: 32rem;
-  padding: var(--tempra-space-1) var(--tempra-space-2);
+  max-width: 22rem;
+  padding: 8px 12px;
   border: 1px solid var(--tempra-color-border);
+  border-radius: var(--tempra-radius-box);
   background: var(--tempra-color-bg);
+  box-shadow: var(--tempra-shadow);
   color: var(--tempra-color-text);
+  font-family: var(--tempra-font-body);
+  font-size: var(--tempra-text-ui);
+  line-height: 1.45;
 }
 
 .prose a.broken {
@@ -37,29 +48,27 @@ div.body wg-content {
   color: var(--tempra-color-muted);
 }
 
-.toc {
-  padding-left: var(--tempra-space-3);
+/* Changes since human verification, over the text: lines only. */
+.prose ins.diff-added {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.22em;
 }
 
-.toc .depth-1 {
-  margin-left: var(--tempra-space-3);
-}
-
-.toc .depth-2 {
-  margin-left: var(--tempra-space-4);
+.prose del.diff-removed {
+  color: var(--tempra-color-faint);
 }
 
 /*
- * Comments (TEMPRA-13), in lines only: a thread's quote is underlined in the body (solid when its
- * thread is the one in focus), a comment being written is outlined, and the selection toolbar
- * and the threads are boxes and rules in the text color.
+ * Comments (TEMPRA-13). A thread's quote is underlined in the body (dotted; solid when its thread
+ * is the one in focus); a comment being written fills its text with the selection grey.
  */
 mark.comment-mark {
   background: none;
   color: inherit;
   text-decoration: underline dotted;
   text-decoration-thickness: 1px;
-  text-underline-offset: 0.2em;
+  text-underline-offset: 0.22em;
   cursor: pointer;
 }
 
@@ -69,130 +78,259 @@ mark.comment-mark.active {
 }
 
 mark.comment-draft {
-  background: none;
+  border-radius: var(--tempra-radius-mark);
+  background: var(--tempra-color-selected);
   color: inherit;
-  outline: 1px dashed var(--tempra-color-text);
 }
 
 .selection-tools {
   display: flex;
-  gap: var(--tempra-space-1);
-  padding: var(--tempra-space-1);
-  border: 1px solid var(--tempra-color-text);
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--tempra-color-border);
+  border-radius: var(--tempra-radius-pill);
   background: var(--tempra-color-bg);
+  box-shadow: var(--tempra-shadow);
+  font-family: var(--tempra-font-body);
 }
 
+.selection-tools button {
+  padding: 4px 12px;
+  border: 0;
+  background: var(--tempra-color-text);
+  color: var(--tempra-color-bg);
+  font-size: var(--tempra-text-meta);
+  font-weight: 500;
+}
+
+.selection-tools button:hover:not(:disabled) {
+  background: var(--tempra-color-text);
+  opacity: 0.85;
+}
+
+/* Threads, in the Comments panel. */
 .threads {
-  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: var(--tempra-space-3);
+  margin: 0;
   padding: 0;
+  list-style: none;
 }
 
 .thread {
-  border-top: 1px solid var(--tempra-color-border);
-  padding: var(--tempra-space-2) 0;
+  padding: 4px 2px;
+  border-radius: var(--tempra-radius-row);
 }
 
 .thread.active {
-  outline: 1px solid var(--tempra-color-text);
-  outline-offset: 2px;
+  outline: 1px solid var(--tempra-color-border-strong);
+  outline-offset: 4px;
+}
+
+.thread-by {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: var(--tempra-text-meta);
+}
+
+.thread-by strong {
+  font-weight: 500;
+}
+
+.thread-by time,
+.thread-by .faint {
+  color: var(--tempra-color-faint);
+}
+
+/* A reply sits a step in from the thread's first comment. */
+.thread .reply {
+  padding-left: 12px;
 }
 
 .quote {
-  margin: 0 0 var(--tempra-space-1);
+  margin: 0 0 10px;
+  padding-left: 10px;
+  border-left: 2px solid var(--tempra-color-border-strong);
   color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
   font-style: italic;
+  line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.quote a {
+  color: inherit;
+  text-decoration: none;
 }
 
 .comment {
-  margin: var(--tempra-space-1) 0;
+  margin: 2px 0 10px;
+  font-size: var(--tempra-text-ui);
+  line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-.comment-form textarea {
+/* The composer: a pill until it is used, then a card with the quote, the text and the actions. */
+.comment-form textarea,
+.reply-form textarea {
   display: block;
   width: 100%;
-  box-sizing: border-box;
-  min-height: 3.5rem;
-  margin-bottom: var(--tempra-space-1);
-  font: inherit;
+  min-height: 2.25rem;
+  border: 0;
+  border-radius: var(--tempra-radius-box);
+  background: var(--tempra-color-ground);
+  resize: vertical;
+}
+
+.comment-form {
+  padding: 12px 14px;
+  border-radius: var(--tempra-radius-box);
+  background: var(--tempra-color-ground);
+}
+
+.comment-form textarea {
+  min-height: 4rem;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.comment-form textarea:focus-visible {
+  outline: none;
+}
+
+.comment-form.idle {
+  padding: 0;
+  background: none;
+}
+
+.comment-form.idle textarea {
+  min-height: 0;
+  height: 2.25rem;
+  padding: 8px 14px;
+  border-radius: var(--tempra-radius-pill);
+  background: var(--tempra-color-ground);
+  resize: none;
+}
+
+.comment-form .actions,
+.reply-form .actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.reply-form textarea {
+  min-height: 0;
+  height: 2rem;
+  padding: 5px 12px;
+  border-radius: var(--tempra-radius-pill);
+  font-size: var(--tempra-text-meta);
+  resize: none;
+}
+
+.reply-form textarea:focus,
+.reply-form textarea:not(:placeholder-shown) {
+  height: 4rem;
+  border-radius: var(--tempra-radius-box);
+}
+
+.comment-form button,
+.reply-form button {
+  padding: 4px 12px;
+  font-size: var(--tempra-text-meta);
 }
 
 /*
- * The editor (TEMPRA-15), lines only like the rest: the frontmatter as a plain form, the note and
- * save bar, and the merge view's choices boxed in rules. Wordgard's menu bar and dialogs take
- * their look from the --wg-* variables above.
+ * The editor (TEMPRA-15). The bar sticks to the sheet's top: the note, Save and Cancel, its right
+ * padding clearing the control cluster. The frontmatter form lives in the Properties panel.
  */
 .edit-bar {
-  margin: var(--tempra-space-3) 0;
-  padding: var(--tempra-space-2) 0;
-  border-top: 1px solid var(--tempra-color-text);
-  border-bottom: 1px solid var(--tempra-color-text);
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px 10px;
+  padding: 10px 264px 10px 24px;
+  border-bottom: 1px solid var(--tempra-color-border);
+  background: var(--tempra-color-bg);
+}
+
+.edit-bar input {
+  flex: 1 1 120px;
+  min-width: 0;
+  max-width: 360px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: var(--tempra-radius-pill);
+  background: var(--tempra-color-ground);
+}
+
+.edit-bar .notice {
+  flex-basis: 100%;
+  margin: 0;
 }
 
 .frontmatter-form {
   display: grid;
-  gap: var(--tempra-space-2);
-  margin: 0 0 var(--tempra-space-2);
+  gap: 12px;
+  margin: 0;
   padding: 0;
   border: 0;
 }
 
 .frontmatter-form legend {
-  font-weight: bold;
   margin-bottom: var(--tempra-space-1);
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-label);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .frontmatter-form label {
   display: grid;
-  gap: var(--tempra-space-1);
+  gap: 4px;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
 }
 
 .frontmatter-form input,
-.frontmatter-form select,
-.edit-actions input {
-  font: inherit;
-  box-sizing: border-box;
-  max-width: 100%;
+.frontmatter-form select {
+  width: 100%;
+  color: var(--tempra-color-text);
 }
 
 .source-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--tempra-space-1);
-  margin: var(--tempra-space-1) 0;
-}
-
-.edit-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--tempra-space-2);
-}
-
-.edit-actions label {
-  flex: 1 1 20rem;
-  display: flex;
-  gap: var(--tempra-space-1);
-  align-items: center;
-}
-
-.edit-actions input {
-  flex: 1;
+  display: grid;
+  gap: 4px;
+  margin: 4px 0 8px;
+  padding: 8px;
+  border-radius: var(--tempra-radius-row);
+  background: var(--tempra-color-ground);
 }
 
 .merge {
-  margin: var(--tempra-space-3) 0;
-  padding: var(--tempra-space-2) 0;
-  border-top: 1px solid var(--tempra-color-text);
-  border-bottom: 1px solid var(--tempra-color-text);
+  margin: 0 0 var(--tempra-space-4);
+  padding: 16px;
+  border: 1px solid var(--tempra-color-border-strong);
+  border-radius: var(--tempra-radius-box);
+  font-size: var(--tempra-text-ui);
+}
+
+.merge h2 {
+  margin-top: 0;
 }
 
 .merge .conflict {
   margin: var(--tempra-space-2) 0;
-  border: 1px solid var(--tempra-color-border);
 }
 
 .merge .conflict label {
@@ -202,17 +340,47 @@ mark.comment-draft {
 
 .merge-side {
   margin: var(--tempra-space-1) 0 0;
-  padding: var(--tempra-space-1);
+  padding: 8px;
   border: 1px solid var(--tempra-color-border);
+  border-radius: var(--tempra-radius-row);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   font-family: var(--tempra-font-mono);
 }
 
-/* The concept as stored (the page's Markdown view): the file's own text, wrapped. */
+/* The concept as stored (the Markdown view): the file's own text, exactly as an agent reads it. */
 .raw-markdown pre {
+  margin: 0 0 var(--tempra-space-2);
+  padding: 16px 18px;
+  border-radius: var(--tempra-radius-box);
+  background: var(--tempra-color-ground);
+  font-size: var(--tempra-text-ui);
+  line-height: 1.6;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-  padding: var(--tempra-space-2);
-  border: 1px solid var(--tempra-color-border);
+}
+
+/* On a phone the cluster takes the bar's first row; the note and buttons go under it. */
+@media (max-width: 600px) {
+  .edit-bar {
+    padding: 58px 16px 10px;
+  }
+}
+
+.comments {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* While editing, Wordgard's own menu bar sticks just under the edit bar, not over it. */
+.edit-bar + .doc div.body wg-menubar {
+  top: 53px;
+  z-index: 1;
+}
+
+@media (max-width: 600px) {
+  .edit-bar + .doc div.body wg-menubar {
+    top: 101px;
+  }
 }
