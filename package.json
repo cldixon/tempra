@@ -10,6 +10,7 @@
     "app"
   ],
   "scripts": {
+    "postinstall": "bun run --filter @tempra/app build",
     "dev": "bun run --filter worker dev",
     "deploy": "bun run --filter worker deploy",
     "typecheck": "bun run --filter '*' typecheck",
