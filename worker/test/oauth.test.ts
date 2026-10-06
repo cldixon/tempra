@@ -286,6 +286,31 @@ describe("OAuth for MCP clients", () => {
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
     });
     expect(r.status).toBe(401);
+    // A Bearer challenge, so the client signs in again rather than showing no tools.
+    expect(r.headers.get("WWW-Authenticate")).toContain('error="invalid_token"');
+    expect(r.headers.get("WWW-Authenticate")).toContain("oauth-protected-resource/mcp");
+  });
+
+  test("a connection whose account was deleted outright is told to sign in again", async () => {
+    const { app, db } = setup();
+    const clientId = await register(app);
+    const flow = await begin(app, clientId);
+    const done = await submit(app, flow, approve);
+    const tokens = await exchange(app, clientId, done.headers.get("Location") ?? "", flow.verifier);
+    // A data reset: the account rows go, the OAuth grant stays behind in KV.
+    for (const t of ["tokens", "sessions", "sign_in_links", "libraries", "handle_holds", "users"]) {
+      db.run(`DELETE FROM ${t}`);
+    }
+    const r = await app.request("/mcp", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${tokens.access_token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+    expect(r.status).toBe(401);
+    expect(r.headers.get("WWW-Authenticate")).toContain('error="invalid_token"');
   });
 
   test("deleting the library, or the account, revokes its connections", async () => {
@@ -394,6 +419,31 @@ describe("OAuth for MCP clients", () => {
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
     });
     expect(r.status).toBe(401);
+    // A Bearer challenge, so the client signs in again rather than showing no tools.
+    expect(r.headers.get("WWW-Authenticate")).toContain('error="invalid_token"');
+    expect(r.headers.get("WWW-Authenticate")).toContain("oauth-protected-resource/mcp");
+  });
+
+  test("a connection whose account was deleted outright is told to sign in again", async () => {
+    const { app, db } = setup();
+    const clientId = await register(app);
+    const flow = await begin(app, clientId);
+    const done = await submit(app, flow, approve);
+    const tokens = await exchange(app, clientId, done.headers.get("Location") ?? "", flow.verifier);
+    // A data reset: the account rows go, the OAuth grant stays behind in KV.
+    for (const t of ["tokens", "sessions", "sign_in_links", "libraries", "handle_holds", "users"]) {
+      db.run(`DELETE FROM ${t}`);
+    }
+    const r = await app.request("/mcp", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${tokens.access_token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+    expect(r.status).toBe(401);
+    expect(r.headers.get("WWW-Authenticate")).toContain('error="invalid_token"');
   });
 
   test("selecting nothing re-shows the page", async () => {
