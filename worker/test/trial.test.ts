@@ -269,8 +269,8 @@ describe("MCP trial 2026-10-06, through the MCP tools", () => {
 
     await call("write", { path: "d/b.md", content: md("B.\n") });
     r = await call("move", { from: "d", to: "e" });
-    expect(r.text).toContain("Moved to d/a.md → e/a.md (move, seq ");
-    expect(r.text).toContain("Moved to d/b.md → e/b.md (move, seq ");
+    expect(r.text).toContain("Moved d/a.md → e/a.md (move, seq ");
+    expect(r.text).toContain("Moved d/b.md → e/b.md (move, seq ");
     expect(r.text).toContain("(2 files, seq ");
 
     // A moved path says where the file went; a deleted one says how to get it back.
@@ -300,5 +300,113 @@ describe("MCP trial 2026-10-06, through the MCP tools", () => {
     expect(transcript).toMatch(/- claude-code\/test at \S+:\n {2}Add a status\./);
     expect(transcript).toMatch(/- claude-code\/test resolved it at \S+:\n {2}Done\./);
     expect(transcript).toMatch(/- claude-code\/test reopened it at \S+\./);
+  });
+});
+
+describe("MCP retest 2026-10-06", () => {
+  test("TEMPRA-44: a failed batch's error reports the committed hash and document", () => {
+    const s = newStore();
+    s.apply(ctx(), [{ op: "write", path: "b.md", content: md("Points at gamma.\n") }]);
+    const head = concept(s, "b.md");
+    const e = errorOf(() =>
+      s.apply(ctx(), [
+        { op: "edit", path: "b.md", edits: [{ old: "Points at", new: "Points to" }] },
+        { op: "edit", path: "b.md", edits: [{ old: "nowhere", new: "x" }] },
+      ]),
+    );
+    expect(e.code).toBe("edit_mismatch");
+    expect(e.extra.current_hash).toBe(head.hash);
+    expect(e.extra.current).toBe(head.markdown);
+    // The hash it reports works.
+    const ok = s.apply(ctx(), [
+      {
+        op: "edit",
+        path: "b.md",
+        edits: [{ old: "Points at", new: "Points to" }],
+        if_match: e.extra.current_hash as string,
+      },
+    ]);
+    expect(ok.results[0]?.hash).not.toBe(head.hash);
+  });
+
+  test("TEMPRA-45: the stored-form diff shows what is stored; spacing alone is summarized", () => {
+    const s = newStore();
+    const fake =
+      "---\ntype: Memo\ndescription: A test concept.\nstatus: stable\ngenerated: { by: me/1, at: 2020-01-01T00:00:00Z }\nverified: { by: human:me, at: 2020-01-01T00:00:00Z }\n---\n* one\n";
+    const r = s.apply(ctx(), [{ op: "write", path: "a.md", content: fake }]).results[0];
+    expect(codes(r?.notices)).toEqual(["generated_ignored", "verified_ignored", "normalized"]);
+    expect(r?.normalized).toContain("-verified: { by: human:me, at: 2020-01-01T00:00:00Z }");
+    expect(r?.normalized).toContain("+generated: { by: claude-code/test, at:");
+    expect(r?.normalized).not.toMatch(/^\+verified/m);
+
+    const table = md("| a | bb |\n|-|-|\n| ccc | d |\n");
+    const t = s.apply(ctx(), [{ op: "write", path: "t.md", content: table }]).results[0];
+    expect(codes(t?.notices)).toEqual(["normalized"]);
+    expect(t?.notices?.[0]?.message).toContain("only spacing changed");
+    expect(t?.normalized).toBeUndefined();
+  });
+
+  test("TEMPRA-46: relative_link lint suggests the target's current path after a move", () => {
+    const s = newStore();
+    s.apply(ctx(), [
+      { op: "write", path: "r/beta.md", content: md("Beta.\n") },
+      { op: "write", path: "r/alpha.md", content: md("See [beta](beta.md).\n") },
+    ]);
+    expect(concept(s, "r/alpha.md").lint[0]?.message).toContain("write it as /r/beta.md");
+    s.apply(ctx(), [{ op: "move", path: "r", to: "q" }]);
+    const lint = concept(s, "q/alpha.md").lint;
+    expect(lint.map((l) => l.message)).toEqual([
+      "Link beta.md is relative; write it as /q/beta.md so it reads the same from anywhere.",
+    ]);
+    expect(s.work({ kind: "lint" }).items[0]?.detail).toContain("/q/beta.md");
+    s.apply(ctx(), [{ op: "move", path: "q/beta.md", to: "elsewhere/beta.md" }]);
+    expect(concept(s, "q/alpha.md").lint[0]?.message).toBe(
+      "Link ../elsewhere/beta.md is relative; write it as /elsewhere/beta.md so it reads the same from anywhere.",
+    );
+  });
+
+  test("TEMPRA-48: literal asterisks in a snippet are escaped, not read as highlights", () => {
+    const s = newStore();
+    s.apply(ctx(), [
+      { op: "write", path: "a.md", content: md("Old snippet: `****markdown****`.\n") },
+    ]);
+    const [hit] = s.search("markdown").results;
+    expect(hit?.snippet).toContain("\\*\\*\\*\\***markdown**\\*\\*\\*\\*");
+  });
+
+  test("TEMPRA-49: delete names the concepts whose links it broke", () => {
+    const s = newStore();
+    s.apply(ctx(), [
+      { op: "write", path: "g.md", content: md("G.\n") },
+      { op: "write", path: "b.md", content: md("See [g](/g.md).\n") },
+    ]);
+    const r = s.apply(ctx(), [{ op: "delete", path: "g.md", if_match: concept(s, "g.md").hash }])
+      .results[0];
+    expect(codes(r?.notices)).toEqual(["broken_links"]);
+    expect(r?.notices?.[0]?.message).toContain("1 concept now links to g.md, which is gone: b.md");
+  });
+
+  test("TEMPRA-50: diff sides carry each version's own seq; the YAML error ends its sentence", () => {
+    const s = newStore();
+    s.apply(ctx(), [{ op: "write", path: "a.md", content: md("One.\n") }]);
+    s.apply(ctx(), [{ op: "write", path: "other.md", content: md("Other.\n") }]);
+    s.apply(ctx(), [
+      { op: "write", path: "a.md", content: md("Two.\n"), if_match: concept(s, "a.md").hash },
+    ]);
+    s.comment(human(), { kind: "open", path: "other.md", body: "Later." });
+    expect(s.diff("a.md").diff).toContain("--- a.md@1\n+++ a.md@3\n");
+    const e = errorOf(() =>
+      s.apply(ctx(), [{ op: "write", path: "x.md", content: "---\ntitle: [unclosed\n---\nx\n" }]),
+    );
+    expect(e.message).toMatch(/[.!?] Nothing was written\.$/);
+  });
+
+  test("TEMPRA-47, 50: query marks an unset status and names its hint for what it is", async () => {
+    const { app } = setup();
+    const call = await connect(app);
+    await call("write", { path: "a.md", content: "---\ntype: Memo\ndescription: A.\n---\nA.\n" });
+    expect((await call("query", { type: "Memo" })).text).toContain("· stable (not set) ·");
+    expect((await call("query", { type: "mem" })).text).toContain("Closest types: Memo.");
+    expect((await call("query", { type: "zzz" })).text).toContain("Types here: Memo.");
   });
 });

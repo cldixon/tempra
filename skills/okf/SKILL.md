@@ -66,7 +66,7 @@ Gross margin equals recognized [revenue](/metrics/revenue.md) minus full COGS.[^
 - `batch` for related changes (a new concept plus the links to it; a rename plus fixes) so they land as one request.
 - `move` renames a file or a whole directory. Links keep working; do not fix them by hand.
 - Put a one-line `note` on every write, saying why. Humans read the ledger.
-- Read the `lint` in every write result and fix it in the same session. The result's notes say what else to know: ignored fields, the stored form, the concept's open comment threads and any your edit left outdated.
+- Read the `lint` in every write result and fix it in the same session. The result's notes say what else to know: ignored fields, the stored form, the concept's open comment threads and any your edit left outdated, and after a delete, the concepts whose links it broke.
 
 ## Conflicts
 
