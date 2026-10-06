@@ -344,6 +344,14 @@ mark.comment-draft {
   font-family: var(--tempra-font-mono);
 }
 
+/* The concept as stored (the page's Markdown view): the file's own text, wrapped. */
+.raw-markdown pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: var(--tempra-space-2);
+  border: 1px solid var(--tempra-color-border);
+}
+
 /*
  * The workspace (TEMPRA-19): a library's tree on the left, the open file in the middle, its
  * context on the right, under one header. Structure only: lines and spacing from the tokens, no

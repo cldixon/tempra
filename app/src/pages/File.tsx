@@ -452,6 +452,8 @@ function ConceptView(props: {
   const { urls, head } = props;
   // While editing, the page keeps the version the edit started from (a refresh must not
   // redraw the body under the person's hands).
+  // The file as stored (frontmatter and body), shown in place of the reader.
+  const [markdown, setMarkdown] = useState(false);
   const [frozen, setFrozen] = useState<{
     concept: Concept;
     sources: Sources;
@@ -550,8 +552,19 @@ function ConceptView(props: {
           )}
           {status !== "stable" && <Chip text={status} tone="warn" />}
           {c.lint.length > 0 && <Chip text={`${c.lint.length} lint`} tone="warn" />}
+          {!editing && (
+            <button type="button" aria-pressed={markdown} onClick={() => setMarkdown((m) => !m)}>
+              Markdown
+            </button>
+          )}
           {writable && !editing && (
-            <button type="button" onClick={edit.start}>
+            <button
+              type="button"
+              onClick={() => {
+                setMarkdown(false);
+                edit.start();
+              }}
+            >
               Edit
             </button>
           )}
@@ -564,18 +577,22 @@ function ConceptView(props: {
               ` Lint: ${edit.saved.lint.map((l) => l.message).join(" ")}`}
           </div>
         )}
-        {editing ? edit.bar : changes.toggle}
-        <Reader
-          key={edit.generation}
-          parsed={parsed}
-          tooltip={tooltip}
-          diff={editing ? null : changes.diff}
-          hideFirst={hideFirst}
-          highlights={highlights}
-          onMark={setActive}
-          onComment={writable ? startDraft : undefined}
-          handle={edit.reader}
-        />
+        {editing ? edit.bar : !markdown && changes.toggle}
+        {markdown && !editing && <RawMarkdown urls={urls} path={c.path} hash={c.hash} />}
+        {/* Kept mounted under the markdown, so comments and the editor keep their reader. */}
+        <div hidden={markdown && !editing}>
+          <Reader
+            key={edit.generation}
+            parsed={parsed}
+            tooltip={tooltip}
+            diff={editing ? null : changes.diff}
+            hideFirst={hideFirst}
+            highlights={highlights}
+            onMark={setActive}
+            onComment={writable ? startDraft : undefined}
+            handle={edit.reader}
+          />
+        </div>
         {c.lint.length > 0 && (
           <>
             <h2 id="lint">Lint</h2>
@@ -1327,4 +1344,28 @@ function useEditing(o: {
   );
 
   return { start: begin, bar, reader, generation, saved };
+}
+
+/** The file as stored: what agents read and write, frontmatter and all. */
+function RawMarkdown(props: { urls: Urls; path: string; hash: string }) {
+  const { urls, path, hash } = props;
+  const url = urls.api(`files/${enc(path)}`, { at: urls.at });
+  const loaded = useLoad(`markdown ${url} ${hash}`, async () => {
+    const res = await fetch(url, {
+      credentials: "same-origin",
+      headers: { Accept: "text/markdown" },
+    });
+    if (!res.ok) throw new ApiError(res.status, "error", res.statusText);
+    return res.text();
+  });
+  return (
+    <Status loaded={loaded}>
+      {(text) => (
+        <div className="raw-markdown">
+          <pre>{text}</pre>
+          <a href={urls.raw(path)}>Open as plain text</a>
+        </div>
+      )}
+    </Status>
+  );
 }

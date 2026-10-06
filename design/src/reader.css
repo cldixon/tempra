@@ -208,3 +208,11 @@ mark.comment-draft {
   overflow-wrap: anywhere;
   font-family: var(--tempra-font-mono);
 }
+
+/* The concept as stored (the page's Markdown view): the file's own text, wrapped. */
+.raw-markdown pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: var(--tempra-space-2);
+  border: 1px solid var(--tempra-color-border);
+}

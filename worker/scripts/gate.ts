@@ -643,6 +643,16 @@ async function browserRenders(
         const body = page.locator(".body .prose");
         await body.waitFor({ timeout: 15_000 });
         await markStay();
+        // Markdown shows the file as stored, frontmatter first, in place of the reader.
+        const asMarkdown = page.getByRole("button", { name: "Markdown", exact: true });
+        await asMarkdown.click();
+        const stored = page.locator(".raw-markdown pre");
+        await stored.waitFor({ timeout: 10_000 });
+        const text = await stored.innerText();
+        if (!text.startsWith("---\ntype:")) throw new Error(`markdown view: ${text.slice(0, 60)}`);
+        if (await body.isVisible()) throw new Error("the reader still shows beside the markdown");
+        await asMarkdown.click();
+        await body.waitFor({ state: "visible" });
         const edit = async () => {
           await page.getByRole("button", { name: "Edit", exact: true }).click();
           await page.locator(".body [contenteditable='true']").first().waitFor({ timeout: 5_000 });
