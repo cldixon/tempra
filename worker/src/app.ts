@@ -23,7 +23,7 @@ import type { RestoreOutcome, RestoreRecord } from "./recovery";
 import { readCookie, SESSION_COOKIE, type Sessions } from "./session";
 import { type Mailer, registerSignInRoutes } from "./signin";
 import { OkfError } from "./store/errors";
-import type { ConceptContent, RequestContext, WriteOp } from "./store/store";
+import type { ConceptContent, RequestContext, WriteOp, WriteResult } from "./store/store";
 import { authorizeLibrary } from "./tenancy";
 import { registerUiRoutes } from "./ui/routes";
 import { appHref, appScript } from "./ui/spa";
@@ -925,13 +925,7 @@ async function exportTar(
   });
 }
 
-function writeResponse(
-  c: C,
-  res: {
-    request_id: string;
-    results: { path: string; hash: string | null; seq: number; lint: unknown[] }[];
-  },
-) {
+function writeResponse(c: C, res: WriteResult) {
   const r = res.results[res.results.length - 1];
   if (!r) throw new OkfError(500, "internal", "Write returned no result.");
   if (r.hash) c.header("ETag", `"${r.hash}"`);
@@ -942,5 +936,13 @@ function writeResponse(
     seq: r.seq,
     request_id: res.request_id,
     lint: r.lint,
+    ...(r.notices ? { notices: r.notices } : {}),
+    ...(r.normalized ? { normalized: r.normalized } : {}),
+    // A directory move: every file it moved.
+    ...(res.results.length > 1
+      ? {
+          files: res.results.map((x) => ({ path: x.path, from: x.from, seq: x.seq, hash: x.hash })),
+        }
+      : {}),
   });
 }

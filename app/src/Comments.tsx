@@ -29,6 +29,14 @@ export interface Thread {
   replies: number;
   anchor: (QuoteSelector & { seq: number }) | null;
   comments: CommentT[];
+  /** Every action in order: open, reply, resolve and reopen, with the comment each added. */
+  actions?: {
+    kind: "open" | "reply" | "resolve" | "reopen";
+    actor: string;
+    ts: string;
+    seq: number;
+    comment: string | null;
+  }[];
 }
 
 /** Where a thread's quote is in the body on screen: text offsets and document positions. */
@@ -329,16 +337,46 @@ function ThreadView(props: {
       {outdated && (
         <Chip text="outdated" tone="warn" title="The quoted text is no longer in the body" />
       )}
-      {t.comments.map((c) => (
-        <div key={c.id}>
-          <div className="small">
-            <strong>{c.actor}</strong> <span className="muted">{when(c.ts)}</span>
-          </div>
-          <p className="comment">{c.body}</p>
-        </div>
-      ))}
-      {t.status === "resolved" && t.resolved_by && (
-        <p className="small muted">Resolved by {t.resolved_by}.</p>
+      {t.actions ? (
+        t.actions.map((a) => {
+          const c = a.comment ? t.comments.find((x) => x.id === a.comment) : undefined;
+          const change =
+            a.kind === "resolve" ? "Resolved" : a.kind === "reopen" ? "Reopened" : null;
+          return (
+            <div key={a.seq}>
+              {change && (
+                <p className="small muted">
+                  {change} by {a.actor} {when(a.ts)}
+                  {c ? ":" : "."}
+                </p>
+              )}
+              {c && (
+                <>
+                  {!change && (
+                    <div className="small">
+                      <strong>{c.actor}</strong> <span className="muted">{when(c.ts)}</span>
+                    </div>
+                  )}
+                  <p className="comment">{c.body}</p>
+                </>
+              )}
+            </div>
+          );
+        })
+      ) : (
+        <>
+          {t.comments.map((c) => (
+            <div key={c.id}>
+              <div className="small">
+                <strong>{c.actor}</strong> <span className="muted">{when(c.ts)}</span>
+              </div>
+              <p className="comment">{c.body}</p>
+            </div>
+          ))}
+          {t.status === "resolved" && t.resolved_by && (
+            <p className="small muted">Resolved by {t.resolved_by}.</p>
+          )}
+        </>
       )}
       {props.writable && (
         <form className="comment-form" onSubmit={act("reply")}>

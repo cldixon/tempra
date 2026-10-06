@@ -47,7 +47,18 @@ function conceptView(v: FileView) {
   return v;
 }
 
-const md = (type: string, body: string, extra = "") => `---\ntype: ${type}\n${extra}---\n${body}`;
+/** A concept as an agent should write it: a specific type, a description and a status. */
+/** Lint without `relative_link`, for tests about relative links themselves. */
+const withoutRelative = <T extends { code: string }>(lint: T[]) =>
+  lint.filter((l) => l.code !== "relative_link");
+
+const md = (type: string, body: string, extra = "") => {
+  const fill = [
+    /^description:/m.test(extra) ? "" : "description: A test concept.\n",
+    /^status:/m.test(extra) ? "" : "status: stable\n",
+  ].join("");
+  return `---\ntype: ${type}\n${fill}${extra}---\n${body}`;
+};
 
 describe("write path", () => {
   test("create, conditional replace, stamping and events", () => {
@@ -56,21 +67,22 @@ describe("write path", () => {
       {
         op: "write",
         path: "a.md",
-        content: md("Note", "Hello\n", "generated: { by: x/1, at: 2020-01-01T00:00:00Z }\n"),
+        content: md("Memo", "Hello\n", "generated: { by: x/1, at: 2020-01-01T00:00:00Z }\n"),
       },
     ]);
     const res = r1.results[0];
     expect(res?.seq).toBe(1);
-    expect(res?.lint.map((l) => l.code)).toEqual(["generated_ignored"]);
+    expect(res?.lint).toEqual([]);
+    expect(res?.notices?.map((l) => l.code)).toEqual(["generated_ignored"]);
     const view = s.read("a");
     if (view.kind !== "concept") throw new Error("not a concept");
     expect(view.frontmatter.generated).toEqual({ by: "agent/1", at: "2026-09-29T12:00:01Z" });
 
     // Replace without If-Match fails with the current hash.
     const e = errorOf(() =>
-      s.apply(ctx(), [{ op: "write", path: "a.md", content: md("Note", "x") }]),
+      s.apply(ctx(), [{ op: "write", path: "a.md", content: md("Memo", "x") }]),
     );
-    expect(e.status).toBe(412);
+    expect(e.status).toBe(409);
     expect(e.extra.current_hash).toBe(view.hash);
     // Stale If-Match fails; the right one succeeds.
     expect(
@@ -78,7 +90,7 @@ describe("write path", () => {
         .status,
     ).toBe(412);
     const r2 = s.apply(ctx(), [
-      { op: "write", path: "a.md", content: md("Note", "Bye\n"), if_match: view.hash },
+      { op: "write", path: "a.md", content: md("Memo", "Bye\n"), if_match: view.hash },
     ]);
     expect(r2.results[0]?.hash).not.toBe(view.hash);
     const ev = s.events().events;
@@ -95,7 +107,7 @@ describe("write path", () => {
       errorOf(() => s.apply(ctx(), [{ op: "write", path: "x/index.md", content: "x" }])).status,
     ).toBe(405);
     const big = errorOf(() =>
-      s.apply(ctx(), [{ op: "write", path: "big.md", content: md("Note", "y".repeat(500)) }]),
+      s.apply(ctx(), [{ op: "write", path: "big.md", content: md("Memo", "y".repeat(500)) }]),
     );
     expect([big.status, big.code]).toEqual([413, "concept_too_large"]);
     expect(s.headSeq()).toBe(0);
@@ -105,7 +117,7 @@ describe("write path", () => {
     const s = newStore();
     const e = errorOf(() =>
       s.apply(ctx(), [
-        { op: "write", path: "a.md", content: md("Note", "a") },
+        { op: "write", path: "a.md", content: md("Memo", "a") },
         { op: "delete", path: "missing.md", if_match: "x" },
       ]),
     );
@@ -116,13 +128,13 @@ describe("write path", () => {
 
   test("edit applies find-and-replace on the rendered document", () => {
     const s = newStore();
-    s.apply(ctx(), [{ op: "write", path: "a.md", content: md("Note", "one two\n") }]);
+    s.apply(ctx(), [{ op: "write", path: "a.md", content: md("Sketch", "one two\n") }]);
     s.apply(ctx(), [
       {
         op: "edit",
         path: "a.md",
         edits: [
-          { old: "type: Note", new: "type: Memo" },
+          { old: "type: Sketch", new: "type: Memo" },
           { old: "two", new: "2" },
         ],
       },
@@ -140,7 +152,7 @@ describe("write path", () => {
 
   test("server-owned keys echoed back produce no lint; changed ones do", () => {
     const s = newStore();
-    s.apply(ctx(), [{ op: "write", path: "a.md", content: md("Note", "x\n") }]);
+    s.apply(ctx(), [{ op: "write", path: "a.md", content: md("Memo", "x\n") }]);
     const v = s.read("a.md");
     if (v.kind !== "concept") throw new Error();
     const echoed = s.apply(ctx(), [
@@ -153,7 +165,11 @@ describe("write path", () => {
       "generated: { by: me/1, at: 2020-01-01T00:00:00Z }",
     );
     const r = s.apply(ctx(), [{ op: "write", path: "a.md", content: changed, if_match: v2.hash }]);
-    expect(r.results[0]?.lint.map((l) => l.code)).toEqual(["generated_ignored"]);
+    expect(r.results[0]?.lint).toEqual([]);
+    expect(r.results[0]?.notices?.map((l) => l.code)).toEqual(["generated_ignored"]);
+    // Ignored fields are reported with the write only: nothing is left to fix on the concept.
+    expect(conceptView(s.read("a.md")).lint).toEqual([]);
+    expect(s.work().items).toEqual([]);
   });
 });
 
@@ -164,13 +180,15 @@ describe("links", () => {
       {
         op: "write",
         path: "a/one.md",
-        content: md("Note", "See [two](./two.md), [abs](/a/two.md#x) and [gone](missing.md).\n"),
+        content: md("Memo", "See [two](./two.md), [abs](/a/two.md#x) and [gone](missing.md).\n"),
       },
-      { op: "write", path: "a/two.md", content: md("Note", "Back to [one](one.md).\n") },
+      { op: "write", path: "a/two.md", content: md("Memo", "Back to [one](one.md).\n") },
     ]);
     const lint = s.read("a/one.md");
     if (lint.kind !== "concept") throw new Error();
-    expect(lint.lint.map((l) => [l.code, l.target])).toEqual([["broken_link", "a/missing.md"]]);
+    expect(withoutRelative(lint.lint).map((l) => [l.code, l.target])).toEqual([
+      ["broken_link", "a/missing.md"],
+    ]);
     expect(bodyOf(lint)).toContain("[two](./two.md)");
 
     s.apply(ctx(), [{ op: "move", path: "a/two.md", to: "b/deep/two.md" }]);
@@ -189,7 +207,7 @@ describe("links", () => {
     expect(bodyOf(old)).toContain("[two](./two.md)");
 
     // Creating the missing target heals the broken link.
-    s.apply(ctx(), [{ op: "write", path: "a/missing.md", content: md("Note", "now here\n") }]);
+    s.apply(ctx(), [{ op: "write", path: "a/missing.md", content: md("Memo", "now here\n") }]);
     expect(s.links("a/one.md").broken).toEqual([]);
     expect(s.links("a/missing.md").inbound.map((l) => l.path)).toEqual(["a/one.md"]);
   });
@@ -197,9 +215,9 @@ describe("links", () => {
   test("directory move is one request with one event per file", () => {
     const s = newStore();
     s.apply(ctx(), [
-      { op: "write", path: "d/x.md", content: md("Note", "[y](y.md)") },
-      { op: "write", path: "d/y.md", content: md("Note", "[out](/top.md)") },
-      { op: "write", path: "top.md", content: md("Note", "[x](d/x.md)") },
+      { op: "write", path: "d/x.md", content: md("Memo", "[y](y.md)") },
+      { op: "write", path: "d/y.md", content: md("Memo", "[out](/top.md)") },
+      { op: "write", path: "top.md", content: md("Memo", "[x](d/x.md)") },
     ]);
     const r = s.apply(ctx(), [{ op: "move", path: "d", to: "e/f" }]);
     expect(s.request(r.request_id).events.map((e) => [e.op, e.meta?.from_path, e.path])).toEqual([
@@ -210,7 +228,7 @@ describe("links", () => {
     if (top.kind !== "concept") throw new Error();
     expect(bodyOf(top)).toBe("[x](e/f/x.md)\n");
     // Collisions fail the whole move.
-    s.apply(ctx(), [{ op: "write", path: "g/x.md", content: md("Note", "") }]);
+    s.apply(ctx(), [{ op: "write", path: "g/x.md", content: md("Memo", "") }]);
     expect(errorOf(() => s.apply(ctx(), [{ op: "move", path: "e/f", to: "g" }])).status).toBe(409);
   });
 });
@@ -218,10 +236,10 @@ describe("links", () => {
 describe("ledger", () => {
   test("revert a path and a request, forward-only", () => {
     const s = newStore();
-    s.apply(ctx(), [{ op: "write", path: "a.md", content: md("Note", "v1\n") }]);
+    s.apply(ctx(), [{ op: "write", path: "a.md", content: md("Memo", "v1\n") }]);
     const h1 = s.read("a.md").kind === "concept" ? (s.read("a.md") as { hash: string }).hash : "";
     const r2 = s.apply(ctx(), [
-      { op: "write", path: "a.md", content: md("Note", "v2\n"), if_match: h1 },
+      { op: "write", path: "a.md", content: md("Memo", "v2\n"), if_match: h1 },
     ]);
     const rv = s.revert(ctx("human:me"), { path: "a.md", to_seq: 1 });
     expect(rv.results[0]?.hash).toBe(h1);
@@ -236,10 +254,10 @@ describe("ledger", () => {
     );
 
     // A request that creates, moves and deletes is undone by reverting it.
-    s.apply(ctx(), [{ op: "write", path: "b.md", content: md("Note", "b\n") }]);
+    s.apply(ctx(), [{ op: "write", path: "b.md", content: md("Memo", "b\n") }]);
     const hb = (s.read("b.md") as { hash: string }).hash;
     const big = s.apply(ctx(), [
-      { op: "write", path: "c.md", content: md("Note", "c\n") },
+      { op: "write", path: "c.md", content: md("Memo", "c\n") },
       { op: "move", path: "a.md", to: "moved/a.md" },
       { op: "delete", path: "b.md", if_match: hb },
     ]);
@@ -261,7 +279,7 @@ describe("ledger", () => {
 
   test("snapshots, requests, history and log", () => {
     const s = newStore();
-    s.apply(ctx("agent/1", "create"), [{ op: "write", path: "t/a.md", content: md("Note", "a") }]);
+    s.apply(ctx("agent/1", "create"), [{ op: "write", path: "t/a.md", content: md("Memo", "a") }]);
     const h = (s.read("t/a.md") as { hash: string }).hash;
     s.apply(ctx("agent/2", "rename"), [{ op: "move", path: "t/a.md", to: "t/b.md" }]);
     s.apply(ctx("agent/2"), [{ op: "delete", path: "t/b.md", if_match: h }]);
@@ -271,7 +289,13 @@ describe("ledger", () => {
     expect(s.history("t/b.md").events.map((e) => e.op)).toEqual(["put", "move", "delete"]);
     expect(s.requests().requests.map((r) => r.note)).toEqual([null, "rename", "create"]);
     expect(s.requests({ limit: 1 }).next).toBe(3);
-    expect(s.log()).toContain("* **Move** by `agent/2`: rename [t/b.md](/t/b.md)");
+    // Moves name both paths; entries link to where the file is now, and to nothing once deleted.
+    expect(s.log()).toContain("* **Move** by `agent/2`: rename t/a.md → `t/b.md`");
+    expect(s.log()).toContain("* **Creation** by `agent/1`: create `t/a.md`");
+    expect(s.log({ at: 2 })).toContain(
+      "* **Move** by `agent/2`: rename t/a.md → [t/b.md](/t/b.md)",
+    );
+    expect(s.log({ at: 2 })).toContain("* **Creation** by `agent/1`: create [t/a.md](/t/b.md)");
     expect(errorOf(() => s.read("t/a.md", { at: 9 })).code).toBe("bad_seq");
   });
 });
@@ -321,7 +345,9 @@ describe("queries", () => {
       ["m/cost.md", 2],
       ["m/rev.md", 2],
     ]);
-    expect(s.grep("^desc", { regex: true }).matches.map((m) => m.path)).toEqual(["t/orders.md"]);
+    expect(s.grep("^description: One", { regex: true }).matches.map((m) => m.path)).toEqual([
+      "t/orders.md",
+    ]);
     expect(s.index("")).toBe(
       '---\nokf_version: "0.2"\n---\n\n# Subdirectories\n\n* [m](m/index.md) - 2 concepts\n* [t](t/index.md) - 1 concept\n',
     );
@@ -389,9 +415,9 @@ describe("import and export round-trip the sample bundles (store level)", () => 
 describe("tier 2", () => {
   test("stored lint drops a broken link once its target exists", () => {
     const s = newStore();
-    s.apply(ctx(), [{ op: "write", path: "a.md", content: md("Note", "[b](b.md)\n") }]);
+    s.apply(ctx(), [{ op: "write", path: "a.md", content: md("Memo", "[b](/b.md)\n") }]);
     expect(conceptView(s.read("a.md")).lint.map((l) => l.code)).toEqual(["broken_link"]);
-    s.apply(ctx(), [{ op: "write", path: "b.md", content: md("Note", "b\n") }]);
+    s.apply(ctx(), [{ op: "write", path: "b.md", content: md("Memo", "b\n") }]);
     expect(conceptView(s.read("a.md")).lint).toEqual([]);
     expect(s.work().items).toEqual([]);
   });
@@ -473,8 +499,9 @@ describe("tier 2", () => {
     expect(links.broken).toEqual([
       { raw: "/pol/missing.md", path: "pol/missing.md", kind: "source" },
     ]);
+    // `raw` is the link as `read` renders it now, not as first written.
     expect(s.links("policies/a.md").inbound).toEqual([
-      { path: "m/x.md", raw: "/pol/a.md", anchor: null, kind: "source" },
+      { path: "m/x.md", raw: "/policies/a.md", anchor: null, kind: "source" },
     ]);
 
     // Writing the missing target clears the flag; exporting renders current paths.
@@ -503,7 +530,7 @@ describe("tier 2", () => {
       ["okf", 3],
       ["loose", 1],
     ]);
-    s.apply(ctx(), [{ op: "write", path: "n.md", content: md("Note", "Orphan.[^nosrc]\n") }]);
+    s.apply(ctx(), [{ op: "write", path: "n.md", content: md("Memo", "Orphan.[^nosrc]\n") }]);
     const n = s.sources("n.md");
     expect(n.unmatched_footnotes).toEqual(["nosrc"]);
     expect(conceptView(s.read("n.md")).lint.map((l) => l.code)).toEqual([
@@ -518,12 +545,12 @@ describe("tier 2", () => {
       {
         op: "write",
         path: "a.md",
-        content: md("Note", "See [b](/b.md).\n", "sources:\n  - { id: x }\n"),
+        content: md("Memo", "See [b](/b.md).\n", "sources:\n  - { id: x }\n"),
       },
     ]);
     const first = s.headSeq();
     const h = conceptView(s.read("a.md")).hash;
-    s.apply(ctx(), [{ op: "write", path: "a.md", content: md("Note", "Fixed.\n"), if_match: h }]);
+    s.apply(ctx(), [{ op: "write", path: "a.md", content: md("Memo", "Fixed.\n"), if_match: h }]);
     expect(conceptView(s.read("a.md")).lint).toEqual([]);
     expect(
       conceptView(s.read("a.md", { at: first })).lint.map((l) => [l.code, l.target ?? null]),
@@ -532,7 +559,7 @@ describe("tier 2", () => {
       ["broken_link", "b.md"],
     ]);
     // A link that was broken then but has a target now is still reported as of then.
-    s.apply(ctx(), [{ op: "write", path: "b.md", content: md("Note", "b\n") }]);
+    s.apply(ctx(), [{ op: "write", path: "b.md", content: md("Memo", "b\n") }]);
     expect(conceptView(s.read("a.md", { at: first })).lint.map((l) => l.code)).toContain(
       "broken_link",
     );

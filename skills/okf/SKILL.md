@@ -55,21 +55,22 @@ Gross margin equals recognized [revenue](/metrics/revenue.md) minus full COGS.[^
 - Every footnote label matches a `sources[].id`, and every `[^id]` in the text has a `[^id]: …` definition line at the end of the body (without one, renderers show it as literal text).
 - Timestamps (`stale_after`, `sources[].last_modified`) are ISO 8601 datetimes with an offset (`2026-06-30T14:00:00Z`). A plain date such as `2026-12-31` is flagged.
 - Set `status` and `stale_after` honestly: `draft` when unsure; a `stale_after` when the content depends on something that changes.
-- Do not write `generated` or `verified`. The server ignores them and says so in lint.
+- Do not write `generated` or `verified`. The server ignores them and says so in the write result's notes.
+- A file with no frontmatter, frontmatter that is not valid YAML, or no `type` is refused (400) and nothing is written; fix it and write again. The rest of this list is lint: a generic `type`, no `description` or `status`, a relative link, an uncited footnote definition. A link to a heading the target lacks, and a `stale_after` already past, come back as notes.
 
 ## Editing
 
 - `edit` for small changes: find-and-replace on the document as `read` shows it, frontmatter included. Each `old` must match once; quote enough context.
-- Bodies are stored in a canonical form: `-` bullets, `*` emphasis, ATX headings, fenced code, padded tables. What you write reads back normalized, and is byte-stable after that; quote `old` from what `read` shows, not from what you sent.
+- Bodies are stored in a canonical form: `-` bullets, `*` emphasis, ATX headings, fenced code, padded tables, short YAML lists and mappings in flow style. What you write reads back normalized, and is byte-stable after that; when it differs from what you sent, the write result says so and shows the diff. Quote `old` from what `read` shows, not from what you sent.
 - `write` for a new concept or a full rewrite. Replacing needs `if_match`.
 - `batch` for related changes (a new concept plus the links to it; a rename plus fixes) so they land as one request.
 - `move` renames a file or a whole directory. Links keep working; do not fix them by hand.
 - Put a one-line `note` on every write, saying why. Humans read the ledger.
-- Read the `lint` in every write result and fix it in the same session.
+- Read the `lint` in every write result and fix it in the same session. The result's notes say what else to know: ignored fields, the stored form, the concept's open comment threads and any your edit left outdated.
 
 ## Conflicts
 
-Pass `if_match` with the hash from your last `read`. If another agent changed the file since, you get a 412 with the current hash. Re-read, reapply your change to the new content, and write again. Do not overwrite blindly.
+Pass `if_match` with the hash from your last `read`. If another agent changed the file since, you get a 412 with the current hash. Re-read, reapply your change to the new content, and write again. Do not overwrite blindly. Writing without `if_match` to a path that exists is a 409 `exists`: pass its hash to replace it, or pick another path. In a `batch`, an error says which op failed (`Op 2 of 3`).
 
 ## Beyond files
 
@@ -100,6 +101,7 @@ Comments are how people ask you for changes. A thread sits on a concept, often o
 - Resolve only what you addressed. `reopen` a thread you resolved by mistake.
 - You can start a thread too (`comment` with `open`, a `path` and optionally a `quote` copied from the body as `read` shows it; it is matched by the text it reads as, markup aside), to ask a person something you cannot decide.
 - An outdated thread's quote is gone from the body; it may already be fixed. Check, then answer it.
+- A concept with open threads cannot be deleted (409 `open_comments`): answer and resolve them first.
 
 ## When to split a concept
 

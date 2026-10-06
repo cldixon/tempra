@@ -60,6 +60,19 @@ export interface ThreadView {
   outdated: boolean;
   /** The opening comment, then the replies, oldest first. */
   comments: CommentView[];
+  /**
+   * Every action on the thread in order (open, reply, resolve, reopen), so a transcript shows
+   * when it was resolved and reopened; `comment` names the comment an action added, if any.
+   */
+  actions: ThreadAction[];
+}
+
+export interface ThreadAction {
+  kind: "open" | "reply" | "resolve" | "reopen";
+  actor: string;
+  ts: string;
+  seq: number;
+  comment: string | null;
 }
 
 export interface CommentResult {

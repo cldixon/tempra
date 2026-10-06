@@ -4,6 +4,37 @@ import type { Json, JsonObject, LintWarning, Verification } from "./types";
 
 const STATUSES = new Set(["draft", "stable", "deprecated"]);
 
+/** Types that say nothing about what a concept is (the server instructions forbid them). */
+const GENERIC_TYPES = new Set([
+  "concept",
+  "content",
+  "doc",
+  "document",
+  "entry",
+  "file",
+  "general",
+  "info",
+  "item",
+  "misc",
+  "note",
+  "notes",
+  "other",
+  "page",
+  "text",
+  "thing",
+  "topic",
+  "untitled",
+]);
+
+export interface LintOptions {
+  /**
+   * Also check what the server instructions ask of a writer (a specific `type`, a `description`
+   * and `status`, absolute links, cited footnotes). On for writes, off for imports, so bundles from
+   * elsewhere that OKF accepts load without a flood of warnings.
+   */
+  strict?: boolean;
+}
+
 function get(entries: [string, Json][], key: string): Json | undefined {
   return entries.find(([k]) => k === key)?.[1];
 }
@@ -20,21 +51,43 @@ export function lintFields(
   entries: [string, Json][],
   generated: JsonObject | null,
   verified: Verification[],
-  footnotes: Pick<BodyScan, "footnoteRefs" | "footnoteDefs">,
+  scan: Pick<BodyScan, "footnoteRefs" | "footnoteDefs"> & Partial<Pick<BodyScan, "links">>,
+  opts: LintOptions = {},
 ): LintWarning[] {
   const out: LintWarning[] = [];
+  const strict = opts.strict ?? false;
   const type = get(entries, "type");
   if (typeof type !== "string" || type.trim() === "") {
     out.push({
       code: "missing_type",
       message: "`type` is required and must be a non-empty string.",
     });
+  } else if (strict && GENERIC_TYPES.has(type.trim().toLowerCase())) {
+    out.push({
+      code: "generic_type",
+      message: `\`type: ${type}\` says nothing about what this is; name the kind of thing (Metric, Decision, Runbook), reusing a type the library already has where one fits (\`start\` lists them).`,
+    });
+  }
+  if (strict) {
+    const description = get(entries, "description");
+    if (typeof description !== "string" || description.trim() === "") {
+      out.push({
+        code: "missing_description",
+        message: "Add a one-line `description`: indexes and search show it beside the title.",
+      });
+    }
   }
   const status = get(entries, "status");
   if (status !== undefined && (typeof status !== "string" || !STATUSES.has(status))) {
     out.push({
       code: "invalid_status",
       message: `\`status\` must be one of draft, stable, deprecated; got ${JSON.stringify(status)}.`,
+    });
+  } else if (status === undefined && strict) {
+    out.push({
+      code: "missing_status",
+      message:
+        "Set `status`: draft until what it describes is built or settled, then stable (an absent status reads as stable).",
     });
   }
 
@@ -92,8 +145,8 @@ export function lintFields(
     }
   }
 
-  const defined = new Set(footnotes.footnoteDefs.map((d) => d.toLowerCase()));
-  for (const label of footnotes.footnoteRefs) {
+  const defined = new Set(scan.footnoteDefs.map((d) => d.toLowerCase()));
+  for (const label of scan.footnoteRefs) {
     if (!sourceIds.has(label)) {
       out.push({
         code: "footnote_unmatched",
@@ -104,6 +157,24 @@ export function lintFields(
       out.push({
         code: "footnote_undefined",
         message: `Footnote [^${label}] has no \`[^${label}]: …\` definition line, so markdown renderers show it as literal text. Add one at the end of the body.`,
+      });
+    }
+  }
+  if (strict) {
+    const cited = new Set(scan.footnoteRefs.map((r) => r.toLowerCase()));
+    for (const label of scan.footnoteDefs) {
+      if (!cited.has(label.toLowerCase())) {
+        out.push({
+          code: "footnote_uncited",
+          message: `Footnote definition [^${label}] is never cited in the body; cite it with [^${label}] or remove it.`,
+        });
+      }
+    }
+    for (const link of scan.links ?? []) {
+      if (link.form !== "relative") continue;
+      out.push({
+        code: "relative_link",
+        message: `Link ${link.raw} is relative; write it as /${link.path}${link.anchor ?? ""} so it reads the same from anywhere.`,
       });
     }
   }

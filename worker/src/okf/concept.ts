@@ -72,7 +72,11 @@ export interface ParsedConcept {
   generated: JsonObject | null;
   /** `verified` as the writer sent it, normalized to a list; null when absent. */
   verified: Verification[] | null;
+  /** True when `verified` was a bare mapping rather than a list. */
+  verifiedBare: boolean;
   lint: LintWarning[];
+  /** Why the frontmatter is unusable (missing or not a YAML mapping), for writes that refuse it. */
+  fmError: string | null;
 }
 
 /** Splits a markdown file into its frontmatter text (null when absent) and body. */
@@ -98,9 +102,13 @@ export function parseConcept(md: string): ParsedConcept {
     body,
     generated: null,
     verified: null,
+    verifiedBare: false,
     lint,
+    fmError: null,
   };
   if (fm === null) {
+    out.fmError =
+      "There is no YAML frontmatter block. Start the file with `---`, then `type: …` and the other fields, then `---`.";
     lint.push({
       code: "missing_frontmatter",
       message: "No YAML frontmatter block; `type` is required.",
@@ -110,11 +118,16 @@ export function parseConcept(md: string): ParsedConcept {
   const doc = parseDocument(fm, { version: "1.2", uniqueKeys: false });
   if (doc.errors.length > 0 || (doc.contents !== null && !isMap(doc.contents))) {
     out.rawFm = fm;
-    const why = doc.errors[0]?.message.split("\n")[0] ?? "not a YAML mapping";
+    const err = doc.errors[0];
+    const why = err?.message.split("\n")[0] ?? "not a YAML mapping";
     lint.push({
       code: "unparseable_frontmatter",
       message: `Frontmatter could not be parsed: ${why}`,
     });
+    // The frontmatter starts on the file's second line, after the opening `---`.
+    const line = err?.linePos?.[0]?.line;
+    const where = line ? ` (line ${line + 1} of the file)` : "";
+    out.fmError = `The frontmatter is not valid YAML${where}: ${why.replace(/ at line \d+, column \d+:?$/, "")}`;
     return out;
   }
   if (hasComments(doc)) {
@@ -134,12 +147,7 @@ export function parseConcept(md: string): ParsedConcept {
       out.generated = value && typeof value === "object" && !Array.isArray(value) ? value : null;
     } else if (key === "verified") {
       out.verified = normalizeVerified(value);
-      if (value && typeof value === "object" && !Array.isArray(value)) {
-        lint.push({
-          code: "verified_bare_mapping",
-          message: "`verified` is a bare mapping; it is treated as a one-element list.",
-        });
-      }
+      out.verifiedBare = !!value && typeof value === "object" && !Array.isArray(value);
     } else if (COMPUTED.has(key)) {
       // Computed keys come back on every read with ?computed=true; echoing them is normal.
     } else {
@@ -180,6 +188,11 @@ export interface BuildOptions {
 export interface BuiltConcept {
   record: ConceptRecord;
   lint: LintWarning[];
+  /**
+   * What the writer should know about this write but has nothing to fix in the stored concept
+   * (fields the server ignored): returned with the write, never stored as lint.
+   */
+  notices: LintWarning[];
   /** Verifications carried by an imported file, to be recorded as verify events. */
   verified: Verification[];
   footnoteRefs: string[];
@@ -193,6 +206,7 @@ export interface BuiltConcept {
  */
 export function buildRecord(parsed: ParsedConcept, opts: BuildOptions): BuiltConcept {
   const lint = [...parsed.lint];
+  const notices: LintWarning[] = [];
   let entries = parsed.entries.map(([k, v]) => [k, v] as [string, Json]);
   const doc = parseMarkdown(parsed.body);
   if (opts.hints) carryIds(opts.hints, doc);
@@ -226,7 +240,7 @@ export function buildRecord(parsed: ParsedConcept, opts: BuildOptions): BuiltCon
     generated = { by: opts.actor, at: opts.now };
     const stored = opts.stored?.generated ?? null;
     if (parsed.generated && !jsonEqual(parsed.generated, stored)) {
-      lint.push({
+      notices.push({
         code: "generated_ignored",
         message:
           "`generated` is stamped by the server from your token; the value you sent was ignored.",
@@ -235,19 +249,26 @@ export function buildRecord(parsed: ParsedConcept, opts: BuildOptions): BuiltCon
   }
   if (opts.mode !== "import" && parsed.verified !== null) {
     if (!jsonEqual(parsed.verified, opts.stored?.verified ?? [])) {
-      lint.push({
+      notices.push({
         code: "verified_ignored",
         message:
-          "`verified` is added only through the verify action; the value you sent was ignored.",
+          "`verified` is set when a person verifies the concept in the app; the value you sent was ignored.",
       });
     }
+  } else if (opts.mode === "import" && parsed.verifiedBare) {
+    lint.push({
+      code: "verified_bare_mapping",
+      message: "`verified` is a bare mapping; it is treated as a one-element list.",
+    });
   }
 
   reconcile(opts.prev ?? null, doc);
   const scan = scanDoc(doc, opts.path);
   const links: StoredLink[] = scan.links.map((l) => ({ ...l, target: null }));
   const verified = opts.mode === "import" ? (parsed.verified ?? []) : [];
-  if (parsed.rawFm === null) lint.push(...lintFields(entries, generated, verified, scan));
+  if (parsed.rawFm === null) {
+    lint.push(...lintFields(entries, generated, verified, scan, { strict: opts.mode === "write" }));
+  }
   const record: ConceptRecord = {
     fm: entries,
     raw_fm: parsed.rawFm,
@@ -256,7 +277,7 @@ export function buildRecord(parsed: ParsedConcept, opts: BuildOptions): BuiltCon
     body: toMarkdown(doc),
     links,
   };
-  return { record, lint, verified, footnoteRefs: scan.footnoteRefs };
+  return { record, lint, notices, verified, footnoteRefs: scan.footnoteRefs };
 }
 
 /** A v0.1 `# Citations` list, taken out of the body into `sources`; null when there is none. */

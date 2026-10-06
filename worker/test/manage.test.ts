@@ -73,8 +73,12 @@ describe("verify, work queue, import and export (Phase 3, slice 3)", () => {
 
   test("the work queue page lists and filters items", async () => {
     const s = setup();
-    await put(s, "a.md", "---\ntype: Note\n---\nSee [gone](/gone.md).\n");
-    await put(s, "b.md", "---\ntitle: No type\n---\nx\n");
+    await put(
+      s,
+      "a.md",
+      "---\ntype: Memo\ndescription: A memo.\nstatus: draft\n---\nSee [gone](/gone.md).\n",
+    );
+    await put(s, "b.md", "---\ntype: Note\n---\nx\n");
     expect((await page(s, `${LIB}/-/work?kind=lint`)).html).toContain('<div id="root"></div>');
     type Work = { items: { kind: string; path: string; detail: string }[] };
     const work = async (q = "") => (await (await s.app.request(`${API}/work${q}`)).json()) as Work;

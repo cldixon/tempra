@@ -34,7 +34,7 @@ export interface Scenario {
 }
 
 const concept = (title: string, body: string) =>
-  `---\ntype: Note\ntitle: ${title}\ndescription: Written by scripted agents.\n---\n${body}\n`;
+  `---\ntype: Agent Memo\ntitle: ${title}\ndescription: Written by scripted agents.\nstatus: draft\n---\n${body}\n`;
 
 /** A write, recorded for the feed measurement. */
 async function write(ctx: ScenarioContext, agent: Agent, args: Record<string, unknown>) {
