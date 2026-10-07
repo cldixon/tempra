@@ -88,16 +88,20 @@ export interface FootnoteParam {
   label: string;
   identifier: string;
   href: string | null;
+  /** What the marker shows (a source's number); the label in brackets when not set. */
+  mark?: string;
 }
 
 export const FootnoteRef = Leaf.Type.define<FootnoteParam>("footnoteRef", {
   inline: true,
   group: [Node.Group.Inline],
   shape: {
-    structure: (p: FootnoteParam) =>
-      Elt.mk("sup", { class: "fnref", "data-label": p.label }, [
-        p.href === null ? `[${p.label}]` : Elt.mk("a", { href: p.href }, [`[${p.label}]`]),
-      ]),
+    structure: (p: FootnoteParam) => {
+      const mark = p.mark ?? `[${p.label}]`;
+      return Elt.mk("sup", { class: "fnref", "data-label": p.label }, [
+        p.href === null ? mark : Elt.mk("a", { href: p.href }, [mark]),
+      ]);
+    },
   },
   toText: (n: Leaf) => `[${(n.param as FootnoteParam).label}]`,
 });

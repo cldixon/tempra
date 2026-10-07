@@ -406,7 +406,7 @@ async function browserRenders(
       const word = String(meta.frontmatter?.title ?? "").split(/\s+/)[0] ?? "";
       const dialog = page.getByRole("dialog", { name: "Open a file" });
       const box = dialog.getByRole("combobox");
-      // It closes every way a person tries: Escape, the same keys, Close, a click outside.
+      // It closes every way a person tries: Escape, the same keys, a click outside.
       const closes = async (how: string, close: () => Promise<void>) => {
         await page.keyboard.press("Control+k");
         await box.waitFor({ timeout: 5000 }).catch(() => {
@@ -419,7 +419,6 @@ async function browserRenders(
       };
       await closes("Escape", () => box.press("Escape"));
       await closes("the same keys", () => page.keyboard.press("Control+k"));
-      await closes("Close", () => dialog.getByRole("button", { name: "Close" }).click());
       await closes("a click outside", () => page.mouse.click(5, 5));
       await page.keyboard.press("Control+k");
       await box.fill(word);

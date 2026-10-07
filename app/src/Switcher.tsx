@@ -16,7 +16,7 @@ const MAX = 12;
 /**
  * The quick switcher (tempra-dev: app/workspace): Ctrl or Cmd+K, type a title or path, Enter.
  * Recent files first, then titles and paths from the library's index (instant), then the
- * library's search inside files. Escape, the same keys, Close or a click outside the box closes it.
+ * library's search inside files. Escape, the same keys or a click outside the box closes it.
  */
 export function Switcher(props: {
   urls: Urls;
@@ -158,9 +158,6 @@ export function Switcher(props: {
           }}
           onKeyDown={keys}
         />
-        <button type="button" onClick={onClose}>
-          Close
-        </button>
       </div>
       <div id={listId} role="listbox" aria-label="Files">
         {hits.map((h, i) => (

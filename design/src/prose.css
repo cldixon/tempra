@@ -110,13 +110,17 @@
   margin: 32px 0;
 }
 
+/* Footnote markers: a source's number, never split across lines. */
 .prose sup {
+  margin-left: 2px;
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-label);
   line-height: 0;
+  white-space: nowrap;
 }
 
 .prose sup a {
-  color: var(--tempra-color-muted);
+  color: inherit;
   text-decoration: none;
 }
 

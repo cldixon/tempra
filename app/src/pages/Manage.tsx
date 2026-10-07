@@ -107,7 +107,9 @@ export function Work({ urls, kind }: { urls: Urls; kind?: string }) {
                           <div className="small muted">{i.detail}</div>
                           {!i.thread && <div className="small">→ {i.suggested_action}</div>}
                         </td>
-                        <td className="muted small">{i.inbound_links} inbound</td>
+                        <td className="muted small">
+                          {i.inbound_links > 0 && `${i.inbound_links} inbound`}
+                        </td>
                         <td className="muted small">{when(i.since)}</td>
                       </tr>
                     ))}
@@ -631,10 +633,6 @@ export function ConnectLibrary({ urls }: { urls: Urls }) {
   return (
     <>
       <h1>Connect an agent</h1>
-      <p>
-        Connections belong to your account. <a href="/connect">Connect an agent</a> covers every
-        library.
-      </p>
       <ConnectSteps slug={urls.slug} />
       <h2>Status</h2>
       <Status loaded={loaded}>

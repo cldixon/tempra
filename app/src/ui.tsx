@@ -10,7 +10,7 @@ export interface Me {
   actor: string;
 }
 
-/** The account pages' header: Tempra, Connect an agent, and the avatar's menu. */
+/** The account pages' header: Tempra and the avatar's menu. */
 export function Header({ me }: { me: Me | null }) {
   return (
     <header className="app-header">
@@ -18,9 +18,6 @@ export function Header({ me }: { me: Me | null }) {
         Tempra
       </a>
       <span className="spacer" />
-      <a className="header-link" href="/connect">
-        Connect an agent
-      </a>
       <AccountMenu me={me} />
     </header>
   );

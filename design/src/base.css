@@ -224,12 +224,10 @@ details > summary {
   white-space: nowrap;
 }
 
-/* Something to act on: outlined, in the text colour (no colour until the palette). */
+/* Something to act on: in the text colour (no colour until the palette). */
 .chip.warn,
 .chip.bad {
-  border-color: var(--tempra-color-border-strong);
   color: var(--tempra-color-text);
-  font-weight: 400;
 }
 
 /* Text for screen readers only: what a symbol (a mark, an icon) means. */

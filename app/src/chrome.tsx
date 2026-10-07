@@ -167,7 +167,7 @@ export function AccountMenu({ me }: { me: Me | null }) {
       buttonClass="avatar"
       align="end"
     >
-      {me && <div className="menu-note">{me.email}</div>}
+      {me && <div className="menu-who">{me.email}</div>}
       <a href="/connect">Connect an agent</a>
       <a href="/tokens">Tokens</a>
       <a href="/apps">Connected apps</a>

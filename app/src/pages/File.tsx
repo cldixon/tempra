@@ -542,20 +542,25 @@ function ConceptView(props: {
   useTitle(`${title} · ${urls.slug}`);
   const status = typeof fm.status === "string" ? fm.status : null;
 
-  const parseOptions = useMemo((): ParseOptions => {
-    const ids = new Set(sources.sources.map((s) => s.id).filter((id) => typeof id === "string"));
+  // Footnote markers are numbers: the sources in their order, then the body's other footnotes
+  // as they are met (`numbers` fills in as the body is parsed; the panel reads it after).
+  const { parseOptions, numbers } = useMemo(() => {
+    const ids = sources.sources.map((s) => s.id).filter((id) => typeof id === "string");
+    const numbers = new Map<string, number>(ids.map((id, i) => [id, i + 1]));
+    const sourceIds = new Set(ids);
     const broken = new Set(links.broken.map((b) => b.path));
-    return {
+    const parseOptions: ParseOptions = {
       path: c.path,
       href: bodyHref(urls),
       exists: (path) => !broken.has(path),
-      footnote: (label, defined) =>
-        ids.has(label)
-          ? `#${anchorId("src", label)}`
-          : defined
-            ? `#${anchorId("fn", label)}`
-            : null,
+      footnote: (label, defined) => {
+        if (!sourceIds.has(label) && !defined) return null;
+        if (!numbers.has(label)) numbers.set(label, numbers.size + 1);
+        const prefix = sourceIds.has(label) ? "src" : "fn";
+        return { href: `#${anchorId(prefix, label)}`, mark: String(numbers.get(label)) };
+      },
     };
+    return { parseOptions, numbers };
   }, [c.path, urls, sources, links]);
   const parsed = useMemo(() => fromTree(c.doc, parseOptions), [c.doc, parseOptions]);
   // A leading heading that repeats the title is not shown twice (the stored body is unchanged).
@@ -783,7 +788,12 @@ function ConceptView(props: {
               {panel === "contents" && (
                 <>
                   <Contents parsed={parsed} skipFirst={hideFirst} />
-                  <SourcesPanel urls={urls} data={sources} footnotes={footnotes} />
+                  <SourcesPanel
+                    urls={urls}
+                    data={sources}
+                    footnotes={footnotes}
+                    numbers={numbers}
+                  />
                   <LinksPanel urls={urls} links={links} head={head} />
                 </>
               )}
@@ -1058,7 +1068,13 @@ function FootnoteHtml({ html }: { html: string }) {
   return <div className="small" dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
-function SourcesPanel(props: { urls: Urls; data: Sources; footnotes: Record<string, string> }) {
+function SourcesPanel(props: {
+  urls: Urls;
+  data: Sources;
+  footnotes: Record<string, string>;
+  /** Each footnote label's number, as the body's markers show it. */
+  numbers: Map<string, number>;
+}) {
   const { urls, data, footnotes } = props;
   const used = new Set<string>();
   const items = data.sources.map((s, i) => {
@@ -1086,7 +1102,7 @@ function SourcesPanel(props: { urls: Urls; data: Sources; footnotes: Record<stri
       );
       meta.push("external");
     } else if (resource) meta.push(resource);
-    if (id) meta.push(`cited ${cited}×`);
+    if (id) meta.push(cited > 0 ? `cited ${cited}×` : "not cited");
     // The footnote's own text, unless it only repeats the source's title.
     const html = id ? footnotes[id] : undefined;
     const def = html && plain(html) !== name.trim() ? html : undefined;
@@ -1119,7 +1135,7 @@ function SourcesPanel(props: { urls: Urls; data: Sources; footnotes: Record<stri
           <ul className="sources">
             {others.map(([label, html]) => (
               <li key={label} id={anchorId("fn", label)}>
-                <span className="num">{label}</span>
+                <span className="num">{props.numbers.get(label) ?? label}</span>
                 <FootnoteHtml html={html} />
               </li>
             ))}
@@ -1251,27 +1267,26 @@ function ReviewPanel(props: {
         {props.changes}
       </section>
       <section>
-        <h3 className="label">This concept</h3>
         <dl className="facts">
           <dt>type</dt>
           <dd>
             {typeof fm.type === "string" && fm.type ? fm.type : <Chip text="no type" tone="bad" />}
           </dd>
-          <dt>trust</dt>
-          <dd>{trustWords(c.trust_tier)}</dd>
-          <dt>status</dt>
-          <dd>
-            {typeof fm.status === "string" ? fm.status : <span className="faint">not set</span>}
-          </dd>
-          <dt>stale_after</dt>
-          <dd>
-            {fm.stale_after === undefined ? (
-              <span className="faint">not set</span>
-            ) : (
-              when(String(fm.stale_after))
-            )}
-            {c.stale && <Chip text="stale" tone="bad" />}
-          </dd>
+          {typeof fm.status === "string" && (
+            <>
+              <dt>status</dt>
+              <dd>{fm.status}</dd>
+            </>
+          )}
+          {fm.stale_after !== undefined && (
+            <>
+              <dt>stale_after</dt>
+              <dd>
+                {when(String(fm.stale_after))}
+                {c.stale && <Chip text="stale" tone="bad" />}
+              </dd>
+            </>
+          )}
         </dl>
       </section>
       {(c.lint.length > 0 || props.work.length > 0) && (
@@ -1291,9 +1306,6 @@ function ReviewPanel(props: {
           </ul>
         </section>
       )}
-      <p className="panel-foot">
-        <a href={urls.work()}>All open work in {urls.slug}</a>
-      </p>
     </>
   );
 }
@@ -1310,11 +1322,6 @@ function History(props: { urls: Urls; concept: Concept; head: number; events: Hi
   const changedSince =
     verified !== undefined && events.some((e) => e.seq > verified.seq && CONTENT_OPS.has(e.op));
   const pinnedOld = urls.at !== undefined && urls.at < head;
-  const view = (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const at = Number(new FormData(e.currentTarget).get("at"));
-    navigate(urls.pinned(Number.isInteger(at) && at > 0 ? at : undefined).file(c.path));
-  };
   const [now] = useState(() => Date.now());
   return (
     <>
@@ -1365,19 +1372,6 @@ function History(props: { urls: Urls; concept: Concept; head: number; events: Hi
       {events.length > shown.length && (
         <p className="small muted">{events.length - shown.length} older events not shown.</p>
       )}
-      <form className="at-form small" onSubmit={view}>
-        <label htmlFor="at">View at seq</label>
-        <input
-          key={urls.at ?? head}
-          id="at"
-          name="at"
-          type="number"
-          min={1}
-          max={head}
-          defaultValue={urls.at ?? head}
-        />
-        <button type="submit">View</button>
-      </form>
       <p className="panel-foot">
         <a href={urls.ledger({ prefix: c.path })}>All {events.length} in the ledger</a>
         <a href={urls.raw(c.path)}>Raw</a>
