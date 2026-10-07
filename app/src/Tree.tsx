@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
+import { Icon } from "./chrome";
 import { type FeedEvent, lastSeen, useFeed } from "./live";
 import { prefetchFile } from "./prefetch";
 import { baseName, dirOf, type Urls } from "./urls";
@@ -81,9 +82,10 @@ function buildDirs(files: Entry[]): Record<string, Entry[]> {
 /**
  * The library's file tree (tempra-dev: app/workspace). The whole index (paths, titles,
  * sequences; no bodies) arrives in one small request when the workspace opens, so opening a
- * folder never waits. Open folders are remembered on this browser, the open file is revealed and
- * marked, and the change feed refreshes the index once per burst of writes, with a mark on files
- * an agent changed in the last minutes or that changed since the last visit.
+ * folder never waits. A folder opens and closes in place (it is not a page); open folders are
+ * remembered on this browser, the open file is revealed and marked, and the change feed refreshes
+ * the index once per burst of writes, with a mark on files an agent changed in the last minutes or
+ * that changed since the last visit.
  */
 export function Tree(props: {
   urls: Urls;
@@ -191,7 +193,10 @@ export function Tree(props: {
 
   // The open file's row is scrolled into view once, when it opens (not after every refresh,
   // which would pull the person back while agents write).
-  const currentRow = useRef<HTMLAnchorElement | null>(null);
+  const currentRow = useRef<HTMLElement | null>(null);
+  const setCurrentRow = (el: HTMLElement | null) => {
+    currentRow.current = el;
+  };
   const scrolledTo = useRef<string | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: the row may first appear when the index arrives.
   useEffect(() => {
@@ -269,24 +274,20 @@ export function Tree(props: {
     return entries.map((e) =>
       e.kind === "dir" ? (
         <li key={e.path}>
-          <div className="tree-row dir">
-            <button
-              type="button"
-              className="tree-toggle"
-              aria-expanded={expanded.has(e.path)}
-              aria-label={`${expanded.has(e.path) ? "Collapse" : "Expand"} ${baseName(e.path)}`}
-              onClick={() => toggle(e.path)}
-            >
-              {expanded.has(e.path) ? "▾" : "▸"}
-            </button>
-            <a
-              href={urls.tree(e.path)}
-              aria-current={props.dir === e.path ? "page" : undefined}
-              ref={props.dir === e.path ? currentRow : undefined}
-            >
-              {baseName(e.path)}
-            </a>
-          </div>
+          {/* A folder opens and closes here; its index.md is a page only by its URL. */}
+          <button
+            type="button"
+            className="tree-row dir"
+            aria-expanded={expanded.has(e.path)}
+            aria-current={props.dir === e.path ? "page" : undefined}
+            ref={props.dir === e.path ? setCurrentRow : undefined}
+            onClick={() => toggle(e.path)}
+          >
+            <span className="tree-chevron">
+              <Icon name="chevron" />
+            </span>
+            <span className="tree-name">{baseName(e.path)}</span>
+          </button>
           {expanded.has(e.path) && <ul>{rows(e.path)}</ul>}
         </li>
       ) : (
@@ -298,7 +299,7 @@ export function Tree(props: {
               title={e.path}
               {...ahead(e.path)}
               aria-current={props.file === e.path ? "page" : undefined}
-              ref={props.file === e.path ? currentRow : undefined}
+              ref={props.file === e.path ? setCurrentRow : undefined}
             >
               {label(e)}
             </a>
@@ -311,21 +312,7 @@ export function Tree(props: {
 
   return (
     <nav aria-label="Files">
-      <ul className="tree">
-        <li>
-          <div className="tree-row root">
-            <span className="tree-leaf" />
-            <a
-              href={urls.tree("")}
-              aria-current={props.dir === "" ? "page" : undefined}
-              ref={props.dir === "" ? currentRow : undefined}
-            >
-              {urls.slug}
-            </a>
-          </div>
-          <ul>{rows("")}</ul>
-        </li>
-      </ul>
+      <ul className="tree">{rows("")}</ul>
     </nav>
   );
 }

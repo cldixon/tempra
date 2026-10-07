@@ -282,9 +282,11 @@ async function browserRenders(
       await page.waitForURL(`${base}/${owner}/${slug}/`);
     });
     await step("library page", async () => {
-      await page.getByRole("heading", { level: 1, name: slug }).waitFor({ timeout: 15_000 });
-      // The root's one line of counts (by type), from GET …/summary.
-      await page.getByText(/^\d+ concepts? · \d+ attachments?/).waitFor();
+      // No document is open: the sheet says what is here in one line (GET …/summary).
+      await page
+        .locator(".empty")
+        .getByText(/^\d+ concepts? · \d+ attachments?/)
+        .waitFor({ timeout: 15_000 });
     });
     // The workspace (TEMPRA-19): the tree stays while files open in the main pane.
     const nested = concepts.find((c) => c.includes("/")) ?? concepts[0] ?? "";
@@ -305,7 +307,8 @@ async function browserRenders(
           if (/\/(tree|outline)(\?|$)/.test(new URL(r.url()).pathname)) asked++;
         };
         page.on("request", count);
-        await sidebar.getByRole("button", { name: `Expand ${folder.split("/").pop()}` }).click();
+        const name = folder.split("/").pop() ?? "";
+        await sidebar.getByRole("button", { name, exact: true }).click();
         await sidebar.locator(`a[title="${nested}"]`).waitFor({ timeout: 1000 });
         page.off("request", count);
         if (asked > 0) throw new Error(`opening a folder made ${asked} request(s)`);
@@ -320,7 +323,7 @@ async function browserRenders(
       await panel("History");
       await page.goBack();
       await page.waitForURL(`${lib}/`);
-      await page.getByRole("heading", { level: 1, name: slug }).waitFor();
+      await page.locator(".empty").waitFor();
       await page.goForward();
       await page.waitForURL(`${lib}/${enc(nested)}`);
       // A page seen before draws from the cache: no loading state on the way back.

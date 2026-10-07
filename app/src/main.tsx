@@ -134,7 +134,7 @@ function App() {
         urls={urls}
         place={place}
         me={who}
-        bare={route?.page === "file"}
+        bare={route?.page === "file" || route?.page === "directory"}
       >
         {boundary}
       </Workspace>

@@ -135,7 +135,7 @@ function bodyHref(urls: Urls) {
 }
 
 /** What a file's page shows: the file, the head, and for a concept its context. */
-interface FileData {
+export interface FileData {
   file: FileJson;
   head: number;
   extra: {
@@ -152,14 +152,14 @@ const isConceptPath = (path: string) =>
   path.endsWith(".md") && !/(^|\/)(index|log)\.md$/.test(path);
 
 /** The cache key of a file's page (see useLoad). */
-const fileKey = (urls: Urls, path: string) => `file ${urls.file(path)}`;
+export const fileKey = (urls: Urls, path: string) => `file ${urls.file(path)}`;
 
 /**
  * Everything a file's page shows, in one round of requests: the file and, for a concept, its
  * sources, links, history and own work items (asked for in parallel; a file that is not a
  * concept answers those with errors, which are then ignored).
  */
-async function loadFile(urls: Urls, path: string): Promise<FileData> {
+export async function loadFile(urls: Urls, path: string): Promise<FileData> {
   const p = enc(path);
   const extra = <T,>(r: Promise<T>) =>
     r.then(
@@ -456,7 +456,8 @@ function Attachment(props: {
   );
 }
 
-function Derived(props: {
+/** A synthesized file (index.md, log.md) in the reader: the file as an agent reads it. */
+export function Derived(props: {
   urls: Urls;
   head: number;
   file: Extract<FileJson, { kind: "derived" }>;

@@ -142,6 +142,12 @@ code {
   font-size: 0.92em;
 }
 
+/* A block of code or a command never widens the page: it scrolls on its own. */
+pre {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
 kbd {
   padding: 1px 7px;
   border-radius: var(--tempra-radius-pill);
@@ -1157,7 +1163,8 @@ body:has(> #root) {
   padding-bottom: 16px;
 }
 
-/* The tree: nested lists, one 30px row per folder or file, indented 14px a level. */
+/* The tree: nested lists, one 30px row per folder or file, indented 14px a level. A folder's row
+   is a button that opens and closes it (a chevron turns); a file's row is a link. */
 .tree,
 .tree ul,
 .ws-views {
@@ -1190,6 +1197,50 @@ body:has(> #root) {
   background: var(--tempra-color-hover);
 }
 
+button.tree-row {
+  width: 100%;
+  border: 0;
+  background: none;
+  color: var(--tempra-color-text);
+  font: inherit;
+  font-size: var(--tempra-text-ui);
+  font-weight: 500;
+  text-align: left;
+}
+
+button.tree-row:hover:not(:disabled) {
+  background: var(--tempra-color-hover);
+}
+
+button.tree-row[aria-current="page"] {
+  background: var(--tempra-color-selected);
+}
+
+.tree-chevron {
+  flex: none;
+  display: flex;
+  width: 16px;
+  color: var(--tempra-color-faint);
+  transition: transform 0.15s ease;
+}
+
+.tree-row[aria-expanded="true"] .tree-chevron {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tree-chevron {
+    transition: none;
+  }
+}
+
+.tree-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .tree-row > a {
   flex: 1;
   min-width: 0;
@@ -1197,12 +1248,6 @@ body:has(> #root) {
   color: var(--tempra-color-muted);
   text-decoration: none;
   text-overflow: ellipsis;
-}
-
-.tree-row.dir > a,
-.tree-row.root > a {
-  color: var(--tempra-color-text);
-  font-weight: 500;
 }
 
 .tree-row:has(> [aria-current="page"]) {
@@ -1214,21 +1259,9 @@ body:has(> #root) {
   font-weight: 500;
 }
 
-.tree-toggle,
 .tree-leaf {
   flex: none;
   width: 16px;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--tempra-color-faint);
-  font-size: 10px;
-  text-align: center;
-}
-
-.tree-toggle:hover:not(:disabled) {
-  background: none;
-  color: var(--tempra-color-text);
 }
 
 /* Marks: ● an agent's change in the last minutes, ∗ changed since the last visit, open comments. */
@@ -1296,6 +1329,24 @@ body:has(> #root) {
   max-width: 960px;
   margin: 0 auto;
   padding: 48px clamp(16px, 5%, 40px) 96px;
+}
+
+/* The library's root: no document open. One line about what is here, in the sheet's middle. */
+.empty {
+  max-width: var(--tempra-measure);
+  margin: 0 auto;
+  padding: 30vh clamp(16px, 5%, 40px) 48px;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-ui);
+  text-align: center;
+}
+
+.empty p {
+  margin: 0 0 8px;
+}
+
+.empty a {
+  color: inherit;
 }
 
 /* A concept in the sheet: the reader's column. */
@@ -1807,47 +1858,12 @@ body:has(> #root) {
   margin: 0;
 }
 
-/* A folder's files: one row each, the title, a word or two beside it, the description under. */
-.file-list {
-  margin: 0 0 var(--tempra-space-4);
-  padding: 0;
-  list-style: none;
-}
-
-.file-list a {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 2px 12px;
-  padding: 10px 12px;
-  margin: 0 -12px;
-  border-radius: var(--tempra-radius-box);
-  color: var(--tempra-color-text);
-  font-size: var(--tempra-font-size);
-  text-decoration: none;
-}
-
-.file-list a:hover {
-  background: var(--tempra-color-hover);
-}
-
-.file-list .name {
-  font-weight: 500;
-}
-
-.file-list .meta {
-  color: var(--tempra-color-faint);
-  font-size: var(--tempra-text-meta);
-  white-space: nowrap;
-}
-
-.file-list .line {
-  grid-column: 1 / -1;
-  color: var(--tempra-color-muted);
-  font-size: var(--tempra-text-ui);
-}
-
-.sheet-page h2.label {
-  margin-top: 0;
+/* A command or URL to copy (the connect pages): wraps rather than widening the page. */
+.page pre,
+.sheet-page pre {
+  margin: 0 0 var(--tempra-space-3);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
 }
 
 .table-wrap {

@@ -1,82 +1,47 @@
+import {
+  ChevronRight,
+  CircleCheck,
+  CirclePlus,
+  Code,
+  History,
+  List,
+  MessageSquare,
+  PanelLeft,
+  Pencil,
+  RefreshCw,
+  SlidersHorizontal,
+} from "lucide-react";
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import type { Me } from "./ui";
 
 /*
- * The app's chrome (take 2, TEMPRA-53): the glyphs, menus and the avatar shared by the workspace
+ * The app's chrome (take 2, TEMPRA-53): the icons, menus and the avatar shared by the workspace
  * and the account pages. Every look is in @tempra/design (workspace.css); nothing here is styled.
  */
 
-const GLYPHS = {
-  refresh: (
-    <>
-      <path d="M13.5 8a5.5 5.5 0 1 1-1.6-3.9" />
-      <path d="M13.5 2.5v2.5H11" />
-    </>
-  ),
-  edit: (
-    <>
-      <path d="M11.3 2.7l2 2L5 13H3v-2z" />
-      <path d="M9.8 4.2l2 2" />
-    </>
-  ),
-  markdown: (
-    <>
-      <path d="M5.5 4.5L2.5 8l3 3.5" />
-      <path d="M10.5 4.5l3 3.5-3 3.5" />
-    </>
-  ),
-  comments: (
-    <path d="M3 3.5h10A1.5 1.5 0 0 1 14.5 5v5a1.5 1.5 0 0 1-1.5 1.5H7L3.5 14v-2.5H3A1.5 1.5 0 0 1 1.5 10V5A1.5 1.5 0 0 1 3 3.5z" />
-  ),
-  review: (
-    <>
-      <circle cx="8" cy="8" r="6" />
-      <path d="M5.5 8.2l1.7 1.7 3.3-3.6" />
-    </>
-  ),
-  contents: <path d="M3 4h10M3 8h7M3 12h10" />,
-  history: (
-    <>
-      <circle cx="8" cy="8" r="6" />
-      <path d="M8 4.6V8l2.3 1.5" />
-    </>
-  ),
-  properties: (
-    <>
-      <path d="M2.5 5h5M11.5 5h2M2.5 11h2M8.5 11h5" />
-      <circle cx="9.5" cy="5" r="1.6" />
-      <circle cx="6.5" cy="11" r="1.6" />
-    </>
-  ),
-  plus: (
-    <>
-      <circle cx="8" cy="8" r="6.25" />
-      <path d="M8 5.2v5.6M5.2 8h5.6" />
-    </>
-  ),
-  files: <path d="M2.5 4h11M2.5 8h11M2.5 12h11" />,
+/*
+ * The icons are Lucide's (the set the handoff asks for), at 16px with a 1.5 stroke, drawn in the
+ * current text colour.
+ */
+const ICONS = {
+  refresh: RefreshCw,
+  edit: Pencil,
+  markdown: Code,
+  comments: MessageSquare,
+  review: CircleCheck,
+  contents: List,
+  history: History,
+  properties: SlidersHorizontal,
+  plus: CirclePlus,
+  files: PanelLeft,
+  chevron: ChevronRight,
 } as const;
 
-export type Glyph = keyof typeof GLYPHS;
+export type Glyph = keyof typeof ICONS;
 
-/** A 16px line glyph (stroke 1.4, round caps), drawn in the current text colour. */
 export function Icon({ name }: { name: Glyph }) {
-  return (
-    <svg
-      width="16"
-      height="16"
-      viewBox="0 0 16 16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.4"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      focusable="false"
-    >
-      {GLYPHS[name]}
-    </svg>
-  );
+  const C = ICONS[name];
+  return <C size={16} strokeWidth={1.5} aria-hidden="true" focusable="false" />;
 }
 
 /** Two letters for a handle: "cl_dixon" → "CD", "sam" → "SA". */
