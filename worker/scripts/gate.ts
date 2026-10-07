@@ -283,7 +283,8 @@ async function browserRenders(
     });
     await step("library page", async () => {
       await page.getByRole("heading", { level: 1, name: slug }).waitFor({ timeout: 15_000 });
-      await page.getByText("ledger sequence").waitFor();
+      // The root's one line of counts (by type), from GET …/summary.
+      await page.getByText(/^\d+ concepts? · \d+ attachments?/).waitFor();
     });
     // The workspace (TEMPRA-19): the tree stays while files open in the main pane.
     const nested = concepts.find((c) => c.includes("/")) ?? concepts[0] ?? "";
