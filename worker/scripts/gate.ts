@@ -548,7 +548,7 @@ async function browserRenders(
       await agentAppends("A sentence the gate added.");
       await page.goto(url);
       await panel("Review");
-      await page.getByLabel(/^Show changes since /).check();
+      await page.getByLabel(/Show changes since /).check();
       const added = page.locator(".body ins.diff-added").last();
       await added.waitFor({ timeout: 10_000 });
       if (!(await added.innerText()).includes("A sentence the gate added.")) {
