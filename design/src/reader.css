@@ -373,14 +373,21 @@ mark.comment-draft {
   gap: 16px;
 }
 
-/* While editing, Wordgard's own menu bar sticks just under the edit bar, not over it. */
-.edit-bar + .doc div.body wg-menubar {
+/*
+ * While editing, Wordgard's menu bar (in its sticky top panel) sticks just under the edit bar,
+ * not over it: the panel is what sticks, so it takes the offset and sits beneath the bar.
+ */
+.edit-bar + .doc div.body .wg-panels-top {
   top: 53px;
   z-index: 1;
 }
 
+.edit-bar + .doc div.body wg-menubar {
+  padding: 4px 0;
+}
+
 @media (max-width: 600px) {
-  .edit-bar + .doc div.body wg-menubar {
+  .edit-bar + .doc div.body .wg-panels-top {
     top: 101px;
   }
 }

@@ -1,4 +1,4 @@
-import { Component, type ReactNode, useEffect } from "react";
+import { Component, type ReactNode, useEffect, useState } from "react";
 import type { ApiError, Loaded } from "./api";
 import { AccountMenu } from "./chrome";
 import { baseName, type Urls } from "./urls";
@@ -92,6 +92,43 @@ export function TrustChip({ tier }: { tier: string | undefined }) {
     return <Chip text="machine-confirmed" title="A process re-checked this version" />;
   }
   return <Chip text="unverified" tone="warn" title="Nobody has verified this version" />;
+}
+
+/** An actor as a person reads it: a handle for a person (`human:cl_dixon` → `cl_dixon`), an agent as is. */
+export const who = (actor: string) => actor.replace(/^human:/, "");
+
+const AGO_UNITS: [number, string][] = [
+  [86_400, "d"],
+  [3600, "h"],
+  [60, "min"],
+  [1, "s"],
+];
+
+/** How long ago, in one unit: "4 s", "3 min", "2 h", "5 d". */
+export function ago(ts: string, now: number): string {
+  const secs = Math.max(0, Math.round((now - Date.parse(ts)) / 1000));
+  for (const [size, unit] of AGO_UNITS)
+    if (secs >= size) return `${Math.floor(secs / size)} ${unit}`;
+  return "0 s";
+}
+
+/** "4 s", kept current. */
+export function useAgo(ts: string): string {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 5000);
+    return () => clearInterval(t);
+  }, []);
+  return ago(ts, now);
+}
+
+/** A time as "3 min" with the full timestamp on hover. */
+export function Ago({ ts, now }: { ts: string; now: number }) {
+  return (
+    <time dateTime={ts} title={`${when(ts)} UTC`}>
+      {ago(ts, now)}
+    </time>
+  );
 }
 
 /** A compact UTC timestamp: 2026-09-29 18:02. */

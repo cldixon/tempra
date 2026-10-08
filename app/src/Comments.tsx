@@ -7,7 +7,7 @@ import { documentPos, locate, type Parsed, type QuoteSelector, textOffset } from
 import type { Highlight } from "@tempra/editor/view";
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, useAction, useLoad } from "./api";
-import { Chip, when } from "./ui";
+import { Ago, Chip, who } from "./ui";
 import type { Urls } from "./urls";
 
 export interface CommentT {
@@ -317,11 +317,12 @@ function ThreadView(props: {
     });
   };
   const outdated = t.anchor !== null && t.at === null;
+  const [now] = useState(() => Date.now());
   /** "who · when", then the text: the thread's first comment, replies a step in. */
   const said = (c: { actor: string; ts: string; body: string }, reply: boolean, key: string) => (
     <div key={key} className={reply ? "reply" : undefined}>
       <div className="thread-by">
-        <strong>{c.actor}</strong> <time dateTime={c.ts}>{when(c.ts)}</time>
+        <strong>{who(c.actor)}</strong> <Ago ts={c.ts} now={now} />
       </div>
       <p className="comment">{c.body}</p>
     </div>
@@ -363,7 +364,7 @@ function ThreadView(props: {
             <div key={a.seq}>
               {change && (
                 <p className="small muted">
-                  {change} by {a.actor} {when(a.ts)}
+                  {change} by {who(a.actor)} <Ago ts={a.ts} now={now} />
                   {c ? ":" : "."}
                 </p>
               )}
@@ -375,7 +376,7 @@ function ThreadView(props: {
         <>
           {t.comments.map((c, i) => said(c, i > 0, c.id))}
           {t.status === "resolved" && t.resolved_by && (
-            <p className="small muted">Resolved by {t.resolved_by}.</p>
+            <p className="small muted">Resolved by {who(t.resolved_by)}.</p>
           )}
         </>
       )}

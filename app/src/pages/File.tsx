@@ -43,12 +43,15 @@ import { el, Reader } from "../Reader";
 import { pushRecent } from "../recent";
 import { navigate, setLeaveGuard } from "../router";
 import {
+  Ago,
   AtNotice,
+  ago,
   anchorId,
   Chip,
   Crumbs,
   formatSize,
   Status,
+  useAgo,
   useScrollToHash,
   useTitle,
   when,
@@ -328,30 +331,6 @@ function useIdle(ms: number): boolean {
     };
   }, [ms]);
   return idle;
-}
-
-const AGO_UNITS: [number, string][] = [
-  [86_400, "d"],
-  [3600, "h"],
-  [60, "min"],
-  [1, "s"],
-];
-
-function ago(ts: string, now: number): string {
-  const secs = Math.max(0, Math.round((now - Date.parse(ts)) / 1000));
-  for (const [size, unit] of AGO_UNITS)
-    if (secs >= size) return `${Math.floor(secs / size)} ${unit}`;
-  return "0 s";
-}
-
-/** "4 s", kept current. */
-function useAgo(ts: string): string {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 5000);
-    return () => clearInterval(t);
-  }, []);
-  return ago(ts, now);
 }
 
 /** "claude-ai/connector changed this 4 s ago, seq 41: the note." */
@@ -1357,13 +1336,13 @@ function History(props: { urls: Urls; concept: Concept; head: number; events: Hi
                   </span>
                 )}
               </span>
-              <span className="when" title={when(e.ts)}>
+              <span className="when">
                 {CONTENT_OPS.has(e.op) ? (
-                  <a href={urls.diff(e.path, undefined, e.seq)} title={`Diff · ${when(e.ts)}`}>
+                  <a href={urls.diff(e.path, undefined, e.seq)} title={`Diff · ${when(e.ts)} UTC`}>
                     {ago(e.ts, now)}
                   </a>
                 ) : (
-                  ago(e.ts, now)
+                  <Ago ts={e.ts} now={now} />
                 )}
               </span>
             </li>

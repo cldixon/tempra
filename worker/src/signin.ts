@@ -142,19 +142,19 @@ function sameOrigin(c: C): boolean {
 const EMAIL = /^[^\s@]+@[^\s@]+$/;
 
 function signInForm(next: string, mode: SignupMode, opts: { email?: string; error?: string } = {}) {
-  const err = opts.error ? `<p><strong>${esc(opts.error)}</strong></p>` : "";
+  const err = opts.error ? `<p class="notice">${esc(opts.error)}</p>` : "";
   const intro =
     mode === "invite"
-      ? "Tempra is in private beta. Enter your email: if you are in, we email you a link; if not, you join the waitlist and we email you once you are approved."
+      ? "Tempra is in private beta. If your email is on the list, we send you a link; if not, you join the waitlist and we write once you are in."
       : "We email you a link. New here? The same link creates your account.";
-  return `<h1>Sign in to Tempra</h1>
+  return `<h1>Sign in</h1>
 <p>${intro}</p>
-${err}<form method="post" action="/sign-in">
+${err}<form method="post" action="/sign-in" class="stack">
 <input type="hidden" name="next" value="${esc(next)}">
-<p><label for="email">Email</label>
-<input id="email" name="email" type="text" inputmode="email" autocomplete="email" required value="${esc(opts.email ?? "")}"></p>
-<p><button type="submit">Email me a link</button></p></form>
-<p><a href="${LEGAL}/terms">Terms</a> | <a href="${LEGAL}/privacy">Privacy</a></p>`;
+<label class="field">Email
+<input id="email" name="email" type="text" inputmode="email" autocomplete="email" required autofocus value="${esc(opts.email ?? "")}"></label>
+<p><button class="primary" type="submit">Email me a link</button></p></form>
+<p class="small faint"><a href="${LEGAL}/terms">Terms</a> · <a href="${LEGAL}/privacy">Privacy</a></p>`;
 }
 
 export function registerSignInRoutes<E extends AppEnv>(
@@ -225,18 +225,18 @@ export function registerSignInRoutes<E extends AppEnv>(
     // The same answer whether the email has an account, is invited, is waitlisted, or asked
     // too often: the page reveals none of it.
     return html(`<h1>Check your email</h1>
-<p>If <strong>${esc(email)}</strong> can sign in here, a link is on its way. It works once, within ${LINK_MINUTES} minutes. If not, it is on the waitlist.</p>
-<p>Nothing? Check spam, or <a href="/sign-in?next=${esc(encodeURIComponent(next))}">try again</a> later.</p>${shown}`);
+<p>If <strong>${esc(email)}</strong> can sign in here, a link is on its way. It works once, within ${LINK_MINUTES} minutes. If not, the address is on the waitlist.</p>
+<p class="muted">Nothing? Check spam, or <a href="/sign-in?next=${esc(encodeURIComponent(next))}">try again</a> later.</p>${shown}`);
   });
 
   // Opening the link only shows a button: mail scanners that fetch links cannot use it up.
   app.get("/sign-in/link", (c) => {
     const t = c.req.query("t") ?? "";
     const next = safeNext(c.req.query("next"));
-    return html(`<h1>Sign in to Tempra</h1><p>Continue to finish signing in on this device.</p>
+    return html(`<h1>Sign in</h1><p>Continue to finish signing in on this device.</p>
 <form method="post" action="/sign-in/link">
 <input type="hidden" name="t" value="${esc(t)}"><input type="hidden" name="next" value="${esc(next)}">
-<p><button type="submit">Continue</button></p></form>`);
+<p><button class="primary" type="submit">Continue</button></p></form>`);
   });
 
   app.post("/sign-in/link", async (c) => {

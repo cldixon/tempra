@@ -131,6 +131,15 @@ a:hover {
   outline-offset: 2px;
 }
 
+/* A text field shows focus by its caret and a firmer edge, not the ring. */
+input:not([type="checkbox"], [type="radio"], [type="file"]):focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 1px solid var(--tempra-color-border-strong);
+  outline-offset: 0;
+  border-color: var(--tempra-color-border-strong);
+}
+
 code,
 pre,
 kbd,
@@ -177,6 +186,7 @@ button {
   border-radius: var(--tempra-radius-pill);
   background: var(--tempra-color-bg);
   font-size: var(--tempra-text-ui);
+  white-space: nowrap;
   cursor: pointer;
 }
 
@@ -226,6 +236,54 @@ textarea {
 fieldset {
   border: 1px solid var(--tempra-color-border);
   border-radius: var(--tempra-radius-box);
+}
+
+/* A form as a column: a label over each field, choices on their own lines, actions last. */
+form.stack fieldset {
+  margin: 0 0 20px;
+  padding: 0;
+  border: 0;
+}
+
+form.stack legend {
+  margin-bottom: 6px;
+  padding: 0;
+  font-weight: 500;
+}
+
+.field {
+  display: block;
+  margin: 10px 0;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-ui);
+}
+
+.field input,
+.field select {
+  display: block;
+  width: 100%;
+  max-width: 22rem;
+  margin-top: 4px;
+  color: var(--tempra-color-text);
+  font-size: var(--tempra-font-size);
+}
+
+.choice {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 4px 0;
+}
+
+.indent {
+  margin: 2px 0 6px 24px;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 table {
@@ -824,14 +882,21 @@ mark.comment-draft {
   gap: 16px;
 }
 
-/* While editing, Wordgard's own menu bar sticks just under the edit bar, not over it. */
-.edit-bar + .doc div.body wg-menubar {
+/*
+ * While editing, Wordgard's menu bar (in its sticky top panel) sticks just under the edit bar,
+ * not over it: the panel is what sticks, so it takes the offset and sits beneath the bar.
+ */
+.edit-bar + .doc div.body .wg-panels-top {
   top: 53px;
   z-index: 1;
 }
 
+.edit-bar + .doc div.body wg-menubar {
+  padding: 4px 0;
+}
+
 @media (max-width: 600px) {
-  .edit-bar + .doc div.body wg-menubar {
+  .edit-bar + .doc div.body .wg-panels-top {
     top: 101px;
   }
 }
@@ -843,7 +908,8 @@ mark.comment-draft {
  * Account pages sit on the same ground in a centred column. Under 1100px the panel overlays the
  * sheet; under 900px the sidebar becomes a drawer.
  */
-body:has(> #root) {
+body:has(> #root),
+body.ground {
   padding: 0;
   background: var(--tempra-color-ground);
 }
@@ -1858,12 +1924,29 @@ button.tree-row[aria-current="page"] {
   margin: 0;
 }
 
-/* A command or URL to copy (the connect pages): wraps rather than widening the page. */
+/* A command or URL to copy (the connect pages): an inset that wraps rather than widening the page. */
 .page pre,
 .sheet-page pre {
   margin: 0 0 var(--tempra-space-3);
+  padding: 10px 14px;
+  border-radius: var(--tempra-radius-row);
+  background: var(--tempra-color-ground);
+  font-size: var(--tempra-text-ui);
+  line-height: 1.55;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.sheet-page pre,
+.sheet-page pre.src,
+.sheet-page pre.diff {
+  background: var(--tempra-color-ground);
+}
+
+/* Dates and short facts in a table keep to one line. */
+table.list td.when,
+table.list .nowrap {
+  white-space: nowrap;
 }
 
 .table-wrap {
@@ -1950,12 +2033,6 @@ form.filters button {
 form.token {
   align-items: flex-start;
   flex-direction: column;
-}
-
-.choice {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
 }
 
 pre.src,

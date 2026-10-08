@@ -5,7 +5,8 @@
  * Account pages sit on the same ground in a centred column. Under 1100px the panel overlays the
  * sheet; under 900px the sidebar becomes a drawer.
  */
-body:has(> #root) {
+body:has(> #root),
+body.ground {
   padding: 0;
   background: var(--tempra-color-ground);
 }
@@ -1020,12 +1021,29 @@ button.tree-row[aria-current="page"] {
   margin: 0;
 }
 
-/* A command or URL to copy (the connect pages): wraps rather than widening the page. */
+/* A command or URL to copy (the connect pages): an inset that wraps rather than widening the page. */
 .page pre,
 .sheet-page pre {
   margin: 0 0 var(--tempra-space-3);
+  padding: 10px 14px;
+  border-radius: var(--tempra-radius-row);
+  background: var(--tempra-color-ground);
+  font-size: var(--tempra-text-ui);
+  line-height: 1.55;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+}
+
+.sheet-page pre,
+.sheet-page pre.src,
+.sheet-page pre.diff {
+  background: var(--tempra-color-ground);
+}
+
+/* Dates and short facts in a table keep to one line. */
+table.list td.when,
+table.list .nowrap {
+  white-space: nowrap;
 }
 
 .table-wrap {
@@ -1112,12 +1130,6 @@ form.filters button {
 form.token {
   align-items: flex-start;
   flex-direction: column;
-}
-
-.choice {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
 }
 
 pre.src,
