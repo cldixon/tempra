@@ -485,17 +485,28 @@ details > summary {
   overflow-x: auto;
 }
 
+/* Rules between rows, none between columns; the header is told apart by its rule, not its weight
+   (a first column is often bold in the content already). */
 .prose table th,
 .prose table td {
-  padding: 6px 10px;
-  border: 1px solid var(--tempra-color-border);
+  padding: 8px 16px 8px 0;
+  border: 0;
+  border-bottom: 1px solid var(--tempra-color-border);
+  text-align: left;
+  vertical-align: top;
   overflow-wrap: normal;
   word-break: normal;
   white-space: normal;
 }
 
+.prose table th:last-child,
+.prose table td:last-child {
+  padding-right: 0;
+}
+
 .prose table th {
-  font-weight: 600;
+  border-bottom-color: var(--tempra-color-text);
+  font-weight: 500;
 }
 
 .prose hr {
