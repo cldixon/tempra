@@ -1,4 +1,5 @@
 import {
+  ChevronDown,
   ChevronRight,
   CircleCheck,
   CirclePlus,
@@ -35,13 +36,14 @@ const ICONS = {
   plus: CirclePlus,
   files: PanelLeft,
   chevron: ChevronRight,
+  down: ChevronDown,
 } as const;
 
 export type Glyph = keyof typeof ICONS;
 
-export function Icon({ name }: { name: Glyph }) {
+export function Icon({ name, size = 16 }: { name: Glyph; size?: number }) {
   const C = ICONS[name];
-  return <C size={16} strokeWidth={1.5} aria-hidden="true" focusable="false" />;
+  return <C size={size} strokeWidth={1.5} aria-hidden="true" focusable="false" />;
 }
 
 /** Two letters for a handle: "cl_dixon" → "CD", "sam" → "SA". */

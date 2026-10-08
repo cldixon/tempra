@@ -13,7 +13,8 @@ export function page(title: string, body: string): string {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(title)} - Tempra</title>
+<title>${esc(title)} · Tempra</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="${designHref}"></head>
 <body class="ground"><header class="app-header"><a class="brand" href="/">Tempra</a></header>
 <main class="page">${body}</main></body></html>`;

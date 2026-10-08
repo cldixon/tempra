@@ -31,6 +31,7 @@ export function spaShell(request: Request): Response {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="csp-nonce" content="${esc(nonce)}">
 <title>Tempra</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="${designHref}">
 <script type="module" src="${appHref}"></script></head>
 <body><div id="root"></div></body></html>`;

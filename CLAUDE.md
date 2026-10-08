@@ -71,7 +71,7 @@ worker/src/account-api.ts  The account's API for the app (session only): account
 worker/src/legal.ts      /terms and /privacy redirect to the landing page
 worker/src/oauth/        /authorize consent (all or selected libraries, like GitHub repo access), a server page
 worker/src/handles.ts    Handle rules: syntax, reserved names (routes, roles, brand), the 90-day hold on released handles
-worker/src/ui/spa.ts     The SPA's shell and its bundle route
+worker/src/ui/spa.ts     The SPA's shell and its bundle route; favicon.ts the tab's icon (/favicon.svg)
 worker/src/ui/           The app's URLs at the root (`/`, `/<handle>/<library>/…`, library pages under `/-/`; old `/app/…` URLs 308): routes.ts answers each with the shell after sign-in and authorizeLibrary, plus downloads and the email-change link
 worker/src/feed.ts       The change feed: the events a write pushes to the library's WebSockets, prefix filters; free of Worker APIs
 worker/src/client.ts     Worker <-> DO boundary: one `call` RPC, errors as data, R2 blob checks

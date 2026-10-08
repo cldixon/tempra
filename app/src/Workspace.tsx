@@ -343,7 +343,10 @@ function LibraryMenu({ urls, place }: { urls: Urls; place: Place }) {
       name={`Library ${urls.slug}`}
       label={
         <>
-          {urls.slug} <span className="caret">▾</span>
+          {urls.slug}
+          <span className="caret">
+            <Icon name="down" size={12} />
+          </span>
         </>
       }
     >

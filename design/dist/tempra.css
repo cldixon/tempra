@@ -947,8 +947,8 @@ body.ground {
 }
 
 .menu-button .caret {
+  display: inline-flex;
   color: var(--tempra-color-faint);
-  font-size: 10px;
 }
 
 .menu-list {

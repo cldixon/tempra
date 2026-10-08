@@ -126,7 +126,7 @@ export function html(
       "Content-Type": "text/html; charset=utf-8",
       "X-Frame-Options": "DENY",
       "Content-Security-Policy":
-        "default-src 'none'; style-src 'self'; form-action 'self'; frame-ancestors 'none'",
+        "default-src 'none'; style-src 'self'; img-src 'self'; form-action 'self'; frame-ancestors 'none'",
       "Cache-Control": "no-store",
       // same-origin: the link's secret never leaves in a Referer, and form posts still carry Origin.
       "Referrer-Policy": "same-origin",

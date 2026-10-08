@@ -25,6 +25,7 @@ import { type Mailer, registerSignInRoutes } from "./signin";
 import { OkfError } from "./store/errors";
 import type { ConceptContent, RequestContext, WriteOp, WriteResult } from "./store/store";
 import { authorizeLibrary } from "./tenancy";
+import { faviconResponse } from "./ui/favicon";
 import { registerUiRoutes } from "./ui/routes";
 import { appHref, appScript } from "./ui/spa";
 import { STARTER } from "./ui/starter";
@@ -217,6 +218,9 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   app.get("/_app/:file", (c) =>
     `/_app/${c.req.param("file")}` === appHref ? appScript() : c.notFound(),
   );
+
+  // The tab's icon, linked from every page's head.
+  app.get("/favicon.svg", () => faviconResponse());
 
   app.use(`${BASE}/*`, async (c, next) => {
     const d = deps(c.env);

@@ -23,10 +23,10 @@ export function Header({ me }: { me: Me | null }) {
   );
 }
 
-/** Sets the document title, as the server pages do: "{title} - Tempra". */
+/** Sets the document title, as the server pages do: "{title} · Tempra". */
 export function useTitle(title: string | null) {
   useEffect(() => {
-    if (title) document.title = `${title} - Tempra`;
+    if (title) document.title = `${title} · Tempra`;
   }, [title]);
 }
 
