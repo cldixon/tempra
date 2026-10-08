@@ -684,8 +684,6 @@ function ConceptView(props: {
         )}
         {edit.merging && edit.bar}
         <Crumbs urls={urls} path={c.path} file>
-          <span aria-hidden="true">·</span>
-          <span>{trustWords(c.trust_tier)}</span>
           {c.stale && (
             <>
               <span aria-hidden="true">·</span>

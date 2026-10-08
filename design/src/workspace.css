@@ -494,22 +494,9 @@ button.tree-row[aria-current="page"] {
   padding: 48px clamp(16px, 5%, 40px) 96px;
 }
 
-/* The library's root: no document open. One line about what is here, in the sheet's middle. */
+/* The library's root: no document open, the sheet blank. */
 .empty {
-  max-width: var(--tempra-measure);
-  margin: 0 auto;
-  padding: 30vh clamp(16px, 5%, 40px) 48px;
-  color: var(--tempra-color-muted);
-  font-size: var(--tempra-text-ui);
-  text-align: center;
-}
-
-.empty p {
-  margin: 0 0 8px;
-}
-
-.empty a {
-  color: inherit;
+  min-height: 50vh;
 }
 
 /* A concept in the sheet: the reader's column. */

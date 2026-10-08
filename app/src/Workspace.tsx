@@ -231,7 +231,7 @@ export function Workspace(props: {
     if (hosts > 0 && location.hash === "#comments") choose("comments");
   }, [hosts > 0, href]);
 
-  // The sidebar's counts: the head sequence and the open work, refreshed with the tree.
+  // The sidebar's count of open work, refreshed with the tree.
   const stats = useLoad(`stats ${urls.owner}/${urls.slug}`, () =>
     api<{ seq: number; open_work: number }>(urls.api("stats")),
   );
@@ -287,7 +287,6 @@ export function Workspace(props: {
             <li>
               <a href={urls.ledger()} aria-current={place.view === "ledger" ? "page" : undefined}>
                 <span>Ledger</span>
-                {counts && <span className="count">seq {counts.seq}</span>}
               </a>
             </li>
             <li>

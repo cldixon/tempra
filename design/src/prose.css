@@ -90,16 +90,30 @@
   font-style: italic;
 }
 
+/*
+ * Tables are real tables, drawn from the stored tree. Wordgard's content breaks words anywhere
+ * (an editor's rule); cells get the page's rule back, so columns size to whole words, and a
+ * table wider than the column scrolls on its own while reading (the editor keeps table layout).
+ */
 .prose table {
   margin: 0 0 18px;
   font-size: 15px;
   line-height: 1.5;
 }
 
+.prose:not([contenteditable="true"]) table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
 .prose table th,
 .prose table td {
   padding: 6px 10px;
   border: 1px solid var(--tempra-color-border);
+  overflow-wrap: normal;
+  word-break: normal;
+  white-space: normal;
 }
 
 .prose table th {

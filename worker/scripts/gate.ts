@@ -282,11 +282,8 @@ async function browserRenders(
       await page.waitForURL(`${base}/${owner}/${slug}/`);
     });
     await step("library page", async () => {
-      // No document is open: the sheet says what is here in one line (GET …/summary).
-      await page
-        .locator(".empty")
-        .getByText(/^\d+ concepts? · \d+ attachments?/)
-        .waitFor({ timeout: 15_000 });
+      // No document is open: the sheet is blank.
+      await page.locator(".empty").waitFor({ timeout: 15_000 });
     });
     // The workspace (TEMPRA-19): the tree stays while files open in the main pane.
     const nested = concepts.find((c) => c.includes("/")) ?? concepts[0] ?? "";
