@@ -55,6 +55,7 @@ import {
   useScrollToHash,
   useTitle,
   when,
+  who,
 } from "../ui";
 import { baseName, dirOf, enc, type Urls } from "../urls";
 import { PanelHost, type PanelId, usePanels } from "../Workspace";
@@ -421,7 +422,7 @@ function Attachment(props: {
       <h1 className="doc-title">{baseName(file.path)}</h1>
       <AtNotice urls={urls} head={props.head} current={urls.pinned(undefined).file(file.path)} />
       <p className="muted">
-        {file.media ?? "file"} · {formatSize(file.size)} · <code>{file.hash.slice(0, 12)}</code>
+        {file.media ?? "file"} · {formatSize(file.size)}
       </p>
       <p>
         <a href={urls.download(file.path)}>Download</a>
@@ -723,7 +724,7 @@ function ConceptView(props: {
         {panel && (
           <>
             <div className="panel-head">
-              <h2>{PANEL_TITLES[panel]}</h2>
+              <h2 id="panel-title">{PANEL_TITLES[panel]}</h2>
               {counts[panel] && <span className="count">{counts[panel]}</span>}
               <span className="spacer" />
               <button
@@ -953,7 +954,7 @@ function useVerificationDiff(
       <p className="small">
         <label>
           <input type="checkbox" checked={on} onChange={(e) => setOn(e.currentTarget.checked)} />{" "}
-          Show changes since {verified.actor} verified it (seq {verified.seq})
+          Show changes since {who(verified.actor)} verified it (seq {verified.seq})
         </label>
         {error && <span className="warn"> {error}</span>}
       </p>
@@ -1179,14 +1180,15 @@ function VerifiedLine({ c }: { c: Concept }) {
   if (c.trust_tier === "human-reviewed" && human) {
     return (
       <p className="state-line on">
-        Verified by {String(human.by)}, {when(String(human.at ?? ""))}. No content change since.
+        Verified by {who(String(human.by))}, {when(String(human.at ?? ""))}. No content change
+        since.
       </p>
     );
   }
   if (human) {
     return (
       <p className="state-line">
-        Last verified by {String(human.by)}, {when(String(human.at ?? ""))}; changed since.
+        Last verified by {who(String(human.by))}, {when(String(human.at ?? ""))}; changed since.
       </p>
     );
   }

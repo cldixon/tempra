@@ -315,7 +315,7 @@ export function Workspace(props: {
         className="ws-panel"
         hidden={!hasPanel}
         tabIndex={-1}
-        aria-label="Panel"
+        aria-labelledby="panel-title"
       />
       <Switcher urls={urls} index={index} open={switching} onClose={() => setSwitching(false)} />
     </div>
