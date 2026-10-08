@@ -1,23 +1,17 @@
-import { href as designHref } from "@tempra/design";
-import { esc } from "../oauth/pages";
+import { esc, page } from "../oauth/pages";
 
 export { esc };
 
 export interface Shell {
   title: string;
-  /** Signed-in email, shown in the header. */
+  /** Signed-in email (kept for the callers; the shell shows the wordmark only, no script). */
   user: string;
   body: string;
 }
 
+/** A server page in the same shell as sign-in and consent (oauth/pages.ts). */
 export function layout(s: Shell): string {
-  return `<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${esc(s.title)} - Tempra</title>
-<link rel="stylesheet" href="${designHref}"></head>
-<body>${s.user ? `<header>Tempra: <a href="/">Libraries</a> | <a href="/connect">Connect</a> | <a href="/tokens">Tokens</a> | <a href="/apps">Connected apps</a> | <a href="/account">${esc(s.user)}</a></header><hr>` : ""}
-<main>${s.body}</main></body></html>`;
+  return page(s.title, s.body);
 }
 
 /**

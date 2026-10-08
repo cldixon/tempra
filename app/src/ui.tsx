@@ -1,5 +1,6 @@
-import { Component, type ReactNode, useEffect } from "react";
+import { Component, type ReactNode, useEffect, useState } from "react";
 import type { ApiError, Loaded } from "./api";
+import { AccountMenu } from "./chrome";
 import { baseName, type Urls } from "./urls";
 
 /** The person the app acts for (GET /api/v1/me). */
@@ -9,28 +10,23 @@ export interface Me {
   actor: string;
 }
 
+/** The account pages' header: Tempra and the avatar's menu. */
 export function Header({ me }: { me: Me | null }) {
   return (
-    <>
-      <header>
-        Tempra: <a href="/">Libraries</a> | <a href="/connect">Connect</a> |{" "}
-        <a href="/tokens">Tokens</a> | <a href="/apps">Connected apps</a>
-        {me && (
-          <>
-            {" "}
-            | <a href="/account">{me.email}</a>
-          </>
-        )}
-      </header>
-      <hr />
-    </>
+    <header className="app-header">
+      <a className="brand" href="/">
+        Tempra
+      </a>
+      <span className="spacer" />
+      <AccountMenu me={me} />
+    </header>
   );
 }
 
-/** Sets the document title, as the server pages do: "{title} - Tempra". */
+/** Sets the document title, as the server pages do: "{title} · Tempra". */
 export function useTitle(title: string | null) {
   useEffect(() => {
-    if (title) document.title = `${title} - Tempra`;
+    if (title) document.title = `${title} · Tempra`;
   }, [title]);
 }
 
@@ -98,6 +94,43 @@ export function TrustChip({ tier }: { tier: string | undefined }) {
   return <Chip text="unverified" tone="warn" title="Nobody has verified this version" />;
 }
 
+/** An actor as a person reads it: a handle for a person (`human:cl_dixon` → `cl_dixon`), an agent as is. */
+export const who = (actor: string) => actor.replace(/^human:/, "");
+
+const AGO_UNITS: [number, string][] = [
+  [86_400, "d"],
+  [3600, "h"],
+  [60, "min"],
+  [1, "s"],
+];
+
+/** How long ago, in one unit: "4 s", "3 min", "2 h", "5 d". */
+export function ago(ts: string, now: number): string {
+  const secs = Math.max(0, Math.round((now - Date.parse(ts)) / 1000));
+  for (const [size, unit] of AGO_UNITS)
+    if (secs >= size) return `${Math.floor(secs / size)} ${unit}`;
+  return "0 s";
+}
+
+/** "4 s", kept current. */
+export function useAgo(ts: string): string {
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 5000);
+    return () => clearInterval(t);
+  }, []);
+  return ago(ts, now);
+}
+
+/** A time as "3 min" with the full timestamp on hover. */
+export function Ago({ ts, now }: { ts: string; now: number }) {
+  return (
+    <time dateTime={ts} title={`${when(ts)} UTC`}>
+      {ago(ts, now)}
+    </time>
+  );
+}
+
 /** A compact UTC timestamp: 2026-09-29 18:02. */
 export function when(iso: string): string {
   return iso
@@ -125,8 +158,12 @@ export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" :
 export const anchorId = (prefix: string, label: string) =>
   `${prefix}-${label.replace(/[^\w.-]/g, "_")}`;
 
-/** Breadcrumbs from the library root to `path` (a directory, or a file when `file` is set). */
-export function Crumbs({ urls, path, file }: { urls: Urls; path: string; file: boolean }) {
+/**
+ * Breadcrumbs from the library root to `path` (a directory, or a file when `file` is set), and
+ * after them what the page adds (the concept's trust and staleness).
+ */
+export function Crumbs(props: { urls: Urls; path: string; file: boolean; children?: ReactNode }) {
+  const { urls, path, file } = props;
   const parts = path === "" ? [] : path.split("/");
   const items: ReactNode[] = [
     <a key="" href={urls.tree("")}>
@@ -135,10 +172,16 @@ export function Crumbs({ urls, path, file }: { urls: Urls; path: string; file: b
   ];
   parts.forEach((seg, i) => {
     const p = parts.slice(0, i + 1).join("/");
-    items.push(" / ");
+    items.push(
+      <span key={`/${p}`} aria-hidden="true">
+        /
+      </span>,
+    );
     items.push(
       i === parts.length - 1 && file ? (
-        seg
+        <span key={p} className="here">
+          {seg}
+        </span>
       ) : (
         <a key={p} href={urls.tree(p)}>
           {seg}
@@ -146,7 +189,12 @@ export function Crumbs({ urls, path, file }: { urls: Urls; path: string; file: b
       ),
     );
   });
-  return <div className="crumbs">{items}</div>;
+  return (
+    <nav className="crumbs" aria-label="Path">
+      {items}
+      {props.children}
+    </nav>
+  );
 }
 
 export function AtNotice({ urls, head, current }: { urls: Urls; head: number; current: string }) {

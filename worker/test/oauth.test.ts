@@ -165,7 +165,7 @@ describe("OAuth for MCP clients", () => {
     const clientId = await register(app);
     const flow = await begin(app, clientId);
     expect(flow.page.status).toBe(200);
-    expect(flow.html).toContain("Connect Claude to your libraries");
+    expect(flow.html).toContain("<h1>Connect Claude</h1>");
     expect(flow.html).toContain("Signed in as owner@example.com");
     expect(flow.html).toContain("<strong>claude.ai</strong>");
     expect(flow.html).toContain('value="claude/connector"');

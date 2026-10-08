@@ -1,28 +1,152 @@
 /*
  * How a rendered concept reads: the markdown body of a concept, in the app now and wherever
- * concepts are shown later (the site, inline MCP Apps views). Scoped to .prose.
+ * concepts are shown later (the site, inline MCP Apps views). Scoped to .prose. A serif at 17px
+ * with generous leading (take 2); headings in the same face.
  */
 .prose {
   max-width: var(--tempra-measure);
+  font-family: var(--tempra-font-reader);
+  font-size: var(--tempra-text-reader);
+  line-height: 1.7;
+  color: var(--tempra-color-text);
+}
+
+.prose h1,
+.prose h2,
+.prose h3,
+.prose h4 {
+  font-family: var(--tempra-font-reader);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  line-height: 1.3;
+}
+
+.prose h1 {
+  margin: 40px 0 12px;
+  font-size: 28px;
+}
+
+.prose h2 {
+  margin: 40px 0 12px;
+  font-size: var(--tempra-text-h2);
+}
+
+.prose h3 {
+  margin: 32px 0 10px;
+  font-size: 19px;
+}
+
+.prose h4 {
+  margin: 24px 0 8px;
+  font-size: var(--tempra-text-reader);
+}
+
+.prose > :first-child {
+  margin-top: 0;
+}
+
+.prose p,
+.prose ul,
+.prose ol {
+  margin: 0 0 18px;
+}
+
+.prose li > p {
+  margin: 0 0 6px;
+}
+
+.prose a {
+  text-underline-offset: 3px;
+}
+
+.prose code {
+  padding: 1px 6px;
+  border-radius: var(--tempra-radius);
+  background: var(--tempra-color-code-bg);
+  font-size: var(--tempra-text-name);
 }
 
 .prose pre {
   overflow-x: auto;
-  padding: var(--tempra-space-2);
+  margin: 0 0 18px;
+  padding: 12px 16px;
+  border-radius: var(--tempra-radius-row);
   background: var(--tempra-color-code-bg);
-  border-radius: var(--tempra-radius);
+  font-size: 14px;
+  line-height: 1.55;
+}
+
+.prose pre code {
+  padding: 0;
+  background: none;
+  font-size: inherit;
 }
 
 .prose blockquote {
-  margin-left: 0;
-  padding-left: var(--tempra-space-3);
-  border-left: 3px solid var(--tempra-color-border);
+  margin: 24px 0;
+  padding: 2px 0 2px 22px;
+  border-left: 2px solid var(--tempra-color-border-strong);
   color: var(--tempra-color-muted);
+  font-style: italic;
 }
 
+/*
+ * Tables are real tables, drawn from the stored tree. Wordgard's content breaks words anywhere
+ * (an editor's rule); cells get the page's rule back, so columns size to whole words, and a
+ * table wider than the column scrolls on its own while reading (the editor keeps table layout).
+ */
+.prose table {
+  margin: 0 0 18px;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.prose:not([contenteditable="true"]) table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* Rules between rows, none between columns; the header is told apart by its rule, not its weight
+   (a first column is often bold in the content already). */
 .prose table th,
 .prose table td {
-  border: 1px solid var(--tempra-color-border);
+  padding: 8px 16px 8px 0;
+  border: 0;
+  border-bottom: 1px solid var(--tempra-color-border);
+  text-align: left;
+  vertical-align: top;
+  overflow-wrap: normal;
+  word-break: normal;
+  white-space: normal;
+}
+
+.prose table th:last-child,
+.prose table td:last-child {
+  padding-right: 0;
+}
+
+.prose table th {
+  border-bottom-color: var(--tempra-color-text);
+  font-weight: 500;
+}
+
+.prose hr {
+  margin: 32px 0;
+}
+
+/* Footnote markers: a source's number, never split across lines. */
+.prose sup {
+  margin-left: 2px;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-label);
+  line-height: 0;
+  white-space: nowrap;
+}
+
+.prose sup a {
+  color: inherit;
+  text-decoration: none;
 }
 
 .prose .footnotes {

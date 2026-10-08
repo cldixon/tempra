@@ -260,14 +260,30 @@ async function browserRenders(
   const { browser, page, step, problems } = b;
   try {
     const enc = (p: string) => p.split("/").map(encodeURIComponent).join("/");
+    /** Opens one of the concept's panels from the cluster (take 2), unless it is open. */
+    const panel = async (name: string) => {
+      const button = page.locator(".cluster").getByRole("button", { name, exact: true });
+      await button.waitFor({ timeout: 15_000 });
+      if ((await button.getAttribute("aria-pressed")) !== "true") await button.click();
+      await page
+        .locator(".ws-panel .panel-head")
+        .getByRole("heading", { level: 2, name, exact: true })
+        .waitFor({ timeout: 10_000 });
+    };
+    /** Someone else's write: the cluster's glyph, then Show new version in its menu. */
+    const newVersion = () => page.locator(".cluster").getByRole("button", { name: "New version" });
+    const showNewVersion = async () => {
+      await newVersion().click();
+      await page.getByRole("button", { name: "Show new version" }).click();
+    };
 
     await step("sign in", async () => {
       await b.signInAs("dev@localhost", `/${owner}/${slug}/`);
       await page.waitForURL(`${base}/${owner}/${slug}/`);
     });
     await step("library page", async () => {
-      await page.getByRole("heading", { level: 1, name: slug }).waitFor({ timeout: 15_000 });
-      await page.getByText("ledger sequence").waitFor();
+      // No document is open: the sheet is blank.
+      await page.locator(".empty").waitFor({ timeout: 15_000 });
     });
     // The workspace (TEMPRA-19): the tree stays while files open in the main pane.
     const nested = concepts.find((c) => c.includes("/")) ?? concepts[0] ?? "";
@@ -288,7 +304,8 @@ async function browserRenders(
           if (/\/(tree|outline)(\?|$)/.test(new URL(r.url()).pathname)) asked++;
         };
         page.on("request", count);
-        await sidebar.getByRole("button", { name: `Expand ${folder.split("/").pop()}` }).click();
+        const name = folder.split("/").pop() ?? "";
+        await sidebar.getByRole("button", { name, exact: true }).click();
         await sidebar.locator(`a[title="${nested}"]`).waitFor({ timeout: 1000 });
         page.off("request", count);
         if (asked > 0) throw new Error(`opening a folder made ${asked} request(s)`);
@@ -299,13 +316,11 @@ async function browserRenders(
       if ((await sidebar.locator(`a[aria-current="page"][title="${nested}"]`).count()) !== 1) {
         throw new Error("the open file is not marked in the tree");
       }
-      await page
-        .locator(".ws-context")
-        .getByRole("heading", { level: 2, name: "History" })
-        .waitFor();
+      // The concept's panels: one at a time, from the cluster.
+      await panel("History");
       await page.goBack();
       await page.waitForURL(`${lib}/`);
-      await page.getByRole("heading", { level: 1, name: slug }).waitFor();
+      await page.locator(".empty").waitFor();
       await page.goForward();
       await page.waitForURL(`${lib}/${enc(nested)}`);
       // A page seen before draws from the cache: no loading state on the way back.
@@ -392,7 +407,7 @@ async function browserRenders(
       const word = String(meta.frontmatter?.title ?? "").split(/\s+/)[0] ?? "";
       const dialog = page.getByRole("dialog", { name: "Open a file" });
       const box = dialog.getByRole("combobox");
-      // It closes every way a person tries: Escape, the same keys, Close, a click outside.
+      // It closes every way a person tries: Escape, the same keys, a click outside.
       const closes = async (how: string, close: () => Promise<void>) => {
         await page.keyboard.press("Control+k");
         await box.waitFor({ timeout: 5000 }).catch(() => {
@@ -405,7 +420,6 @@ async function browserRenders(
       };
       await closes("Escape", () => box.press("Escape"));
       await closes("the same keys", () => page.keyboard.press("Control+k"));
-      await closes("Close", () => dialog.getByRole("button", { name: "Close" }).click());
       await closes("a click outside", () => page.mouse.click(5, 5));
       await page.keyboard.press("Control+k");
       await box.fill(word);
@@ -430,7 +444,8 @@ async function browserRenders(
       // A tap on the page closes it too.
       await files.click();
       await sidebar.waitFor({ state: "visible" });
-      await page.locator(".ws-main").click({ position: { x: 380, y: 300 } });
+      // (Wherever it lands outside the drawer: the sheet, or a panel overlaying it.)
+      await page.mouse.click(405, 400);
       await sidebar.waitFor({ state: "hidden" });
       await files.click();
       await sidebar.waitFor({ state: "visible" });
@@ -448,7 +463,7 @@ async function browserRenders(
         await page.goto(`${base}/${owner}/${slug}/${enc(concept)}`);
         const body = page.locator(".body .prose");
         await body.waitFor({ timeout: 15_000 });
-        await page.getByRole("heading", { level: 2, name: "History" }).waitFor();
+        await page.locator(".cluster").waitFor();
         if ((await body.getAttribute("contenteditable")) === "true") throw new Error("editable");
         if ((await body.innerText()).trim() === "") throw new Error("empty body");
         if (shots && concept === concepts[0]) {
@@ -501,16 +516,18 @@ async function browserRenders(
       await markStay();
       const started = Date.now();
       await agentAppends("A sentence written while the page was open.");
-      const banner = page.getByRole("status").filter({ hasText: "changed this" });
-      await banner.waitFor({ timeout: 10_000 });
+      // A newer version shows as the cluster's glyph (take 2), saying who and why.
+      await newVersion().waitFor({ timeout: 10_000 });
       const ms = Date.now() - started;
       console.log(`  (the change reached the page in ${ms} ms)`);
-      if (ms > 3000) throw new Error(`the banner took ${ms} ms`);
+      if (ms > 3000) throw new Error(`the new-version glyph took ${ms} ms`);
       if (shots) await page.screenshot({ path: `${shots}/live.png` });
       // The open file prefetched again (a hover on its own row) must not hide the new version.
       await page.locator(`.ws-sidebar a[title="${concept}"]`).hover();
       await page.waitForTimeout(500);
-      await banner.getByRole("button", { name: "Show new version" }).click();
+      await newVersion().click();
+      await page.getByRole("status").filter({ hasText: "changed this" }).waitFor();
+      await page.getByRole("button", { name: "Show new version" }).click();
       await page
         .locator(".body")
         .getByText("A sentence written while the page was open.")
@@ -521,11 +538,14 @@ async function browserRenders(
     await step("verify, an agent's edit, and the changes since verification", async () => {
       await agentAppends("A sentence before verification.");
       await page.goto(url);
+      // Trust, Verify and the changes since live in the Review panel.
+      await panel("Review");
       await page.getByRole("button", { name: "Verify this version" }).click();
       await page.getByText(/^Verified as human:/).waitFor({ timeout: 10_000 });
       await agentAppends("A sentence the gate added.");
       await page.goto(url);
-      await page.getByLabel(/Show changes since human:/).check();
+      await panel("Review");
+      await page.getByLabel(/Show changes since /).check();
       const added = page.locator(".body ins.diff-added").last();
       await added.waitFor({ timeout: 10_000 });
       if (!(await added.innerText()).includes("A sentence the gate added.")) {
@@ -547,7 +567,7 @@ async function browserRenders(
       async () => {
         await page.goto(url);
         await page.locator(".body .prose").waitFor({ timeout: 15_000 });
-        await page.getByRole("heading", { level: 2, name: /^Comments/ }).waitFor();
+        await panel("Comments");
         // Selects the first 16 characters of the first longer run of paragraph text, as a
         // person dragging over it would (a script string: this file has no DOM types).
         const select = () =>
@@ -653,7 +673,7 @@ async function browserRenders(
         if (moved.outdated || moved.anchor?.block !== block) {
           throw new Error(`the thread lost its place: ${JSON.stringify(moved)}`);
         }
-        await page.getByRole("button", { name: "Show new version" }).click();
+        await showNewVersion();
         await page.locator(".body").getByText(opening).waitFor({ timeout: 10_000 });
         await mark.first().waitFor({ timeout: 10_000 });
         if (!(await mark.first().innerText()).includes(quote.trim().slice(0, 8))) {
@@ -773,7 +793,7 @@ async function browserRenders(
         });
         if (!agentEdit.ok)
           throw new Error(`agent edit: ${agentEdit.status} ${await agentEdit.text()}`);
-        await page.getByRole("button", { name: "Show new version" }).click();
+        await showNewVersion();
         await body.getByText("Edited by an agent and a").waitFor({ timeout: 10_000 });
         // A write meanwhile: the save meets a 412 and merges, keeping both changes.
         await edit();
@@ -807,7 +827,7 @@ async function browserRenders(
     );
     await step("ledger, reached by a link within the app, tails live", async () => {
       await markStay();
-      await page.getByRole("link", { name: "Ledger", exact: true }).click();
+      await page.getByRole("link", { name: /^Ledger/ }).click();
       await page.getByRole("heading", { level: 1, name: "Ledger" }).waitFor({ timeout: 15_000 });
       const requests = page.locator("li.request");
       await requests.first().waitFor();
@@ -1021,13 +1041,30 @@ async function freshAccountConnects(): Promise<string[]> {
     await step("the open Connect page shows the agent's write, live", () =>
       page.getByText("Last agent write: claude-code/gate").waitFor({ timeout: 5000 }),
     );
+    /** A link in the avatar's menu (take 2: the account's pages live there). */
+    const accountLink = async (name: string) => {
+      await page.getByRole("button", { name: "Account menu" }).click();
+      await page.locator(".menu-list").getByRole("link", { name, exact: true }).click();
+    };
+    /** A library view: Work queue in the sidebar, the settings in the library's menu. */
+    const libraryLink = async (name: string) => {
+      if (name === "Work queue") {
+        await page
+          .locator(".ws-sidebar")
+          .getByRole("link", { name: /^Work queue/ })
+          .click();
+        return;
+      }
+      await page.getByRole("button", { name: /^Library / }).click();
+      await page.locator(".menu-list").getByRole("link", { name, exact: true }).click();
+    };
     await step("connected apps lists the app, from the header", async () => {
-      await page.getByRole("link", { name: "Connected apps" }).click();
+      await accountLink("Connected apps");
       await page.waitForURL(`${base}/apps`);
       await page.getByRole("cell", { name: /Gate/ }).waitFor({ timeout: 15_000 });
     });
     await step("tokens: create one, see it once, revoke it", async () => {
-      await page.getByRole("link", { name: "Tokens" }).first().click();
+      await accountLink("Tokens");
       await page.locator('input[name="actor"]').fill("process:gate");
       await page.getByRole("button", { name: "Create token" }).click();
       await page.locator("#token-secret").waitFor({ timeout: 15_000 });
@@ -1036,7 +1073,7 @@ async function freshAccountConnects(): Promise<string[]> {
       await page.getByText("revoked").waitFor({ timeout: 15_000 });
     });
     await step("account page", async () => {
-      await page.getByRole("link", { name: "newcomer@localhost" }).click();
+      await accountLink("Account");
       await page.getByText("this device").waitFor({ timeout: 15_000 });
     });
     for (const [tab, text] of [
@@ -1046,19 +1083,19 @@ async function freshAccountConnects(): Promise<string[]> {
     ] as const) {
       await step(`library tab ${tab}`, async () => {
         await page.goto(`${lib}/`);
-        await page.getByRole("link", { name: tab }).click();
+        await libraryLink(tab);
         await page.getByText(text).first().waitFor({ timeout: 15_000 });
       });
     }
     await step("export now, from Import & export", async () => {
-      await page.getByRole("link", { name: "Import & export" }).click();
+      await libraryLink("Import & export");
       await page.getByRole("button", { name: "Export now" }).click();
       await page.getByText("Exported to R2").waitFor({ timeout: 15_000 });
     });
 
     // Deleting the library wipes its Durable Object and ends the connection.
     await step("delete the library from its Delete tab", async () => {
-      await page.getByRole("link", { name: "Delete" }).click();
+      await libraryLink("Delete");
       await page.locator('input[name="confirm"]').fill("notes");
       await page.getByRole("button", { name: "Delete library" }).click();
       // The last library gone: first run again.

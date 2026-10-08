@@ -70,10 +70,11 @@ export interface ParseOptions {
   /** Library paths links may point to, when known: others are marked broken. */
   exists?(path: string, dir: boolean): boolean;
   /**
-   * Where a footnote reference points; `defined` says whether the body has a `[^label]: …`
-   * definition. Defaults to `#fn-<label>` for defined ones.
+   * Where a footnote reference points, and optionally what its marker shows (a source's
+   * number; the label in brackets otherwise); `defined` says whether the body has a
+   * `[^label]: …` definition. Defaults to `#fn-<label>` for defined ones.
    */
-  footnote?(label: string, defined: boolean): string | null;
+  footnote?(label: string, defined: boolean): string | null | { href: string | null; mark: string };
 }
 
 /** A footnote definition, kept beside the document: its label and content. */
@@ -296,12 +297,16 @@ class Builder {
         case "footnoteReference": {
           const label = n.label ?? n.identifier;
           const defined = this.defined.has(label);
-          const href = this.opts.footnote
+          const ref = this.opts.footnote
             ? this.opts.footnote(label, defined)
             : defined
               ? `#fn-${label}`
               : null;
-          out.push(FootnoteRef.of({ label, identifier: n.identifier, href }, marks));
+          const param: FootnoteParam =
+            ref !== null && typeof ref === "object"
+              ? { label, identifier: n.identifier, href: ref.href, mark: ref.mark }
+              : { label, identifier: n.identifier, href: ref };
+          out.push(FootnoteRef.of(param, marks));
           return;
         }
         case "break":

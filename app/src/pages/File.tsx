@@ -20,6 +20,7 @@ import {
   useDraft,
   useThreads,
 } from "../Comments";
+import { type Glyph, Icon, Menu } from "../chrome";
 import {
   type Base,
   type Frontmatter as FmObject,
@@ -42,19 +43,22 @@ import { el, Reader } from "../Reader";
 import { pushRecent } from "../recent";
 import { navigate, setLeaveGuard } from "../router";
 import {
+  Ago,
   AtNotice,
+  ago,
   anchorId,
   Chip,
   Crumbs,
   formatSize,
   Status,
-  TrustChip,
+  useAgo,
   useScrollToHash,
   useTitle,
   when,
+  who,
 } from "../ui";
 import { baseName, dirOf, enc, type Urls } from "../urls";
-import { ContextPanel, useRevealContext } from "../Workspace";
+import { PanelHost, type PanelId, usePanels } from "../Workspace";
 
 type Json = string | number | boolean | null | Json[] | { [k: string]: Json };
 type JsonObject = { [k: string]: Json };
@@ -135,7 +139,7 @@ function bodyHref(urls: Urls) {
 }
 
 /** What a file's page shows: the file, the head, and for a concept its context. */
-interface FileData {
+export interface FileData {
   file: FileJson;
   head: number;
   extra: {
@@ -152,14 +156,14 @@ const isConceptPath = (path: string) =>
   path.endsWith(".md") && !/(^|\/)(index|log)\.md$/.test(path);
 
 /** The cache key of a file's page (see useLoad). */
-const fileKey = (urls: Urls, path: string) => `file ${urls.file(path)}`;
+export const fileKey = (urls: Urls, path: string) => `file ${urls.file(path)}`;
 
 /**
  * Everything a file's page shows, in one round of requests: the file and, for a concept, its
  * sources, links, history and own work items (asked for in parallel; a file that is not a
  * concept answers those with errors, which are then ignored).
  */
-async function loadFile(urls: Urls, path: string): Promise<FileData> {
+export async function loadFile(urls: Urls, path: string): Promise<FileData> {
   const p = enc(path);
   const extra = <T,>(r: Promise<T>) =>
     r.then(
@@ -214,7 +218,7 @@ export function File(props: { urls: Urls; path: string; done: string | null; act
   useScrollToHash(loaded.state === "ready");
   const notice = props.done ? DONE[props.done]?.(props.actor) : undefined;
 
-  // Live (tempra-dev: app/live): someone else's change to this file shows as a banner, and the
+  // Live (tempra-dev: app/live): someone else's change to this file shows in the cluster, and the
   // new version swaps in by itself only while the reader is idle. Pinned versions stay put.
   const [change, setChange] = useState<FeedEvent | null>(null);
   const shown = loaded.state === "ready" ? loaded.data : null;
@@ -252,47 +256,56 @@ export function File(props: { urls: Urls; path: string; done: string | null; act
   useEffect(() => {
     if (swappable && idle) swap();
   }, [swappable, idle, swap]);
+  const live: Live | null =
+    change && shown ? { change, shownSeq: shown.file.seq, onSwap: editing ? null : swap } : null;
+  const concept = loaded.state === "ready" && loaded.data.extra;
   return (
     <>
-      {notice && <div className="notice ok">{notice}</div>}
-      {/* A concept's context panel keeps its place while the page loads (no column jump). */}
-      {loaded.state === "loading" && isConceptPath(path) && <ContextPanel>{null}</ContextPanel>}
-      {change && shown && (
-        <ChangeBanner
+      {/* A concept's panel keeps its place while the page loads (no column jump). */}
+      {!concept && isConceptPath(path) && loaded.state !== "error" && <PanelHost>{null}</PanelHost>}
+      {concept ? (
+        <ConceptView
           urls={urls}
-          change={change}
-          shownSeq={shown.file.seq}
-          onSwap={editing ? null : swap}
+          concept={concept.concept}
+          head={loaded.data.head}
+          sources={concept.sources}
+          links={concept.links}
+          history={concept.history}
+          work={concept.work}
+          threads={threads.state === "ready" ? threads.data.threads : null}
+          threadsError={threads.state === "error" ? threads.error.message : null}
+          notice={notice}
+          live={live}
+          onCommented={threads.reload}
+          onVerified={loaded.reload}
+          onEditing={setEditing}
         />
+      ) : (
+        <article className="doc">
+          {notice && <div className="notice">{notice}</div>}
+          {live && <LiveNotice urls={urls} live={live} />}
+          <Status loaded={loaded}>
+            {(d) =>
+              d.file.kind === "attachment" ? (
+                <Attachment urls={urls} file={d.file} head={d.head} />
+              ) : d.file.kind === "derived" ? (
+                <Derived urls={urls} file={d.file} head={d.head} />
+              ) : null
+            }
+          </Status>
+        </article>
       )}
-      <Status loaded={loaded}>
-        {(d) =>
-          d.file.kind === "attachment" ? (
-            <Attachment urls={urls} file={d.file} head={d.head} />
-          ) : d.file.kind === "derived" ? (
-            <Derived urls={urls} file={d.file} head={d.head} />
-          ) : (
-            d.extra && (
-              <ConceptView
-                urls={urls}
-                concept={d.extra.concept}
-                head={d.head}
-                sources={d.extra.sources}
-                links={d.extra.links}
-                history={d.extra.history}
-                work={d.extra.work}
-                threads={threads.state === "ready" ? threads.data.threads : null}
-                threadsError={threads.state === "error" ? threads.error.message : null}
-                onCommented={threads.reload}
-                onVerified={loaded.reload}
-                onEditing={setEditing}
-              />
-            )
-          )
-        }
-      </Status>
     </>
   );
+}
+
+/** Someone else's change to the open file, as the page shows it. */
+interface Live {
+  change: FeedEvent;
+  /** The sequence of the version on screen, for the diff. */
+  shownSeq: number;
+  /** Null while editing: the change is merged at save instead. */
+  onSwap: (() => void) | null;
 }
 
 /**
@@ -321,34 +334,8 @@ function useIdle(ms: number): boolean {
   return idle;
 }
 
-const AGO_UNITS: [number, string][] = [
-  [86_400, "d"],
-  [3600, "h"],
-  [60, "min"],
-  [1, "s"],
-];
-
-function ago(ts: string, now: number): string {
-  const secs = Math.max(0, Math.round((now - Date.parse(ts)) / 1000));
-  for (const [size, unit] of AGO_UNITS)
-    if (secs >= size) return `${Math.floor(secs / size)} ${unit}`;
-  return "0 s";
-}
-
-/** "claude-ai/connector changed this 4 s ago, seq 41. Show diff · Show new version" */
-function ChangeBanner(props: {
-  urls: Urls;
-  change: FeedEvent;
-  shownSeq: number;
-  /** Null while editing: the change is merged at save instead. */
-  onSwap: (() => void) | null;
-}) {
-  const { urls, change: e } = props;
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 5000);
-    return () => clearInterval(t);
-  }, []);
+/** "claude-ai/connector changed this 4 s ago, seq 41: the note." */
+function changeLine(e: FeedEvent, since: string): string {
   const what =
     e.op === "delete"
       ? "deleted this"
@@ -357,10 +344,49 @@ function ChangeBanner(props: {
         : e.op === "verify"
           ? "verified this"
           : "changed this";
+  return `${e.actor} ${what} ${since} ago, seq ${e.seq}${e.note ? `: ${e.note}` : ""}.`;
+}
+
+/**
+ * A newer version, in the cluster: a pulsing glyph that opens who wrote it, Show diff and Show
+ * new version (while editing: the change is merged at save).
+ */
+function NewVersion({ urls, live }: { urls: Urls; live: Live }) {
+  const e = live.change;
+  const since = useAgo(e.ts);
+  return (
+    <div className="new-version">
+      <Menu
+        name="New version"
+        title={`New version · ${e.actor}${e.note ? ` · ${e.note}` : ""}`}
+        buttonClass="icon-button"
+        align="end"
+        label={<Icon name="refresh" />}
+      >
+        <p role="status">{changeLine(e, since)}</p>
+        {CONTENT_OPS.has(e.op) && <a href={urls.diff(e.path, live.shownSeq, e.seq)}>Show diff</a>}
+        {live.onSwap ? (
+          <button type="button" onClick={live.onSwap}>
+            Show new version
+          </button>
+        ) : (
+          <p>Your edit will be merged with it when you save.</p>
+        )}
+      </Menu>
+    </div>
+  );
+}
+
+/**
+ * A change the cluster cannot show: the open file was moved or deleted (or it is not a concept).
+ * A notice in the sheet, with the way to where it went.
+ */
+function LiveNotice({ urls, live }: { urls: Urls; live: Live }) {
+  const e = live.change;
+  const since = useAgo(e.ts);
   return (
     <div className="notice" role="status">
-      {e.actor} {what} {ago(e.ts, now)} ago, seq {e.seq}
-      {e.note ? `: ${e.note}` : ""}.{" "}
+      {changeLine(e, since)}{" "}
       {e.op === "move" ? (
         <a href={urls.pinned(undefined).file(e.path)}>Go to {e.path}</a>
       ) : e.op === "delete" ? (
@@ -369,15 +395,13 @@ function ChangeBanner(props: {
         <>
           {CONTENT_OPS.has(e.op) && (
             <>
-              <a href={urls.diff(e.path, props.shownSeq, e.seq)}>Show diff</a> ·{" "}
+              <a href={urls.diff(e.path, live.shownSeq, e.seq)}>Show diff</a> ·{" "}
             </>
           )}
-          {props.onSwap ? (
-            <button type="button" onClick={props.onSwap}>
+          {live.onSwap && (
+            <button type="button" onClick={live.onSwap}>
               Show new version
             </button>
-          ) : (
-            "Your edit will be merged with it when you save."
           )}
         </>
       )}
@@ -395,10 +419,10 @@ function Attachment(props: {
   return (
     <>
       <Crumbs urls={urls} path={file.path} file />
-      <h1>{baseName(file.path)}</h1>
+      <h1 className="doc-title">{baseName(file.path)}</h1>
       <AtNotice urls={urls} head={props.head} current={urls.pinned(undefined).file(file.path)} />
       <p className="muted">
-        {file.media ?? "file"} · {formatSize(file.size)} · <code>{file.hash.slice(0, 12)}</code>
+        {file.media ?? "file"} · {formatSize(file.size)}
       </p>
       <p>
         <a href={urls.download(file.path)}>Download</a>
@@ -412,7 +436,8 @@ function Attachment(props: {
   );
 }
 
-function Derived(props: {
+/** A synthesized file (index.md, log.md) in the reader: the file as an agent reads it. */
+export function Derived(props: {
   urls: Urls;
   head: number;
   file: Extract<FileJson, { kind: "derived" }>;
@@ -435,6 +460,29 @@ function Derived(props: {
   );
 }
 
+/** The trust tier in a few words, for the crumb row and the Review panel's head. */
+function trustWords(tier: string | undefined): string {
+  if (tier === "human-reviewed") return "human-reviewed";
+  if (tier === "machine-confirmed") return "machine-confirmed";
+  return "unverified";
+}
+
+const PANEL_TITLES: Record<PanelId, string> = {
+  comments: "Comments",
+  review: "Review",
+  contents: "Contents & sources",
+  history: "History",
+  properties: "Properties",
+};
+
+const PANEL_GLYPHS: Record<PanelId, Glyph> = {
+  comments: "comments",
+  review: "review",
+  contents: "contents",
+  history: "history",
+  properties: "properties",
+};
+
 function ConceptView(props: {
   urls: Urls;
   concept: Concept;
@@ -446,12 +494,17 @@ function ConceptView(props: {
   /** Null while they load, or when they failed (`threadsError`). */
   threads: Thread[] | null;
   threadsError: string | null;
+  /** What the last action did (verified, restored). */
+  notice: string | undefined;
+  /** Someone else's change since this version, if any. */
+  live: Live | null;
   onCommented(): void;
   onVerified(): void;
   /** Editing started or ended (the page then holds new versions back). */
   onEditing(on: boolean): void;
 }) {
-  const { urls, head } = props;
+  const { urls, head, live } = props;
+  const panels = usePanels();
   // While editing, the page keeps the version the edit started from (a refresh must not
   // redraw the body under the person's hands).
   // The file as stored (frontmatter and body), shown in place of the reader.
@@ -468,22 +521,27 @@ function ConceptView(props: {
   const fm = c.frontmatter;
   const title = typeof fm.title === "string" && fm.title ? fm.title : baseName(c.path);
   useTitle(`${title} · ${urls.slug}`);
-  const status = typeof fm.status === "string" ? fm.status : "stable";
+  const status = typeof fm.status === "string" ? fm.status : null;
 
-  const parseOptions = useMemo((): ParseOptions => {
-    const ids = new Set(sources.sources.map((s) => s.id).filter((id) => typeof id === "string"));
+  // Footnote markers are numbers: the sources in their order, then the body's other footnotes
+  // as they are met (`numbers` fills in as the body is parsed; the panel reads it after).
+  const { parseOptions, numbers } = useMemo(() => {
+    const ids = sources.sources.map((s) => s.id).filter((id) => typeof id === "string");
+    const numbers = new Map<string, number>(ids.map((id, i) => [id, i + 1]));
+    const sourceIds = new Set(ids);
     const broken = new Set(links.broken.map((b) => b.path));
-    return {
+    const parseOptions: ParseOptions = {
       path: c.path,
       href: bodyHref(urls),
       exists: (path) => !broken.has(path),
-      footnote: (label, defined) =>
-        ids.has(label)
-          ? `#${anchorId("src", label)}`
-          : defined
-            ? `#${anchorId("fn", label)}`
-            : null,
+      footnote: (label, defined) => {
+        if (!sourceIds.has(label) && !defined) return null;
+        if (!numbers.has(label)) numbers.set(label, numbers.size + 1);
+        const prefix = sourceIds.has(label) ? "src" : "fn";
+        return { href: `#${anchorId(prefix, label)}`, mark: String(numbers.get(label)) };
+      },
     };
+    return { parseOptions, numbers };
   }, [c.path, urls, sources, links]);
   const parsed = useMemo(() => fromTree(c.doc, parseOptions), [c.doc, parseOptions]);
   // A leading heading that repeats the title is not shown twice (the stored body is unchanged).
@@ -513,15 +571,24 @@ function ConceptView(props: {
   const writable = urls.at === undefined || urls.at >= head;
   const [active, setActive] = useState<string | null>(null);
   const placed = useMemo(() => placeThreads(props.threads ?? [], parsed), [props.threads, parsed]);
-  // Comment on selected text: the reader's toolbar starts a draft, shown in the panel.
+  const openThreads = placed.filter((t) => t.status === "open").length;
+  // Comment on selected text: the reader's popover starts a draft, shown in the Comments panel.
   const draft = useDraft(parsed);
-  const reveal = useRevealContext();
+  const openPanel = panels?.open;
   const startDraft = useCallback(
     (range: { from: number; to: number }) => {
       draft.start(range);
-      reveal();
+      openPanel?.("comments");
     },
-    [draft.start, reveal],
+    [draft.start, openPanel],
+  );
+  // A highlight clicked in the body shows its thread.
+  const onMark = useCallback(
+    (id: string | null) => {
+      setActive(id);
+      if (id) openPanel?.("comments");
+    },
+    [openPanel],
   );
   const highlights = useMemo(
     () => highlightsOf(placed, active, draft.draft),
@@ -533,50 +600,107 @@ function ConceptView(props: {
     if (urls.at === undefined) pushRecent(urls, { path: c.path, title });
   }, [urls, c.path, title]);
 
+  const work = props.work.filter((w) => w.kind !== "comment" && w.kind !== "lint");
+  const issues = c.lint.length + work.length;
+  const counts: Record<PanelId, string> = {
+    comments: openThreads > 0 ? `${openThreads} open` : "",
+    review: issues > 0 ? `${issues} to fix` : trustWords(c.trust_tier),
+    contents: "",
+    history: `seq ${c.seq}`,
+    properties: editing ? "editing" : "",
+  };
+  const panel = panels?.panel ?? null;
+  const moved = live && (live.change.op === "move" || live.change.op === "delete");
+
   return (
     <>
-      <div>
-        <Crumbs urls={urls} path={c.path} file />
-        <h1>{title}</h1>
-        {typeof fm.description === "string" && <p className="muted">{fm.description}</p>}
-        <div className="chips">
-          {typeof fm.type === "string" && fm.type ? (
-            <Chip text={fm.type} />
-          ) : (
-            <Chip text="no type" tone="bad" />
-          )}
-          <TrustChip tier={c.trust_tier} />
-          {c.stale && (
-            <Chip text="stale" tone="bad" title={`stale_after ${String(fm.stale_after)}`} />
-          )}
-          {status !== "stable" && <Chip text={status} tone="warn" />}
-          {c.lint.length > 0 && <Chip text={`${c.lint.length} lint`} tone="warn" />}
-          {!editing && (
-            <button type="button" aria-pressed={markdown} onClick={() => setMarkdown((m) => !m)}>
-              Markdown
-            </button>
-          )}
-          {writable && !editing && (
-            <button
-              type="button"
-              onClick={() => {
+      <div className="cluster" role="toolbar" aria-label="Concept">
+        {live && !moved && (
+          <>
+            <NewVersion urls={urls} live={live} />
+            <span className="cluster-sep" />
+          </>
+        )}
+        {writable && (
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Edit"
+            title={editing ? "Stop editing" : "Edit"}
+            aria-pressed={editing}
+            onClick={() => {
+              if (editing) edit.cancel();
+              else {
                 setMarkdown(false);
                 edit.start();
-              }}
-            >
-              Edit
-            </button>
-          )}
-        </div>
+              }
+            }}
+          >
+            <Icon name="edit" />
+          </button>
+        )}
+        <button
+          type="button"
+          className="icon-button"
+          aria-label="Markdown"
+          title="Markdown: the file as stored, as an agent reads it"
+          aria-pressed={markdown && !editing}
+          disabled={editing}
+          onClick={() => setMarkdown((m) => !m)}
+        >
+          <Icon name="markdown" />
+        </button>
+        {panels && (
+          <>
+            <span className="cluster-sep" />
+            {(Object.keys(PANEL_TITLES) as PanelId[]).map((id) => (
+              <button
+                key={id}
+                type="button"
+                className="icon-button"
+                aria-label={PANEL_TITLES[id]}
+                title={PANEL_TITLES[id]}
+                aria-pressed={panel === id}
+                onClick={() => panels.toggle(id)}
+              >
+                <Icon name={PANEL_GLYPHS[id]} />
+                {id === "comments" && openThreads > 0 && <span className="dot" />}
+              </button>
+            ))}
+          </>
+        )}
+      </div>
+      {editing && !edit.merging && edit.bar}
+      <article className="doc">
+        {props.notice && <div className="notice">{props.notice}</div>}
+        {moved && live && <LiveNotice urls={urls} live={live} />}
         <AtNotice urls={urls} head={head} current={urls.pinned(undefined).file(c.path)} />
         {edit.saved && (
-          <div className="notice ok" role="status">
+          <div className="notice" role="status">
             Saved.
             {edit.saved.lint.length > 0 &&
               ` Lint: ${edit.saved.lint.map((l) => l.message).join(" ")}`}
           </div>
         )}
-        {editing ? edit.bar : !markdown && changes.toggle}
+        {edit.merging && edit.bar}
+        <Crumbs urls={urls} path={c.path} file>
+          {c.stale && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span>stale</span>
+            </>
+          )}
+          {status && status !== "stable" && (
+            <>
+              <span aria-hidden="true">·</span>
+              <span>{status}</span>
+            </>
+          )}
+        </Crumbs>
+        <header className="doc-head">
+          <h1 className="doc-title">{title}</h1>
+          {typeof fm.description === "string" && <p className="doc-tagline">{fm.description}</p>}
+        </header>
         {markdown && !editing && <RawMarkdown urls={urls} path={c.path} hash={c.hash} />}
         {/* Kept mounted under the markdown, so comments and the editor keep their reader. */}
         <div hidden={markdown && !editing}>
@@ -587,90 +711,132 @@ function ConceptView(props: {
             diff={editing ? null : changes.diff}
             hideFirst={hideFirst}
             highlights={highlights}
-            onMark={setActive}
+            onMark={onMark}
             onComment={writable ? startDraft : undefined}
             handle={edit.reader}
           />
         </div>
-        {c.lint.length > 0 && (
+      </article>
+      {/* The open panel, beside the sheet (tempra-dev: app/workspace, The panels). */}
+      <PanelHost>
+        {panel && (
           <>
-            <h2 id="lint">Lint</h2>
-            <ul className="lint">
-              {c.lint.map((l, i) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: lint warnings have no id.
-                <li key={i}>
-                  <code>{l.code}</code> {l.message}
-                </li>
-              ))}
-            </ul>
+            <div className="panel-head">
+              <h2 id="panel-title">{PANEL_TITLES[panel]}</h2>
+              {counts[panel] && <span className="count">{counts[panel]}</span>}
+              <span className="spacer" />
+              <button
+                type="button"
+                className="panel-close"
+                aria-label="Close panel"
+                title="Close"
+                onClick={() => panels?.close()}
+              >
+                ×
+              </button>
+            </div>
+            <div className="panel-body">
+              {panel === "comments" &&
+                (props.threads || props.threadsError ? (
+                  <CommentsPanel
+                    urls={urls}
+                    path={c.path}
+                    placed={placed}
+                    error={props.threadsError}
+                    writable={writable}
+                    draft={draft.draft}
+                    onClearDraft={draft.clear}
+                    active={active}
+                    onActive={setActive}
+                    onChanged={props.onCommented}
+                  />
+                ) : (
+                  <p className="small muted">Loading…</p>
+                ))}
+              {panel === "review" && (
+                <ReviewPanel
+                  urls={urls}
+                  concept={c}
+                  head={head}
+                  editing={editing}
+                  changes={changes.toggle}
+                  work={work}
+                  onVerified={props.onVerified}
+                />
+              )}
+              {panel === "contents" && (
+                <>
+                  <Contents parsed={parsed} skipFirst={hideFirst} />
+                  <SourcesPanel
+                    urls={urls}
+                    data={sources}
+                    footnotes={footnotes}
+                    numbers={numbers}
+                  />
+                  <LinksPanel urls={urls} links={links} head={head} />
+                </>
+              )}
+              {panel === "history" && (
+                <History urls={urls} concept={c} head={head} events={props.history} />
+              )}
+              {panel === "properties" && (editing ? edit.form : <Frontmatter fm={fm} />)}
+            </div>
           </>
         )}
-      </div>
-      {/* The workspace's right panel (tempra-dev: app/workspace). */}
-      <ContextPanel>
-        {/* Verifying is for a saved version, not one being edited. */}
-        {!editing && <Verify urls={urls} concept={c} head={head} onVerified={props.onVerified} />}
-        {(props.threads || props.threadsError) && (
-          <CommentsPanel
-            urls={urls}
-            path={c.path}
-            placed={placed}
-            error={props.threadsError}
-            writable={writable}
-            draft={draft.draft}
-            onClearDraft={draft.clear}
-            active={active}
-            onActive={setActive}
-            onChanged={props.onCommented}
-          />
-        )}
-        <Contents parsed={parsed} skipFirst={hideFirst} />
-        {/* Open comments are in their own section above. */}
-        <Work items={props.work.filter((w) => w.kind !== "comment")} />
-        <SourcesPanel urls={urls} data={sources} footnotes={footnotes} />
-        <LinksPanel urls={urls} links={links} head={head} />
-        <History urls={urls} concept={c} head={head} events={props.history} />
-        <Frontmatter fm={fm} />
-      </ContextPanel>
+      </PanelHost>
     </>
   );
 }
 
-/** A table of contents from the body's headings, when it has a few. */
+/**
+ * A table of contents from the body's headings, when it has a few. The heading the sheet is
+ * scrolled to is marked.
+ */
 function Contents({ parsed, skipFirst }: { parsed: Parsed; skipFirst: boolean }) {
   const headings = skipFirst ? parsed.headings.slice(1) : parsed.headings;
+  const [current, setCurrent] = useState<string | null>(null);
+  const ids = headings.map((h) => h.id).join(" ");
+  useEffect(() => {
+    const sheet = document.querySelector(".ws-main");
+    if (!sheet || !ids) return;
+    const list = ids.split(" ");
+    const update = () => {
+      const top = sheet.getBoundingClientRect().top + 120;
+      let at: string | null = list[0] ?? null;
+      for (const id of list) {
+        const el = document.getElementById(id);
+        if (el && el.getBoundingClientRect().top <= top) at = id;
+      }
+      setCurrent(at);
+    };
+    update();
+    sheet.addEventListener("scroll", update, { passive: true });
+    return () => sheet.removeEventListener("scroll", update);
+  }, [ids]);
   if (headings.length < 2) return null;
   const top = Math.min(...headings.map((h) => h.depth));
   return (
-    <section>
-      <h2>Contents</h2>
+    <nav aria-label="Contents">
       <ul className="toc">
         {headings.map((h) => (
           <li key={h.id} className={`depth-${h.depth - top}`}>
-            <a href={`#${h.id}`}>{h.text}</a>
+            <a href={`#${h.id}`} aria-current={h.id === current ? "location" : undefined}>
+              {h.text}
+            </a>
           </li>
         ))}
       </ul>
-    </section>
+    </nav>
   );
 }
 
-/** The concept's open work items (lint, broken links, stale), each with what to do. */
-function Work({ items }: { items: WorkItem[] }) {
-  if (items.length === 0) return null;
+/** A work item (broken link, staleness) as a card: what it is, and what to do. */
+function WorkCard({ w }: { w: WorkItem }) {
   return (
-    <section>
-      <h2>Work</h2>
-      <ul>
-        {items.map((w) => (
-          <li key={`${w.kind} ${w.detail}`}>
-            <Chip text={w.kind.replace("_", " ")} tone={w.kind === "lint" ? "warn" : "bad"} />{" "}
-            <span className="small">{w.detail}</span>
-            <div className="small">→ {w.suggested_action}</div>
-          </li>
-        ))}
-      </ul>
-    </section>
+    <li className="inset">
+      <Chip text={w.kind.replace("_", " ")} tone="bad" /> <span>{w.detail}</span>
+      <div className="muted">→ {w.suggested_action}</div>
+    </li>
   );
 }
 
@@ -786,7 +952,7 @@ function useVerificationDiff(
       <p className="small">
         <label>
           <input type="checkbox" checked={on} onChange={(e) => setOn(e.currentTarget.checked)} />{" "}
-          Show changes since {verified.actor} verified it (seq {verified.seq})
+          Show changes since {who(verified.actor)} verified it (seq {verified.seq})
         </label>
         {error && <span className="warn"> {error}</span>}
       </p>
@@ -854,22 +1020,25 @@ function FmValue({ k, v }: { k: string; v: Json }) {
   return <Scalar v={v} />;
 }
 
+/** The frontmatter, read-only: the Properties panel while reading. */
 function Frontmatter({ fm }: { fm: JsonObject }) {
   return (
-    <section>
-      <h2>Frontmatter</h2>
-      <dl className="fm">
-        {Object.entries(fm).map(([k, v]) => (
-          <div key={k}>
-            <dt>{k}</dt>
-            <dd>
-              <FmValue k={k} v={v} />
-            </dd>
-          </div>
-        ))}
-      </dl>
-    </section>
+    <dl className="facts">
+      {Object.entries(fm).map(([k, v]) => (
+        <div key={k} className="fact">
+          <dt>{k}</dt>
+          <dd>
+            <FmValue k={k} v={v} />
+          </dd>
+        </div>
+      ))}
+    </dl>
   );
+}
+
+/** The text of a little HTML (a footnote definition), for comparing. */
+function plain(html: string): string {
+  return (new DOMParser().parseFromString(html, "text/html").body.textContent ?? "").trim();
 }
 
 /** Footnote definitions as HTML from Wordgard (`toHTML`), which escapes every text and attribute. */
@@ -878,7 +1047,13 @@ function FootnoteHtml({ html }: { html: string }) {
   return <div className="small" dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
-function SourcesPanel(props: { urls: Urls; data: Sources; footnotes: Record<string, string> }) {
+function SourcesPanel(props: {
+  urls: Urls;
+  data: Sources;
+  footnotes: Record<string, string>;
+  /** Each footnote label's number, as the body's markers show it. */
+  numbers: Map<string, number>;
+}) {
   const { urls, data, footnotes } = props;
   const used = new Set<string>();
   const items = data.sources.map((s, i) => {
@@ -887,41 +1062,41 @@ function SourcesPanel(props: { urls: Urls; data: Sources; footnotes: Record<stri
     const name = typeof s.title === "string" ? s.title : (id ?? "Source");
     const resource = typeof s.resource === "string" ? s.resource : null;
     const internal = (s.internal ?? null) as JsonObject | null;
-    let where: React.ReactNode = null;
-    if (internal?.broken) {
-      where = (
-        <>
-          {resource} <Chip text="missing" tone="bad" />
-        </>
-      );
-    } else if (internal && typeof internal.path === "string") {
-      where = (
-        <>
-          <a href={urls.file(internal.path)}>{resource ?? internal.path}</a>{" "}
-          {internal.trust_tier && <TrustChip tier={String(internal.trust_tier)} />}
-          {internal.stale && <Chip text="stale" tone="bad" />}
-          {internal.status && internal.status !== "stable" && (
-            <Chip text={String(internal.status)} tone="warn" />
-          )}
-        </>
-      );
-    } else if (resource) where = <Scalar v={resource} />;
-    const def = id ? footnotes[id] : undefined;
     const cited = typeof s.cited === "number" ? s.cited : 0;
+    const meta: string[] = [];
+    let link: React.ReactNode = <span>{name}</span>;
+    if (internal?.broken) {
+      meta.push(`${resource ?? ""} · missing`);
+    } else if (internal && typeof internal.path === "string") {
+      link = <a href={urls.file(internal.path)}>{name}</a>;
+      meta.push(internal.path);
+      if (internal.trust_tier) meta.push(String(internal.trust_tier));
+      if (internal.stale) meta.push("stale");
+      if (internal.status && internal.status !== "stable") meta.push(String(internal.status));
+    } else if (resource && /^https?:\/\//i.test(resource)) {
+      link = (
+        <a href={resource} rel="noopener noreferrer nofollow">
+          {name}
+        </a>
+      );
+      meta.push("external");
+    } else if (resource) meta.push(resource);
+    if (id) meta.push(cited > 0 ? `cited ${cited}×` : "not cited");
+    // The footnote's own text, unless it only repeats the source's title.
+    const html = id ? footnotes[id] : undefined;
+    const def = html && plain(html) !== name.trim() ? html : undefined;
     return (
       <li key={id ?? i} id={id ? anchorId("src", id) : undefined}>
-        <strong>{name}</strong>
-        {id && (
-          <div className="small muted">
-            [^{id}] · cited {cited}×
-          </div>
-        )}
-        <div className="small">{where}</div>
-        {def && (
-          <div className="muted">
-            <FootnoteHtml html={def} />
-          </div>
-        )}
+        <span className="num">{i + 1}</span>
+        <span>
+          {link}
+          <span className="meta">{meta.join(" · ")}</span>
+          {def && (
+            <span className="meta">
+              <FootnoteHtml html={def} />
+            </span>
+          )}
+        </span>
       </li>
     );
   });
@@ -931,15 +1106,15 @@ function SourcesPanel(props: { urls: Urls; data: Sources; footnotes: Record<stri
   }
   return (
     <section id="sources">
-      <h2>Sources</h2>
-      {items.length > 0 && <ul>{items}</ul>}
+      <h3 className="label">Sources</h3>
+      {items.length > 0 && <ol className="sources">{items}</ol>}
       {others.length > 0 && (
         <>
-          <p className="small muted">Other footnotes</p>
-          <ul>
+          <h3 className="label">Other footnotes</h3>
+          <ul className="sources">
             {others.map(([label, html]) => (
               <li key={label} id={anchorId("fn", label)}>
-                <span className="small muted">[^{label}]</span>
+                <span className="num">{props.numbers.get(label) ?? label}</span>
                 <FootnoteHtml html={html} />
               </li>
             ))}
@@ -959,13 +1134,13 @@ function LinksPanel({ urls, links, head }: { urls: Urls; links: Links; head: num
   const atHead = urls.at === undefined || urls.at >= head;
   return (
     <section>
-      <h2>Linked from</h2>
+      <h3 className="label">Linked from</h3>
       {links.inbound.length > 0 ? (
-        <ul>
+        <ul className="linked">
           {links.inbound.map((l) => (
             <li key={`${l.path} ${l.kind} ${l.raw}`}>
               <a href={urls.pinned(undefined).file(l.path)}>{l.path}</a>
-              {l.kind === "source" && <span className="small muted"> cites it</span>}
+              {l.kind === "source" && <span className="faint"> cites it</span>}
             </li>
           ))}
         </ul>
@@ -989,19 +1164,54 @@ function LinksPanel({ urls, links, head }: { urls: Urls; links: Links; head: num
   );
 }
 
-/**
- * Human verification of the current version (spec: OKF conformance, What the service stamps).
- * A later ordinary write lapses it, so the panel says what it covers.
- */
-function Verify(props: { urls: Urls; concept: Concept; head: number; onVerified(): void }) {
-  const { urls, concept: c } = props;
-  const [error, setError] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  if (urls.at !== undefined && urls.at < props.head) return null;
+/** The latest human verification in the frontmatter, if any. */
+function humanVerified(c: Concept): JsonObject | undefined {
   const list = Array.isArray(c.frontmatter.verified)
     ? (c.frontmatter.verified as JsonObject[])
     : [];
-  const human = [...list].reverse().find((v) => String(v.by ?? "").startsWith("human:"));
+  return [...list].reverse().find((v) => String(v.by ?? "").startsWith("human:"));
+}
+
+/** "Verified by human:x, 2026-10-05 17:51. No content change since." and its kin. */
+function VerifiedLine({ c }: { c: Concept }) {
+  const human = humanVerified(c);
+  if (c.trust_tier === "human-reviewed" && human) {
+    return (
+      <p className="state-line on">
+        Verified by {who(String(human.by))}, {when(String(human.at ?? ""))}. No content change
+        since.
+      </p>
+    );
+  }
+  if (human) {
+    return (
+      <p className="state-line">
+        Last verified by {who(String(human.by))}, {when(String(human.at ?? ""))}; changed since.
+      </p>
+    );
+  }
+  return <p className="state-line">No human has verified this concept.</p>;
+}
+
+/**
+ * Whether a person can rely on this version (tempra-dev: app/workspace, The panels): who
+ * verified it, Verify, the changes since, what kind of concept it is, and what is wrong with it.
+ * Human verification (spec: OKF conformance, What the service stamps) lapses with a later write.
+ */
+function ReviewPanel(props: {
+  urls: Urls;
+  concept: Concept;
+  head: number;
+  editing: boolean;
+  changes: React.ReactNode;
+  work: WorkItem[];
+  onVerified(): void;
+}) {
+  const { urls, concept: c } = props;
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const fm = c.frontmatter;
+  const current = urls.at === undefined || urls.at >= props.head;
   const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const note = String(new FormData(e.currentTarget).get("note") ?? "").trim();
@@ -1021,98 +1231,120 @@ function Verify(props: { urls: Urls; concept: Concept; head: number; onVerified(
     }
   };
   return (
-    <section>
-      <h2>Verification</h2>
-      {c.trust_tier === "human-reviewed" && human ? (
-        <p className="small">
-          <Chip text="human-reviewed" tone="ok" /> by {String(human.by)},{" "}
-          {when(String(human.at ?? ""))}.
-        </p>
-      ) : human ? (
-        <p className="small">
-          Last verified by {String(human.by)} on {when(String(human.at ?? ""))}, but the content has
-          changed since.
-        </p>
-      ) : (
-        <p className="small muted">No human has verified this concept.</p>
+    <>
+      <section>
+        <VerifiedLine c={c} />
+        {error && <div className="notice">{error}</div>}
+        {/* Verifying is for the saved current version, not one being edited or from the past. */}
+        {current && !props.editing && c.trust_tier !== "human-reviewed" && (
+          <form className="verify-form" onSubmit={submit}>
+            <input type="text" name="note" placeholder="Note (optional)" aria-label="Note" />
+            <button className="primary" type="submit" disabled={busy}>
+              Verify this version
+            </button>
+          </form>
+        )}
+        {props.changes}
+      </section>
+      <section>
+        <dl className="facts">
+          <dt>type</dt>
+          <dd>
+            {typeof fm.type === "string" && fm.type ? fm.type : <Chip text="no type" tone="bad" />}
+          </dd>
+          {typeof fm.status === "string" && (
+            <>
+              <dt>status</dt>
+              <dd>{fm.status}</dd>
+            </>
+          )}
+          {fm.stale_after !== undefined && (
+            <>
+              <dt>stale_after</dt>
+              <dd>
+                {when(String(fm.stale_after))}
+                {c.stale && <Chip text="stale" tone="bad" />}
+              </dd>
+            </>
+          )}
+        </dl>
+      </section>
+      {(c.lint.length > 0 || props.work.length > 0) && (
+        <section>
+          <h3 className="label">To fix</h3>
+          <ul className="inset-list">
+            {c.lint.map((l, i) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: lint warnings have no id.
+              <li key={i} className="inset">
+                <Chip text="lint" /> <code>{l.code}</code>{" "}
+                <span className="muted">{l.message}</span>
+              </li>
+            ))}
+            {props.work.map((w) => (
+              <WorkCard key={`${w.kind} ${w.detail}`} w={w} />
+            ))}
+          </ul>
+        </section>
       )}
-      {error && <div className="notice">{error}</div>}
-      {c.trust_tier !== "human-reviewed" && (
-        <form onSubmit={submit}>
-          <input type="text" name="note" placeholder="Note (optional)" />{" "}
-          <button className="primary" type="submit" disabled={busy}>
-            Verify this version
-          </button>
-        </form>
-      )}
-    </section>
+    </>
   );
 }
 
 function History(props: { urls: Urls; concept: Concept; head: number; events: HistoryEvent[] }) {
   const { urls, concept: c, head } = props;
-  // Comments are in their own section; history is the concept's versions.
+  // Comments are in their own panel; history is the concept's versions.
   const events = props.events.filter((e) => e.op !== "comment");
   const shown = [...events].reverse().slice(0, 50);
   // Time travel shortcuts (spec: Time travel in the UI).
   const verified = [...events]
     .reverse()
     .find((e) => e.op === "verify" && e.actor.startsWith("human:"));
-  let sinceHuman: React.ReactNode;
-  if (!verified) sinceHuman = "Never verified by a human.";
-  else if (events.some((e) => e.seq > verified.seq && CONTENT_OPS.has(e.op))) {
-    sinceHuman = (
-      <>
-        <a href={urls.diff(c.path, verified.seq)}>Changes since human verification</a> (seq{" "}
-        {verified.seq}, {verified.actor})
-      </>
-    );
-  } else sinceHuman = `No changes since ${verified.actor} verified it at seq ${verified.seq}.`;
+  const changedSince =
+    verified !== undefined && events.some((e) => e.seq > verified.seq && CONTENT_OPS.has(e.op));
   const pinnedOld = urls.at !== undefined && urls.at < head;
-  const view = (e: FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const at = Number(new FormData(e.currentTarget).get("at"));
-    navigate(urls.pinned(Number.isInteger(at) && at > 0 ? at : undefined).file(c.path));
-  };
+  const [now] = useState(() => Date.now());
   return (
-    <section>
-      <h2>History</h2>
-      <form className="inline" onSubmit={view}>
-        <label className="small" htmlFor="at">
-          View at sequence
-        </label>{" "}
-        <input
-          key={urls.at ?? head}
-          id="at"
-          name="at"
-          type="number"
-          min={1}
-          max={head}
-          defaultValue={urls.at ?? head}
-        />{" "}
-        <button type="submit">View</button>
-      </form>
-      <p className="small">{sinceHuman}</p>
+    <>
+      <section>
+        <VerifiedLine c={c} />
+        {verified && changedSince && (
+          <p className="small">
+            <a href={urls.diff(c.path, verified.seq)}>Changes since human verification</a> (seq{" "}
+            {verified.seq})
+          </p>
+        )}
+      </section>
       <ol className="history">
         {shown.map((e) => {
-          const note = typeof e.meta?.note === "string" ? ` · ${e.meta.note}` : "";
-          const from = typeof e.meta?.from_path === "string" ? ` from ${e.meta.from_path}` : "";
-          const label = (
-            <>
-              <strong>{e.seq}</strong> {e.op}
-            </>
-          );
+          const note = typeof e.meta?.note === "string" ? e.meta.note : "";
+          const from = typeof e.meta?.from_path === "string" ? `from ${e.meta.from_path}` : "";
+          const classes = [e.seq === c.seq ? "current" : "", e.op === "verify" ? "verify" : ""];
           return (
-            <li key={e.seq} className={e.seq === c.seq ? "current" : undefined}>
-              {e.op === "delete" ? label : <a href={urls.pinned(e.seq).file(e.path)}>{label}</a>}
-              {from} · {e.actor} · {when(e.ts)}
-              {note}
-              {CONTENT_OPS.has(e.op) && (
-                <>
-                  {" "}
-                  · <a href={urls.diff(e.path, undefined, e.seq)}>diff</a>
-                </>
+            <li key={e.seq} className={classes.filter(Boolean).join(" ") || undefined}>
+              {e.op === "delete" ? (
+                <span className="seq">{e.seq}</span>
+              ) : (
+                <a className="seq" href={urls.pinned(e.seq).file(e.path)} title="View this version">
+                  {e.seq}
+                </a>
               )}
+              <span>
+                {e.op} <span className="who">{e.actor}</span>
+                {(note || from) && (
+                  <span className="note" title={[from, note].filter(Boolean).join(" · ")}>
+                    {[from, note].filter(Boolean).join(" · ")}
+                  </span>
+                )}
+              </span>
+              <span className="when">
+                {CONTENT_OPS.has(e.op) ? (
+                  <a href={urls.diff(e.path, undefined, e.seq)} title={`Diff · ${when(e.ts)} UTC`}>
+                    {ago(e.ts, now)}
+                  </a>
+                ) : (
+                  <Ago ts={e.ts} now={now} />
+                )}
+              </span>
             </li>
           );
         })}
@@ -1120,17 +1352,17 @@ function History(props: { urls: Urls; concept: Concept; head: number; events: Hi
       {events.length > shown.length && (
         <p className="small muted">{events.length - shown.length} older events not shown.</p>
       )}
-      <p className="small">
-        <a href={urls.raw(c.path)}>Raw source</a>
+      <p className="panel-foot">
+        <a href={urls.ledger({ prefix: c.path })}>All {events.length} in the ledger</a>
+        <a href={urls.raw(c.path)}>Raw</a>
         {pinnedOld && (
           <>
-            {" "}
-            · <a href={urls.pinned(undefined).file(c.path)}>Current version</a> ·{" "}
+            <a href={urls.pinned(undefined).file(c.path)}>Current version</a>
             <a href={urls.restore(c.path, urls.at as number)}>Restore this version…</a>
           </>
         )}
       </p>
-    </section>
+    </>
   );
 }
 
@@ -1298,6 +1530,7 @@ function useEditing(o: {
     Object.entries(o.concept.frontmatter).filter(([k]) => k === "generated" || k === "verified"),
   ) as FmObject;
 
+  // While merging, the merge view takes the bar's place (in the sheet, above the body).
   const bar = merge ? (
     <MergeView
       // A new merge (after another write meanwhile) starts with nothing picked.
@@ -1309,40 +1542,50 @@ function useEditing(o: {
       onCancel={() => setMerge(null)}
     />
   ) : (
-    form && (
-      <form className="edit-bar" onSubmit={save}>
-        <FrontmatterForm
-          form={form}
-          types={types}
-          stamped={stamped}
-          onChange={(f) => {
-            setForm(f);
-            dirty.current = true;
-          }}
-        />
-        <div className="edit-actions">
-          <label>
-            Note{" "}
-            <input
-              value={note}
-              onChange={(e) => setNote(e.currentTarget.value)}
-              placeholder="What you changed, in one line"
-              required
-            />
-          </label>{" "}
-          <button className="primary" type="submit" disabled={busy || uploading > 0}>
-            {uploading > 0 ? "Uploading…" : "Save"}
-          </button>{" "}
-          <button type="button" onClick={cancel} disabled={busy}>
-            Cancel
-          </button>
-        </div>
-        {error && <div className="notice">{error}</div>}
-      </form>
-    )
+    <form className="edit-bar" onSubmit={save}>
+      <label className="visually-hidden" htmlFor="edit-note">
+        Note
+      </label>
+      <input
+        id="edit-note"
+        value={note}
+        onChange={(e) => setNote(e.currentTarget.value)}
+        placeholder="What you changed, in one line"
+        required
+      />
+      <button className="primary" type="submit" disabled={busy || uploading > 0}>
+        {uploading > 0 ? "Uploading…" : "Save"}
+      </button>
+      <button type="button" className="ghost" onClick={cancel} disabled={busy}>
+        Cancel
+      </button>
+      {error && <div className="notice">{error}</div>}
+    </form>
   );
 
-  return { start: begin, bar, reader, generation, saved };
+  // The frontmatter as a form, in the Properties panel while editing.
+  const formView = form && (
+    <FrontmatterForm
+      form={form}
+      types={types}
+      stamped={stamped}
+      onChange={(f) => {
+        setForm(f);
+        dirty.current = true;
+      }}
+    />
+  );
+
+  return {
+    start: begin,
+    cancel,
+    bar,
+    form: formView,
+    merging: merge !== null,
+    reader,
+    generation,
+    saved,
+  };
 }
 
 /** The file as stored: what agents read and write, frontmatter and all. */

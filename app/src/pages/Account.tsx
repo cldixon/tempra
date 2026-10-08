@@ -57,7 +57,7 @@ export function Welcome({ me }: { me: Me | null }) {
           </label>
         </p>
         <p>
-          <button type="submit" disabled={busy}>
+          <button className="primary" type="submit" disabled={busy}>
             Create
           </button>
         </p>
@@ -208,7 +208,7 @@ export function Tokens({ me, library }: { me: Me | null; library: string | null 
                             </div>
                           </td>
                           <td>{t.scope}</td>
-                          <td className="small muted">
+                          <td className="small muted nowrap">
                             {t.expires ? `expires ${when(t.expires)}` : "no expiry"}
                             {t.created_by && (
                               <>
@@ -548,8 +548,8 @@ export function Account({ done }: { done: string | null }) {
                 <tbody>
                   {a.sessions.map((s) => (
                     <tr key={s.id}>
-                      <td>{when(s.created)}</td>
-                      <td>{when(s.last_seen)}</td>
+                      <td className="when">{when(s.created)}</td>
+                      <td className="when">{when(s.last_seen)}</td>
                       <td className="small muted">{s.user_agent ?? ""}</td>
                       <td>
                         {s.current ? (
@@ -570,12 +570,14 @@ export function Account({ done }: { done: string | null }) {
               </table>
             </div>
             {/* Signing out stays a server form: it must work whatever state the app is in. */}
-            <form method="post" action="/sign-out">
-              <button type="submit">Sign out</button>
-            </form>
-            <form method="post" action="/sign-out/everywhere">
-              <button type="submit">Sign out everywhere</button>
-            </form>
+            <div className="actions">
+              <form method="post" action="/sign-out">
+                <button type="submit">Sign out</button>
+              </form>
+              <form method="post" action="/sign-out/everywhere">
+                <button type="submit">Sign out everywhere</button>
+              </form>
+            </div>
             <h2>Delete account</h2>
             <p>Deletes every library you own. Export them first.</p>
             <form onSubmit={remove}>
@@ -592,7 +594,7 @@ export function Account({ done }: { done: string | null }) {
               </p>
             </form>
             <p>
-              <a href={`${LEGAL}/terms`}>Terms</a> | <a href={`${LEGAL}/privacy`}>Privacy</a>
+              <a href={`${LEGAL}/terms`}>Terms</a> · <a href={`${LEGAL}/privacy`}>Privacy</a>
             </p>
           </>
         )}

@@ -71,7 +71,7 @@ function errorPage(user: User | null, status: number, message: string): Response
     layout({
       title,
       user: user?.email ?? "",
-      body: `<h1>${esc(title)}</h1><p>${esc(message)}</p><p><a href="/">Back to libraries</a></p>`,
+      body: `<h1>${esc(title)}</h1><p>${esc(message)}</p><p><a href="/">Libraries</a></p>`,
     }),
     status,
   );
@@ -140,7 +140,7 @@ function emailConfirmPage(t: string): string {
   return `<h1>Confirm your new email</h1>
 <form method="post" action="/account/email/confirm">
 <input type="hidden" name="t" value="${esc(t)}">
-<p><button type="submit">Confirm</button></p>
+<p><button class="primary" type="submit">Confirm</button></p>
 </form>`;
 }
 

@@ -7,7 +7,7 @@ import { documentPos, locate, type Parsed, type QuoteSelector, textOffset } from
 import type { Highlight } from "@tempra/editor/view";
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, useAction, useLoad } from "./api";
-import { Chip, when } from "./ui";
+import { Ago, Chip, who } from "./ui";
 import type { Urls } from "./urls";
 
 export interface CommentT {
@@ -158,8 +158,7 @@ export function CommentsPanel(props: {
     if (active) document.getElementById(`thread-${active}`)?.scrollIntoView({ block: "nearest" });
   }, [active]);
   return (
-    <section id="comments">
-      <h2>Comments{open.length > 0 ? ` (${open.length})` : ""}</h2>
+    <section id="comments" className="comments" aria-label="Comment threads">
       {props.error && <p className="small warn">Could not load the comments: {props.error}</p>}
       {props.writable && (
         <NewComment
@@ -190,7 +189,7 @@ export function CommentsPanel(props: {
       )}
       {resolved.length > 0 && (
         <details>
-          <summary className="small">Resolved ({resolved.length})</summary>
+          <summary className="small faint">Resolved ({resolved.length})</summary>
           <ol className="threads">
             {resolved.map((t) => (
               <ThreadView
@@ -243,13 +242,12 @@ function NewComment(props: {
       props.onPosted(r.thread.id);
     });
   };
+  // A pill until it is used; a card with the quote, the text and the actions once it is.
+  const [focused, setFocused] = useState(false);
+  const idle = !draft && !focused && !text;
   return (
-    <form className="comment-form" onSubmit={submit}>
-      {draft ? (
-        <blockquote className="quote small">{clip(draft.quote, 300)}</blockquote>
-      ) : (
-        <p className="small muted">Select text to comment on it.</p>
-      )}
+    <form className={idle ? "comment-form idle" : "comment-form"} onSubmit={submit}>
+      {draft && <blockquote className="quote">{clip(draft.quote, 300)}</blockquote>}
       <label className="visually-hidden" htmlFor="new-comment">
         Comment
       </label>
@@ -258,6 +256,7 @@ function NewComment(props: {
         ref={box}
         value={text}
         onChange={(e) => setText(e.currentTarget.value)}
+        onFocus={() => setFocused(true)}
         // Escape drops the draft; leaving an empty draft drops it too (as a click away does).
         onKeyDown={(e) => {
           if (e.key === "Escape" && draft) {
@@ -266,21 +265,25 @@ function NewComment(props: {
           }
         }}
         onBlur={(e) => {
+          setFocused(false);
           if (draft && !e.currentTarget.value.trim()) onClearDraft();
         }}
-        placeholder={draft ? "Comment on the selection" : "Comment on this concept"}
+        placeholder={
+          draft ? "Comment on the selection" : "Comment on this concept, or select text…"
+        }
       />
       {error && <div className="notice">{error}</div>}
-      <button className="primary" type="submit" disabled={busy || !text.trim()}>
-        Comment
-      </button>
-      {draft && (
-        <>
-          {" "}
-          <button type="button" onClick={onClearDraft}>
-            Cancel
+      {!idle && (
+        <div className="actions">
+          {draft && (
+            <button type="button" className="ghost" onClick={onClearDraft}>
+              Cancel
+            </button>
+          )}
+          <button className="primary" type="submit" disabled={busy || !text.trim()}>
+            Comment
           </button>
-        </>
+        </div>
       )}
     </form>
   );
@@ -314,10 +317,21 @@ function ThreadView(props: {
     });
   };
   const outdated = t.anchor !== null && t.at === null;
+  const [now] = useState(() => Date.now());
+  /** "who · when", then the text: the thread's first comment, replies a step in. */
+  const said = (c: { actor: string; ts: string; body: string }, reply: boolean, key: string) => (
+    <div key={key} className={reply ? "reply" : undefined}>
+      <div className="thread-by">
+        <strong>{who(c.actor)}</strong> <Ago ts={c.ts} now={now} />
+      </div>
+      <p className="comment">{c.body}</p>
+    </div>
+  );
+  let saidOnce = false;
   return (
     <li id={`thread-${t.id}`} className={props.active ? "thread active" : "thread"}>
       {t.anchor && (
-        <blockquote className="quote small">
+        <blockquote className="quote">
           {t.at ? (
             <a
               href={`#thread-${t.id}`}
@@ -335,51 +349,39 @@ function ThreadView(props: {
         </blockquote>
       )}
       {outdated && (
-        <Chip text="outdated" tone="warn" title="The quoted text is no longer in the body" />
+        <p className="small">
+          <Chip text="outdated" tone="warn" title="The quoted text is no longer in the body" />
+        </p>
       )}
       {t.actions ? (
         t.actions.map((a) => {
           const c = a.comment ? t.comments.find((x) => x.id === a.comment) : undefined;
           const change =
             a.kind === "resolve" ? "Resolved" : a.kind === "reopen" ? "Reopened" : null;
+          const reply = saidOnce;
+          if (c) saidOnce = true;
           return (
             <div key={a.seq}>
               {change && (
                 <p className="small muted">
-                  {change} by {a.actor} {when(a.ts)}
+                  {change} by {who(a.actor)} <Ago ts={a.ts} now={now} />
                   {c ? ":" : "."}
                 </p>
               )}
-              {c && (
-                <>
-                  {!change && (
-                    <div className="small">
-                      <strong>{c.actor}</strong> <span className="muted">{when(c.ts)}</span>
-                    </div>
-                  )}
-                  <p className="comment">{c.body}</p>
-                </>
-              )}
+              {c && (change ? <p className="comment">{c.body}</p> : said(c, reply, c.id))}
             </div>
           );
         })
       ) : (
         <>
-          {t.comments.map((c) => (
-            <div key={c.id}>
-              <div className="small">
-                <strong>{c.actor}</strong> <span className="muted">{when(c.ts)}</span>
-              </div>
-              <p className="comment">{c.body}</p>
-            </div>
-          ))}
+          {t.comments.map((c, i) => said(c, i > 0, c.id))}
           {t.status === "resolved" && t.resolved_by && (
-            <p className="small muted">Resolved by {t.resolved_by}.</p>
+            <p className="small muted">Resolved by {who(t.resolved_by)}.</p>
           )}
         </>
       )}
       {props.writable && (
-        <form className="comment-form" onSubmit={act("reply")}>
+        <form className="reply-form" onSubmit={act("reply")}>
           {t.status === "open" && (
             <>
               <label className="visually-hidden" htmlFor={`reply-${t.id}`}>
@@ -395,20 +397,34 @@ function ThreadView(props: {
             </>
           )}
           {error && <div className="notice">{error}</div>}
-          {t.status === "open" ? (
-            <>
-              <button type="submit" disabled={busy || !reply.trim()}>
-                Reply
-              </button>{" "}
-              <button type="button" disabled={busy} onClick={() => act("resolve")()}>
-                Resolve
+          <div className="actions">
+            {t.status === "open" ? (
+              <>
+                {reply.trim() && (
+                  <button type="submit" className="primary" disabled={busy}>
+                    Reply
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="ghost"
+                  disabled={busy}
+                  onClick={() => act("resolve")()}
+                >
+                  Resolve
+                </button>
+              </>
+            ) : (
+              <button
+                type="button"
+                className="ghost"
+                disabled={busy}
+                onClick={() => act("reopen")()}
+              >
+                Reopen
               </button>
-            </>
-          ) : (
-            <button type="button" disabled={busy} onClick={() => act("reopen")()}>
-              Reopen
-            </button>
-          )}
+            )}
+          </div>
         </form>
       )}
     </li>

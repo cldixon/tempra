@@ -164,6 +164,13 @@ describe("links, footnotes and headings for the reader", () => {
     expect(toHtmlFragment(p.footnotes[0]?.doc as never).toHTML()).toMatch(
       /^<p data-block="\w+">Note.<\/p>$/,
     );
+    // The caller may also say what the marker shows (a source's number).
+    const numbered = fromTree(stored(md), {
+      footnote: (label) => ({ href: `#src-${label}`, mark: label === "a" ? "1" : "2" }),
+    });
+    const shown = toHtmlFragment(numbered.doc).toHTML();
+    expect(shown).toContain('<sup class="fnref" data-label="a"><a href="#src-a">1</a></sup>');
+    expect(toTree(numbered.doc, numbered.footnotes)).toEqual(numbered.tree);
   });
 
   test("blocks carry their IDs into the reader", () => {

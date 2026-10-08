@@ -88,32 +88,30 @@ export function Work({ urls, kind }: { urls: Urls; kind?: string }) {
             </p>
           ) : (
             <>
-              <div className="table-wrap">
-                <table className="list">
-                  <tbody>
-                    {items.map((i) => (
-                      <tr key={i.thread ?? `${i.kind} ${i.path} ${i.detail}`}>
-                        <td>
-                          <Chip
-                            text={i.kind.replace("_", " ")}
-                            tone={i.kind === "comment" ? "" : i.kind === "lint" ? "warn" : "bad"}
-                          />
-                        </td>
-                        <td className="name">
-                          {/* A comment opens on its thread; its suggested action is for agents. */}
-                          <a href={i.thread ? `${urls.file(i.path)}#comments` : urls.file(i.path)}>
-                            {i.path}
-                          </a>
-                          <div className="small muted">{i.detail}</div>
-                          {!i.thread && <div className="small">→ {i.suggested_action}</div>}
-                        </td>
-                        <td className="muted small">{i.inbound_links} inbound</td>
-                        <td className="muted small">{when(i.since)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
+              <ol className="ledger">
+                {items.map((i) => (
+                  <li key={i.thread ?? `${i.kind} ${i.path} ${i.detail}`} className="request">
+                    <div className="req-head">
+                      <Chip
+                        text={i.kind.replace("_", " ")}
+                        tone={i.kind === "comment" ? "" : i.kind === "lint" ? "warn" : "bad"}
+                      />
+                      {/* A comment opens on its thread; its suggested action is for agents. */}
+                      <a href={i.thread ? `${urls.file(i.path)}#comments` : urls.file(i.path)}>
+                        {i.path}
+                      </a>
+                      <span className="muted small">{when(i.since)}</span>
+                      {i.inbound_links > 0 && (
+                        <span className="muted small">
+                          {plural(i.inbound_links, "inbound link")}
+                        </span>
+                      )}
+                    </div>
+                    <div className="note">{i.detail}</div>
+                    {!i.thread && <div className="small">→ {i.suggested_action}</div>}
+                  </li>
+                ))}
+              </ol>
               {total > items.length && (
                 <p className="small muted">{total - items.length} more not shown.</p>
               )}
@@ -631,10 +629,6 @@ export function ConnectLibrary({ urls }: { urls: Urls }) {
   return (
     <>
       <h1>Connect an agent</h1>
-      <p>
-        Connections belong to your account. <a href="/connect">Connect an agent</a> covers every
-        library.
-      </p>
       <ConnectSteps slug={urls.slug} />
       <h2>Status</h2>
       <Status loaded={loaded}>
