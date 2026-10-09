@@ -188,6 +188,18 @@ function chromiumPath(): string | null {
  * Chromium with one page that records every failed response, console error and page error as a
  * problem; `step` runs a part of a check and records its failure without stopping the rest.
  */
+/** The longest one browser step may take before it is reported as hung. */
+const STEP_MS = 90_000;
+
+/** Resolves with `work`, or rejects once `ms` pass, naming what took too long. */
+function within<T>(ms: number, what: string, work: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${what}: no answer in ${ms / 1000} s`)), ms);
+  });
+  return Promise.race([work, late]).finally(() => clearTimeout(timer));
+}
+
 async function openBrowser() {
   const executablePath = chromiumPath();
   if (!executablePath) return "no Chromium found; set CHROME_PATH";
@@ -213,7 +225,9 @@ async function openBrowser() {
   let failures = 0;
   const step = async (what: string, run: () => Promise<unknown>) => {
     try {
-      await run();
+      // A step that hangs (a wait with no timeout of its own) fails by name rather than
+      // silently using up the CI job's time.
+      await within(STEP_MS, what, run());
     } catch (e) {
       problems.push(`${what}: ${String(e).split("\n")[0]}`);
       // GATE_SCREENSHOTS: what the page showed when the step failed.
@@ -1152,15 +1166,18 @@ async function freshAccountConnects(): Promise<string[]> {
 
     // Sharing in the app (tempra-dev: v2/sharing): invite from the Members tab; the invitee
     // accepts from Invitations in their own browser; as a reader there is no Edit, at write there is.
-    await ui(
-      `${base}/api/v1/libraries/newcomer/notes/files/shared.md`,
-      {
-        method: "PUT",
-        headers: { Origin: base, "Content-Type": "text/markdown" },
-        body: "---\ntype: Note\ntitle: Shared note\ndescription: For the invited reader.\n---\nRead me.\n",
-      },
-      cookie,
-    );
+    await step("a note to share", async () => {
+      const put = await ui(
+        `${base}/api/v1/libraries/newcomer/notes/files/shared.md`,
+        {
+          method: "PUT",
+          headers: { Origin: base, "Content-Type": "text/markdown" },
+          body: "---\ntype: Note\ntitle: Shared note\ndescription: For the invited reader.\n---\nRead me.\n",
+        },
+        cookie,
+      );
+      if (put.status !== 200) throw new Error(`PUT shared.md: ${put.status}`);
+    });
     await step("invite a person from the Members tab", async () => {
       await page.goto(`${lib}/`);
       await libraryLink("Members");
@@ -1168,7 +1185,9 @@ async function freshAccountConnects(): Promise<string[]> {
       await page.getByRole("button", { name: "Invite" }).click();
       await page.getByText("Invited @stranger").waitFor({ timeout: 15_000 });
     });
-    const invitee = await openBrowser();
+    const invitee = await within(STEP_MS, "opening the invitee's browser", openBrowser()).catch(
+      (e) => String(e),
+    );
     if (typeof invitee === "string") problems.push(invitee);
     else {
       try {
@@ -1198,7 +1217,9 @@ async function freshAccountConnects(): Promise<string[]> {
         });
         problems.push(...invitee.problems.map((p) => `invitee: ${p}`));
       } finally {
-        await invitee.browser.close();
+        await within(STEP_MS, "closing the invitee's browser", invitee.browser.close()).catch((e) =>
+          problems.push(String(e)),
+        );
       }
     }
 
