@@ -2,6 +2,7 @@ import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { type AgentKey, connectionAgent, tokenAgent } from "./agents";
 import { actedBy, createApp, type Deps } from "./app";
 import { handleMcp, type McpContext } from "./mcp/server";
+import { postComment } from "./notify";
 import { type GrantProps, SCOPES } from "./oauth/routes";
 import { OkfError } from "./store/errors";
 import { grantLibraries } from "./tenancy";
@@ -127,6 +128,7 @@ export function createWorker(deps: (env: Cloudflare.Env) => Deps): {
           return handleMcp(request, {
             ...caller,
             open: (t) => d.library(t),
+            comment: (t, req, action) => postComment(d, t, d.library(t), req, action),
             blobs: d.blobs,
             origin,
           });

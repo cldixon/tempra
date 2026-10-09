@@ -5,6 +5,8 @@ import { makeClient, r2BlobStore } from "./client";
 import type { Library } from "./library";
 import { DEFAULT_STORAGE_MB } from "./limits";
 import { exportsPrefix, listExports } from "./maintain";
+import { d1Notifications } from "./notify";
+import { devMailer, flushMail, sendDigests } from "./notify-mail";
 import { listRestores, RESTORE_ID, restoresPrefix } from "./recovery";
 import { d1Sessions } from "./session";
 import type { Mailer } from "./signin";
@@ -27,7 +29,14 @@ function libraryStub(env: Env, name: string): DurableObjectStub<Library> {
  * set in cloudflare.config.ts (mailFrom); without it there is no mailer.
  */
 type MailBinding = {
-  send(m: { from: string; to: string; subject: string; text: string }): Promise<unknown>;
+  send(m: {
+    from: string;
+    to: string;
+    subject: string;
+    text: string;
+    html?: string;
+    headers?: Record<string, string>;
+  }): Promise<unknown>;
 };
 
 function mailerFor(env: Env): Mailer | null {
@@ -57,6 +66,7 @@ const depsFor = (env: Env): Deps => {
     accounts: d1Accounts(env.DB),
     sessions: d1Sessions(env.DB),
     mailer: mailerFor(env),
+    notifications: d1Notifications(env.DB),
     async rateLimit(kind, key) {
       const limiter = kind === "write" ? env.WRITE_LIMITER : env.REQUEST_LIMITER;
       return (await limiter.limit({ key })).success;
@@ -163,11 +173,40 @@ const depsFor = (env: Env): Deps => {
 
 const worker = createWorker(depsFor);
 
+/** The 5-minute cron that sends batched notification mail; any other is the daily one. */
+const NOTIFY_CRON = "*/5 * * * *";
+
 export default {
   fetch: worker.fetch,
 
-  /** The daily blob sweep and operator digest (v2 spec: A3); cron in cloudflare.config.ts. */
-  async scheduled(_controller, env) {
+  /**
+   * The crons in cloudflare.config.ts: every 5 minutes the batched notification mail (TEMPRA-74);
+   * daily the blob sweep, the operator digest and people's digests (v2 spec: A3).
+   */
+  async scheduled(controller, env) {
+    // Local dev (DEV_SIGNIN=1) keeps notification mail in the dev outbox (/_dev/mail).
+    const mail = {
+      accounts: d1Accounts(env.DB),
+      notifications: d1Notifications(env.DB),
+      mailer: env.DEV_SIGNIN === "1" ? devMailer : mailerFor(env),
+      origin: env.APP_ORIGIN,
+      now: new Date(),
+    };
+    if (controller.cron === NOTIFY_CRON) {
+      const sent = await flushMail(mail);
+      if (sent.mails || sent.skipped) console.log(JSON.stringify({ notify_mail: sent }));
+      return;
+    }
+    const digests = await sendDigests({
+      ...mail,
+      digest: (doId, since) => {
+        const stub = libraryStub(env, doId);
+        return makeClient((method, args) => stub.call(method, args)).digest({ since });
+      },
+    }).catch((e) => {
+      console.error(JSON.stringify({ digests_failed: String(e) }));
+      return null;
+    });
     const result = await sweep({
       libraries: async () =>
         (
@@ -187,7 +226,12 @@ export default {
     // The waitlist (v2 spec: Accounts and sign-in): the digest counts who waits, past the notice cap.
     const waiting = (await d1Accounts(env.DB).waitlist()).length;
     if (waiting) result.attention.push(`${waiting} waiting on the waitlist: /waitlist`);
-    console.log(JSON.stringify({ sweep: result }));
+    // Notification mail that failed yesterday (bounces, as far as sending tells us).
+    const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+    const failed = await mail.notifications.failures(yesterday);
+    if (failed)
+      result.attention.push(`${failed} notification mails failed to send on ${yesterday}`);
+    console.log(JSON.stringify({ sweep: result, digests }));
     const mailer = mailerFor(env);
     if (result.attention.length && env.OPERATOR_EMAIL && mailer) {
       await mailer.send({

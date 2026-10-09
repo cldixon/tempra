@@ -105,8 +105,16 @@ export default defineConfig(({ mode }) => {
       domains: local ? [] : [d.host],
       workersDev: false,
 
-      // The daily blob sweep and operator digest (v2 spec: A3), after the libraries' 03:00 exports.
-      triggers: d.cron === false ? [] : [triggers.scheduled({ schedule: "30 4 * * *" })],
+      // The daily blob sweep, operator digest and people's digests (v2 spec: A3), after the
+      // libraries' 03:00 exports; every 5 minutes, batched notification mail (TEMPRA-74). The
+      // Worker tells them apart by schedule (src/index.ts).
+      triggers:
+        d.cron === false
+          ? []
+          : [
+              triggers.scheduled({ schedule: "30 4 * * *" }),
+              triggers.scheduled({ schedule: "*/5 * * * *" }),
+            ],
 
       // One SQLite-backed Durable Object per library (spec: Backend architecture). Declared as an
       // export; this replaces Wrangler's `migrations` history (its v1 created the same class).
@@ -150,6 +158,8 @@ export default defineConfig(({ mode }) => {
 
         // The daily digest goes to OPERATOR_EMAIL, a secret (typed in src/env.d.ts); unset sends none.
         MAIL_FROM: bindings.text(d.mailFrom),
+        // Links in mail sent from the crons, which have no request to take an origin from.
+        APP_ORIGIN: bindings.text(local ? "http://localhost:8787" : `https://${d.host}`),
         ...(d.mailFrom
           ? { EMAIL: bindings.sendEmail({ allowedSenderAddresses: [d.mailFrom] }) }
           : {}),

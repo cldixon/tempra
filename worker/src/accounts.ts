@@ -865,6 +865,9 @@ export function d1Accounts(db: D1Database): Accounts {
         db.prepare("DELETE FROM tokens WHERE library = ?").bind(libraryId),
         db.prepare("DELETE FROM library_members WHERE library = ?").bind(libraryId),
         db.prepare("DELETE FROM library_invitations WHERE library = ?").bind(libraryId),
+        db.prepare("DELETE FROM notifications WHERE library = ?").bind(libraryId),
+        db.prepare("DELETE FROM library_seen WHERE library = ?").bind(libraryId),
+        db.prepare("DELETE FROM notification_prefs WHERE library = ?").bind(libraryId),
         db.prepare("DELETE FROM libraries WHERE id = ?").bind(libraryId),
       ]);
     },
@@ -881,6 +884,9 @@ export function d1Accounts(db: D1Database): Accounts {
         db.prepare("DELETE FROM library_members WHERE user = ?").bind(user.id),
         db.prepare("DELETE FROM library_invitations WHERE user = ?").bind(user.id),
         db.prepare("DELETE FROM agents WHERE user = ?").bind(user.id),
+        db.prepare("DELETE FROM notifications WHERE user = ?").bind(user.id),
+        db.prepare("DELETE FROM library_seen WHERE user = ?").bind(user.id),
+        db.prepare("DELETE FROM notification_prefs WHERE user = ?").bind(user.id),
         db.prepare("DELETE FROM users WHERE id = ?").bind(user.id),
         db
           .prepare("INSERT OR REPLACE INTO handle_holds (handle, user, released) VALUES (?, ?, ?)")
