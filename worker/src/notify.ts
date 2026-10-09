@@ -69,7 +69,7 @@ export const MAILS_PER_DAY = 20;
 
 export interface Notifications {
   add(items: NewItem[]): Promise<void>;
-  /** The inbox, newest first: open items, or with `all` read and done ones too. */
+  /** The inbox, newest first: open items, or with `all` read and done ones too; `before` is `next`. */
   inbox(
     user: string,
     opts?: { all?: boolean; before?: string; limit?: number },
@@ -146,18 +146,19 @@ export function d1Notifications(db: D1Database): Notifications {
     },
     async inbox(user, opts = {}) {
       const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
+      // Newest first by insertion order (items made in the same millisecond keep theirs).
+      const before = Number(opts.before);
       const r = await db
         .prepare(
-          `${items} WHERE user = ? ${opts.all ? "" : "AND done_at IS NULL"}
-           ${opts.before ? "AND created < ?" : ""} ORDER BY created DESC, id LIMIT ?`,
+          `SELECT rowid AS n, ${items.slice("SELECT ".length)} WHERE user = ?
+           ${opts.all ? "" : "AND done_at IS NULL"} ${before > 0 ? "AND rowid < ?" : ""}
+           ORDER BY rowid DESC LIMIT ?`,
         )
-        .bind(...[user, ...(opts.before ? [opts.before] : []), limit + 1])
-        .all<Item>();
-      const page = r.results.slice(0, limit);
-      return {
-        items: page,
-        next: r.results.length > limit ? (page[page.length - 1]?.created ?? null) : null,
-      };
+        .bind(...[user, ...(before > 0 ? [before] : []), limit + 1])
+        .all<Item & { n: number }>();
+      const page = r.results.slice(0, limit).map(({ n: _, ...i }) => i);
+      const last = r.results[limit - 1];
+      return { items: page, next: r.results.length > limit && last ? String(last.n) : null };
     },
     async unread(user) {
       const r = await db

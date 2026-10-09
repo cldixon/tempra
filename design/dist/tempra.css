@@ -2115,3 +2115,81 @@ ul.events {
   font-family: var(--tempra-font-mono);
   font-size: var(--tempra-text-label);
 }
+
+/* ---------- Notifications (TEMPRA-72, TEMPRA-73): counts, the inbox, mentions ---------- */
+
+/* The headers' Inbox link and its unread count: a number, no colour. */
+.inbox-link {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-ui);
+  text-decoration: none;
+}
+
+.inbox-link:hover {
+  color: var(--tempra-color-text);
+}
+
+.inbox-link .count,
+.lib-list .tally {
+  color: var(--tempra-color-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A library's tally in the list: for you, new, open threads. */
+.lib-list .tally {
+  float: right;
+  font-size: var(--tempra-text-ui);
+  font-weight: 400;
+}
+
+.inbox-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.inbox-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  padding: 12px 18px;
+  border-radius: var(--tempra-radius-box);
+}
+
+.inbox-list li:hover {
+  background: var(--tempra-color-hover);
+}
+
+.inbox-list .what {
+  flex: 1 1 20rem;
+}
+
+.inbox-list .unread .what a {
+  font-weight: 600;
+}
+
+.inbox-list .when {
+  font-size: var(--tempra-text-meta);
+}
+
+.inbox-list .excerpt {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--tempra-color-muted);
+}
+
+/* The comment box with its @ suggestions under it. */
+.mention-box {
+  position: relative;
+}
+
+.mention-list [aria-selected="true"] {
+  background: var(--tempra-color-hover);
+}

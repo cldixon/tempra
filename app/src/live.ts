@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import type { Urls } from "./urls";
 
@@ -278,31 +278,83 @@ export function useTrailing(fn: () => void, ms = 400): () => void {
 }
 
 /**
- * "Since you last looked" (tempra-dev: app/live): the ledger sequence a person had seen in a
- * library on this browser. Local storage only; it may be missing or refuse, which only means
- * nothing is marked new.
+ * "Since you last looked" (tempra-dev: app/live, TEMPRA-72): the ledger sequence a person has
+ * seen in a library, kept on the server so it follows them across devices. Read once per page
+ * load, so what is new stays marked while the person looks around; null until it arrives, or
+ * when they have never looked.
  */
-export function lastSeen(urls: Urls): number | null {
-  const key = `tempra:seen:${urls.owner}/${urls.slug}`;
-  // Read once per page load, so what is new stays marked while the person looks around.
-  if (!atLoad.has(key)) {
-    try {
-      const v = localStorage.getItem(key);
-      atLoad.set(key, v === null ? null : Number(v));
-    } catch {
-      atLoad.set(key, null);
+export function useLastSeen(urls: Urls): number | null {
+  const key = seenKey(urls);
+  const [seen, setSeen] = useState(() => atLoad.get(key)?.value ?? null);
+  useEffect(() => {
+    let entry = atLoad.get(key);
+    if (!entry) {
+      entry = { value: null, ready: loadSeen(urls) };
+      atLoad.set(key, entry);
     }
-  }
-  return atLoad.get(key) ?? null;
+    let live = true;
+    void entry.ready.then((v) => live && setSeen(v));
+    return () => {
+      live = false;
+    };
+  }, [key, urls]);
+  return seen;
 }
 
-const atLoad = new Map<string, number | null>();
+const seenKey = (urls: Urls) => `${urls.owner}/${urls.slug}`;
 
-export function markSeen(urls: Urls, seq: number) {
+const atLoad = new Map<string, { value: number | null; ready: Promise<number | null> }>();
+
+/** The server's cursor; a cursor this browser kept before (local storage) is carried over once. */
+async function loadSeen(urls: Urls): Promise<number | null> {
+  const key = seenKey(urls);
+  let seq: number | null = null;
   try {
-    const key = `tempra:seen:${urls.owner}/${urls.slug}`;
-    if (Number(localStorage.getItem(key) ?? 0) < seq) localStorage.setItem(key, String(seq));
+    seq = (await api<{ seq: number | null }>(urls.api("seen"))).seq;
   } catch {
-    // Private mode or storage off: nothing is marked new next time.
+    return null;
   }
+  const old = `tempra:seen:${key}`;
+  try {
+    const local = localStorage.getItem(old);
+    if (local !== null) {
+      localStorage.removeItem(old);
+      if (seq === null || Number(local) > seq) {
+        seq = Number(local);
+        sendSeen(urls, seq);
+      }
+    }
+  } catch {
+    // Storage off: nothing to carry over.
+  }
+  const entry = atLoad.get(key);
+  if (entry) entry.value = seq;
+  return seq;
+}
+
+/** The highest sequence sent per library, so a page sends each step forward once. */
+const sent = new Map<string, number>();
+
+/** Said on window when a cursor moved, so counts of what is new reload. */
+export const SEEN_EVENT = "tempra:seen";
+
+function sendSeen(urls: Urls, seq: number) {
+  sent.set(seenKey(urls), seq);
+  void api(urls.api("seen"), { method: "PUT", body: JSON.stringify({ seq }) })
+    .then(() => window.dispatchEvent(new Event(SEEN_EVENT)))
+    .catch(() => {
+      // Offline: the next look sends it again.
+      sent.delete(seenKey(urls));
+    });
+}
+
+/**
+ * The person has seen the library's ledger up to `seq` (it never moves back). Sent once this
+ * page load's cursor has been read, so the page still marks what was new when it opened.
+ */
+export function markSeen(urls: Urls, seq: number) {
+  if ((sent.get(seenKey(urls)) ?? -1) >= seq) return;
+  sent.set(seenKey(urls), seq);
+  const read = atLoad.get(seenKey(urls))?.ready ?? Promise.resolve(null);
+  void read.then(() => sendSeen(urls, seq));
 }

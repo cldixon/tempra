@@ -26,8 +26,8 @@ CREATE TABLE notifications (
   -- over the day's cap); null when it is never mailed.
   mail     TEXT CHECK (mail IN ('pending', 'sent', 'skipped'))
 );
--- The inbox, newest first, and its unread count.
-CREATE INDEX notifications_user ON notifications (user, created);
+-- The inbox, newest first (rowid order within a user), and its unread count.
+CREATE INDEX notifications_user ON notifications (user);
 CREATE INDEX notifications_unread ON notifications (user, library) WHERE read_at IS NULL AND done_at IS NULL;
 -- The mail batcher's queue.
 CREATE INDEX notifications_mail ON notifications (user, created) WHERE mail = 'pending';

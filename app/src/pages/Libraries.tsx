@@ -15,6 +15,20 @@ interface Library {
   concepts?: number;
   attachments?: number;
   open_work?: number;
+  open_comments?: number;
+  /** Since the person last looked (TEMPRA-72): changes by others, and items for them here. */
+  tally?: { changes: number; for_you: number };
+}
+
+/** A library's tally as a few words: "2 for you · 5 new · 1 open thread"; empty for none. */
+export function tallyText(l: Pick<Library, "tally" | "open_comments">): string {
+  const parts: string[] = [];
+  if (l.tally?.for_you) parts.push(`${l.tally.for_you} for you`);
+  if (l.tally?.changes) parts.push(`${l.tally.changes} new`);
+  if (l.open_comments) {
+    parts.push(`${l.open_comments} open thread${l.open_comments === 1 ? "" : "s"}`);
+  }
+  return parts.join(" · ");
 }
 
 /** The account's libraries: one row each, a New button, and how agents get in. */
@@ -66,6 +80,7 @@ export function Libraries() {
                         {/* Another account's library (shared) says whose it is. */}
                         {owners.size > 1 && <span className="owner">{l.owner}/</span>}
                         {l.slug}
+                        {tallyText(l) && <span className="tally">{tallyText(l)}</span>}
                       </a>
                       {l.role && l.role !== "owner" && <span className="faint"> {l.role}</span>}
                     </li>

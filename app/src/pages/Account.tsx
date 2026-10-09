@@ -1,6 +1,6 @@
 import { type FormEvent, useState } from "react";
 import { api, field, useAction, useLoad } from "../api";
-import { type Me, Status, useTitle, when } from "../ui";
+import { type Me, Status, useScrollToHash, useTitle, when } from "../ui";
 import { Urls } from "../urls";
 
 /** The landing page's legal pages (TEMPRA-14). */
@@ -632,6 +632,7 @@ export function Account({ done }: { done: string | null }) {
               Libraries: {a.usage.libraries} of {a.limits.libraries}. Active tokens:{" "}
               {a.usage.tokens} of {a.limits.tokens}.
             </p>
+            <MailSettings />
             <h2>Sessions</h2>
             <div className="table-wrap">
               <table className="list">
@@ -694,6 +695,107 @@ export function Account({ done }: { done: string | null }) {
             <p>
               <a href={`${LEGAL}/terms`}>Terms</a> · <a href={`${LEGAL}/privacy`}>Privacy</a>
             </p>
+          </>
+        )}
+      </Status>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------- notification mail
+
+interface MailPrefs {
+  immediate: boolean;
+  digest: boolean;
+  libraries: { library: string; immediate: boolean | null; digest: boolean | null }[];
+}
+
+/** A library's setting as the select shows it: following the account, on or off. */
+const choice = (v: boolean | null) => (v === null ? "" : v ? "on" : "off");
+const fromChoice = (v: string) => (v === "" ? null : v === "on");
+
+/**
+ * What the person is mailed (TEMPRA-74): what is addressed to them, batched, and an opt-in daily
+ * digest; each library can follow the account or differ. Every change saves at once.
+ */
+function MailSettings() {
+  const loaded = useLoad("mail-prefs", () => api<MailPrefs>("/api/v1/account/notifications"));
+  // Mail's "Mail settings" link lands here (#notifications).
+  useScrollToHash(loaded.state === "ready");
+  const action = useAction();
+  const save = (body: Record<string, unknown>) =>
+    action.run(async () => {
+      await post("/api/v1/account/notifications", body, "PUT");
+      loaded.reload();
+    });
+  return (
+    <>
+      <h2 id="notifications">Notifications</h2>
+      {action.error && <div className="notice">{action.error}</div>}
+      <Status loaded={loaded}>
+        {(p) => (
+          <>
+            <p>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={p.immediate}
+                  disabled={action.busy}
+                  onChange={(e) => void save({ immediate: e.currentTarget.checked })}
+                />{" "}
+                Mail me replies, mentions and new threads on what I wrote
+              </label>
+            </p>
+            <p>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={p.digest}
+                  disabled={action.busy}
+                  onChange={(e) => void save({ digest: e.currentTarget.checked })}
+                />{" "}
+                Mail me a daily digest of my libraries
+              </label>
+            </p>
+            {p.libraries.length > 0 && (
+              <div className="table-wrap">
+                <table className="list">
+                  <thead>
+                    <tr>
+                      <th>Library</th>
+                      <th>Mail</th>
+                      <th>Digest</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {p.libraries.map((l) => (
+                      <tr key={l.library}>
+                        <td className="name">{l.library}</td>
+                        {(["immediate", "digest"] as const).map((k) => (
+                          <td key={k}>
+                            <select
+                              aria-label={`${k === "immediate" ? "Mail" : "Digest"} for ${l.library}`}
+                              value={choice(l[k])}
+                              disabled={action.busy}
+                              onChange={(e) =>
+                                void save({
+                                  library: l.library,
+                                  [k]: fromChoice(e.currentTarget.value),
+                                })
+                              }
+                            >
+                              <option value="">As above ({p[k] ? "on" : "off"})</option>
+                              <option value="on">On</option>
+                              <option value="off">Off</option>
+                            </select>
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </>
         )}
       </Status>

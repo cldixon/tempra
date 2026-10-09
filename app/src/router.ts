@@ -10,6 +10,7 @@ export type Route =
   | { page: "apps" }
   | { page: "account"; done: string | null }
   | { page: "invitations" }
+  | { page: "inbox"; all: boolean }
   | { page: "members"; owner: string; slug: string }
   | { page: "work"; owner: string; slug: string; kind?: string }
   | { page: "transfer"; owner: string; slug: string }
@@ -71,6 +72,7 @@ export function match(url: URL): Route | null {
   if (path === "/apps") return { page: "apps" };
   if (path === "/account") return { page: "account", done: q.get("done") };
   if (path === "/invitations") return { page: "invitations" };
+  if (path === "/inbox") return { page: "inbox", all: q.get("all") === "1" };
   const m = /^\/([^/]+)\/([^/]+)\/(.*)$/.exec(path);
   if (!m) return null;
   const owner = decode(m[1] ?? "");
@@ -152,6 +154,7 @@ const ACCOUNT_PAGES = new Set([
   "/apps",
   "/account",
   "/invitations",
+  "/inbox",
 ]);
 
 /**

@@ -43,6 +43,8 @@ describe("routes follow the server's URLs (tempra-dev: v2/urls-and-handles)", ()
     });
     expect(at("/ann/notes/-/connect")).toMatchObject({ page: "library-connect" });
     expect(at("/invitations")).toEqual({ page: "invitations" });
+    expect(at("/inbox")).toEqual({ page: "inbox", all: false });
+    expect(at("/inbox?all=1")).toEqual({ page: "inbox", all: true });
     for (const p of ["transfer", "recovery", "delete", "members"]) {
       expect(at(`/ann/notes/-/${p}`)).toMatchObject({ page: p, owner: "ann", slug: "notes" });
     }
