@@ -1,5 +1,6 @@
 import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
-import { createApp, type Deps } from "./app";
+import { type AgentKey, connectionAgent, tokenAgent } from "./agents";
+import { actedBy, createApp, type Deps } from "./app";
 import { handleMcp, type McpContext } from "./mcp/server";
 import { type GrantProps, SCOPES } from "./oauth/routes";
 import { OkfError } from "./store/errors";
@@ -30,6 +31,23 @@ function invalidToken(origin: string, why: string): Response {
   });
 }
 
+/** The client's name and version from an MCP initialize request, or null for anything else. */
+function initializeInfo(body: unknown): string | null {
+  const msgs = Array.isArray(body) ? body : [body];
+  for (const m of msgs) {
+    const msg = m as {
+      method?: string;
+      params?: { clientInfo?: { name?: unknown; version?: unknown } };
+    };
+    if (msg?.method !== "initialize") continue;
+    const ci = msg.params?.clientInfo;
+    const name = typeof ci?.name === "string" ? ci.name : "";
+    const version = typeof ci?.version === "string" ? ci.version : "";
+    return `${name} ${version}`.trim();
+  }
+  return null;
+}
+
 export function createWorker(deps: (env: Cloudflare.Env) => Deps): {
   fetch: NonNullable<ExportedHandler<Env>["fetch"]>;
 } {
@@ -49,7 +67,9 @@ export function createWorker(deps: (env: Cloudflare.Env) => Deps): {
           // An app connection reaches the account's libraries as of now; a bearer token (or a
           // connection approved before account-level access) reaches its one library.
           let who: Admission;
-          let caller: Pick<McpContext, "actor" | "scope" | "tiers" | "libraries">;
+          let caller: Pick<McpContext, "actor" | "scope" | "tiers" | "libraries" | "by">;
+          /** The agent behind the connection, as the person's agent on its platform. */
+          let agent: { userId: string; key: AgentKey } | null = null;
           if (props.grant) {
             const g = props.grant;
             const reach = await grantLibraries(d.accounts, g);
@@ -62,7 +82,9 @@ export function createWorker(deps: (env: Cloudflare.Env) => Deps): {
               scope: g.scope,
               tiers: g.tiers,
               libraries: reach.libraries,
+              by: reach.libraries[0] ? actedBy(reach.libraries[0]) : { person: reach.user.id },
             };
+            agent = { userId: reach.user.id, key: connectionAgent(g.client ?? {}) };
           } else if (props.token) {
             const t = props.token;
             who = tokenAdmission(t);
@@ -71,18 +93,30 @@ export function createWorker(deps: (env: Cloudflare.Env) => Deps): {
               scope: t.scope,
               tiers: t.mcp_tiers,
               libraries: [t],
+              by: actedBy(t),
             };
+            if (t.created_by && t.agent) agent = { userId: t.created_by, key: tokenAgent(t.actor) };
           } else {
             return new Response(null, { status: 401 });
           }
           let write = false;
           if (request.method === "POST") {
-            write = mcpWrites(
-              await request
-                .clone()
-                .json()
-                .catch(() => null),
-            );
+            const body = await request
+              .clone()
+              .json()
+              .catch(() => null);
+            write = mcpWrites(body);
+            // What the client says about itself, once per session (TEMPRA-75): a claim, kept
+            // to tell agents apart and never used to authorize.
+            const info = initializeInfo(body);
+            if (agent && info !== null) {
+              await d.accounts
+                .recordAgent(agent.userId, agent.key, {
+                  client: info,
+                  userAgent: request.headers.get("User-Agent"),
+                })
+                .catch((e) => console.error("recordAgent", e));
+            }
           }
           try {
             await admit(d, who, write);

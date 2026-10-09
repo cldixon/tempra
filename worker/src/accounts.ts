@@ -1,3 +1,4 @@
+import { type AgentKey, agentId } from "./agents";
 import { hashToken, newTokenSecret } from "./auth";
 import { checkHandle, HANDLE_HOLD_DAYS, handleFromEmail } from "./handles";
 import { type Limits, limitsFrom, overLimit } from "./limits";
@@ -31,6 +32,18 @@ export interface Member {
   handle: string;
   role: MemberRole;
   created: string;
+}
+
+/** An agent acting for a person (agents.ts), as the app shows it. */
+export interface AgentRow {
+  id: string;
+  name: string;
+  platform: string;
+  /** The person's current handle. */
+  person: string;
+  first_seen: string;
+  last_seen: string;
+  client: string | null;
 }
 
 export interface User {
@@ -113,6 +126,17 @@ export interface Accounts {
   ): Promise<void>;
   /** Ends a membership; false when there was none. */
   unshare(libraryId: string, userId: string): Promise<boolean>;
+  /**
+   * Records that a person's agent connected (consent, a minted token, MCP initialize), with what
+   * it said about itself; returns its id. Names agents only, never authorizes.
+   */
+  recordAgent(
+    userId: string,
+    key: AgentKey,
+    seen?: { client?: string | null; userAgent?: string | null },
+  ): Promise<string>;
+  /** Agents by id, with their person's handle; unknown ids are left out. */
+  agents(ids: string[]): Promise<AgentRow[]>;
   /** A library by its path, with its owner's users row id; null when there is none. */
   library(owner: string, slug: string): Promise<(LibraryRef & { ownerId: string }) | null>;
   createLibrary(slug: string, owner: Pick<User, "id" | "handle">): Promise<LibraryRef>;
@@ -396,6 +420,41 @@ export function d1Accounts(db: D1Database): Accounts {
         .all<ReachableLibrary & { shared: number }>();
       return r.results.map(({ shared: _, ...l }) => l);
     },
+    async recordAgent(userId, key, seen = {}) {
+      const id = agentId(userId, key.platform);
+      const now = new Date().toISOString();
+      await db
+        .prepare(
+          `INSERT INTO agents (id, user, platform, name, first_seen, last_seen, client, user_agent)
+           VALUES (?1, ?2, ?3, ?4, ?5, ?5, ?6, ?7)
+           ON CONFLICT (id) DO UPDATE SET last_seen = ?5, name = ?4,
+             client = COALESCE(?6, client), user_agent = COALESCE(?7, user_agent)`,
+        )
+        .bind(
+          id,
+          userId,
+          key.platform,
+          key.name.slice(0, 80),
+          now,
+          seen.client?.slice(0, 120) ?? null,
+          seen.userAgent?.slice(0, 200) ?? null,
+        )
+        .run();
+      return id;
+    },
+    async agents(ids) {
+      if (ids.length === 0) return [];
+      const unique = [...new Set(ids)].slice(0, 100);
+      const r = await db
+        .prepare(
+          `SELECT a.id, a.name, a.platform, u.handle AS person, a.first_seen, a.last_seen, a.client
+           FROM agents a JOIN users u ON u.id = a.user
+           WHERE a.id IN (${unique.map(() => "?").join(", ")})`,
+        )
+        .bind(...unique)
+        .all<AgentRow>();
+      return r.results;
+    },
     async memberRole(libraryId, userId) {
       const row = await db
         .prepare("SELECT role FROM library_members WHERE library = ? AND user = ?")
@@ -626,6 +685,7 @@ export function d1Accounts(db: D1Database): Accounts {
           .bind(new Date().toISOString(), user.id),
         db.prepare("UPDATE tokens SET created_by = NULL WHERE created_by = ?").bind(user.id),
         db.prepare("DELETE FROM library_members WHERE user = ?").bind(user.id),
+        db.prepare("DELETE FROM agents WHERE user = ?").bind(user.id),
         db.prepare("DELETE FROM users WHERE id = ?").bind(user.id),
         db
           .prepare("INSERT OR REPLACE INTO handle_holds (handle, user, released) VALUES (?, ?, ?)")

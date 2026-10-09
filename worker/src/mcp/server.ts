@@ -16,6 +16,8 @@ export interface McpContext {
   tiers: string;
   /** The libraries the caller reaches now, each as the token it acts with there. */
   libraries: TokenInfo[];
+  /** The person and agent behind the actor, for the ledger (TEMPRA-75). */
+  by?: RequestContext["by"];
   open(token: TokenInfo): LibraryClient;
   blobs: BlobStore;
   /** The Worker's origin, for download URLs. */
@@ -172,6 +174,7 @@ export function buildServer(ctx: McpContext): McpServer {
     actor: ctx.actor,
     request_id: crypto.randomUUID(),
     note: note ?? null,
+    by: ctx.by ?? null,
   });
 
   const checkWrite = (token: TokenInfo, ...paths: string[]) => {

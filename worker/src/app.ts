@@ -3,6 +3,7 @@ import { type Doc, parseMarkdown } from "@tempra/editor/doc";
 import { type Context, Hono } from "hono";
 import { registerAccountApi } from "./account-api";
 import { type Accounts, checkNewToken, type User } from "./accounts";
+import { tokenAgent } from "./agents";
 import type { Authenticate, TokenInfo } from "./auth";
 import {
   type BlobStore,
@@ -130,7 +131,14 @@ function requestContext(c: C, note?: unknown): RequestContext {
     actor: c.var.token.actor,
     request_id: crypto.randomUUID(),
     note: typeof note === "string" && note ? note : header ? decodeURIComponent(header) : null,
+    by: actedBy(c.var.token),
   };
+}
+
+/** The person and agent behind a token, for the ledger (tempra-dev: agents act for a person). */
+export function actedBy(t: TokenInfo): RequestContext["by"] {
+  if (!t.created_by) return null;
+  return t.agent ? { person: t.created_by, agent: t.agent } : { person: t.created_by };
 }
 
 /** Content writes: write, edit, move, delete, attach, revert, import, verify. */
@@ -545,6 +553,44 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
 
   app.get(`${BASE}/stats`, async (c) => c.json(await c.var.lib.stats()));
 
+  // Who has worked in the library: people and each of their agents, from the ledger's records
+  // of who acted (TEMPRA-75), named from D1. Agents act for their person ("Claude for @alice").
+  app.get(`${BASE}/agents`, async (c) => {
+    const rows = await c.var.lib.contributors();
+    const accounts = c.var.deps.accounts;
+    const agents = new Map(
+      (await accounts.agents(rows.flatMap((r) => (r.agent ? [r.agent] : [])))).map((a) => [
+        a.id,
+        a,
+      ]),
+    );
+    const handles = new Map<string, string | null>();
+    for (const id of new Set(rows.map((r) => r.person))) {
+      handles.set(id, (await accounts.account(id))?.handle ?? null);
+    }
+    return c.json({
+      contributors: rows.map((r) => {
+        const a = r.agent ? agents.get(r.agent) : undefined;
+        return {
+          person: handles.get(r.person) ?? null,
+          agent: r.agent
+            ? {
+                id: r.agent,
+                name: a?.name ?? null,
+                platform: a?.platform ?? null,
+                client: a?.client ?? null,
+              }
+            : null,
+          actor: r.actor,
+          requests: r.requests,
+          first_seq: r.first_seq,
+          last_seq: r.last_seq,
+          last_ts: r.last_ts,
+        };
+      }),
+    });
+  });
+
   // The change feed (tempra-dev: app/live): a WebSocket on which the library's Durable Object
   // pushes every committed event. Authorized and counted once, here, when it opens; a session
   // must open it from this site's own pages. GET /events?since=N is the catch-up.
@@ -735,7 +781,12 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     if (body.starter && session) {
       const client = await d.libraryByDoId(lib.do_id);
       await client?.apply(
-        { actor: session.actor, request_id: crypto.randomUUID(), note: "Starter note" },
+        {
+          actor: session.actor,
+          request_id: crypto.randomUUID(),
+          note: "Starter note",
+          by: { person: session.id },
+        },
         [{ op: "write", path: "start-here.md", content: STARTER }],
       );
     }
@@ -791,6 +842,10 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
         "read_only",
         `You have read access to ${lib.owner}/${lib.slug}: mint a read token (it may still comment).`,
       );
+    }
+    // A token for an agent names that agent (agents.ts): the person's agent for its app.
+    if (!fields.actor.startsWith("human:")) {
+      await d.accounts.recordAgent(user.id, tokenAgent(fields.actor));
     }
     const minted = await d.accounts.createToken({
       ...fields,

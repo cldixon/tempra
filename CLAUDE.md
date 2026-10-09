@@ -60,6 +60,7 @@ worker/src/app.ts        Hono app: REST routes under /api/v1/libraries/{owner}/{
 worker/src/auth.ts       Bearer tokens: hash lookup in D1, scope, prefix, expiry, revocation, suspension
 worker/src/accounts.ts   Users (handles), libraries and tokens in D1, every query scoped to one account
 worker/src/tenancy.ts    authorizeLibrary: the one check that a caller may reach {owner}/{slug} (its owner, or a member in D1 `library_members`) and with what role; 404 otherwise. requireOwner for owner-only routes. grantLibraries: what an app connection reaches
+worker/src/agents.ts     Agent identity (TEMPRA-75): an agent is a person's agents on one platform (claude.ai, chatgpt.com, a CLI, a token's app), id derived from (person, platform); D1 `agents` names them; every ledger event's meta carries `by: {person, agent}`; GET …/agents lists who acted. Never authorizes
 worker/src/session.ts    Magic links and sessions in D1 (hashes only), the session cookie
 worker/src/signin.ts     /sign-in, /sign-out and signedIn(); SIGNUP (open, invite, closed) decides who gets a link
 worker/src/origin.ts     fromThisSite(): the same-site check for every state-changing post (Origin, then Sec-Fetch-Site)

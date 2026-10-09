@@ -37,6 +37,7 @@ export const LIBRARY_METHODS = [
   "maintenance",
   "setMaintenance",
   "stats",
+  "contributors",
 ] as const;
 
 export type LibraryMethod = (typeof LIBRARY_METHODS)[number];

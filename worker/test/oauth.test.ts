@@ -14,13 +14,13 @@ const b64url = (bytes: Uint8Array) =>
 
 type App = ReturnType<typeof setup>["app"];
 
-async function register(app: App, name = "Claude") {
+async function register(app: App, name = "Claude", redirect = REDIRECT) {
   const r = await app.request("/register", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       client_name: name,
-      redirect_uris: [REDIRECT],
+      redirect_uris: [redirect],
       token_endpoint_auth_method: "none",
       grant_types: ["authorization_code", "refresh_token"],
       response_types: ["code"],
@@ -31,13 +31,18 @@ async function register(app: App, name = "Claude") {
 }
 
 /** Starts an authorization: returns the consent page, its handle and cookies, and the PKCE verifier. */
-async function begin(app: App, clientId: string, scope = "okf:read okf:write") {
+async function begin(
+  app: App,
+  clientId: string,
+  scope = "okf:read okf:write",
+  redirect = REDIRECT,
+) {
   const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
   const challenge = b64url(sha256(new TextEncoder().encode(verifier)));
   const query = new URLSearchParams({
     response_type: "code",
     client_id: clientId,
-    redirect_uri: REDIRECT,
+    redirect_uri: redirect,
     scope,
     state: "st4te",
     code_challenge: challenge,
@@ -68,7 +73,13 @@ async function submit(
   });
 }
 
-async function exchange(app: App, clientId: string, location: string, verifier: string) {
+async function exchange(
+  app: App,
+  clientId: string,
+  location: string,
+  verifier: string,
+  redirect = REDIRECT,
+) {
   const code = new URL(location).searchParams.get("code") ?? "";
   const r = await app.request("/token", {
     method: "POST",
@@ -76,7 +87,7 @@ async function exchange(app: App, clientId: string, location: string, verifier: 
     body: new URLSearchParams({
       grant_type: "authorization_code",
       code,
-      redirect_uri: REDIRECT,
+      redirect_uri: redirect,
       client_id: clientId,
       code_verifier: verifier,
       resource: `${ORIGIN}/mcp`,
@@ -298,7 +309,16 @@ describe("OAuth for MCP clients", () => {
     const done = await submit(app, flow, approve);
     const tokens = await exchange(app, clientId, done.headers.get("Location") ?? "", flow.verifier);
     // A data reset: the account rows go, the OAuth grant stays behind in KV.
-    for (const t of ["tokens", "sessions", "sign_in_links", "libraries", "handle_holds", "users"]) {
+    for (const t of [
+      "tokens",
+      "sessions",
+      "sign_in_links",
+      "library_members",
+      "agents",
+      "libraries",
+      "handle_holds",
+      "users",
+    ]) {
       db.run(`DELETE FROM ${t}`);
     }
     const r = await app.request("/mcp", {
@@ -458,6 +478,69 @@ describe("OAuth for MCP clients", () => {
     );
   });
 
+  test("each person's agents are their own identities, recorded in the ledger", async () => {
+    const s = setup();
+    const friend = await s.stranger("friend@example.com");
+    await s.accounts.share("lib-1", friend.user.id, "write", "user_1");
+    const CHATGPT = "https://chatgpt.com/connector_platform_oauth_redirect";
+    /** Connects an app as a person, to the owner's demo, and writes one note through it. */
+    const connect = async (app: App, name: string, redirect: string, pick: string) => {
+      const clientId = await register(app, name, redirect);
+      const flow = await begin(app, clientId, "okf:read okf:write", redirect);
+      const done = await submit(app, flow, { ...approve, libraries: "selected", library: pick });
+      const t = await exchange(
+        app,
+        clientId,
+        done.headers.get("Location") ?? "",
+        flow.verifier,
+        redirect,
+      );
+      const { call } = await mcp(app, t.access_token);
+      const path = `${name.toLowerCase()}-${crypto.randomUUID().slice(0, 8)}.md`;
+      const w = await call("write", { path, content: "---\ntype: Note\n---\nHi.\n" });
+      expect(w.isError).toBe(false);
+    };
+    await connect(s.app, "Claude", REDIRECT, "demo");
+    await connect(s.app, "ChatGPT", CHATGPT, "demo");
+    await connect(friend.app, "Claude", REDIRECT, "owner/demo");
+    await connect(friend.app, "ChatGPT", CHATGPT, "owner/demo");
+    // Connecting the same app again is the same agent.
+    await connect(friend.app, "Claude", REDIRECT, "owner/demo");
+
+    const r = await s.app.request("/api/v1/libraries/owner/demo/agents");
+    expect(r.status).toBe(200);
+    const { contributors } = (await r.json()) as {
+      contributors: {
+        person: string;
+        agent: { id: string; name: string; platform: string; client: string | null };
+        requests: number;
+      }[];
+    };
+    const seen = contributors.map((c) => `${c.agent.name} (${c.agent.platform}) for ${c.person}`);
+    expect(seen.sort()).toEqual([
+      "ChatGPT (chatgpt.com) for friend",
+      "ChatGPT (chatgpt.com) for owner",
+      "Claude (claude.ai) for friend",
+      "Claude (claude.ai) for owner",
+    ]);
+    expect(new Set(contributors.map((c) => c.agent.id)).size).toBe(4);
+    const friendsClaude = contributors.find(
+      (c) => c.person === "friend" && c.agent.name === "Claude",
+    );
+    expect(friendsClaude?.requests).toBe(2);
+    // What the client said at MCP initialize, kept as a claim.
+    expect(friendsClaude?.agent.client).toBe("oauth-test 1.0.0");
+
+    // Each request names its person and agent by id, stable across handle changes.
+    const log = (await (await s.req("/requests", { token: "human" })).json()) as {
+      requests: { by: { person: string; agent?: string } | null }[];
+    };
+    expect(log.requests[0]?.by).toEqual({
+      person: friend.user.id,
+      agent: friendsClaude?.agent.id as string,
+    });
+  });
+
   test("selected libraries: only those, and a suspended account is cut off", async () => {
     const { app, accounts, db } = setup();
     await accounts.createLibrary("private", { id: "user_1", handle: "owner" });
@@ -497,7 +580,16 @@ describe("OAuth for MCP clients", () => {
     const done = await submit(app, flow, approve);
     const tokens = await exchange(app, clientId, done.headers.get("Location") ?? "", flow.verifier);
     // A data reset: the account rows go, the OAuth grant stays behind in KV.
-    for (const t of ["tokens", "sessions", "sign_in_links", "libraries", "handle_holds", "users"]) {
+    for (const t of [
+      "tokens",
+      "sessions",
+      "sign_in_links",
+      "library_members",
+      "agents",
+      "libraries",
+      "handle_holds",
+      "users",
+    ]) {
       db.run(`DELETE FROM ${t}`);
     }
     const r = await app.request("/mcp", {

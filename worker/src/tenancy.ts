@@ -1,4 +1,5 @@
 import type { Accounts, LibraryRef, Role, User } from "./accounts";
+import { agentId, type ClientSignals, connectionAgent } from "./agents";
 import type { TokenInfo } from "./auth";
 import { OkfError } from "./store/errors";
 
@@ -63,6 +64,8 @@ export interface AccountGrant {
   prefix: string | null;
   tiers: "all" | "files";
   libraries: "all" | string[];
+  /** What the app said about itself at consent (agents.ts); absent on older connections. */
+  client?: ClientSignals;
 }
 
 /**
@@ -79,6 +82,7 @@ export async function grantLibraries(
   const user = await accounts.account(grant.userId);
   if (!user) return null;
   const selected = grant.libraries === "all" ? null : new Set(grant.libraries);
+  const agent = agentId(user.id, connectionAgent(grant.client ?? {}).platform);
   const libraries = (await accounts.reachable(user.id))
     .filter((l) => (selected ? selected.has(l.id) : l.role === "owner"))
     .map(
@@ -92,6 +96,7 @@ export async function grantLibraries(
         created_by: user.id,
         role,
         person: user.handle,
+        agent,
       }),
     );
   return { user, libraries };

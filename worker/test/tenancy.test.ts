@@ -399,6 +399,39 @@ describe("tenancy (v2 spec: Tenancy and authorization)", () => {
     expect((await s.req("/tree", { token: minted.secret })).status).toBe(401);
   });
 
+  test("a token's agent and the person in the app are told apart in the ledger", async () => {
+    const s = setup();
+    const friend = await s.stranger("friend@example.com");
+    await s.accounts.share("lib-1", friend.user.id, "write", "user_1");
+    const minted = await friend.app.request("/api/v1/tokens", {
+      method: "POST",
+      headers: { Origin: ORIGIN, "Content-Type": "application/json" },
+      body: JSON.stringify({ library: "owner/demo", actor: "claude-code/laptop", scope: "write" }),
+    });
+    const { secret } = (await minted.json()) as { secret: string };
+    const note = (body: string) => ({
+      method: "PUT",
+      headers: { "Content-Type": "text/markdown" },
+      body: `---\ntype: Note\n---\n${body}\n`,
+    });
+    expect((await s.req("/files/by-agent.md", { ...note("Agent."), token: secret })).status).toBe(
+      200,
+    );
+    const inApp = await friend.app.request(`${API}/files/by-person.md`, {
+      ...note("Person."),
+      headers: { Origin: ORIGIN, "Content-Type": "text/markdown" },
+    });
+    expect(inApp.status).toBe(200);
+    const r = (await (await s.app.request(`${API}/agents`)).json()) as {
+      contributors: { person: string; agent: { name: string; platform: string } | null }[];
+    };
+    expect(
+      r.contributors.map(
+        (c) => `${c.person}:${c.agent ? `${c.agent.name}@${c.agent.platform}` : "-"}`,
+      ),
+    ).toEqual(["friend:-", "friend:claude-code@token/claude-code"]);
+  });
+
   test("the owner is never a member; deletes take memberships with them", async () => {
     const s = setup();
     const friend = await s.stranger("friend@example.com");

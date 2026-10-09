@@ -8,6 +8,7 @@ import {
 import type { Hono } from "hono";
 import type { ReachableLibrary } from "../accounts";
 import { checkSlug } from "../accounts";
+import { type ClientSignals, connectionAgent } from "../agents";
 import type { Deps } from "../app";
 import type { TokenInfo } from "../auth";
 import { normalizeDir } from "../okf/paths";
@@ -211,6 +212,20 @@ export function registerAppRoutes<E extends AppEnv>(
               ...(created ? [created.id] : []),
             ];
       const prefix = normalizeDir(form.prefix) || null;
+      // Who is connecting, as far as can be told (agents.ts): its sign-in domain is the
+      // strongest signal; its name is a claim. Recorded as the person's agent on that platform.
+      const described = await oauth.describeConsent(approved.request).catch(() => null);
+      const host = described?.redirectHost ?? "";
+      const client: ClientSignals = {
+        name: described?.clientName ?? null,
+        // A metadata-document client's own domain, else where its sign-in returns to (a
+        // registered client's name is unverified, but only claude.ai receives at claude.ai).
+        domain:
+          described?.clientDomain ??
+          (/^[a-z0-9.-]+\.[a-z]{2,}$/i.test(host) && !described?.redirectIsLoopback ? host : null),
+        loopback: described?.redirectIsLoopback ?? false,
+      };
+      await accounts.recordAgent(user.id, connectionAgent(client));
       const props: GrantProps = {
         grant: {
           id: crypto.randomUUID(),
@@ -220,6 +235,7 @@ export function registerAppRoutes<E extends AppEnv>(
           prefix,
           tiers: form.tiers,
           libraries,
+          client,
         },
       };
       const { redirectTo } = await oauth.completeAuthorization({

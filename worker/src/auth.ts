@@ -1,5 +1,6 @@
 import { bytesToHex, randomBytes } from "@noble/hashes/utils.js";
 import type { Role } from "./accounts";
+import { agentId, tokenAgent } from "./agents";
 import { sha256Hex } from "./okf/hash";
 import { OkfError } from "./store/errors";
 
@@ -24,6 +25,8 @@ export interface TokenInfo {
    * (tempra-dev: v2/sharing); the library's owner when absent.
    */
   person?: string;
+  /** The agent acting through it (agents.ts); absent for a person in the app or a human: token. */
+  agent?: string;
 }
 
 export type Authenticate = (secret: string) => Promise<TokenInfo>;
@@ -108,6 +111,9 @@ export function d1Authenticate(
       library: { id: row.library_id, slug: row.slug, do_id: row.do_id, owner: row.owner ?? "" },
       created_by: row.created_by,
       ...(row.person ? { person: row.person } : {}),
+      ...(row.created_by && !row.actor.startsWith("human:")
+        ? { agent: agentId(row.created_by, tokenAgent(row.actor).platform) }
+        : {}),
     };
   };
 }
