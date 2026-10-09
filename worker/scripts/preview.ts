@@ -188,17 +188,32 @@ async function seedAndSmoke(
     const s = await seed(bundle.replace(/_/g, "-"), "github-actions/preview");
     const lib = `${url}/api/v1/libraries/${s.owner}/${s.slug}`;
     const headers = { Authorization: `Bearer ${s.token}` };
-    const tree = (await (await fetch(`${lib}/tree`, { headers })).json()) as {
-      entries?: unknown[];
-    };
-    if ((tree.entries ?? []).length > 0) continue;
-    const imp = await fetch(`${lib}/import?source=fixtures/${bundle}`, {
-      method: "POST",
-      headers: { ...headers, "Content-Type": "application/x-tar" },
-      body: writeTar(loadBundle(bundle)),
-    });
-    if (!imp.ok) throw new Error(`import ${bundle}: ${imp.status} ${await imp.text()}`);
-    console.log(`Imported ${bundle} into ${s.owner}/${s.slug}`);
+    // A library's Durable Object, new in a namespace created moments ago by the deploy, can
+    // answer 5xx for a few seconds (PR #52's first preview). Retry those, checking the library
+    // is still empty first, so a retried import never doubles one that went through.
+    for (let attempt = 1; ; attempt++) {
+      const tree = await fetch(`${lib}/tree`, { headers });
+      if (tree.ok) {
+        const { entries } = (await tree.json()) as { entries?: unknown[] };
+        if ((entries ?? []).length > 0) break;
+        const imp = await fetch(`${lib}/import?source=fixtures/${bundle}`, {
+          method: "POST",
+          headers: { ...headers, "Content-Type": "application/x-tar" },
+          body: writeTar(loadBundle(bundle)),
+        });
+        if (imp.ok) {
+          console.log(`Imported ${bundle} into ${s.owner}/${s.slug}`);
+          break;
+        }
+        if (imp.status < 500 || attempt === 4) {
+          throw new Error(`import ${bundle}: ${imp.status} ${await imp.text()}`);
+        }
+      } else if (tree.status < 500 || attempt === 4) {
+        throw new Error(`tree of ${s.owner}/${s.slug}: ${tree.status} ${await tree.text()}`);
+      }
+      console.log(`${s.owner}/${s.slug} not ready (attempt ${attempt}); retrying`);
+      await Bun.sleep(2000 * 2 ** (attempt - 1));
+    }
   }
 
   const smoke = await seed("smoke", "github-actions/smoke");
