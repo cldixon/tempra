@@ -41,6 +41,7 @@ import { type FeedEvent, useFeed } from "../live";
 import { registerPrefetch } from "../prefetch";
 import { el, Reader } from "../Reader";
 import { pushRecent } from "../recent";
+import { useRole } from "../role";
 import { navigate, setLeaveGuard } from "../router";
 import {
   Ago,
@@ -571,6 +572,9 @@ function ConceptView(props: {
 
   // Comments: each thread's quote found in the body on screen, highlighted while open.
   const writable = urls.at === undefined || urls.at >= head;
+  // Editing and verifying need write access (tempra-dev: v2/sharing); a reader still comments.
+  const role = useRole(urls);
+  const mayChange = writable && role !== null && role !== "read";
   const [active, setActive] = useState<string | null>(null);
   const placed = useMemo(() => placeThreads(props.threads ?? [], parsed), [props.threads, parsed]);
   const openThreads = placed.filter((t) => t.status === "open").length;
@@ -623,7 +627,7 @@ function ConceptView(props: {
             <span className="cluster-sep" />
           </>
         )}
-        {writable && (
+        {mayChange && (
           <button
             type="button"
             className="icon-button"
@@ -764,6 +768,7 @@ function ConceptView(props: {
                   changes={changes.toggle}
                   work={work}
                   onVerified={props.onVerified}
+                  mayVerify={role !== null && role !== "read"}
                 />
               )}
               {panel === "contents" && (
@@ -1208,6 +1213,8 @@ function ReviewPanel(props: {
   changes: React.ReactNode;
   work: WorkItem[];
   onVerified(): void;
+  /** Read members do not verify. */
+  mayVerify: boolean;
 }) {
   const { urls, concept: c } = props;
   const [error, setError] = useState<string | null>(null);
@@ -1238,7 +1245,7 @@ function ReviewPanel(props: {
         <VerifiedLine c={c} />
         {error && <div className="notice">{error}</div>}
         {/* Verifying is for the saved current version, not one being edited or from the past. */}
-        {current && !props.editing && c.trust_tier !== "human-reviewed" && (
+        {props.mayVerify && current && !props.editing && c.trust_tier !== "human-reviewed" && (
           <form className="verify-form" onSubmit={submit}>
             <input type="text" name="note" placeholder="Note (optional)" aria-label="Note" />
             <button className="primary" type="submit" disabled={busy}>

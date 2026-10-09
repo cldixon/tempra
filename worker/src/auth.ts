@@ -1,4 +1,6 @@
 import { bytesToHex, randomBytes } from "@noble/hashes/utils.js";
+import type { Role } from "./accounts";
+import { agentId, tokenAgent } from "./agents";
 import { sha256Hex } from "./okf/hash";
 import { OkfError } from "./store/errors";
 
@@ -13,6 +15,18 @@ export interface TokenInfo {
   library: { id: string; slug: string; do_id: string; owner: string };
   /** The users row id of the human who minted the token, when known. */
   created_by?: string | null;
+  /**
+   * The role of the person it acts for in this library (tempra-dev: v2/sharing). `scope` is
+   * already capped by it: a `read` member's token is read-only, and may still comment.
+   */
+  role: Role;
+  /**
+   * The handle of the person it acts for, whose account its requests and writes count against
+   * (tempra-dev: v2/sharing); the library's owner when absent.
+   */
+  person?: string;
+  /** The agent acting through it (agents.ts); absent for a person in the app or a human: token. */
+  agent?: string;
 }
 
 export type Authenticate = (secret: string) => Promise<TokenInfo>;
@@ -37,6 +51,9 @@ interface TokenRow {
   slug: string;
   do_id: string;
   owner: string | null;
+  owner_id: string | null;
+  member_role: "read" | "write" | null;
+  person: string | null;
   suspended: string | null;
 }
 
@@ -56,9 +73,13 @@ export function d1Authenticate(
       const row = await db
         .prepare(
           `SELECT t.id, t.actor, t.scope, t.prefix, t.mcp_tiers, t.expires, t.revoked, t.created_by,
-                  l.id AS library_id, l.slug, l.do_id, u.handle AS owner, u.suspended
+                  l.id AS library_id, l.slug, l.do_id, u.handle AS owner, l.owner AS owner_id,
+                  m.role AS member_role, p.handle AS person, u.suspended
            FROM tokens t JOIN libraries l ON l.id = t.library
-           LEFT JOIN users u ON u.id = l.owner WHERE t.hash = ?`,
+           LEFT JOIN users u ON u.id = l.owner
+           LEFT JOIN library_members m ON m.library = l.id AND m.user = t.created_by
+           LEFT JOIN users p ON p.id = t.created_by
+           WHERE t.hash = ?`,
         )
         .bind(hash)
         .first<TokenRow>();
@@ -73,14 +94,26 @@ export function d1Authenticate(
     if (row.expires && Date.parse(row.expires) <= now()) {
       throw new OkfError(401, "token_expired", "This token has expired.");
     }
+    // A token acts for the person who minted it: the owner (or, for tokens minted before
+    // creators were recorded, the owner's), else a member, at most at their role now.
+    const role: Role | null =
+      row.created_by === null || row.created_by === row.owner_id ? "owner" : row.member_role;
+    if (!role) {
+      throw new OkfError(401, "no_access", "This token's creator no longer has its library.");
+    }
     return {
       id: row.id,
       actor: row.actor,
-      scope: row.scope === "write" ? "write" : "read",
+      scope: row.scope === "write" && role !== "read" ? "write" : "read",
+      role,
       prefix: row.prefix || null,
       mcp_tiers: row.mcp_tiers,
       library: { id: row.library_id, slug: row.slug, do_id: row.do_id, owner: row.owner ?? "" },
       created_by: row.created_by,
+      ...(row.person ? { person: row.person } : {}),
+      ...(row.created_by && !row.actor.startsWith("human:")
+        ? { agent: agentId(row.created_by, tokenAgent(row.actor).platform) }
+        : {}),
     };
   };
 }

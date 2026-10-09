@@ -141,9 +141,14 @@ export function Tokens({ me, library }: { me: Me | null; library: string | null 
   const loaded = useLoad("tokens", async () => {
     const [t, l] = await Promise.all([
       api<{ tokens: TokenRow[] }>("/api/v1/tokens"),
-      api<{ libraries: { slug: string }[] }>("/api/v1/libraries"),
+      api<{ libraries: { owner: string; slug: string; role?: string }[] }>("/api/v1/libraries"),
     ]);
-    return { tokens: t.tokens, libraries: l.libraries.map((x) => x.slug) };
+    // An own library by its slug; one shared with the person as owner/slug, the name the
+    // server mints on (a member's token is held to their role there).
+    const names = l.libraries.map((x) =>
+      (x.role ?? "owner") === "owner" ? x.slug : `${x.owner}/${x.slug}`,
+    );
+    return { tokens: t.tokens, libraries: names };
   });
   const [minted, setMinted] = useState<Minted | null>(null);
   const action = useAction();
@@ -405,6 +410,99 @@ export function Apps() {
                           onClick={() => void revoke(a.id)}
                         >
                           Revoke
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
+        }
+      </Status>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------- invitations
+
+interface PendingInvitation {
+  id: string;
+  owner: string;
+  slug: string;
+  role: "read" | "write";
+  /** Who invited. */
+  handle: string;
+  expires: string;
+}
+
+/** Invitations to other people's libraries (tempra-dev: v2/sharing), to accept or decline. */
+export function Invitations() {
+  useTitle("Invitations");
+  const loaded = useLoad("invitations", () =>
+    api<{ invitations: PendingInvitation[] }>("/api/v1/invitations"),
+  );
+  const action = useAction();
+  const answer = (i: PendingInvitation, accept: boolean) =>
+    action.run(async () => {
+      await api(
+        `/api/v1/invitations/${encodeURIComponent(i.id)}/${accept ? "accept" : "decline"}`,
+        {
+          method: "POST",
+        },
+      );
+      if (accept) {
+        // A full load: the library list and the workspace learn the new library.
+        location.assign(new Urls(i.owner, i.slug).tree(""));
+        return;
+      }
+      loaded.reload();
+    });
+  return (
+    <>
+      <h1>Invitations</h1>
+      {action.error && <div className="notice">{action.error}</div>}
+      <Status loaded={loaded}>
+        {({ invitations }) =>
+          invitations.length === 0 ? (
+            <p>None waiting.</p>
+          ) : (
+            <div className="table-wrap">
+              <table className="list">
+                <thead>
+                  <tr>
+                    <th>Library</th>
+                    <th>Access</th>
+                    <th>From</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {invitations.map((i) => (
+                    <tr key={i.id}>
+                      <td className="name">
+                        <strong>
+                          {i.owner}/{i.slug}
+                        </strong>
+                        <div className="small muted">open until {i.expires.slice(0, 10)}</div>
+                      </td>
+                      <td>{i.role === "write" ? "Read and write" : "Read and comment"}</td>
+                      <td>@{i.handle}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="primary"
+                          disabled={action.busy}
+                          onClick={() => void answer(i, true)}
+                        >
+                          Accept
+                        </button>{" "}
+                        <button
+                          type="button"
+                          disabled={action.busy}
+                          onClick={() => void answer(i, false)}
+                        >
+                          Decline
                         </button>
                       </td>
                     </tr>

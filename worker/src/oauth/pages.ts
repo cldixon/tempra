@@ -1,6 +1,6 @@
 import type { ConsentDescription } from "@cloudflare/workers-oauth-provider";
 import { href as designHref } from "@tempra/design";
-import type { LibraryRef } from "../accounts";
+import type { ReachableLibrary } from "../accounts";
 
 /** Escapes text for HTML; every client-supplied string passes through here. */
 export const esc = (value: string) => value.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -23,7 +23,7 @@ export function page(title: string, body: string): string {
 export interface ConsentForm {
   /** All of the account's libraries, including later ones, or the selected ones only. */
   libraries: "all" | "selected";
-  /** Slugs of the selected libraries. */
+  /** The selected libraries, by consentKey. */
   selected: string[];
   newLibrary: string;
   access: "read" | "write";
@@ -32,12 +32,20 @@ export interface ConsentForm {
   tiers: "all" | "files";
 }
 
+/**
+ * How the consent form names a library: an own library by its slug, one shared with the person
+ * as owner/slug (the person may own a library of the same name).
+ */
+export function consentKey(l: ReachableLibrary): string {
+  return l.role === "owner" ? l.slug : `${l.owner}/${l.slug}`;
+}
+
 /** The consent page (spec: Apps under Auth): what the app is, where tokens go, what it may do. */
 export function consentPage(opts: {
   details: ConsentDescription;
   handle: string;
   signedInAs: string;
-  libraries: LibraryRef[];
+  libraries: ReachableLibrary[];
   form: ConsentForm;
   error?: string;
 }): string {
@@ -47,11 +55,14 @@ export function consentPage(opts: {
     ? `Published by <strong>${esc(details.clientDomain)}</strong>.`
     : "This app registered itself; its name is not verified.";
   const libChecks = opts.libraries
-    .map(
-      (l) =>
-        `<label class="choice"><input type="checkbox" name="library" value="${esc(l.slug)}"${form.selected.includes(l.slug) ? " checked" : ""}> ${esc(l.owner)}/${esc(l.slug)}</label>`,
-    )
+    .map((l) => {
+      const key = consentKey(l);
+      const shared =
+        l.role === "owner" ? "" : ` <span class="faint">shared with you, ${l.role}</span>`;
+      return `<label class="choice"><input type="checkbox" name="library" value="${esc(key)}"${form.selected.includes(key) ? " checked" : ""}> ${esc(l.owner)}/${esc(l.slug)}${shared}</label>`;
+    })
     .join("");
+  const anyShared = opts.libraries.some((l) => l.role !== "owner");
   const radio = (field: string, value: string, current: string, label: string, hint: string) =>
     `<label class="choice"><input type="radio" name="${field}" value="${value}"${value === current ? " checked" : ""}> ${label}${hint ? ` <span class="faint">${hint}</span>` : ""}</label>`;
   return page(
@@ -64,7 +75,7 @@ ${opts.error ? `<p class="notice">${esc(opts.error)}</p>` : ""}
   <input type="hidden" name="handle" value="${esc(opts.handle)}">
   <fieldset>
     <legend>Libraries</legend>
-    ${radio("libraries", "all", form.libraries, "All libraries", "including ones you create later")}
+    ${radio("libraries", "all", form.libraries, "All your libraries", `including ones you create later${anyShared ? "; libraries shared with you only when picked" : ""}`)}
     ${radio("libraries", "selected", form.libraries, "Only these", "")}
     <div class="indent">${libChecks}</div>
     <label class="field">New library <span class="faint">(optional)</span>

@@ -1,7 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { api, useLoad } from "./api";
-import { Account, Apps, ConnectAccount, Tokens, Welcome } from "./pages/Account";
+import { Account, Apps, ConnectAccount, Invitations, Tokens, Welcome } from "./pages/Account";
 import { Diff } from "./pages/Diff";
 import { Directory } from "./pages/Directory";
 import { File } from "./pages/File";
@@ -10,6 +10,7 @@ import { Libraries } from "./pages/Libraries";
 import {
   ConnectLibrary,
   DeleteLibrary,
+  Members,
   Recovery,
   Restore,
   Revert,
@@ -63,6 +64,8 @@ function App() {
     page = <Apps />;
   } else if (route.page === "account") {
     page = <Account done={route.done} />;
+  } else if (route.page === "invitations") {
+    page = <Invitations />;
   } else {
     const urls = urlsFor(route.owner, route.slug, "at" in route ? route.at : undefined);
     const place: Place = { file: null, dir: null, view: null };
@@ -115,6 +118,9 @@ function App() {
         break;
       case "delete":
         page = <DeleteLibrary urls={urls} />;
+        break;
+      case "members":
+        page = <Members urls={urls} me={who?.handle ?? null} />;
         break;
       case "revert":
         page = <Revert urls={urls} request={route.request} actor={actor} />;

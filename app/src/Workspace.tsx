@@ -12,6 +12,7 @@ import {
 import { createPortal } from "react-dom";
 import { api, useLoad } from "./api";
 import { AccountMenu, Icon, Menu } from "./chrome";
+import { libraryName, useLibraries, useRole } from "./role";
 import { lastNavigation } from "./router";
 import { Switcher } from "./Switcher";
 import { type OutlineFile, Tree } from "./Tree";
@@ -22,7 +23,7 @@ import { Urls } from "./urls";
 export interface Place {
   file: string | null;
   dir: string | null;
-  view: "ledger" | "work" | "transfer" | "recovery" | "connect" | "delete" | null;
+  view: "ledger" | "work" | "transfer" | "recovery" | "connect" | "delete" | "members" | null;
 }
 
 /** The concept page's panels, one open at a time (tempra-dev: app/workspace, The panels). */
@@ -326,17 +327,20 @@ export function Workspace(props: {
  * (import and export, recovery, connect, delete).
  */
 function LibraryMenu({ urls, place }: { urls: Urls; place: Place }) {
-  const libs = useLoad("workspace libraries", () =>
-    api<{ libraries: { owner: string; slug: string }[] }>("/api/v1/libraries"),
-  );
+  const libs = useLibraries();
+  const role = useRole(urls);
   const list = libs.state === "ready" ? libs.data.libraries : [];
   const others = list.filter((l) => l.owner !== urls.owner || l.slug !== urls.slug);
-  const settings: [string, string, Place["view"]][] = [
-    ["Import & export", urls.transfer(), "transfer"],
-    ["Recovery", urls.recovery(), "recovery"],
-    ["Connect", urls.connect(), "connect"],
-    ["Delete", urls.remove(), "delete"],
+  // Recovery and Delete are the owner's (tempra-dev: v2/sharing); members see the rest.
+  const owner = role === "owner";
+  const all: [string, string, Place["view"], boolean][] = [
+    ["Members", urls.members(), "members", true],
+    ["Import & export", urls.transfer(), "transfer", true],
+    ["Recovery", urls.recovery(), "recovery", owner],
+    ["Connect", urls.connect(), "connect", true],
+    ["Delete", urls.remove(), "delete", owner],
   ];
+  const settings = all.filter(([, , , shown]) => shown);
   return (
     <Menu
       name={`Library ${urls.slug}`}
@@ -354,7 +358,7 @@ function LibraryMenu({ urls, place }: { urls: Urls; place: Place }) {
           <div className="menu-note">Switch library</div>
           {others.map((l) => (
             <a key={`${l.owner}/${l.slug}`} href={new Urls(l.owner, l.slug).tree("")}>
-              {l.slug}
+              {libraryName(l)}
             </a>
           ))}
           <hr />

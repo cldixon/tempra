@@ -108,7 +108,7 @@ export function registerAccountApi(
   app.get("/api/v1/apps", async (c) => {
     const { d, user } = await person(c);
     const oauth: OAuthHelpers = c.env.OAUTH_PROVIDER;
-    const libs = await d.accounts.libraries(user.id);
+    const libs = await d.accounts.reachable(user.id);
     const grants = [];
     let cursor: string | undefined;
     do {
@@ -133,7 +133,9 @@ export function registerAccountApi(
             m.libraries === "all"
               ? "all"
               : Array.isArray(m.libraries)
-                ? libs.filter((l) => m.libraries?.includes(l.id)).map((l) => l.slug)
+                ? libs
+                    .filter((l) => m.libraries?.includes(l.id))
+                    .map((l) => (l.role === "owner" ? l.slug : `${l.owner}/${l.slug}`))
                 : m.library
                   ? [m.library]
                   : [],

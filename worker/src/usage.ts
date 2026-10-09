@@ -38,7 +38,7 @@ export const WRITE_TOOLS = new Set([
 /** Who a request counts against: a per-token (or per-connection) key and the account. */
 export interface Admission {
   key: string;
-  /** The account: a library owner's handle. */
+  /** The account: the handle of the person the caller acts for. */
   account: string;
   library?: string;
 }
@@ -47,7 +47,8 @@ export function tokenAdmission(token: TokenInfo): Admission {
   // Grants approved before A1 carry no owner handle; their library id stands in until reconnected.
   return {
     key: `${token.id}|${token.library.id}|${token.actor}`,
-    account: token.library.owner || token.library.id,
+    // The person it acts for (a member's agents spend the member's budget, not the owner's).
+    account: token.person || token.library.owner || token.library.id,
     library: token.library.id,
   };
 }

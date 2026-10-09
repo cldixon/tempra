@@ -2,7 +2,8 @@ import * as design from "@tempra/design";
 import { type Doc, parseMarkdown } from "@tempra/editor/doc";
 import { type Context, Hono } from "hono";
 import { registerAccountApi } from "./account-api";
-import { type Accounts, checkNewToken, type LibraryRef, type User } from "./accounts";
+import { type Accounts, checkNewToken, type MemberRole, type User } from "./accounts";
+import { tokenAgent } from "./agents";
 import type { Authenticate, TokenInfo } from "./auth";
 import {
   type BlobStore,
@@ -24,7 +25,7 @@ import { readCookie, SESSION_COOKIE, type Sessions } from "./session";
 import { type Mailer, registerSignInRoutes } from "./signin";
 import { OkfError } from "./store/errors";
 import type { ConceptContent, RequestContext, WriteOp, WriteResult } from "./store/store";
-import { authorizeLibrary } from "./tenancy";
+import { type Authorized, authorizeLibrary, requireOwner } from "./tenancy";
 import { faviconResponse } from "./ui/favicon";
 import { registerUiRoutes } from "./ui/routes";
 import { appHref, appScript } from "./ui/spa";
@@ -130,12 +131,42 @@ function requestContext(c: C, note?: unknown): RequestContext {
     actor: c.var.token.actor,
     request_id: crypto.randomUUID(),
     note: typeof note === "string" && note ? note : header ? decodeURIComponent(header) : null,
+    by: actedBy(c.var.token),
   };
 }
 
+/** The person and agent behind a token, for the ledger (tempra-dev: agents act for a person). */
+export function actedBy(t: TokenInfo): RequestContext["by"] {
+  if (!t.created_by) return null;
+  return t.agent ? { person: t.created_by, agent: t.agent } : { person: t.created_by };
+}
+
+/** Content writes: write, edit, move, delete, attach, revert, import, verify. */
 function requireWrite(c: C, ...paths: string[]) {
   const t = c.var.token;
-  if (t.scope !== "write") throw new OkfError(403, "read_only", "This token is read-only.");
+  if (t.scope !== "write") throw readOnly(t);
+  underTokenPrefix(t, paths);
+}
+
+/**
+ * Comments (tempra-dev: v2/sharing): a separate permission from writing content, which every
+ * caller that reaches the library has, read included; a prefix still limits where.
+ */
+function requireComment(c: C, path: string) {
+  underTokenPrefix(c.var.token, [path]);
+}
+
+function readOnly(t: TokenInfo): OkfError {
+  return new OkfError(
+    403,
+    "read_only",
+    t.role === "read"
+      ? "You have read access to this library: you can read and comment, not change it."
+      : "This token is read-only: it can read and comment, not change content.",
+  );
+}
+
+function underTokenPrefix(t: TokenInfo, paths: string[]) {
   if (t.prefix === null) return;
   const prefix = t.prefix;
   for (const p of paths) {
@@ -522,6 +553,44 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
 
   app.get(`${BASE}/stats`, async (c) => c.json(await c.var.lib.stats()));
 
+  // Who has worked in the library: people and each of their agents, from the ledger's records
+  // of who acted (TEMPRA-75), named from D1. Agents act for their person ("Claude for @alice").
+  app.get(`${BASE}/agents`, async (c) => {
+    const rows = await c.var.lib.contributors();
+    const accounts = c.var.deps.accounts;
+    const agents = new Map(
+      (await accounts.agents(rows.flatMap((r) => (r.agent ? [r.agent] : [])))).map((a) => [
+        a.id,
+        a,
+      ]),
+    );
+    const handles = new Map<string, string | null>();
+    for (const id of new Set(rows.map((r) => r.person))) {
+      handles.set(id, (await accounts.account(id))?.handle ?? null);
+    }
+    return c.json({
+      contributors: rows.map((r) => {
+        const a = r.agent ? agents.get(r.agent) : undefined;
+        return {
+          person: handles.get(r.person) ?? null,
+          agent: r.agent
+            ? {
+                id: r.agent,
+                name: a?.name ?? null,
+                platform: a?.platform ?? null,
+                client: a?.client ?? null,
+              }
+            : null,
+          actor: r.actor,
+          requests: r.requests,
+          first_seq: r.first_seq,
+          last_seq: r.last_seq,
+          last_ts: r.last_ts,
+        };
+      }),
+    });
+  });
+
   // The change feed (tempra-dev: app/live): a WebSocket on which the library's Durable Object
   // pushes every committed event. Authorized and counted once, here, when it opens; a session
   // must open it from this site's own pages. GET /events?since=N is the catch-up.
@@ -537,7 +606,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     if (!feed) throw new OkfError(501, "unavailable", "The change feed is not wired here.");
     c.var.deps.meter?.({
       kind: "feed",
-      account: token.library.owner || token.library.id,
+      account: token.person || token.library.owner || token.library.id,
       library: token.library.id,
     });
     return feed(token.library.do_id, c.req.raw, c.req.query("prefix") ?? "");
@@ -585,7 +654,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     if (typeof body.path !== "string") {
       throw new OkfError(400, "bad_request", "Give the concept's `path`.");
     }
-    requireWrite(c, body.path);
+    requireComment(c, body.path);
     const anchor = body.anchor
       ? {
           quote: String(body.anchor.quote ?? ""),
@@ -609,7 +678,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   const act = (kind: "reply" | "resolve" | "reopen") => async (c: C) => {
     const id = c.req.param("thread") ?? "";
     const { path } = await c.var.lib.thread(id);
-    requireWrite(c, path);
+    requireComment(c, path);
     // The body is optional for resolve and reopen: no JSON at all is fine.
     const sent = (await c.req.text()).trim();
     let raw: { body?: unknown } = {};
@@ -624,6 +693,120 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   app.post(`${BASE}/comments/:thread`, act("reply"));
   app.post(`${BASE}/comments/:thread/resolve`, act("resolve"));
   app.post(`${BASE}/comments/:thread/reopen`, act("reopen"));
+
+  // ------------------------------------------------------------------ members and invitations
+
+  // Sharing (tempra-dev: v2/sharing, TEMPRA-61): who is in the library, and invitations. People
+  // only, from the app's pages; managing them is the owner's, leaving is any member's.
+  const sessionOnly = (c: C, what: string) => {
+    if (!c.var.token.id.startsWith("session:")) {
+      throw new OkfError(403, "session_only", `${what} only from the app's pages.`);
+    }
+  };
+  const memberRole = (v: unknown): MemberRole => {
+    if (v !== "read" && v !== "write") {
+      throw new OkfError(400, "bad_role", "A member's role is read or write.");
+    }
+    return v;
+  };
+
+  app.get(`${BASE}/members`, async (c) => {
+    const ref = c.var.token.library;
+    const accounts = c.var.deps.accounts;
+    const owner = c.var.token.role === "owner";
+    return c.json({
+      owner: ref.owner,
+      role: c.var.token.role,
+      members: (await accounts.members(ref.id)).map(({ handle, role, created }) => ({
+        handle,
+        role,
+        created,
+      })),
+      // Pending invitations are the owner's to see.
+      ...(owner ? { invitations: await accounts.libraryInvitations(ref.id) } : {}),
+    });
+  });
+
+  app.post(`${BASE}/invitations`, async (c) => {
+    sessionOnly(c, "Invitations are sent");
+    requireOwner(c.var.token.role, "invite people");
+    const body = await json<{ to?: string; role?: string }>(c);
+    const role = memberRole(body.role);
+    const to = String(body.to ?? "").trim();
+    if (!to) throw new OkfError(400, "bad_request", "Give a handle or an email address.");
+    const accounts = c.var.deps.accounts;
+    const ref = c.var.token.library;
+    const byEmail = to.includes("@") && !to.startsWith("@");
+    const invitee = await accounts.findAccount(byEmail ? { email: to } : { handle: to });
+    if (!invitee) {
+      // An email is never confirmed or denied as an account: the answer is the same either way.
+      if (byEmail) return c.json({ sent: "if_account" }, 202);
+      throw new OkfError(404, "no_account", `There is no Tempra account @${to.replace(/^@/, "")}.`);
+    }
+    const inviter = c.var.token.created_by ?? "";
+    const { renewed } = await accounts.invite(ref.id, invitee.id, role, inviter);
+    if (!renewed) {
+      const origin = new URL(c.req.url).origin;
+      const who = c.var.token.actor.replace(/^human:/, "@");
+      await c.var.deps.mailer
+        ?.send({
+          to: invitee.email,
+          subject: `${who} invited you to ${ref.owner}/${ref.slug} on Tempra`,
+          text: `${who} invited you to the library ${ref.owner}/${ref.slug} with ${role} access${role === "read" ? " (read and comment)" : ""}.\n\nAccept or decline: ${origin}/invitations\n\nThe invitation is open for 14 days. If you did not expect it, ignore this email.\n`,
+        })
+        .then(() => c.var.deps.meter?.({ kind: "email", account: invitee.handle }))
+        .catch((e) =>
+          console.error(JSON.stringify({ mail_failed: "invitation", error: String(e) })),
+        );
+    }
+    return c.json(
+      byEmail ? { sent: "if_account" } : { sent: "invited", handle: invitee.handle },
+      202,
+    );
+  });
+
+  app.delete(`${BASE}/invitations/:id`, async (c) => {
+    sessionOnly(c, "Invitations are withdrawn");
+    requireOwner(c.var.token.role, "withdraw invitations");
+    const ok = await c.var.deps.accounts.revokeInvitation(
+      c.req.param("id"),
+      c.var.token.library.id,
+    );
+    if (!ok) throw new OkfError(404, "not_found", "No such pending invitation.");
+    return c.body(null, 204);
+  });
+
+  /** A member by handle, for changing their role or removing them. */
+  const memberNamed = async (c: C) => {
+    const accounts = c.var.deps.accounts;
+    const person = await accounts.findAccount({ handle: c.req.param("member") ?? "" });
+    const role = person ? await accounts.memberRole(c.var.token.library.id, person.id) : null;
+    if (!person || !role) throw new OkfError(404, "not_found", "No such member.");
+    return person;
+  };
+
+  app.put(`${BASE}/members/:member`, async (c) => {
+    sessionOnly(c, "Members are managed");
+    requireOwner(c.var.token.role, "change members' access");
+    const person = await memberNamed(c);
+    const role = memberRole((await json<{ role?: string }>(c)).role);
+    await c.var.deps.accounts.share(
+      c.var.token.library.id,
+      person.id,
+      role,
+      c.var.token.created_by ?? null,
+    );
+    return c.json({ handle: person.handle, role });
+  });
+
+  // The owner removes a member; a member leaves.
+  app.delete(`${BASE}/members/:member`, async (c) => {
+    sessionOnly(c, "Members are removed");
+    const person = await memberNamed(c);
+    if (person.id !== c.var.token.created_by) requireOwner(c.var.token.role, "remove members");
+    await c.var.deps.accounts.unshare(c.var.token.library.id, person.id);
+    return c.body(null, 204);
+  });
 
   // ------------------------------------------------------------------ signed downloads
 
@@ -660,11 +843,14 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
       return { d, user: { id: who.user.id, handle: who.user.handle }, session: who.user };
     }
     const token = who.token;
-    if (!token.actor.startsWith("human:") || !token.created_by || !token.library.owner) {
+    if (!token.actor.startsWith("human:") || !token.created_by) {
       throw new OkfError(403, "human_only", "Library and token management needs a human: token.");
     }
-    const user = { id: token.created_by, handle: token.library.owner };
-    return { d, user, session: null };
+    // The person who minted it, never the library's owner as such: on a shared library they
+    // are different people (tempra-dev: v2/sharing).
+    const account = await d.accounts.account(token.created_by);
+    if (!account) throw new OkfError(401, "no_account", "This token's account no longer exists.");
+    return { d, user: { id: account.id, handle: account.handle }, session: null };
   };
 
   // Who the caller acts as: the signed-in person, or the person a human: token acts for.
@@ -677,15 +863,16 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
 
   app.get("/api/v1/libraries", async (c) => {
     const { d, user } = await human(c);
-    const refs = await d.accounts.libraries(user.id);
+    const refs = await d.accounts.reachable(user.id);
     const libraries = await Promise.all(
-      refs.map(async ({ id, slug, owner, do_id }) => {
+      refs.map(async ({ id, slug, owner, do_id, role }) => {
         const lib = await d.libraryByDoId(do_id);
         const s = lib ? await lib.summary() : null;
         return {
           id,
           owner,
           slug,
+          role,
           ...(s && {
             seq: s.seq,
             concepts: s.concepts,
@@ -708,7 +895,12 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     if (body.starter && session) {
       const client = await d.libraryByDoId(lib.do_id);
       await client?.apply(
-        { actor: session.actor, request_id: crypto.randomUUID(), note: "Starter note" },
+        {
+          actor: session.actor,
+          request_id: crypto.randomUUID(),
+          note: "Starter note",
+          by: { person: session.id },
+        },
         [{ op: "write", path: "start-here.md", content: STARTER }],
       );
     }
@@ -720,6 +912,32 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     if (!("user" in who)) throw new OkfError(403, "session_only", "Sign in to the app.");
     return who.user;
   });
+
+  // The signed-in person's pending invitations, and their answer (TEMPRA-61).
+  const invitee = async (c: C) => {
+    const d = deps(c.env);
+    const who = await principal(c, d);
+    if (!("user" in who)) throw new OkfError(403, "session_only", "Sign in to the app.");
+    return { d, user: who.user };
+  };
+
+  app.get("/api/v1/invitations", async (c) => {
+    const { d, user } = await invitee(c);
+    return c.json({ invitations: await d.accounts.invitations(user.id) });
+  });
+
+  for (const answer of ["accept", "decline"] as const) {
+    app.post(`/api/v1/invitations/:id/${answer}`, async (c) => {
+      const { d, user } = await invitee(c);
+      const done = await d.accounts.decideInvitation(
+        c.req.param("id"),
+        user.id,
+        answer === "accept",
+      );
+      if (!done) throw new OkfError(404, "not_found", "No such open invitation for you.");
+      return c.json({ ...done, accepted: answer === "accept" });
+    });
+  }
 
   app.get("/api/v1/tokens", async (c) => {
     const { d, user } = await human(c);
@@ -738,8 +956,13 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
         mcp_tiers?: string;
       }>()
       .catch(() => ({}) as Record<string, undefined>);
-    const lib = (await d.accounts.libraries(user.id)).find(
-      (l) => l.slug === body.library || l.id === body.library,
+    // One of the person's own libraries by slug, or any they reach by id or owner/slug: a
+    // member mints on a shared library for their own agents (tempra-dev: v2/sharing).
+    const lib = (await d.accounts.reachable(user.id)).find(
+      (l) =>
+        l.id === body.library ||
+        `${l.owner}/${l.slug}` === body.library ||
+        (l.role === "owner" && l.slug === body.library),
     );
     if (!lib) throw new OkfError(404, "no_library", `There is no library ${body.library ?? ""}.`);
     // A person signed in to the app may mint a token as themselves (human:); a token may not.
@@ -753,12 +976,24 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
       },
       session ? session.actor : null,
     );
+    if (lib.role === "read" && fields.scope === "write") {
+      throw new OkfError(
+        403,
+        "read_only",
+        `You have read access to ${lib.owner}/${lib.slug}: mint a read token (it may still comment).`,
+      );
+    }
+    // A token for an agent names that agent (agents.ts): the person's agent for its app.
+    if (!fields.actor.startsWith("human:")) {
+      await d.accounts.recordAgent(user.id, tokenAgent(fields.actor));
+    }
     const minted = await d.accounts.createToken({
       ...fields,
       libraryId: lib.id,
       createdBy: user.id,
     });
-    return c.json({ id: minted.id, secret: minted.secret, library: lib.slug, ...fields }, 201);
+    const library = lib.role === "owner" ? lib.slug : `${lib.owner}/${lib.slug}`;
+    return c.json({ id: minted.id, secret: minted.secret, library, ...fields }, 201);
   });
 
   app.delete("/api/v1/tokens/:id", async (c) => {
@@ -774,6 +1009,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
       throw new OkfError(403, "human_only", "Point-in-time restore needs a human: token.");
     }
     const recovery = c.var.deps.recovery;
+    requireOwner(token.role, "restore it");
     if (!recovery) throw new OkfError(501, "unavailable", "Restore is not wired here.");
     return { recovery, ref: token.library, token };
   };
@@ -811,6 +1047,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
 
   app.post(`${BASE}/maintain`, async (c) => {
     const ref = peopleOnly(c);
+    requireOwner(c.var.token.role, "run its maintainers");
     if (!c.var.deps.maintain)
       throw new OkfError(501, "unavailable", "Maintenance is not wired here.");
     const res = (await c.var.deps.maintain(ref.do_id)) as { export: { key?: string } };
@@ -822,6 +1059,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     if (!c.var.token.id.startsWith("session:")) {
       throw new OkfError(403, "session_only", "A library is deleted only from the app's pages.");
     }
+    requireOwner(c.var.token.role, "delete it");
     const ref = c.var.token.library;
     const body = await c.req.json<{ confirm?: string }>().catch(() => ({}) as { confirm?: string });
     if (String(body.confirm ?? "").trim() !== ref.slug) {
@@ -892,17 +1130,19 @@ async function principal(c: C, d: Deps): Promise<{ token: TokenInfo } | { user: 
 
 /**
  * The signed-in person acting on a library they may reach, as the token the routes act with:
- * attributed to their human: actor, full write access like the UI's own forms.
+ * attributed to their human: actor, with their role there (a `read` member reads and comments).
  */
-function sessionToken(user: User, library: LibraryRef): TokenInfo {
+function sessionToken(user: User, { role, ...library }: Authorized): TokenInfo {
   return {
     id: `session:${user.id}`,
     actor: user.actor,
-    scope: "write",
+    scope: role === "read" ? "read" : "write",
     prefix: null,
     mcp_tiers: "all",
     library,
     created_by: user.id,
+    role,
+    person: user.handle,
   };
 }
 

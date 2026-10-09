@@ -83,6 +83,11 @@ export interface RequestContext {
   actor: string;
   request_id: string;
   note?: string | null;
+  /**
+   * The person (users row id) and agent behind the actor (tempra-dev:
+   * decisions/agents-act-for-a-person), kept in each event's meta as `by`.
+   */
+  by?: { person: string; agent?: string } | null;
 }
 
 export interface BlobRef {
@@ -161,6 +166,8 @@ export interface RequestRow {
   ts: string;
   actor: string;
   note: string | null;
+  /** The person and agent behind the actor, when recorded (from 2026-10, TEMPRA-75). */
+  by: { person: string; agent?: string } | null;
   events: EventRow[];
 }
 
@@ -459,6 +466,11 @@ export class LibraryStore {
   ): number {
     const meta: JsonObject = { ...(e.meta ?? {}) };
     if (ctx.note) meta.note = ctx.note;
+    if (ctx.by?.person) {
+      meta.by = ctx.by.agent
+        ? { person: ctx.by.person, agent: ctx.by.agent }
+        : { person: ctx.by.person };
+    }
     const rows = this.sql.all<{ seq: number }>(
       `INSERT INTO events (ts, actor, request_id, op, path, prev_hash, hash, concept_id, meta)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING seq`,
@@ -1988,6 +2000,7 @@ export class LibraryStore {
       ts: first?.ts ?? "",
       actor: first?.actor ?? "",
       note: (first?.meta?.note as string | undefined) ?? null,
+      by: (first?.meta?.by as RequestRow["by"] | undefined) ?? null,
       events,
     };
   }
@@ -3128,6 +3141,33 @@ export class LibraryStore {
     return this.sql
       .all<{ hash: string }>("SELECT hash FROM blobs WHERE location = 'r2'")
       .map((r) => r.hash);
+  }
+
+  /**
+   * GET /agents: who has acted in the library, each person and each of their agents, from the
+   * `by` the ledger records (TEMPRA-75), most recent first. An agent becomes one of the
+   * library's members the first time it acts here. Requests recorded before then have none.
+   */
+  contributors() {
+    const rows = this.sql.all<{
+      person: string;
+      agent: string | null;
+      requests: number;
+      first_seq: number;
+      last_seq: number;
+    }>(
+      `SELECT json_extract(meta, '$.by.person') AS person, json_extract(meta, '$.by.agent') AS agent,
+              COUNT(DISTINCT request_id) AS requests, MIN(seq) AS first_seq, MAX(seq) AS last_seq
+       FROM events WHERE meta IS NOT NULL AND json_extract(meta, '$.by.person') IS NOT NULL
+       GROUP BY person, agent ORDER BY last_seq DESC LIMIT 500`,
+    );
+    return rows.map((r) => {
+      const last = this.sql.all<{ actor: string; ts: string }>(
+        "SELECT actor, ts FROM events WHERE seq = ?",
+        r.last_seq,
+      )[0];
+      return { ...r, actor: last?.actor ?? "", last_ts: last?.ts ?? "" };
+    });
   }
 
   stats() {

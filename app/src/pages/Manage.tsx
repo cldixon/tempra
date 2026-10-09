@@ -1,6 +1,7 @@
 import { type FormEvent, useState } from "react";
 import { ApiError, api, field, useAction, useLoad } from "../api";
 import { useFeed, useTrailing } from "../live";
+import { useRole } from "../role";
 import { navigate } from "../router";
 import { Chip, Crumbs, plural, Status, useTitle, when } from "../ui";
 import { baseName, type Urls } from "../urls";
@@ -627,9 +628,17 @@ export function ConnectLibrary({ urls }: { urls: Urls }) {
     };
   });
   useLive(urls, loaded.state === "ready" ? loaded.data.head : null, loaded.reload);
+  const role = useRole(urls);
   return (
     <>
       <h1>Connect an agent</h1>
+      {role && role !== "owner" && (
+        <p>
+          This library is @{urls.owner}'s, shared with you to{" "}
+          {role === "write" ? "read and write" : "read and comment"}. Your agents reach it at most
+          with the same access; pick it by name when you connect.
+        </p>
+      )}
       <ConnectSteps slug={urls.slug} />
       <h2>Status</h2>
       <Status loaded={loaded}>
@@ -685,6 +694,240 @@ export function DeleteLibrary({ urls }: { urls: Urls }) {
           </button>
         </p>
       </form>
+    </>
+  );
+}
+
+// ---------------------------------------------------------------- members
+
+interface MembersData {
+  owner: string;
+  role: "owner" | "write" | "read";
+  members: { handle: string; role: "read" | "write"; created: string }[];
+  /** The owner's view only. */
+  invitations?: { id: string; handle: string; role: "read" | "write"; expires: string }[];
+}
+
+/** Someone who has worked in the library: a person in the app, or one of their agents. */
+export interface Contributor {
+  person: string | null;
+  agent: { id: string; name: string | null; platform: string | null; client: string | null } | null;
+  actor: string;
+  requests: number;
+  last_ts: string;
+}
+
+/** How an agent is named (tempra-dev: decisions/agents-act-for-a-person): "Claude for @ann". */
+export function agentLabel(c: Pick<Contributor, "person" | "agent" | "actor">): string {
+  const who = c.person ? `@${c.person}` : "a deleted account";
+  if (!c.agent) return `${who} in the app`;
+  return `${c.agent.name ?? c.actor} for ${who}`;
+}
+
+const ROLE_WORDS = { read: "Read and comment", write: "Read and write" } as const;
+
+/**
+ * Who is in the library (tempra-dev: v2/sharing): the owner, members with their access, and the
+ * agents that have worked here, each for its person. The owner invites, changes access and
+ * removes; a member may leave.
+ */
+export function Members({ urls, me }: { urls: Urls; me: string | null }) {
+  useTitle(`Members · ${urls.slug}`);
+  const loaded = useLoad(`members ${urls.base}`, async () => {
+    const [m, a] = await Promise.all([
+      api<MembersData>(urls.api("members")),
+      api<{ contributors: Contributor[] }>(urls.api("agents")),
+    ]);
+    return { ...m, contributors: a.contributors };
+  });
+  const action = useAction();
+  const [notice, setNotice] = useState<string | null>(null);
+  const done = (text: string) => {
+    setNotice(text);
+    loaded.reload();
+  };
+  const invite = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const to = field(form, "to");
+    const role = field(form, "role");
+    void action.run(async () => {
+      const r = await api<{ sent: string; handle?: string }>(
+        urls.api("invitations"),
+        json({ to, role }),
+      );
+      form.reset();
+      done(
+        r.sent === "invited"
+          ? `Invited @${r.handle}. They accept from their Invitations page.`
+          : "If that address has a Tempra account, they will get the invitation.",
+      );
+    });
+  };
+  const member = (handle: string) => urls.api(`members/${encodeURIComponent(handle)}`);
+  const setRole = (handle: string, role: string) =>
+    action.run(async () => {
+      await api(member(handle), { method: "PUT", body: JSON.stringify({ role }) });
+      done(`@${handle} now has ${role} access.`);
+    });
+  const remove = (handle: string, leaving: boolean) =>
+    action.run(async () => {
+      await api(member(handle), { method: "DELETE" });
+      if (leaving) {
+        location.assign("/");
+        return;
+      }
+      done(`Removed @${handle}.`);
+    });
+  const withdraw = (id: string) =>
+    action.run(async () => {
+      await api(urls.api(`invitations/${encodeURIComponent(id)}`), { method: "DELETE" });
+      done("Invitation withdrawn.");
+    });
+  return (
+    <>
+      <h1>Members</h1>
+      {notice && <div className="notice ok">{notice}</div>}
+      {action.error && <div className="notice">{action.error}</div>}
+      <Status loaded={loaded}>
+        {(d) => {
+          const owner = d.role === "owner";
+          return (
+            <>
+              <div className="table-wrap">
+                <table className="list">
+                  <thead>
+                    <tr>
+                      <th>Person</th>
+                      <th>Access</th>
+                      <th />
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td className="name">@{d.owner}</td>
+                      <td>Owner</td>
+                      <td />
+                    </tr>
+                    {d.members.map((m) => (
+                      <tr key={m.handle}>
+                        <td className="name">@{m.handle}</td>
+                        <td>
+                          {owner ? (
+                            <select
+                              aria-label={`Access for @${m.handle}`}
+                              value={m.role}
+                              disabled={action.busy}
+                              onChange={(e) => void setRole(m.handle, e.currentTarget.value)}
+                            >
+                              <option value="read">{ROLE_WORDS.read}</option>
+                              <option value="write">{ROLE_WORDS.write}</option>
+                            </select>
+                          ) : (
+                            ROLE_WORDS[m.role]
+                          )}
+                        </td>
+                        <td>
+                          {owner ? (
+                            <button
+                              type="button"
+                              disabled={action.busy}
+                              onClick={() => void remove(m.handle, false)}
+                            >
+                              Remove
+                            </button>
+                          ) : (
+                            m.handle === me && (
+                              <button
+                                type="button"
+                                disabled={action.busy}
+                                onClick={() => void remove(m.handle, true)}
+                              >
+                                Leave
+                              </button>
+                            )
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {owner && (
+                <>
+                  <h2>Invite</h2>
+                  <form className="token" onSubmit={invite}>
+                    <p>
+                      <label>
+                        Handle or email{" "}
+                        <input
+                          type="text"
+                          name="to"
+                          required
+                          autoComplete="off"
+                          placeholder="@ann"
+                        />
+                      </label>{" "}
+                      <label>
+                        Access{" "}
+                        <select name="role" defaultValue="read">
+                          <option value="read">{ROLE_WORDS.read}</option>
+                          <option value="write">{ROLE_WORDS.write}</option>
+                        </select>
+                      </label>{" "}
+                      <button className="primary" type="submit" disabled={action.busy}>
+                        Invite
+                      </button>
+                    </p>
+                    <p className="small muted">
+                      Only people with a Tempra account. Their agents reach this library at most at
+                      their access.
+                    </p>
+                  </form>
+                  {(d.invitations ?? []).length > 0 && (
+                    <>
+                      <h2>Waiting</h2>
+                      <ul>
+                        {(d.invitations ?? []).map((i) => (
+                          <li key={i.id}>
+                            @{i.handle}, {ROLE_WORDS[i.role].toLowerCase()}, until{" "}
+                            {i.expires.slice(0, 10)}{" "}
+                            <button
+                              type="button"
+                              disabled={action.busy}
+                              onClick={() => void withdraw(i.id)}
+                            >
+                              Withdraw
+                            </button>
+                          </li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                </>
+              )}
+
+              <h2>Who has worked here</h2>
+              {d.contributors.length === 0 ? (
+                <p className="muted">Nobody yet, as far as the ledger records (since 2026-10).</p>
+              ) : (
+                <ul>
+                  {d.contributors.map((c) => (
+                    <li key={`${c.person}|${c.agent?.id ?? ""}`}>
+                      <a href={urls.ledger({ actor: c.actor })}>{agentLabel(c)}</a>{" "}
+                      <span className="small muted">
+                        {plural(c.requests, "change")}, last {when(c.last_ts)}
+                        {c.agent?.platform ? ` · ${c.agent.platform}` : ""}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </>
+          );
+        }}
+      </Status>
     </>
   );
 }

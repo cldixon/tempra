@@ -26,7 +26,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { chromium } from "playwright-core";
+import { type Browser, chromium } from "playwright-core";
 import { readTar, writeTar } from "../src/util/tar";
 import { compareBundle } from "../test/compare";
 import { BUNDLES, loadBundle } from "../test/fixtures";
@@ -188,10 +188,30 @@ function chromiumPath(): string | null {
  * Chromium with one page that records every failed response, console error and page error as a
  * problem; `step` runs a part of a check and records its failure without stopping the rest.
  */
-async function openBrowser() {
-  const executablePath = chromiumPath();
-  if (!executablePath) return "no Chromium found; set CHROME_PATH";
-  const browser = await chromium.launch({ executablePath });
+/** The longest one browser step may take before it is reported as hung. */
+const STEP_MS = 90_000;
+
+/** Resolves with `work`, or rejects once `ms` pass, naming what took too long. */
+function within<T>(ms: number, what: string, work: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${what}: no answer in ${ms / 1000} s`)), ms);
+  });
+  return Promise.race([work, late]).finally(() => clearTimeout(timer));
+}
+
+/**
+ * A browser page with the gate's checks attached. Given a browser already open, a second person
+ * gets a fresh context in it (their own cookies), not a second browser: closing an extra
+ * Chrome hangs on CI's runners.
+ */
+async function openBrowser(shared?: Browser) {
+  let browser = shared;
+  if (!browser) {
+    const executablePath = chromiumPath();
+    if (!executablePath) return "no Chromium found; set CHROME_PATH";
+    browser = await chromium.launch({ executablePath });
+  }
   const context = await browser.newContext();
   const page = await context.newPage();
   const problems: string[] = [];
@@ -213,7 +233,9 @@ async function openBrowser() {
   let failures = 0;
   const step = async (what: string, run: () => Promise<unknown>) => {
     try {
-      await run();
+      // A step that hangs (a wait with no timeout of its own) fails by name rather than
+      // silently using up the CI job's time.
+      await within(STEP_MS, what, run());
     } catch (e) {
       problems.push(`${what}: ${String(e).split("\n")[0]}`);
       // GATE_SCREENSHOTS: what the page showed when the step failed.
@@ -240,7 +262,7 @@ async function openBrowser() {
       .filter((c) => c.name.includes("session"))
       .map((c) => `${c.name}=${c.value}`)
       .join("; ");
-  return { browser, page, problems, step, signInAs, cookie };
+  return { browser, context, page, problems, step, signInAs, cookie };
 }
 
 /**
@@ -937,6 +959,52 @@ async function strangers(owner: string, slug: string, token: string): Promise<st
     headers: { Authorization: `Bearer ${token}` },
   });
   if (cross.status !== 404) problems.push(`dev's token on the stranger's ${slug}: ${cross.status}`);
+
+  // Sharing (tempra-dev: v2/sharing): the dev invites the stranger to write; they accept, open
+  // it, connect their own agent over OAuth to it, and the agent writes as theirs.
+  const lib = `/api/v1/libraries/${owner}/${slug}`;
+  const invited = await apiAs(devCookie, `${lib}/invitations`, "POST", {
+    to: "@stranger",
+    role: "write",
+  });
+  if (invited.status !== 202) problems.push(`dev invites the stranger: ${invited.status}`);
+  const inbox = (await (await apiAs(cookie, "/api/v1/invitations")).json()) as {
+    invitations?: { id: string; owner: string }[];
+  };
+  const invitation = inbox.invitations?.find((i) => i.owner === owner);
+  if (!invitation) return [...problems, "the stranger has no invitation"];
+  const accepted = await apiAs(cookie, `/api/v1/invitations/${invitation.id}/accept`, "POST");
+  if (accepted.status !== 200) problems.push(`the stranger accepts: ${accepted.status}`);
+  for (const p of ["", "a.md"]) {
+    const page = await ui(`${base}/${owner}/${slug}/${p}`, {}, cookie);
+    if (page.status !== 200) problems.push(`the member opens ${slug}/${p}: ${page.status}`);
+  }
+  const connected = await oauthConnect(cookie, {
+    library: `${owner}/${slug}`,
+    libraries: "selected",
+    new_library: "",
+    access: "write",
+    prefix: "",
+    actor: "claude-ai/connector",
+    tiers: "all",
+  });
+  if ("error" in connected) return [...problems, `the member connects: ${connected.error}`];
+  if (!(await mcpSmoke({ url: base, token: connected.token, log: () => {} }))) {
+    problems.push("the member's agent works in the shared library over MCP");
+  }
+  const who = (await (await apiAs(devCookie, `${lib}/agents`)).json()) as {
+    contributors?: { person: string | null; agent: { platform: string | null } | null }[];
+  };
+  if (
+    !who.contributors?.some((c) => c.person === "stranger" && c.agent?.platform === "claude.ai")
+  ) {
+    problems.push(`the member's agent is not among the library's agents: ${JSON.stringify(who)}`);
+  }
+  // Removed: the member and their agent are out at once.
+  const removed = await apiAs(devCookie, `${lib}/members/stranger`, "DELETE");
+  if (removed.status !== 204) problems.push(`dev removes the member: ${removed.status}`);
+  const after = await ui(`${base}/${owner}/${slug}/`, {}, cookie);
+  if (after.status !== 404) problems.push(`a removed member opens ${slug}: ${after.status}`);
   return problems;
 }
 
@@ -945,6 +1013,74 @@ const b64url = (bytes: Uint8Array) =>
     .replace(/\+/g, "-")
     .replace(/\//g, "_")
     .replace(/=+$/, "");
+
+/**
+ * Connects an MCP client over OAuth with PKCE, as Claude would, as the signed-in person with
+ * this cookie, approving consent with these fields; the access token, or what went wrong.
+ */
+async function oauthConnect(
+  cookie: string,
+  fields: Record<string, string>,
+): Promise<{ token: string } | { error: string }> {
+  const redirect = "https://claude.ai/api/mcp/auth_callback";
+  const reg = await fetch(`${base}/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      client_name: "Gate",
+      redirect_uris: [redirect],
+      token_endpoint_auth_method: "none",
+    }),
+  });
+  const { client_id } = (await reg.json()) as { client_id: string };
+  const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
+  const challenge = b64url(
+    new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))),
+  );
+  const authorize = `${base}/authorize?${new URLSearchParams({
+    response_type: "code",
+    client_id,
+    redirect_uri: redirect,
+    scope: "okf:read okf:write",
+    state: "gate",
+    code_challenge: challenge,
+    code_challenge_method: "S256",
+    resource: `${base}/mcp`,
+  })}`;
+  // Consent stays a server page (TEMPRA-14): posted as a person's browser would.
+  const consent = await ui(authorize, {}, cookie);
+  const html = await consent.text();
+  const handle = /name="handle" value="([^"]+)"/.exec(html)?.[1];
+  if (!handle) return { error: `consent page: ${consent.status} ${html.slice(0, 200)}` };
+  const consentCookies = consent.headers
+    .getSetCookie()
+    .map((c) => c.split(";")[0])
+    .join("; ");
+  const approved = await ui(
+    authorize,
+    {
+      method: "POST",
+      headers: { Origin: base },
+      body: new URLSearchParams({ handle, decision: "approve", ...fields }),
+    },
+    `${cookie}; ${consentCookies}`,
+  );
+  const code = new URL(approved.headers.get("Location") ?? redirect).searchParams.get("code");
+  if (!code) return { error: `consent: ${approved.status}` };
+  const tok = await fetch(`${base}/token`, {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      grant_type: "authorization_code",
+      code,
+      redirect_uri: redirect,
+      client_id,
+      code_verifier: verifier,
+    }),
+  });
+  const { access_token } = (await tok.json()) as { access_token?: string };
+  return access_token ? { token: access_token } : { error: `token: ${tok.status}` };
+}
 
 /**
  * A fresh account's first run (v2 spec: Phases and gates, A2), in the browser: sign up, the
@@ -969,73 +1105,16 @@ async function freshAccountConnects(): Promise<string[]> {
     await page.getByText("No agent has written yet").waitFor({ timeout: 15_000 });
     const cookie = await b.cookie();
 
-    const redirect = "https://claude.ai/api/mcp/auth_callback";
-    const reg = await fetch(`${base}/register`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        client_name: "Gate",
-        redirect_uris: [redirect],
-        token_endpoint_auth_method: "none",
-      }),
+    const connected = await oauthConnect(cookie, {
+      library: "notes",
+      new_library: "",
+      access: "write",
+      prefix: "",
+      actor: "claude-code/gate",
+      tiers: "all",
     });
-    const { client_id } = (await reg.json()) as { client_id: string };
-    const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
-    const challenge = b64url(
-      new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))),
-    );
-    const authorize = `${base}/authorize?${new URLSearchParams({
-      response_type: "code",
-      client_id,
-      redirect_uri: redirect,
-      scope: "okf:read okf:write",
-      state: "gate",
-      code_challenge: challenge,
-      code_challenge_method: "S256",
-      resource: `${base}/mcp`,
-    })}`;
-    // Consent stays a server page (TEMPRA-14): posted as a person's browser would.
-    const consent = await ui(authorize, {}, cookie);
-    const html = await consent.text();
-    const handle = /name="handle" value="([^"]+)"/.exec(html)?.[1];
-    if (!handle) return [`consent page: ${consent.status} ${html.slice(0, 200)}`];
-    const consentCookies = consent.headers
-      .getSetCookie()
-      .map((c) => c.split(";")[0])
-      .join("; ");
-    const approved = await ui(
-      authorize,
-      {
-        method: "POST",
-        headers: { Origin: base },
-        body: new URLSearchParams({
-          handle,
-          decision: "approve",
-          library: "notes",
-          new_library: "",
-          access: "write",
-          prefix: "",
-          actor: "claude-code/gate",
-          tiers: "all",
-        }),
-      },
-      `${cookie}; ${consentCookies}`,
-    );
-    const code = new URL(approved.headers.get("Location") ?? redirect).searchParams.get("code");
-    if (!code) return [`consent: ${approved.status}`];
-    const tok = await fetch(`${base}/token`, {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        grant_type: "authorization_code",
-        code,
-        redirect_uri: redirect,
-        client_id,
-        code_verifier: verifier,
-      }),
-    });
-    const { access_token } = (await tok.json()) as { access_token?: string };
-    if (!access_token) return [`token: ${tok.status}`];
+    if ("error" in connected) return [connected.error];
+    const access_token = connected.token;
     if (!(await mcpSmoke({ url: base, token: access_token }))) return ["MCP over OAuth"];
 
     await step("the open Connect page shows the agent's write, live", () =>
@@ -1092,6 +1171,67 @@ async function freshAccountConnects(): Promise<string[]> {
       await page.getByRole("button", { name: "Export now" }).click();
       await page.getByText("Exported to R2").waitFor({ timeout: 15_000 });
     });
+
+    // Sharing in the app (tempra-dev: v2/sharing): invite from the Members tab; the invitee
+    // accepts from Invitations in their own browser; as a reader there is no Edit, at write there is.
+    await step("a note to share", async () => {
+      const put = await ui(
+        `${base}/api/v1/libraries/newcomer/notes/files/shared.md`,
+        {
+          method: "PUT",
+          headers: { Origin: base, "Content-Type": "text/markdown" },
+          body: "---\ntype: Note\ntitle: Shared note\ndescription: For the invited reader.\n---\nRead me.\n",
+        },
+        cookie,
+      );
+      if (put.status !== 200) throw new Error(`PUT shared.md: ${put.status}`);
+    });
+    await step("invite a person from the Members tab", async () => {
+      await page.goto(`${lib}/`);
+      await libraryLink("Members");
+      await page.locator('input[name="to"]').fill("@stranger");
+      await page.getByRole("button", { name: "Invite" }).click();
+      await page.getByText("Invited @stranger").waitFor({ timeout: 15_000 });
+    });
+    const invitee = await within(
+      STEP_MS,
+      "opening the invitee's browser",
+      openBrowser(browser),
+    ).catch((e) => String(e));
+    if (typeof invitee === "string") problems.push(invitee);
+    else {
+      try {
+        await invitee.step("the invitee accepts from Invitations", async () => {
+          await invitee.signInAs("stranger@localhost", "/invitations");
+          await invitee.page.getByRole("button", { name: "Accept" }).click();
+          await invitee.page.waitForURL(`${lib}/`, { timeout: 15_000 });
+        });
+        const markdownButton = () => invitee.page.getByRole("button", { name: "Markdown" });
+        await invitee.step("a reader sees the note and no Edit", async () => {
+          await invitee.page.goto(`${lib}/shared.md`);
+          await invitee.page.getByText("Read me.").waitFor({ timeout: 15_000 });
+          await markdownButton().waitFor({ timeout: 15_000 });
+          // The role loads with the library list; give it the moment it takes.
+          await invitee.page.waitForTimeout(500);
+          const edit = await invitee.page.getByRole("button", { name: "Edit" }).count();
+          if (edit !== 0) throw new Error("a read member is offered Edit");
+        });
+        await step("the owner gives the member write access", async () => {
+          await page.goto(`${lib}/-/members`);
+          await page.getByLabel("Access for @stranger").selectOption("write");
+          await page.getByText("@stranger now has write access").waitFor({ timeout: 15_000 });
+        });
+        await invitee.step("a writer is offered Edit", async () => {
+          await invitee.page.goto(`${lib}/shared.md`);
+          await invitee.page.getByRole("button", { name: "Edit" }).waitFor({ timeout: 15_000 });
+        });
+        problems.push(...invitee.problems.map((p) => `invitee: ${p}`));
+      } finally {
+        await within(STEP_MS, "closing the invitee's browser", invitee.context.close()).catch((e) =>
+          problems.push(String(e)),
+        );
+      }
+    }
 
     // Deleting the library wipes its Durable Object and ends the connection.
     await step("delete the library from its Delete tab", async () => {
@@ -1188,7 +1328,7 @@ try {
   const first = tokens[0];
   const tenancy = first ? await strangers(first.owner, first.slug, first.token) : ["no library"];
   console.log(
-    `${tenancy.length === 0 ? "PASS" : "FAIL"} a second account sees nothing of the first`,
+    `${tenancy.length === 0 ? "PASS" : "FAIL"} a second account sees nothing of the first, until invited; then it and its agent work there`,
   );
   for (const p of tenancy) console.log(`  - ${p}`);
   if (tenancy.length > 0) failed = true;

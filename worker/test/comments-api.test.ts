@@ -105,7 +105,7 @@ describe("comments over REST and MCP", () => {
     ]);
   });
 
-  test("writes are refused cross-site, to read-only tokens and outside a token's prefix", async () => {
+  test("comments are refused cross-site and outside a token's prefix; read access may comment", async () => {
     const s = setup();
     await seed(s);
     const forged = await post(
@@ -121,7 +121,8 @@ describe("comments over REST and MCP", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ path: "metrics/margin.md", body: "x" }),
     });
-    expect(reader.status).toBe(403);
+    // Commenting is its own permission, apart from writing content (tempra-dev: v2/sharing).
+    expect(reader.status).toBe(201);
     const scoped = await s.req("/comments", {
       method: "POST",
       token: "scoped",

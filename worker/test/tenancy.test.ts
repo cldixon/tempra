@@ -207,6 +207,248 @@ describe("tenancy (v2 spec: Tenancy and authorization)", () => {
     expect(page).not.toContain("private-notes");
   });
 
+  test("a read member reads and comments, and every other change is refused", async () => {
+    const s = setup();
+    await seedOwnerContent(s);
+    const friend = await s.stranger("friend@example.com");
+    await s.accounts.share("lib-1", friend.user.id, "read", "user_1");
+    const as = (path: string, init: RequestInit = {}) =>
+      friend.app.request(`${API}${path}`, {
+        ...init,
+        headers: { Origin: ORIGIN, "Content-Type": "application/json", ...init.headers },
+      });
+
+    const read = await as("/files/a.md");
+    expect(read.status).toBe(200);
+    expect(await read.text()).toContain("secret note");
+    expect((await friend.app.request(`${UI}/`)).status).toBe(200);
+    const comment = await as("/comments", {
+      method: "POST",
+      body: JSON.stringify({ path: "a.md", body: "Is this still true?" }),
+    });
+    expect(comment.status).toBe(201);
+    const seqAfterComment = s.store().headSeq();
+
+    const put = await as("/files/a.md", {
+      method: "PUT",
+      headers: { "Content-Type": "text/markdown" },
+      body: "---\ntype: Note\n---\nChanged.\n",
+    });
+    expect(put.status).toBe(403);
+    expect(await put.text()).toContain("read and comment");
+
+    // Every other state-changing route, REST and UI: nothing lands.
+    const failures: string[] = [];
+    for (const r of await libraryRoutes(s)) {
+      if (r.method === "GET" || r.path.includes("/comments")) continue;
+      const path = fill(r.path);
+      const got = await friend.app.request(path, {
+        method: r.method,
+        headers: { Origin: ORIGIN, "Content-Type": "application/json" },
+        body: r.method === "DELETE" ? undefined : JSON.stringify({ confirm: "demo", path: "a.md" }),
+      });
+      if (got.status < 400) failures.push(`${r.method} ${r.path}: ${got.status}`);
+    }
+    expect(failures).toEqual([]);
+    expect(s.store().headSeq()).toBe(seqAfterComment);
+  });
+
+  test("a write member writes and verifies as themselves; owner-only stays the owner's", async () => {
+    const s = setup();
+    await seedOwnerContent(s);
+    const friend = await s.stranger("friend@example.com");
+    await s.accounts.share("lib-1", friend.user.id, "write", "user_1");
+    const as = (path: string, init: RequestInit = {}) =>
+      friend.app.request(`${API}${path}`, {
+        ...init,
+        headers: { Origin: ORIGIN, "Content-Type": "application/json", ...init.headers },
+      });
+
+    const put = await as("/files/b.md", {
+      method: "PUT",
+      headers: { "Content-Type": "text/markdown" },
+      body: "---\ntype: Note\n---\nThe friend's note.\n",
+    });
+    expect(put.status).toBe(200);
+    expect((await as("/verify/a.md", { method: "POST" })).status).toBe(200);
+    const log = (await (await as("/requests")).json()) as { requests: { actor: string }[] };
+    expect(log.requests.map((r) => r.actor)).toContain("human:friend");
+
+    for (const [path, body] of [
+      ["/delete", { confirm: "demo" }],
+      ["/restore", { to: new Date().toISOString() }],
+      ["/maintain", {}],
+    ] as const) {
+      const got = await as(path, { method: "POST", body: JSON.stringify(body) });
+      expect(got.status).toBe(403);
+      expect(await got.text()).toContain("owner_only");
+    }
+    expect((await as("/restores")).status).toBe(403);
+    // The owner still can.
+    expect((await s.req("/restores", { token: "human" })).status).toBe(200);
+  });
+
+  test("shared libraries are listed with the role; removing a member cuts them off at once", async () => {
+    const s = setup();
+    const friend = await s.stranger("friend@example.com");
+    await s.accounts.share("lib-1", friend.user.id, "read", "user_1");
+    const list = (await (await friend.app.request("/api/v1/libraries")).json()) as {
+      libraries: { owner: string; slug: string; role: string }[];
+    };
+    expect(list.libraries.map((l) => `${l.owner}/${l.slug}:${l.role}`)).toEqual([
+      "friend/demo:owner",
+      "owner/demo:read",
+    ]);
+    // Owner-only lists stay the account's own.
+    expect((await s.accounts.libraries(friend.user.id)).map((l) => l.owner)).toEqual(["friend"]);
+    expect(await s.accounts.members("lib-1")).toMatchObject([{ handle: "friend", role: "read" }]);
+
+    expect((await friend.app.request(`${API}/tree`)).status).toBe(200);
+    expect(await s.accounts.unshare("lib-1", friend.user.id)).toBe(true);
+    expect((await friend.app.request(`${API}/tree`)).status).toBe(404);
+    expect((await friend.app.request(`${UI}/`)).status).toBe(404);
+  });
+
+  test("a member's token acts at their role now, never as the owner", async () => {
+    const s = setup();
+    const friend = await s.stranger("friend@example.com");
+    await s.accounts.share("lib-1", friend.user.id, "write", "user_1");
+    const mint = async (actor: string) =>
+      (
+        await s.accounts.createToken({
+          libraryId: "lib-1",
+          actor,
+          scope: "write",
+          prefix: null,
+          expires: null,
+          mcpTiers: "all",
+          createdBy: friend.user.id,
+        })
+      ).secret;
+    const agent = await mint("claude-code/friend");
+    const human = await mint("human:friend");
+    const put = (token: string) =>
+      s.req("/files/c.md", {
+        method: "PUT",
+        token,
+        headers: { "Content-Type": "text/markdown" },
+        body: "---\ntype: Note\n---\nBy the friend's agent.\n",
+      });
+    expect((await put(agent)).status).toBe(200);
+    // A human: token acts for the person who minted it, not the library's owner.
+    const me = await s.anon.request("/api/v1/me", {
+      headers: { Authorization: `Bearer ${human}` },
+    });
+    expect(((await me.json()) as { handle: string }).handle).toBe("friend");
+    expect((await s.req("/restores", { token: human })).status).toBe(403);
+
+    await s.accounts.share("lib-1", friend.user.id, "read", "user_1");
+    expect((await put(agent)).status).toBe(403);
+    const comment = await s.req("/comments", {
+      method: "POST",
+      token: agent,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: "c.md", body: "Still here, read only." }),
+    });
+    expect(comment.status).toBe(201);
+
+    await s.accounts.unshare("lib-1", friend.user.id);
+    const gone = await s.req("/tree", { token: agent });
+    expect(gone.status).toBe(401);
+    expect(await gone.text()).toContain("no_access");
+  });
+
+  test("a member mints tokens on a shared library at their role, on their own limit", async () => {
+    const s = setup();
+    const friend = await s.stranger("friend@example.com");
+    await s.accounts.share("lib-1", friend.user.id, "read", "user_1");
+    const mint = (scope: string) =>
+      friend.app.request("/api/v1/tokens", {
+        method: "POST",
+        headers: { Origin: ORIGIN, "Content-Type": "application/json" },
+        body: JSON.stringify({ library: "owner/demo", actor: "claude-code/friend", scope }),
+      });
+    const tooMuch = await mint("write");
+    expect(tooMuch.status).toBe(403);
+    expect(await tooMuch.text()).toContain("mint a read token");
+    const ok = await mint("read");
+    expect(ok.status).toBe(201);
+    const minted = (await ok.json()) as { id: string; library: string; secret: string };
+    expect(minted.library).toBe("owner/demo");
+    // The slug alone names their own library, never the shared one.
+    const own = await friend.app.request("/api/v1/tokens", {
+      method: "POST",
+      headers: { Origin: ORIGIN, "Content-Type": "application/json" },
+      body: JSON.stringify({ library: "demo", actor: "claude-code/mine", scope: "write" }),
+    });
+    expect(((await own.json()) as { library: string }).library).toBe("demo");
+
+    // Both see it; it counts against the member's limit, not the owner's.
+    const theirs = (await s.accounts.tokens(friend.user.id)).map((t) => t.library);
+    expect(theirs).toContain("owner/demo");
+    expect((await s.accounts.tokens("user_1")).map((t) => t.id)).toContain(minted.id);
+    expect((await s.accounts.usage("user_1")).tokens).toBe(0);
+    expect((await s.accounts.usage(friend.user.id)).tokens).toBe(4);
+
+    // The member may revoke their own; the owner may revoke any on their library.
+    const revoke = await friend.app.request(`/api/v1/tokens/${minted.id}`, {
+      method: "DELETE",
+      headers: { Origin: ORIGIN },
+    });
+    expect(revoke.status).toBe(204);
+    expect((await s.req("/tree", { token: minted.secret })).status).toBe(401);
+  });
+
+  test("a token's agent and the person in the app are told apart in the ledger", async () => {
+    const s = setup();
+    const friend = await s.stranger("friend@example.com");
+    await s.accounts.share("lib-1", friend.user.id, "write", "user_1");
+    const minted = await friend.app.request("/api/v1/tokens", {
+      method: "POST",
+      headers: { Origin: ORIGIN, "Content-Type": "application/json" },
+      body: JSON.stringify({ library: "owner/demo", actor: "claude-code/laptop", scope: "write" }),
+    });
+    const { secret } = (await minted.json()) as { secret: string };
+    const note = (body: string) => ({
+      method: "PUT",
+      headers: { "Content-Type": "text/markdown" },
+      body: `---\ntype: Note\n---\n${body}\n`,
+    });
+    expect((await s.req("/files/by-agent.md", { ...note("Agent."), token: secret })).status).toBe(
+      200,
+    );
+    const inApp = await friend.app.request(`${API}/files/by-person.md`, {
+      ...note("Person."),
+      headers: { Origin: ORIGIN, "Content-Type": "text/markdown" },
+    });
+    expect(inApp.status).toBe(200);
+    const r = (await (await s.app.request(`${API}/agents`)).json()) as {
+      contributors: { person: string; agent: { name: string; platform: string } | null }[];
+    };
+    expect(
+      r.contributors.map(
+        (c) => `${c.person}:${c.agent ? `${c.agent.name}@${c.agent.platform}` : "-"}`,
+      ),
+    ).toEqual(["friend:-", "friend:claude-code@token/claude-code"]);
+  });
+
+  test("the owner is never a member; deletes take memberships with them", async () => {
+    const s = setup();
+    const friend = await s.stranger("friend@example.com");
+    expect(s.accounts.share("lib-1", "user_1", "write", "user_1")).rejects.toThrow(
+      "cannot also be a member",
+    );
+    expect(s.accounts.share("lib-1", friend.user.id, "admin" as "read", "user_1")).rejects.toThrow(
+      "read or write",
+    );
+    await s.accounts.share("lib-1", friend.user.id, "read", "user_1");
+    await s.accounts.share(friend.lib.id, "user_1", "write", friend.user.id);
+    await s.accounts.deleteLibrary(friend.lib.id);
+    expect((await s.accounts.reachable("user_1")).map((l) => l.owner)).toEqual(["owner"]);
+    await s.accounts.deleteUser(friend.user);
+    expect(await s.accounts.members("lib-1")).toEqual([]);
+  });
+
   test("library paths are {owner}/{slug} in the UI and the API", () => {
     expect(UI).toBe("/owner/demo");
     expect(API).toBe("/api/v1/libraries/owner/demo");

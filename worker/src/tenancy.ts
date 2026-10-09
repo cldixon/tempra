@@ -1,4 +1,5 @@
-import type { Accounts, LibraryRef, User } from "./accounts";
+import type { Accounts, LibraryRef, Role, User } from "./accounts";
+import { agentId, type ClientSignals, connectionAgent } from "./agents";
 import type { TokenInfo } from "./auth";
 import { OkfError } from "./store/errors";
 
@@ -7,11 +8,14 @@ import { OkfError } from "./store/errors";
  * authorization). Routes resolve {owner}/{slug} through here and never compare IDs themselves.
  * A library the caller cannot reach is answered exactly like one that does not exist: 404.
  *
- * Phase A: a signed-in person reaches the libraries they own; a token reaches its own library;
- * an app connection reaches the libraries its grant selects (grantLibraries). Phase B adds
- * members with roles here, without touching routes.
+ * A signed-in person reaches the libraries they own and those shared with them, with their role
+ * (tempra-dev: v2/sharing); a token reaches its own library, at its creator's role; an app
+ * connection reaches the libraries its grant selects (grantLibraries).
  */
 export type Caller = { user: User } | { token: TokenInfo };
+
+/** A library the caller may reach, with what they may do there. */
+export type Authorized = LibraryRef & { role: Role };
 
 export function noLibrary(owner: string, slug: string): OkfError {
   return new OkfError(404, "no_library", `There is no library ${owner}/${slug}.`);
@@ -22,15 +26,26 @@ export async function authorizeLibrary(
   caller: Caller,
   owner: string,
   slug: string,
-): Promise<LibraryRef> {
+): Promise<Authorized> {
   if ("token" in caller) {
-    const lib = caller.token.library;
-    if (lib.owner && lib.owner === owner && lib.slug === slug) return lib;
+    const { library: lib, role } = caller.token;
+    if (lib.owner && lib.owner === owner && lib.slug === slug) return { ...lib, role };
     throw noLibrary(owner, slug);
   }
-  const ref = await accounts.library(owner, slug);
-  if (!ref || ref.ownerId !== caller.user.id) throw noLibrary(owner, slug);
-  return { id: ref.id, slug: ref.slug, do_id: ref.do_id, owner: ref.owner };
+  const found = await accounts.library(owner, slug);
+  if (!found) throw noLibrary(owner, slug);
+  const ref = { id: found.id, slug: found.slug, do_id: found.do_id, owner: found.owner };
+  if (found.ownerId === caller.user.id) return { ...ref, role: "owner" };
+  const role = await accounts.memberRole(found.id, caller.user.id);
+  if (!role) throw noLibrary(owner, slug);
+  return { ...ref, role };
+}
+
+/** Refuses anything but the library's owner (or a token acting for them). */
+export function requireOwner(role: Role, what: string): void {
+  if (role !== "owner") {
+    throw new OkfError(403, "owner_only", `Only the library's owner can ${what}.`);
+  }
 }
 
 /**
@@ -49,11 +64,16 @@ export interface AccountGrant {
   prefix: string | null;
   tiers: "all" | "files";
   libraries: "all" | string[];
+  /** What the app said about itself at consent (agents.ts); absent on older connections. */
+  client?: ClientSignals;
 }
 
 /**
  * The libraries a connection reaches now, each as the token it acts with there; null when the
- * account is gone or suspended.
+ * account is gone or suspended. "All libraries" means the account's own; a library shared with
+ * it is reached only when the grant selects it, at the lower of the grant's scope and the
+ * person's role now, so lowering or ending a membership applies on the next request
+ * (tempra-dev: v2/sharing).
  */
 export async function grantLibraries(
   accounts: Accounts,
@@ -62,17 +82,21 @@ export async function grantLibraries(
   const user = await accounts.account(grant.userId);
   if (!user) return null;
   const selected = grant.libraries === "all" ? null : new Set(grant.libraries);
-  const libraries = (await accounts.libraries(user.id))
-    .filter((l) => !selected || selected.has(l.id))
+  const agent = agentId(user.id, connectionAgent(grant.client ?? {}).platform);
+  const libraries = (await accounts.reachable(user.id))
+    .filter((l) => (selected ? selected.has(l.id) : l.role === "owner"))
     .map(
-      (l): TokenInfo => ({
+      ({ role, ...l }): TokenInfo => ({
         id: `grant:${grant.id}`,
         actor: grant.actor,
-        scope: grant.scope,
+        scope: role === "read" ? "read" : grant.scope,
         prefix: grant.prefix,
         mcp_tiers: grant.tiers,
         library: { id: l.id, slug: l.slug, do_id: l.do_id, owner: l.owner },
         created_by: user.id,
+        role,
+        person: user.handle,
+        agent,
       }),
     );
   return { user, libraries };

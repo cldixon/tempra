@@ -16,6 +16,8 @@ export interface McpContext {
   tiers: string;
   /** The libraries the caller reaches now, each as the token it acts with there. */
   libraries: TokenInfo[];
+  /** The person and agent behind the actor, for the ledger (TEMPRA-75). */
+  by?: RequestContext["by"];
   open(token: TokenInfo): LibraryClient;
   blobs: BlobStore;
   /** The Worker's origin, for download URLs. */
@@ -172,10 +174,24 @@ export function buildServer(ctx: McpContext): McpServer {
     actor: ctx.actor,
     request_id: crypto.randomUUID(),
     note: note ?? null,
+    by: ctx.by ?? null,
   });
 
   const checkWrite = (token: TokenInfo, ...paths: string[]) => {
-    if (token.scope !== "write") throw new OkfError(403, "read_only", "This token is read-only.");
+    if (token.scope !== "write") {
+      throw new OkfError(
+        403,
+        "read_only",
+        "You have read access here: you can read and comment, not change content.",
+      );
+    }
+    checkPrefix(token, paths);
+  };
+
+  /** Comments are their own permission (tempra-dev: v2/sharing): read access may comment. */
+  const checkComment = (token: TokenInfo, path: string) => checkPrefix(token, [path]);
+
+  const checkPrefix = (token: TokenInfo, paths: string[]) => {
     if (token.prefix === null) return;
     for (const p of paths) {
       if (!underPrefix(normalizePath(p) ?? "", token.prefix)) {
@@ -839,7 +855,7 @@ export function buildServer(ctx: McpContext): McpServer {
         const { token, lib } = pick(library);
         if (action === "open") {
           if (!path) throw new OkfError(400, "bad_request", "`open` needs the concept's `path`.");
-          checkWrite(token, path);
+          checkComment(token, path);
           const r = await lib.comment(request(), {
             kind: "open",
             path,
@@ -851,7 +867,7 @@ export function buildServer(ctx: McpContext): McpServer {
         if (!thread)
           throw new OkfError(400, "bad_request", `\`${action}\` needs the \`thread\` id.`);
         const t = await lib.thread(thread);
-        checkWrite(token, t.path);
+        checkComment(token, t.path);
         const r = await lib.comment(request(), { kind: action, thread, body: body ?? "" });
         const verb = { reply: "Replied to", resolve: "Resolved", reopen: "Reopened" }[action];
         return text(

@@ -9,6 +9,8 @@ interface Library {
   id: string;
   owner: string;
   slug: string;
+  /** Shared libraries carry the person's role there (tempra-dev: v2/sharing). */
+  role?: "owner" | "write" | "read";
   seq?: number;
   concepts?: number;
   attachments?: number;
@@ -22,6 +24,10 @@ export function Libraries() {
     api<{ libraries: Library[] }>("/api/v1/libraries").then((r) => r.libraries),
   );
   const [creating, setCreating] = useState(false);
+  const invited = useLoad("invitations", () =>
+    api<{ invitations: unknown[] }>("/api/v1/invitations"),
+  );
+  const waiting = invited.state === "ready" ? invited.data.invitations.length : 0;
   return (
     <>
       <div className="page-head">
@@ -37,6 +43,14 @@ export function Libraries() {
         </button>
       </div>
       {creating && <NewLibrary onCancel={() => setCreating(false)} />}
+      {waiting > 0 && (
+        <p>
+          <a href="/invitations">
+            {waiting === 1 ? "An invitation" : `${waiting} invitations`} to a library
+          </a>{" "}
+          {waiting === 1 ? "is" : "are"} waiting for you.
+        </p>
+      )}
       <Status loaded={loaded}>
         {(libs) => {
           const owners = new Set(libs.map((l) => l.owner));
@@ -53,6 +67,7 @@ export function Libraries() {
                         {owners.size > 1 && <span className="owner">{l.owner}/</span>}
                         {l.slug}
                       </a>
+                      {l.role && l.role !== "owner" && <span className="faint"> {l.role}</span>}
                     </li>
                   ))}
                 </ul>

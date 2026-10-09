@@ -9,6 +9,8 @@ export type Route =
   | { page: "tokens"; library: string | null }
   | { page: "apps" }
   | { page: "account"; done: string | null }
+  | { page: "invitations" }
+  | { page: "members"; owner: string; slug: string }
   | { page: "work"; owner: string; slug: string; kind?: string }
   | { page: "transfer"; owner: string; slug: string }
   | { page: "recovery"; owner: string; slug: string }
@@ -68,6 +70,7 @@ export function match(url: URL): Route | null {
   if (path === "/tokens") return { page: "tokens", library: q.get("library") };
   if (path === "/apps") return { page: "apps" };
   if (path === "/account") return { page: "account", done: q.get("done") };
+  if (path === "/invitations") return { page: "invitations" };
   const m = /^\/([^/]+)\/([^/]+)\/(.*)$/.exec(path);
   if (!m) return null;
   const owner = decode(m[1] ?? "");
@@ -116,6 +119,7 @@ export function match(url: URL): Route | null {
       case "transfer":
       case "recovery":
       case "delete":
+      case "members":
         return tail === "" ? { page: pageName, owner, slug } : null;
       case "connect":
         return tail === "" ? { page: "library-connect", owner, slug } : null;
@@ -140,7 +144,15 @@ let lastMove: "push" | "pop" = "push";
 export const lastNavigation = () => lastMove;
 
 /** The account's own pages, which no handle can collide with (they are reserved names). */
-const ACCOUNT_PAGES = new Set(["/", "/welcome", "/connect", "/tokens", "/apps", "/account"]);
+const ACCOUNT_PAGES = new Set([
+  "/",
+  "/welcome",
+  "/connect",
+  "/tokens",
+  "/apps",
+  "/account",
+  "/invitations",
+]);
 
 /**
  * A page with unsaved work (the editor) registers a guard: asked before the app leaves the page,

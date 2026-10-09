@@ -174,6 +174,7 @@ export const TOKENS: Record<string, TokenInfo> = {
     prefix: null,
     mcp_tiers: "all",
     library: LIB,
+    role: "owner",
   },
   reader: {
     id: "t2",
@@ -182,6 +183,7 @@ export const TOKENS: Record<string, TokenInfo> = {
     prefix: null,
     mcp_tiers: "all",
     library: LIB,
+    role: "owner",
   },
   scoped: {
     id: "t3",
@@ -190,6 +192,7 @@ export const TOKENS: Record<string, TokenInfo> = {
     prefix: "notes",
     mcp_tiers: "all",
     library: LIB,
+    role: "owner",
   },
   process: {
     id: "t4",
@@ -198,6 +201,7 @@ export const TOKENS: Record<string, TokenInfo> = {
     prefix: null,
     mcp_tiers: "all",
     library: LIB,
+    role: "owner",
   },
   human: {
     id: "t6",
@@ -207,6 +211,7 @@ export const TOKENS: Record<string, TokenInfo> = {
     mcp_tiers: "all",
     library: LIB,
     created_by: "user_1",
+    role: "owner",
   },
   files: {
     id: "t5",
@@ -215,6 +220,7 @@ export const TOKENS: Record<string, TokenInfo> = {
     prefix: null,
     mcp_tiers: "files",
     library: LIB,
+    role: "owner",
   },
 };
 
