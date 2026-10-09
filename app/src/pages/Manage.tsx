@@ -54,6 +54,7 @@ const KINDS: [string | undefined, string][] = [
   [undefined, "All"],
   ["comment", "Comments"],
   ["stale", "Stale"],
+  ["stale_soon", "Stale soon"],
   ["broken_link", "Broken links"],
   ["lint", "Lint"],
 ];

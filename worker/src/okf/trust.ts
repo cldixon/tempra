@@ -43,9 +43,32 @@ export function trustTier(generated: JsonObject | null, verified: Verification[]
 
 /** A concept is stale when `now >= stale_after` (OKF §5.5). */
 export function isStale(staleAfter: Json | undefined, now = Date.now()): boolean {
-  if (typeof staleAfter !== "string") return false;
+  const t = staleTime(staleAfter);
+  return t !== null && now >= t;
+}
+
+/** How far ahead of `stale_after` a concept is stale soon (TEMPRA-63). */
+export const STALE_SOON_DAYS = 14;
+export const STALE_SOON_MS = STALE_SOON_DAYS * 86_400_000;
+
+/** `stale_after` as epoch milliseconds, or null when absent or unparseable. */
+export function staleTime(staleAfter: Json | undefined): number | null {
+  if (typeof staleAfter !== "string") return null;
   const t = Date.parse(staleAfter);
-  return !Number.isNaN(t) && now >= t;
+  return Number.isNaN(t) ? null : t;
+}
+
+export type Staleness = "stale" | "stale_soon";
+
+/**
+ * Where a concept stands against its clock: stale once `stale_after` has passed, stale soon within
+ * STALE_SOON_DAYS of it. Only `stale_after` and the time decide it; no other write moves it.
+ */
+export function staleness(staleAfter: Json | undefined, now = Date.now()): Staleness | null {
+  const t = staleTime(staleAfter);
+  if (t === null) return null;
+  if (now >= t) return "stale";
+  return now + STALE_SOON_MS >= t ? "stale_soon" : null;
 }
 
 /** Absent status is `stable` (OKF §5.4). */

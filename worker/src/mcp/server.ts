@@ -38,7 +38,7 @@ How to work:
 3. Prefer \`edit\` for small changes, \`write\` for new concepts or rewrites, \`batch\` for related changes so they land as one request. Pass \`if_match\` (the hash from your last read); on a conflict, re-read and reapply. Bodies are stored in a canonical form (\`-\` bullets, \`*\` emphasis, padded tables): what you write reads back normalized, so \`edit\` the text as \`read\` shows it.
 4. Put a one-line \`note\` on every write. Read the \`lint\` in every write result and fix what it reports; the result's notes say what else to know (ignored fields, the stored form, open comments). A concept with no frontmatter, invalid YAML or no \`type\` is refused. Keep concepts under 100 KB; split big ones into linked concepts.
 5. Never write index.md or log.md (the server synthesizes them). Never set \`generated\` (the server stamps it) or \`verified\` (not yours to claim). Set \`status\` and \`stale_after\` honestly. Timestamps are full ISO 8601 datetimes with an offset (\`stale_after: 2026-12-31T00:00:00Z\`); a plain date is flagged.
-6. Use \`work\` to find what needs doing: open comments, stale concepts, broken links, lint.
+6. Use \`work\` to find what needs doing: open comments, stale concepts, broken links, lint; \`work\` with kind stale_soon lists what goes stale within 14 days. Only a new \`stale_after\` resets a concept's clock; other edits leave it stale.
 7. Comments are how people ask you for changes. Before editing a concept, read its open threads with \`comments\`; make the change a comment asks for, then answer it with \`comment\` (reply, and resolve what you fixed). Ask with a reply when unsure; never resolve a thread you did not address. A concept with open threads cannot be deleted until they are resolved.`;
 
 const text = (t: string): CallToolResult => ({ content: [{ type: "text", text: t }] });
@@ -247,7 +247,7 @@ export function buildServer(ctx: McpContext): McpServer {
       const lines = [
         `# Library ${token.library.owner}/${token.library.slug} (seq ${summary.seq})`,
         "",
-        `Concepts: ${summary.concepts} · attachments: ${summary.attachments} · open work items: ${summary.open_work} (${summary.open_comments} of them comment threads)`,
+        `Concepts: ${summary.concepts} · attachments: ${summary.attachments} · open work items: ${summary.open_work} (${summary.open_comments} of them comment threads)${summary.stale_soon > 0 ? ` · stale soon: ${summary.stale_soon} (\`work\` kind stale_soon)` : ""}`,
         `Types: ${types || "none yet"}`,
         you(),
         ...(others.length > 0
@@ -357,7 +357,7 @@ export function buildServer(ctx: McpContext): McpServer {
           `path: ${view.path}`,
           `hash: ${view.hash}`,
           `seq: ${view.seq}${args.at !== undefined ? ` (as of ${args.at})` : ""}`,
-          `trust: ${view.trust_tier} · stale: ${view.stale ? "yes" : "no"} · status: ${status} · inbound links: ${view.inbound_links}`,
+          `trust: ${view.trust_tier} · stale: ${view.stale ? "yes" : view.stale_soon ? "soon" : "no"} · status: ${status} · inbound links: ${view.inbound_links}`,
           ...(tier2 && view.open_comments > 0
             ? [
                 `Open comments: ${view.open_comments}. Read them with \`comments\` (path ${view.path}) before you edit.`,
@@ -755,9 +755,9 @@ export function buildServer(ctx: McpContext): McpServer {
       "work",
       {
         title: "Maintenance queue",
-        description: `${BEYOND}what needs doing in this library: open comment threads (requests from people), stale concepts (past stale_after), broken links, and lint, ranked by how many concepts link in. Each item has a suggested action; fix it through the normal write tools, and answer comments with \`comment\`.`,
+        description: `${BEYOND}what needs doing in this library: open comment threads (requests from people), stale concepts (past stale_after), broken links, and lint, ranked by how many concepts link in. Each item has a suggested action; fix it through the normal write tools, and answer comments with \`comment\`. \`kind: "stale_soon"\` looks ahead instead: concepts within 14 days of stale_after, to refresh before they go stale; only moving stale_after resets the clock.`,
         inputSchema: {
-          kind: z.enum(["comment", "stale", "broken_link", "lint"]).optional(),
+          kind: z.enum(["comment", "stale", "stale_soon", "broken_link", "lint"]).optional(),
           limit: z.number().int().optional(),
           ...libArg,
         },

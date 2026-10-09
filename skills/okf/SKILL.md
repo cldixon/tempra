@@ -55,6 +55,7 @@ Gross margin equals recognized [revenue](/metrics/revenue.md) minus full COGS.[^
 - Every footnote label matches a `sources[].id`, and every `[^id]` in the text has a `[^id]: …` definition line at the end of the body (without one, renderers show it as literal text).
 - Timestamps (`stale_after`, `sources[].last_modified`) are ISO 8601 datetimes with an offset (`2026-06-30T14:00:00Z`). A plain date such as `2026-12-31` is flagged.
 - Set `status` and `stale_after` honestly: `draft` when unsure; a `stale_after` when the content depends on something that changes.
+- Only a new `stale_after` resets a concept's clock: an edit that leaves it alone leaves the concept stale (or stale soon, within 14 days of it). Move it forward when you have re-checked the content, not because you touched the file.
 - Do not write `generated` or `verified`. The server ignores them and says so in the write result's notes.
 - A file with no frontmatter, frontmatter that is not valid YAML, or no `type` is refused (400) and nothing is written; fix it and write again. The rest of this list is lint: a generic `type`, no `description` or `status`, a relative link, an uncited footnote definition, and a link to a heading its target does not have (rechecked whenever you read, so it follows changes to the target). A `stale_after` already past comes back as a note.
 
@@ -79,7 +80,7 @@ These tools have no equivalent in a folder of files. Use them instead of greppin
 | Need | Tool |
 | --- | --- |
 | What others changed recently | `log` |
-| What needs fixing (open comments, stale, broken links, lint) | `work` |
+| What needs fixing (open comments, stale, broken links, lint); what goes stale within 14 days (`kind: stale_soon`) | `work` |
 | Requests and questions people left on a concept | `comments`, then `comment` |
 | Find by meaning, ranked | `search` |
 | Filter by type, tag, status, trust, staleness | `query` |

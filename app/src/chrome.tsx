@@ -3,8 +3,10 @@ import {
   ChevronRight,
   CircleCheck,
   CirclePlus,
+  ClockAlert,
   Code,
   History,
+  Hourglass,
   List,
   MessageSquare,
   PanelLeft,
@@ -36,6 +38,8 @@ const ICONS = {
   plus: CirclePlus,
   files: PanelLeft,
   chevron: ChevronRight,
+  stale: ClockAlert,
+  soon: Hourglass,
   down: ChevronDown,
 } as const;
 

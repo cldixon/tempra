@@ -54,11 +54,14 @@ CREATE TABLE IF NOT EXISTS concepts (
   resource     TEXT,
   status       TEXT NOT NULL,
   stale_after  TEXT,
+  -- stale_after as epoch ms, for the staleness process's range query (TEMPRA-63).
+  stale_ms     INTEGER,
   generated_by TEXT,
   generated_at TEXT,
   extra        TEXT,
   lint         TEXT
 );
+CREATE INDEX IF NOT EXISTS concepts_stale ON concepts(stale_ms) WHERE stale_ms IS NOT NULL;
 CREATE TABLE IF NOT EXISTS verifications (
   concept_id TEXT NOT NULL, by TEXT NOT NULL, at TEXT NOT NULL, seq INTEGER NOT NULL
 );
@@ -100,6 +103,7 @@ CREATE TABLE IF NOT EXISTS flags (
   concept_id TEXT, kind TEXT, since_seq INTEGER, detail TEXT,
   PRIMARY KEY (concept_id, kind)
 );
+CREATE INDEX IF NOT EXISTS flags_kind ON flags(kind);
 
 CREATE TABLE IF NOT EXISTS threads (
   id           TEXT PRIMARY KEY,

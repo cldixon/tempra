@@ -42,7 +42,15 @@ import {
   splitAnchor,
   underPrefix,
 } from "../okf/paths";
-import { effectiveStatus, isStale, trustTier } from "../okf/trust";
+import {
+  effectiveStatus,
+  isStale,
+  STALE_SOON_DAYS,
+  type Staleness,
+  staleness,
+  staleTime,
+  trustTier,
+} from "../okf/trust";
 import type {
   ConceptRecord,
   Json,
@@ -227,6 +235,8 @@ export type FileView =
       lint: LintWarning[];
       trust_tier: TrustTier;
       stale: boolean;
+      /** Within STALE_SOON_DAYS of `stale_after`, worked out at read time like `stale`. */
+      stale_soon: boolean;
       inbound_links: number;
       /** Open comment threads, at head (0 for an earlier version). */
       open_comments: number;
@@ -372,6 +382,39 @@ export class LibraryStore {
     this.size = opts.size ?? null;
     migrate(sql);
     this.reindexSearch();
+    this.addStaleTimes();
+  }
+
+  /**
+   * The staleness process needs `stale_after` as a number it can range over (TEMPRA-63).
+   * Libraries created before that get the column and its index once, then a first run, so the
+   * work queue never misses a concept that went stale before the first alarm.
+   */
+  private addStaleTimes() {
+    if (this.sql.all("SELECT 1 FROM meta WHERE key = 'stale_ms'").length > 0) return;
+    const dated = this.sql.transaction(() => {
+      const cols = this.sql.all<{ name: string }>("PRAGMA table_info(concepts)");
+      if (!cols.some((c) => c.name === "stale_ms")) {
+        this.sql.run("ALTER TABLE concepts ADD COLUMN stale_ms INTEGER");
+      }
+      this.sql.script(
+        "CREATE INDEX IF NOT EXISTS concepts_stale ON concepts(stale_ms) WHERE stale_ms IS NOT NULL;\n" +
+          "CREATE INDEX IF NOT EXISTS flags_kind ON flags(kind);",
+      );
+      const rows = this.sql.all<{ concept_id: string; stale_after: string }>(
+        "SELECT concept_id, stale_after FROM concepts WHERE stale_after IS NOT NULL",
+      );
+      for (const r of rows) {
+        this.sql.run(
+          "UPDATE concepts SET stale_ms = ? WHERE concept_id = ?",
+          staleTime(r.stale_after),
+          r.concept_id,
+        );
+      }
+      this.sql.run("INSERT INTO meta (key, value) VALUES ('stale_ms', '1')");
+      return rows.length > 0;
+    });
+    if (dated) this.maintainStaleness();
   }
 
   /**
@@ -1430,21 +1473,28 @@ export class LibraryStore {
     ]);
     const extra = r.fm.filter(([k]) => !typed.has(k));
     const gen = r.generated;
+    const staleAfter = str(field(r, "stale_after"));
+    const before = this.sql.all<{ stale_after: string | null }>(
+      "SELECT stale_after FROM concepts WHERE concept_id = ?",
+      id,
+    )[0];
     this.sql.run(
       `INSERT INTO concepts (concept_id, type, title, description, resource, status, stale_after,
-         generated_by, generated_at, extra, lint)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         stale_ms, generated_by, generated_at, extra, lint)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(concept_id) DO UPDATE SET type = excluded.type, title = excluded.title,
          description = excluded.description, resource = excluded.resource, status = excluded.status,
-         stale_after = excluded.stale_after, generated_by = excluded.generated_by,
-         generated_at = excluded.generated_at, extra = excluded.extra, lint = excluded.lint`,
+         stale_after = excluded.stale_after, stale_ms = excluded.stale_ms,
+         generated_by = excluded.generated_by, generated_at = excluded.generated_at,
+         extra = excluded.extra, lint = excluded.lint`,
       id,
       str(field(r, "type")) ?? "",
       str(field(r, "title")),
       str(field(r, "description")),
       str(field(r, "resource")),
       effectiveStatus(field(r, "status")),
-      str(field(r, "stale_after")),
+      staleAfter,
+      staleTime(staleAfter),
       gen ? str(gen.by) : null,
       gen ? str(gen.at) : null,
       JSON.stringify(extra),
@@ -1510,6 +1560,33 @@ export class LibraryStore {
     } else {
       this.sql.run("DELETE FROM flags WHERE concept_id = ? AND kind = 'lint'", id);
     }
+
+    // Only a new stale_after moves the clock (TEMPRA-63): any other write leaves the flags as
+    // the staleness process last set them.
+    if (!before || before.stale_after !== staleAfter) this.setStaleFlag(id, staleAfter, seq);
+  }
+
+  /** Sets a concept's stale or stale_soon flag from its `stale_after`, clearing the other. */
+  private setStaleFlag(id: string, staleAfter: string | null, seq: number): Staleness | null {
+    // The clock is read only when there is a date to weigh (tests count its calls).
+    const now = staleAfter === null ? null : this.clock();
+    const state = now ? staleness(staleAfter ?? undefined, now.getTime()) : null;
+    this.sql.run(
+      "DELETE FROM flags WHERE concept_id = ? AND kind IN ('stale', 'stale_soon') AND kind IS NOT ?",
+      id,
+      state,
+    );
+    if (state) {
+      this.sql.run(
+        `INSERT INTO flags (concept_id, kind, since_seq, detail) VALUES (?, ?, ?, ?)
+         ON CONFLICT(concept_id, kind) DO UPDATE SET detail = excluded.detail`,
+        id,
+        state,
+        seq,
+        JSON.stringify({ stale_after: staleAfter, at: iso(now ?? this.clock()) }),
+      );
+    }
+    return state;
   }
 
   private unindex(id: string) {
@@ -1789,6 +1866,7 @@ export class LibraryStore {
       lint,
       trust_tier: trustTier(r.generated, verified),
       stale: isStale(field(r, "stale_after"), this.clock().getTime()),
+      stale_soon: staleness(field(r, "stale_after"), this.clock().getTime()) === "stale_soon",
       inbound_links: atHead ? this.inboundCount(e.concept_id) : 0,
       open_comments: atHead ? this.openThreadsOf(e.concept_id) : 0,
     };
@@ -1952,15 +2030,28 @@ export class LibraryStore {
   outline(opts: { at?: number } = {}) {
     const snap = this.snapshot(opts.at);
     // Open comment threads, at head only (comments are not versioned with content).
-    const open = snap.seq === this.headSeq() ? this.openThreadCounts() : new Map<string, number>();
+    const atHead = snap.seq === this.headSeq();
+    const open = atHead ? this.openThreadCounts() : new Map<string, number>();
+    const stale = atHead ? this.staleFlags() : new Map<string, Staleness>();
     const files = snap.sorted().map((e) => ({
       path: e.path,
       kind: e.kind,
       title: e.kind === "concept" ? (str(field(this.record(e.hash), "title")) ?? null) : null,
       seq: e.seq,
       ...(open.has(e.concept_id) ? { comments: open.get(e.concept_id) } : {}),
+      ...(stale.has(e.concept_id) ? { stale: stale.get(e.concept_id) } : {}),
     }));
     return { seq: snap.seq, files };
+  }
+
+  /** Concepts the staleness process flagged, told apart by the time now (as in `work`). */
+  private staleFlags(): Map<string, Staleness> {
+    const now = this.clock().getTime();
+    const rows = this.sql.all<{ concept_id: string; stale_ms: number }>(
+      `SELECT f.concept_id, c.stale_ms FROM flags f JOIN concepts c ON c.concept_id = f.concept_id
+       WHERE f.kind IN ('stale', 'stale_soon') AND c.stale_ms IS NOT NULL`,
+    );
+    return new Map(rows.map((r) => [r.concept_id, r.stale_ms <= now ? "stale" : "stale_soon"]));
   }
 
   tree(opts: { prefix?: string; depth?: number; at?: number } = {}) {
@@ -2402,8 +2493,8 @@ export class LibraryStore {
   }
 
   /**
-   * GET /work: the work queue (spec: Write path and maintainers). Stale concepts are computed at
-   * read time until the staleness maintainer arrives; broken links and lint come from flags.
+   * GET /work: the work queue (spec: Write path and maintainers). Staleness, broken links and
+   * lint come from flags; stale soon only when asked for (`kind`) or for one concept (`path`).
    * Ranked by inbound links, then age.
    */
   work(opts: { kind?: string; limit?: number; path?: string } = {}) {
@@ -2415,25 +2506,43 @@ export class LibraryStore {
     // One file's items (the app's concept page), whatever the queue's length.
     const only = opts.path === undefined ? undefined : (normalizePath(opts.path) ?? "");
     const mine = (path: string) => only === undefined || path === only;
-    if (want("stale")) {
-      // From the typed column, so the queue never parses records (spec: Tier 3, staleness).
-      const rows = this.sql.all<{ concept_id: string; stale_after: string }>(
-        "SELECT concept_id, stale_after FROM concepts WHERE stale_after IS NOT NULL",
+    // Stale soon is a look-ahead: listed when asked for, or on one concept's page, not in the
+    // queue of what needs doing now.
+    const soon = opts.kind === "stale_soon" || (opts.kind === undefined && only !== undefined);
+    if (want("stale") || soon) {
+      // From the staleness process's flags (TEMPRA-63), told apart by the time now, so a concept
+      // flagged stale soon is stale the moment its date passes, between two runs.
+      const rows = this.sql.all<{ concept_id: string; stale_after: string; stale_ms: number }>(
+        `SELECT f.concept_id, c.stale_after, c.stale_ms FROM flags f
+         JOIN concepts c ON c.concept_id = f.concept_id
+         WHERE f.kind IN ('stale', 'stale_soon') AND c.stale_ms IS NOT NULL`,
       );
       for (const row of rows) {
         const e = snap.byId.get(row.concept_id);
         if (e?.kind !== "concept" || !mine(e.path)) continue;
         const staleAfter = row.stale_after;
-        if (!isStale(staleAfter, now)) continue;
-        items.push({
-          kind: "stale",
-          path: e.path,
-          since: String(staleAfter),
-          detail: `stale_after ${String(staleAfter)} has passed`,
-          suggested_action:
-            "Re-check the concept against its sources and resource. Update it (which restamps generated) and move stale_after forward, or set status: deprecated if it no longer holds.",
-          inbound_links: this.inboundCount(e.concept_id),
-        });
+        if (row.stale_ms <= now) {
+          if (!want("stale")) continue;
+          items.push({
+            kind: "stale",
+            path: e.path,
+            since: staleAfter,
+            detail: `stale_after ${staleAfter} has passed`,
+            suggested_action:
+              "Re-check the concept against its sources and resource. Update it (which restamps generated) and move stale_after forward, or set status: deprecated if it no longer holds.",
+            inbound_links: this.inboundCount(e.concept_id),
+          });
+        } else if (soon) {
+          items.push({
+            kind: "stale_soon",
+            path: e.path,
+            since: staleAfter,
+            detail: `stale_after ${staleAfter} is within ${STALE_SOON_DAYS} days`,
+            suggested_action:
+              "Re-check the concept against its sources before then. If it still holds, move stale_after forward; only a new stale_after resets the clock.",
+            inbound_links: this.inboundCount(e.concept_id),
+          });
+        }
       }
     }
     // Missing-heading lint is not stored: work it out for every concept with an anchored link.
@@ -2455,7 +2564,8 @@ export class LibraryStore {
       since_seq: number;
       detail: string;
     }>(
-      "SELECT f.concept_id, f.kind, f.since_seq, f.detail FROM flags f JOIN paths p ON p.concept_id = f.concept_id",
+      `SELECT f.concept_id, f.kind, f.since_seq, f.detail FROM flags f
+       JOIN paths p ON p.concept_id = f.concept_id WHERE f.kind NOT IN ('stale', 'stale_soon')`,
     );
     // A concept with only missing-heading lint gets a lint item too, dated by its latest version.
     for (const id of anchorLint.keys()) {
@@ -2920,6 +3030,60 @@ export class LibraryStore {
     return lines.length ? `${lines.join("\n")}\n` : "";
   }
 
+  /**
+   * The staleness process (TEMPRA-63): one range query over the indexed `stale_ms` finds every
+   * concept that is stale or stale soon, and the flags are brought in line with it. A write keeps
+   * its concept's flags current when `stale_after` moves, so a run only catches what time alone
+   * changed. Returns what newly became stale soon or stale, for alerts and the digest.
+   */
+  maintainStaleness(): StalenessRun {
+    const now = this.clock();
+    const t = now.getTime();
+    return this.sql.transaction(() => {
+      const seq = this.headSeq();
+      const due = this.sql.all<{
+        concept_id: string;
+        stale_after: string;
+        stale_ms: number;
+        path: string;
+      }>(
+        `SELECT c.concept_id, c.stale_after, c.stale_ms, p.path FROM concepts c
+         JOIN paths p ON p.concept_id = c.concept_id WHERE c.stale_ms <= ?`,
+        t + STALE_SOON_DAYS * 86_400_000,
+      );
+      const flagged = new Map(
+        this.sql
+          .all<{ concept_id: string; kind: string }>(
+            "SELECT concept_id, kind FROM flags WHERE kind IN ('stale', 'stale_soon')",
+          )
+          .map((f) => [f.concept_id, f.kind]),
+      );
+      const run: StalenessRun = { stale: 0, stale_soon: 0, became: { stale: [], stale_soon: [] } };
+      for (const r of due) {
+        const state: Staleness = r.stale_ms <= t ? "stale" : "stale_soon";
+        run[state]++;
+        const was = flagged.get(r.concept_id);
+        flagged.delete(r.concept_id);
+        if (was === state) continue;
+        this.setStaleFlag(r.concept_id, r.stale_after, seq);
+        run.became[state].push(r.path);
+      }
+      // Left over: flags whose concept is no longer due (a clock set back, a restored row).
+      for (const id of flagged.keys()) this.setStaleFlag(id, null, seq);
+      for (const k of ["stale", "stale_soon"] as const) run.became[k].sort();
+      this.sql.run(
+        `INSERT INTO cursors (maintainer, seq) VALUES ('staleness', ?)
+         ON CONFLICT(maintainer) DO UPDATE SET seq = excluded.seq`,
+        seq,
+      );
+      this.setMaintenance({
+        staleness_at: iso(now),
+        staleness_counts: JSON.stringify({ stale: run.stale, stale_soon: run.stale_soon }),
+      });
+      return run;
+    });
+  }
+
   /** The usage-rollup maintainer: drops read counts older than the usage window. */
   pruneUsage(): number {
     const before = this.sql.all<{ n: number }>("SELECT COUNT(*) AS n FROM access_log")[0]?.n ?? 0;
@@ -2971,6 +3135,9 @@ export class LibraryStore {
     const seq = this.headSeq();
     const m = this.maintenance();
     const exportSeq = m.export_seq ? Number(m.export_seq) : 0;
+    const stalenessSeq =
+      this.sql.all<{ seq: number }>("SELECT seq FROM cursors WHERE maintainer = 'staleness'")[0]
+        ?.seq ?? 0;
     return {
       seq,
       paths: one("SELECT COUNT(*) AS n FROM paths"),
@@ -2979,14 +3146,28 @@ export class LibraryStore {
       events: one("SELECT COUNT(*) AS n FROM events"),
       requests: one("SELECT COUNT(DISTINCT request_id) AS n FROM events"),
       bytes: this.size ? this.size() : null,
+      // Every maintainer here is a process: deterministic, run by Tempra from the daily alarm.
+      // Managed agents will be listed beside them as kind "agent".
       maintainers: {
         export: {
+          kind: "process",
           cursor: exportSeq,
           lag: seq - exportSeq,
           last_run: m.export_at ?? null,
           last_key: m.export_key ?? null,
         },
-        usage: { last_run: m.usage_at ?? null, window_days: USAGE_WINDOW_DAYS },
+        usage: { kind: "process", last_run: m.usage_at ?? null, window_days: USAGE_WINDOW_DAYS },
+        staleness: {
+          kind: "process",
+          cursor: stalenessSeq,
+          lag: seq - stalenessSeq,
+          last_run: m.staleness_at ?? null,
+          ...(JSON.parse(m.staleness_counts ?? '{"stale":0,"stale_soon":0}') as {
+            stale: number;
+            stale_soon: number;
+          }),
+          soon_days: STALE_SOON_DAYS,
+        },
       },
       next_run: m.next_run ?? null,
     };
@@ -3013,6 +3194,7 @@ export class LibraryStore {
       attachments,
       types,
       open_work: this.work({ limit: 1 }).total,
+      stale_soon: this.work({ kind: "stale_soon", limit: 1 }).total,
       open_comments: [...this.openThreadCounts().entries()]
         .filter(([id]) => snap.byId.has(id))
         .reduce((n, [, c]) => n + c, 0),
@@ -3060,6 +3242,13 @@ export class LibraryStore {
 export type DownloadPayload =
   | { k: "file"; path: string; hash: string; media: string | null }
   | { k: "export"; at: number; name?: string };
+
+/** What one run of the staleness process found: counts now, and paths that changed state. */
+export interface StalenessRun {
+  stale: number;
+  stale_soon: number;
+  became: { stale: string[]; stale_soon: string[] };
+}
 
 export interface WorkItem {
   kind: string;
