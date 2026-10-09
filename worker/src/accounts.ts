@@ -46,6 +46,24 @@ export interface AgentRow {
   client: string | null;
 }
 
+/** A pending invitation to a library (TEMPRA-61). */
+export interface Invitation {
+  id: string;
+  /** The library, as {owner}/{slug}. */
+  owner: string;
+  slug: string;
+  role: MemberRole;
+  /** The invited person's handle (the owner's view) or the inviter's (the invitee's view). */
+  handle: string;
+  created: string;
+  expires: string;
+}
+
+/** How long an invitation stays open. */
+export const INVITATION_DAYS = 14;
+/** Invitations a library may send a day: enough for a team, too few to spam with. */
+export const INVITATIONS_PER_DAY = 20;
+
 export interface User {
   id: string;
   email: string;
@@ -137,6 +155,33 @@ export interface Accounts {
   ): Promise<string>;
   /** Agents by id, with their person's handle; unknown ids are left out. */
   agents(ids: string[]): Promise<AgentRow[]>;
+  /** An account by handle or email, for inviting; null when there is none or it is suspended. */
+  findAccount(by: { handle: string } | { email: string }): Promise<User | null>;
+  /**
+   * Invites an account to a library with a role, or renews a pending invitation (new role,
+   * new expiry). 409 when they own it or are already a member; 429 past the daily limit.
+   */
+  invite(
+    libraryId: string,
+    userId: string,
+    role: MemberRole,
+    invitedBy: string,
+  ): Promise<{ id: string; renewed: boolean }>;
+  /** A library's pending invitations, by the invited person's handle. */
+  libraryInvitations(libraryId: string): Promise<Invitation[]>;
+  /** The person's pending invitations, with the inviter's handle. */
+  invitations(userId: string): Promise<Invitation[]>;
+  /**
+   * Accepts or declines the person's own pending invitation; accepting makes them a member.
+   * Null when there is no such open invitation for them.
+   */
+  decideInvitation(
+    id: string,
+    userId: string,
+    accept: boolean,
+  ): Promise<{ owner: string; slug: string; role: MemberRole } | null>;
+  /** Withdraws a pending invitation to a library; false when there was none. */
+  revokeInvitation(id: string, libraryId: string): Promise<boolean>;
   /** A library by its path, with its owner's users row id; null when there is none. */
   library(owner: string, slug: string): Promise<(LibraryRef & { ownerId: string }) | null>;
   createLibrary(slug: string, owner: Pick<User, "id" | "handle">): Promise<LibraryRef>;
@@ -455,6 +500,154 @@ export function d1Accounts(db: D1Database): Accounts {
         .all<AgentRow>();
       return r.results;
     },
+    async findAccount(by) {
+      const [col, value] =
+        "handle" in by
+          ? ["handle", by.handle.trim().replace(/^@/, "").toLowerCase()]
+          : ["email", by.email.trim().toLowerCase()];
+      return db
+        .prepare(
+          `SELECT id, email, actor, handle FROM users WHERE ${col} = ? AND suspended IS NULL`,
+        )
+        .bind(value)
+        .first<User>();
+    },
+    async invite(libraryId, userId, role, invitedBy) {
+      if (role !== "read" && role !== "write") {
+        throw new OkfError(400, "bad_role", "A member's role is read or write.");
+      }
+      const lib = await db
+        .prepare(
+          `SELECT owner, (SELECT role FROM library_members WHERE library = ?1 AND user = ?2) AS member
+           FROM libraries WHERE id = ?1`,
+        )
+        .bind(libraryId, userId)
+        .first<{ owner: string; member: string | null }>();
+      if (!lib) throw new OkfError(404, "no_library", "No such library.");
+      if (lib.owner === userId) throw new OkfError(409, "is_owner", "That's the library's owner.");
+      if (lib.member) {
+        throw new OkfError(
+          409,
+          "already_member",
+          `They are already a member, with ${lib.member} access.`,
+        );
+      }
+      const now = new Date();
+      const expires = new Date(now.getTime() + INVITATION_DAYS * 86_400_000).toISOString();
+      const renewed = await db
+        .prepare(
+          `UPDATE library_invitations SET role = ?, expires = ?, invited_by = ?
+           WHERE library = ? AND user = ? AND status = 'pending' RETURNING id`,
+        )
+        .bind(role, expires, invitedBy, libraryId, userId)
+        .first<{ id: string }>();
+      if (renewed) return { id: renewed.id, renewed: true };
+      const id = `inv_${crypto.randomUUID()}`;
+      const dayAgo = new Date(now.getTime() - 86_400_000).toISOString();
+      // The day's count is checked in the same statement, so a burst cannot slip past it.
+      const r = await db
+        .prepare(
+          `INSERT INTO library_invitations (id, library, user, role, invited_by, created, expires)
+           SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7
+           WHERE (SELECT COUNT(*) FROM library_invitations WHERE library = ?2 AND created > ?8) < ?9`,
+        )
+        .bind(
+          id,
+          libraryId,
+          userId,
+          role,
+          invitedBy,
+          now.toISOString(),
+          expires,
+          dayAgo,
+          INVITATIONS_PER_DAY,
+        )
+        .run();
+      if (!r.meta.changes) {
+        throw new OkfError(
+          429,
+          "too_many_invitations",
+          `A library can send ${INVITATIONS_PER_DAY} invitations a day.`,
+        );
+      }
+      return { id, renewed: false };
+    },
+    async libraryInvitations(libraryId) {
+      const r = await db
+        .prepare(
+          `SELECT i.id, o.handle AS owner, l.slug, i.role, u.handle, i.created, i.expires
+           FROM library_invitations i JOIN libraries l ON l.id = i.library
+           JOIN users o ON o.id = l.owner JOIN users u ON u.id = i.user
+           WHERE i.library = ? AND i.status = 'pending' AND i.expires > ?
+           ORDER BY i.created DESC`,
+        )
+        .bind(libraryId, new Date().toISOString())
+        .all<Invitation>();
+      return r.results;
+    },
+    async invitations(userId) {
+      const r = await db
+        .prepare(
+          `SELECT i.id, o.handle AS owner, l.slug, i.role, b.handle, i.created, i.expires
+           FROM library_invitations i JOIN libraries l ON l.id = i.library
+           JOIN users o ON o.id = l.owner LEFT JOIN users b ON b.id = i.invited_by
+           WHERE i.user = ? AND i.status = 'pending' AND i.expires > ? AND o.suspended IS NULL
+           ORDER BY i.created DESC`,
+        )
+        .bind(userId, new Date().toISOString())
+        .all<Invitation & { handle: string | null }>();
+      return r.results.map((i) => ({ ...i, handle: i.handle ?? i.owner }));
+    },
+    async decideInvitation(id, userId, accept) {
+      const now = new Date().toISOString();
+      const inv = await db
+        .prepare(
+          `SELECT i.library, i.role, i.invited_by, o.handle AS owner, l.slug
+           FROM library_invitations i JOIN libraries l ON l.id = i.library
+           JOIN users o ON o.id = l.owner
+           WHERE i.id = ? AND i.user = ? AND i.status = 'pending' AND i.expires > ?
+             AND o.suspended IS NULL`,
+        )
+        .bind(id, userId, now)
+        .first<{
+          library: string;
+          role: MemberRole;
+          invited_by: string;
+          owner: string;
+          slug: string;
+        }>();
+      if (!inv) return null;
+      const decide = db
+        .prepare(
+          "UPDATE library_invitations SET status = ?, decided = ? WHERE id = ? AND status = 'pending'",
+        )
+        .bind(accept ? "accepted" : "declined", now, id);
+      if (!accept) {
+        await decide.run();
+        return { owner: inv.owner, slug: inv.slug, role: inv.role };
+      }
+      await db.batch([
+        decide,
+        db
+          .prepare(
+            `INSERT INTO library_members (library, user, role, granted_by, created)
+             SELECT ?1, ?2, ?3, ?4, ?5 WHERE EXISTS (SELECT 1 FROM libraries WHERE id = ?1 AND owner != ?2)
+             ON CONFLICT (library, user) DO UPDATE SET role = excluded.role`,
+          )
+          .bind(inv.library, userId, inv.role, inv.invited_by, now),
+      ]);
+      return { owner: inv.owner, slug: inv.slug, role: inv.role };
+    },
+    async revokeInvitation(id, libraryId) {
+      const r = await db
+        .prepare(
+          `UPDATE library_invitations SET status = 'revoked', decided = ?
+           WHERE id = ? AND library = ? AND status = 'pending'`,
+        )
+        .bind(new Date().toISOString(), id, libraryId)
+        .run();
+      return r.meta.changes > 0;
+    },
     async memberRole(libraryId, userId) {
       const row = await db
         .prepare("SELECT role FROM library_members WHERE library = ? AND user = ?")
@@ -671,6 +864,7 @@ export function d1Accounts(db: D1Database): Accounts {
       await db.batch([
         db.prepare("DELETE FROM tokens WHERE library = ?").bind(libraryId),
         db.prepare("DELETE FROM library_members WHERE library = ?").bind(libraryId),
+        db.prepare("DELETE FROM library_invitations WHERE library = ?").bind(libraryId),
         db.prepare("DELETE FROM libraries WHERE id = ?").bind(libraryId),
       ]);
     },
@@ -685,6 +879,7 @@ export function d1Accounts(db: D1Database): Accounts {
           .bind(new Date().toISOString(), user.id),
         db.prepare("UPDATE tokens SET created_by = NULL WHERE created_by = ?").bind(user.id),
         db.prepare("DELETE FROM library_members WHERE user = ?").bind(user.id),
+        db.prepare("DELETE FROM library_invitations WHERE user = ?").bind(user.id),
         db.prepare("DELETE FROM agents WHERE user = ?").bind(user.id),
         db.prepare("DELETE FROM users WHERE id = ?").bind(user.id),
         db

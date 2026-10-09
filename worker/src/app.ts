@@ -2,7 +2,7 @@ import * as design from "@tempra/design";
 import { type Doc, parseMarkdown } from "@tempra/editor/doc";
 import { type Context, Hono } from "hono";
 import { registerAccountApi } from "./account-api";
-import { type Accounts, checkNewToken, type User } from "./accounts";
+import { type Accounts, checkNewToken, type MemberRole, type User } from "./accounts";
 import { tokenAgent } from "./agents";
 import type { Authenticate, TokenInfo } from "./auth";
 import {
@@ -694,6 +694,120 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   app.post(`${BASE}/comments/:thread/resolve`, act("resolve"));
   app.post(`${BASE}/comments/:thread/reopen`, act("reopen"));
 
+  // ------------------------------------------------------------------ members and invitations
+
+  // Sharing (tempra-dev: v2/sharing, TEMPRA-61): who is in the library, and invitations. People
+  // only, from the app's pages; managing them is the owner's, leaving is any member's.
+  const sessionOnly = (c: C, what: string) => {
+    if (!c.var.token.id.startsWith("session:")) {
+      throw new OkfError(403, "session_only", `${what} only from the app's pages.`);
+    }
+  };
+  const memberRole = (v: unknown): MemberRole => {
+    if (v !== "read" && v !== "write") {
+      throw new OkfError(400, "bad_role", "A member's role is read or write.");
+    }
+    return v;
+  };
+
+  app.get(`${BASE}/members`, async (c) => {
+    const ref = c.var.token.library;
+    const accounts = c.var.deps.accounts;
+    const owner = c.var.token.role === "owner";
+    return c.json({
+      owner: ref.owner,
+      role: c.var.token.role,
+      members: (await accounts.members(ref.id)).map(({ handle, role, created }) => ({
+        handle,
+        role,
+        created,
+      })),
+      // Pending invitations are the owner's to see.
+      ...(owner ? { invitations: await accounts.libraryInvitations(ref.id) } : {}),
+    });
+  });
+
+  app.post(`${BASE}/invitations`, async (c) => {
+    sessionOnly(c, "Invitations are sent");
+    requireOwner(c.var.token.role, "invite people");
+    const body = await json<{ to?: string; role?: string }>(c);
+    const role = memberRole(body.role);
+    const to = String(body.to ?? "").trim();
+    if (!to) throw new OkfError(400, "bad_request", "Give a handle or an email address.");
+    const accounts = c.var.deps.accounts;
+    const ref = c.var.token.library;
+    const byEmail = to.includes("@") && !to.startsWith("@");
+    const invitee = await accounts.findAccount(byEmail ? { email: to } : { handle: to });
+    if (!invitee) {
+      // An email is never confirmed or denied as an account: the answer is the same either way.
+      if (byEmail) return c.json({ sent: "if_account" }, 202);
+      throw new OkfError(404, "no_account", `There is no Tempra account @${to.replace(/^@/, "")}.`);
+    }
+    const inviter = c.var.token.created_by ?? "";
+    const { renewed } = await accounts.invite(ref.id, invitee.id, role, inviter);
+    if (!renewed) {
+      const origin = new URL(c.req.url).origin;
+      const who = c.var.token.actor.replace(/^human:/, "@");
+      await c.var.deps.mailer
+        ?.send({
+          to: invitee.email,
+          subject: `${who} invited you to ${ref.owner}/${ref.slug} on Tempra`,
+          text: `${who} invited you to the library ${ref.owner}/${ref.slug} with ${role} access${role === "read" ? " (read and comment)" : ""}.\n\nAccept or decline: ${origin}/invitations\n\nThe invitation is open for 14 days. If you did not expect it, ignore this email.\n`,
+        })
+        .then(() => c.var.deps.meter?.({ kind: "email", account: invitee.handle }))
+        .catch((e) =>
+          console.error(JSON.stringify({ mail_failed: "invitation", error: String(e) })),
+        );
+    }
+    return c.json(
+      byEmail ? { sent: "if_account" } : { sent: "invited", handle: invitee.handle },
+      202,
+    );
+  });
+
+  app.delete(`${BASE}/invitations/:id`, async (c) => {
+    sessionOnly(c, "Invitations are withdrawn");
+    requireOwner(c.var.token.role, "withdraw invitations");
+    const ok = await c.var.deps.accounts.revokeInvitation(
+      c.req.param("id"),
+      c.var.token.library.id,
+    );
+    if (!ok) throw new OkfError(404, "not_found", "No such pending invitation.");
+    return c.body(null, 204);
+  });
+
+  /** A member by handle, for changing their role or removing them. */
+  const memberNamed = async (c: C) => {
+    const accounts = c.var.deps.accounts;
+    const person = await accounts.findAccount({ handle: c.req.param("member") ?? "" });
+    const role = person ? await accounts.memberRole(c.var.token.library.id, person.id) : null;
+    if (!person || !role) throw new OkfError(404, "not_found", "No such member.");
+    return person;
+  };
+
+  app.put(`${BASE}/members/:member`, async (c) => {
+    sessionOnly(c, "Members are managed");
+    requireOwner(c.var.token.role, "change members' access");
+    const person = await memberNamed(c);
+    const role = memberRole((await json<{ role?: string }>(c)).role);
+    await c.var.deps.accounts.share(
+      c.var.token.library.id,
+      person.id,
+      role,
+      c.var.token.created_by ?? null,
+    );
+    return c.json({ handle: person.handle, role });
+  });
+
+  // The owner removes a member; a member leaves.
+  app.delete(`${BASE}/members/:member`, async (c) => {
+    sessionOnly(c, "Members are removed");
+    const person = await memberNamed(c);
+    if (person.id !== c.var.token.created_by) requireOwner(c.var.token.role, "remove members");
+    await c.var.deps.accounts.unshare(c.var.token.library.id, person.id);
+    return c.body(null, 204);
+  });
+
   // ------------------------------------------------------------------ signed downloads
 
   /** Short-lived download URLs for exports and attachments; the signature is the credential. */
@@ -798,6 +912,32 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     if (!("user" in who)) throw new OkfError(403, "session_only", "Sign in to the app.");
     return who.user;
   });
+
+  // The signed-in person's pending invitations, and their answer (TEMPRA-61).
+  const invitee = async (c: C) => {
+    const d = deps(c.env);
+    const who = await principal(c, d);
+    if (!("user" in who)) throw new OkfError(403, "session_only", "Sign in to the app.");
+    return { d, user: who.user };
+  };
+
+  app.get("/api/v1/invitations", async (c) => {
+    const { d, user } = await invitee(c);
+    return c.json({ invitations: await d.accounts.invitations(user.id) });
+  });
+
+  for (const answer of ["accept", "decline"] as const) {
+    app.post(`/api/v1/invitations/:id/${answer}`, async (c) => {
+      const { d, user } = await invitee(c);
+      const done = await d.accounts.decideInvitation(
+        c.req.param("id"),
+        user.id,
+        answer === "accept",
+      );
+      if (!done) throw new OkfError(404, "not_found", "No such open invitation for you.");
+      return c.json({ ...done, accepted: answer === "accept" });
+    });
+  }
 
   app.get("/api/v1/tokens", async (c) => {
     const { d, user } = await human(c);
