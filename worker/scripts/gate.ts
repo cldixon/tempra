@@ -26,7 +26,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { chromium } from "playwright-core";
+import { type Browser, chromium } from "playwright-core";
 import { readTar, writeTar } from "../src/util/tar";
 import { compareBundle } from "../test/compare";
 import { BUNDLES, loadBundle } from "../test/fixtures";
@@ -200,10 +200,18 @@ function within<T>(ms: number, what: string, work: Promise<T>): Promise<T> {
   return Promise.race([work, late]).finally(() => clearTimeout(timer));
 }
 
-async function openBrowser() {
-  const executablePath = chromiumPath();
-  if (!executablePath) return "no Chromium found; set CHROME_PATH";
-  const browser = await chromium.launch({ executablePath });
+/**
+ * A browser page with the gate's checks attached. Given a browser already open, a second person
+ * gets a fresh context in it (their own cookies), not a second browser: closing an extra
+ * Chrome hangs on CI's runners.
+ */
+async function openBrowser(shared?: Browser) {
+  let browser = shared;
+  if (!browser) {
+    const executablePath = chromiumPath();
+    if (!executablePath) return "no Chromium found; set CHROME_PATH";
+    browser = await chromium.launch({ executablePath });
+  }
   const context = await browser.newContext();
   const page = await context.newPage();
   const problems: string[] = [];
@@ -254,7 +262,7 @@ async function openBrowser() {
       .filter((c) => c.name.includes("session"))
       .map((c) => `${c.name}=${c.value}`)
       .join("; ");
-  return { browser, page, problems, step, signInAs, cookie };
+  return { browser, context, page, problems, step, signInAs, cookie };
 }
 
 /**
@@ -1185,9 +1193,11 @@ async function freshAccountConnects(): Promise<string[]> {
       await page.getByRole("button", { name: "Invite" }).click();
       await page.getByText("Invited @stranger").waitFor({ timeout: 15_000 });
     });
-    const invitee = await within(STEP_MS, "opening the invitee's browser", openBrowser()).catch(
-      (e) => String(e),
-    );
+    const invitee = await within(
+      STEP_MS,
+      "opening the invitee's browser",
+      openBrowser(browser),
+    ).catch((e) => String(e));
     if (typeof invitee === "string") problems.push(invitee);
     else {
       try {
@@ -1217,7 +1227,7 @@ async function freshAccountConnects(): Promise<string[]> {
         });
         problems.push(...invitee.problems.map((p) => `invitee: ${p}`));
       } finally {
-        await within(STEP_MS, "closing the invitee's browser", invitee.browser.close()).catch((e) =>
+        await within(STEP_MS, "closing the invitee's browser", invitee.context.close()).catch((e) =>
           problems.push(String(e)),
         );
       }
