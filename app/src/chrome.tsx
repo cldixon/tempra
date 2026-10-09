@@ -142,6 +142,7 @@ export function AccountMenu({ me }: { me: Me | null }) {
       <a href="/connect">Connect an agent</a>
       <a href="/tokens">Tokens</a>
       <a href="/apps">Connected apps</a>
+      <a href="/invitations">Invitations</a>
       <a href="/account">Account</a>
       <hr />
       <form method="post" action="/sign-out">

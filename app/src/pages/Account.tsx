@@ -424,6 +424,99 @@ export function Apps() {
   );
 }
 
+// ---------------------------------------------------------------- invitations
+
+interface PendingInvitation {
+  id: string;
+  owner: string;
+  slug: string;
+  role: "read" | "write";
+  /** Who invited. */
+  handle: string;
+  expires: string;
+}
+
+/** Invitations to other people's libraries (tempra-dev: v2/sharing), to accept or decline. */
+export function Invitations() {
+  useTitle("Invitations");
+  const loaded = useLoad("invitations", () =>
+    api<{ invitations: PendingInvitation[] }>("/api/v1/invitations"),
+  );
+  const action = useAction();
+  const answer = (i: PendingInvitation, accept: boolean) =>
+    action.run(async () => {
+      await api(
+        `/api/v1/invitations/${encodeURIComponent(i.id)}/${accept ? "accept" : "decline"}`,
+        {
+          method: "POST",
+        },
+      );
+      if (accept) {
+        // A full load: the library list and the workspace learn the new library.
+        location.assign(new Urls(i.owner, i.slug).tree(""));
+        return;
+      }
+      loaded.reload();
+    });
+  return (
+    <>
+      <h1>Invitations</h1>
+      {action.error && <div className="notice">{action.error}</div>}
+      <Status loaded={loaded}>
+        {({ invitations }) =>
+          invitations.length === 0 ? (
+            <p>None waiting.</p>
+          ) : (
+            <div className="table-wrap">
+              <table className="list">
+                <thead>
+                  <tr>
+                    <th>Library</th>
+                    <th>Access</th>
+                    <th>From</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {invitations.map((i) => (
+                    <tr key={i.id}>
+                      <td className="name">
+                        <strong>
+                          {i.owner}/{i.slug}
+                        </strong>
+                        <div className="small muted">open until {i.expires.slice(0, 10)}</div>
+                      </td>
+                      <td>{i.role === "write" ? "Read and write" : "Read and comment"}</td>
+                      <td>@{i.handle}</td>
+                      <td>
+                        <button
+                          type="button"
+                          className="primary"
+                          disabled={action.busy}
+                          onClick={() => void answer(i, true)}
+                        >
+                          Accept
+                        </button>{" "}
+                        <button
+                          type="button"
+                          disabled={action.busy}
+                          onClick={() => void answer(i, false)}
+                        >
+                          Decline
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
+        }
+      </Status>
+    </>
+  );
+}
+
 // ---------------------------------------------------------------- the account page
 
 interface AccountData {

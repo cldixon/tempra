@@ -6,6 +6,7 @@ import { type Done, navigate } from "../router";
 import { Chip, plural, Status, useTitle, when } from "../ui";
 import type { LedgerFilters, Urls } from "../urls";
 import { CONTENT_OPS } from "./File";
+import { agentLabel, type Contributor } from "./Manage";
 
 interface LedgerEvent {
   seq: number;
@@ -19,6 +20,8 @@ interface LedgerRequest {
   ts: string;
   actor: string;
   note: string | null;
+  /** The person and agent behind the actor (TEMPRA-75), by id. */
+  by?: { person: string; agent?: string } | null;
   events: LedgerEvent[];
 }
 
@@ -26,13 +29,17 @@ export function Ledger(props: { urls: Urls; filters: LedgerFilters; done: Done; 
   const { urls, filters: f } = props;
   useTitle(`Ledger · ${urls.slug}`);
   const loaded = useLoad(`ledger ${urls.ledger(f)}`, async () => {
-    const [page, stats] = await Promise.all([
+    const [page, stats, agents] = await Promise.all([
       api<{ requests: LedgerRequest[]; next: number | null }>(
         urls.api("requests", { ...f, limit: 30 }),
       ),
       api<{ seq: number }>(urls.api("stats")),
+      api<{ contributors: Contributor[] }>(urls.api("agents")),
     ]);
-    return { ...page, head: stats.seq };
+    // Agents named for whom they work: "Claude for @ann" (tempra-dev: agents act for a person).
+    const names: Record<string, string> = {};
+    for (const c of agents.contributors) if (c.agent) names[c.agent.id] = agentLabel(c);
+    return { ...page, head: stats.seq, names };
   });
   // Live tail (tempra-dev: app/live): on the newest page, a new request that the filters may
   // match reloads the list; the server applies the filters.
@@ -93,7 +100,7 @@ export function Ledger(props: { urls: Urls; filters: LedgerFilters; done: Done; 
         </a>
       </form>
       <Status loaded={loaded}>
-        {({ requests, next }) => (
+        {({ requests, next, names }) => (
           <>
             {requests.length === 0 ? (
               <p className="muted">No requests match.</p>
@@ -106,6 +113,7 @@ export function Ledger(props: { urls: Urls; filters: LedgerFilters; done: Done; 
                     filters={f}
                     request={r}
                     isNew={seen !== null && (r.events[0]?.seq ?? 0) > seen}
+                    agent={r.by?.agent ? names[r.by.agent] : undefined}
                   />
                 ))}
               </ol>
@@ -127,12 +135,15 @@ function Request({
   filters,
   request: r,
   isNew,
+  agent,
 }: {
   urls: Urls;
   filters: LedgerFilters;
   request: LedgerRequest;
   /** Made after the person last looked at this library. */
   isNew: boolean;
+  /** Who the agent works for, when an agent made the request. */
+  agent?: string;
 }) {
   const shown = r.events.slice(0, 12);
   const more = r.events.length - shown.length;
@@ -150,6 +161,7 @@ function Request({
         )}
         <span className="muted small">{when(r.ts)}</span>{" "}
         <a href={urls.ledger({ ...filters, actor: r.actor, before: undefined })}>{r.actor}</a>{" "}
+        {agent && <span className="muted small">{agent}</span>}{" "}
         <span className="muted small">
           seq {first}
           {r.events.length > 1 ? `–${last}` : ""}

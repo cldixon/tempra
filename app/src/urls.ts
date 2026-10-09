@@ -69,6 +69,9 @@ export class Urls {
   remove() {
     return this.page("delete");
   }
+  members() {
+    return this.page("members");
+  }
   /** The REST API for this library. */
   api(rest: string, params: Record<string, string | number | undefined> = {}) {
     return `/api/v1/libraries/${encodeURIComponent(this.owner)}/${encodeURIComponent(this.slug)}/${rest}${query(params)}`;

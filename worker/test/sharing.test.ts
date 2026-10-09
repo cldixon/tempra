@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { SESSION_COOKIE } from "../src/session";
 import { API, ORIGIN, setup } from "./harness";
 
 type S = ReturnType<typeof setup>;
@@ -168,6 +169,17 @@ describe("invitations (tempra-dev: v2/sharing, TEMPRA-61)", () => {
     await s.accounts.share("lib-1", friend.user.id, "read", "user_1");
     expect((await call(friend.app, `${API}/members/friend`, "DELETE")).status).toBe(204);
     expect(await s.accounts.memberRole("lib-1", friend.user.id)).toBeNull();
+  });
+
+  test("someone with only a shared library lands on their library list, not first run", async () => {
+    const s = setup();
+    const user = await s.accounts.user("invited@example.com");
+    const session = s.sessionFor(user.id);
+    const home = () => s.anon.request("/", { headers: { Cookie: `${SESSION_COOKIE}=${session}` } });
+    const before = await home();
+    expect(before.status).toBe(302);
+    await s.accounts.share("lib-1", user.id, "read", "user_1");
+    expect((await home()).status).toBe(200);
   });
 
   test("a library sends a limited number of invitations a day", async () => {

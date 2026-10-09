@@ -1150,6 +1150,58 @@ async function freshAccountConnects(): Promise<string[]> {
       await page.getByText("Exported to R2").waitFor({ timeout: 15_000 });
     });
 
+    // Sharing in the app (tempra-dev: v2/sharing): invite from the Members tab; the invitee
+    // accepts from Invitations in their own browser; as a reader there is no Edit, at write there is.
+    await ui(
+      `${base}/api/v1/libraries/newcomer/notes/files/shared.md`,
+      {
+        method: "PUT",
+        headers: { Origin: base, "Content-Type": "text/markdown" },
+        body: "---\ntype: Note\ntitle: Shared note\ndescription: For the invited reader.\n---\nRead me.\n",
+      },
+      cookie,
+    );
+    await step("invite a person from the Members tab", async () => {
+      await page.goto(`${lib}/`);
+      await libraryLink("Members");
+      await page.locator('input[name="to"]').fill("@stranger");
+      await page.getByRole("button", { name: "Invite" }).click();
+      await page.getByText("Invited @stranger").waitFor({ timeout: 15_000 });
+    });
+    const invitee = await openBrowser();
+    if (typeof invitee === "string") problems.push(invitee);
+    else {
+      try {
+        await invitee.step("the invitee accepts from Invitations", async () => {
+          await invitee.signInAs("stranger@localhost", "/invitations");
+          await invitee.page.getByRole("button", { name: "Accept" }).click();
+          await invitee.page.waitForURL(`${lib}/`, { timeout: 15_000 });
+        });
+        const markdownButton = () => invitee.page.getByRole("button", { name: "Markdown" });
+        await invitee.step("a reader sees the note and no Edit", async () => {
+          await invitee.page.goto(`${lib}/shared.md`);
+          await invitee.page.getByText("Read me.").waitFor({ timeout: 15_000 });
+          await markdownButton().waitFor({ timeout: 15_000 });
+          // The role loads with the library list; give it the moment it takes.
+          await invitee.page.waitForTimeout(500);
+          const edit = await invitee.page.getByRole("button", { name: "Edit" }).count();
+          if (edit !== 0) throw new Error("a read member is offered Edit");
+        });
+        await step("the owner gives the member write access", async () => {
+          await page.goto(`${lib}/-/members`);
+          await page.getByLabel("Access for @stranger").selectOption("write");
+          await page.getByText("@stranger now has write access").waitFor({ timeout: 15_000 });
+        });
+        await invitee.step("a writer is offered Edit", async () => {
+          await invitee.page.goto(`${lib}/shared.md`);
+          await invitee.page.getByRole("button", { name: "Edit" }).waitFor({ timeout: 15_000 });
+        });
+        problems.push(...invitee.problems.map((p) => `invitee: ${p}`));
+      } finally {
+        await invitee.browser.close();
+      }
+    }
+
     // Deleting the library wipes its Durable Object and ends the connection.
     await step("delete the library from its Delete tab", async () => {
       await libraryLink("Delete");

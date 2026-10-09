@@ -163,13 +163,15 @@ export function registerUiRoutes<E extends AppEnv>(
   };
 
   get("/", async (p) => {
-    // First run: no libraries yet (v2 spec: Onboarding).
-    if ((await p.deps.accounts.libraries(p.user.id)).length === 0) {
+    // First run: no libraries yet, own or shared (v2 spec: Onboarding; tempra-dev: v2/sharing).
+    if ((await p.deps.accounts.reachable(p.user.id)).length === 0) {
       return p.c.redirect("/welcome", 302);
     }
     return shell(p);
   });
-  for (const path of ["/welcome", "/connect", "/tokens", "/account", "/apps"]) get(path, shell);
+  for (const path of ["/welcome", "/connect", "/tokens", "/account", "/apps", "/invitations"]) {
+    get(path, shell);
+  }
 
   // The UI lived under /app until it moved to the root (v2 spec: URLs). 308 keeps a form post's
   // method and body; bookmarks and emailed links land on the page's new URL.
@@ -205,6 +207,7 @@ export function registerUiRoutes<E extends AppEnv>(
     "recovery",
     "connect",
     "delete",
+    "members",
   ]) {
     get(`/:owner/:lib/-/${page}`, library);
   }
