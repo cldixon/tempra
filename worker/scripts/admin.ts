@@ -3,8 +3,13 @@
  * by default (the state `cf dev` uses); --remote for the deployed one.
  *
  *   bun run admin transfer --library <owner>/<slug> --to <email> [--remote]
- *       Gives a library to another account (which must have signed in once). Its tokens,
- *       grants, ledger and exports stay as they are.
+ *       Gives a library to another account (which must have signed in once). Its ledger and
+ *       exports stay as they are; tokens act for whoever minted them, so the old owner's stop
+ *       working unless they are made a member (share). The new owner stops being a member.
+ *   bun run admin share --library <owner>/<slug> --to <email> --role read|write [--remote]
+ *   bun run admin unshare --library <owner>/<slug> --to <email> [--remote]
+ *       Makes an account a member of a library, changes its role, or ends the membership
+ *       (tempra-dev: v2/sharing). Temporary, until invitations (TEMPRA-61).
  *   bun run admin suspend --email <email> [--undo] [--remote]
  *       Refuses the account's sessions and tokens without deleting anything.
  *   bun run admin users [--remote]
@@ -33,6 +38,7 @@ const { values, positionals } = parseArgs({
     undo: { type: "boolean" },
     set: { type: "string" },
     reset: { type: "boolean" },
+    role: { type: "string" },
     remote: { type: "boolean" },
   },
 });
@@ -65,11 +71,49 @@ switch (positionals[0]) {
       `SELECT 1 FROM libraries WHERE owner = ${q(String(to[0]))} AND slug = ${q(slug)}`,
     );
     if (clash) fail(`${to[1]} already has a library named ${slug}.`);
+    // The new owner is no longer a member of their own library.
     await d1Sql(
-      `UPDATE libraries SET owner = ${q(String(to[0]))} WHERE id = ${q(String(lib[0]))}`,
+      `UPDATE libraries SET owner = ${q(String(to[0]))} WHERE id = ${q(String(lib[0]))};
+       DELETE FROM library_members WHERE library = ${q(String(lib[0]))} AND user = ${q(String(to[0]))};`,
       where,
     );
     console.log(`${owner}/${slug} is now ${to[1]}/${slug}.`);
+    break;
+  }
+  case "share":
+  case "unshare": {
+    const share = positionals[0] === "share";
+    const [owner, slug] = (values.library ?? "").split("/");
+    if (!owner || !slug || !values.to || (share && !["read", "write"].includes(values.role ?? "")))
+      fail(
+        share
+          ? "Usage: share --library <owner>/<slug> --to <email> --role read|write"
+          : "Usage: unshare --library <owner>/<slug> --to <email>",
+      );
+    const lib = await one(
+      `SELECT l.id, l.owner FROM libraries l JOIN users u ON u.id = l.owner WHERE u.handle = ${q(owner)} AND l.slug = ${q(slug)}`,
+    );
+    if (!lib) fail(`No library ${owner}/${slug}.`);
+    const to = await one(
+      `SELECT id, handle FROM users WHERE email = ${q(values.to.toLowerCase())}`,
+    );
+    if (!to) fail(`No account for ${values.to}; they sign in once first.`);
+    if (to[0] === lib[1]) fail(`${to[1]} owns ${owner}/${slug}.`);
+    if (share) {
+      await d1Sql(
+        `INSERT INTO library_members (library, user, role, granted_by, created)
+         VALUES (${q(String(lib[0]))}, ${q(String(to[0]))}, ${q(String(values.role))}, ${q(String(lib[1]))}, ${q(new Date().toISOString())})
+         ON CONFLICT (library, user) DO UPDATE SET role = excluded.role`,
+        where,
+      );
+      console.log(`${to[1]} has ${values.role} access to ${owner}/${slug}.`);
+    } else {
+      await d1Sql(
+        `DELETE FROM library_members WHERE library = ${q(String(lib[0]))} AND user = ${q(String(to[0]))}`,
+        where,
+      );
+      console.log(`${to[1]} no longer has ${owner}/${slug}.`);
+    }
     break;
   }
   case "suspend": {
@@ -181,6 +225,6 @@ switch (positionals[0]) {
   }
   default:
     fail(
-      "Commands: transfer, suspend, users, limits, invite, uninvite, waitlist, rename (see scripts/admin.ts).",
+      "Commands: transfer, share, unshare, suspend, users, limits, invite, uninvite, waitlist, rename (see scripts/admin.ts).",
     );
 }

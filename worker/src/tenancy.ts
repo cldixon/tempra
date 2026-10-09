@@ -1,4 +1,4 @@
-import type { Accounts, LibraryRef, User } from "./accounts";
+import type { Accounts, LibraryRef, Role, User } from "./accounts";
 import type { TokenInfo } from "./auth";
 import { OkfError } from "./store/errors";
 
@@ -7,11 +7,14 @@ import { OkfError } from "./store/errors";
  * authorization). Routes resolve {owner}/{slug} through here and never compare IDs themselves.
  * A library the caller cannot reach is answered exactly like one that does not exist: 404.
  *
- * Phase A: a signed-in person reaches the libraries they own; a token reaches its own library;
- * an app connection reaches the libraries its grant selects (grantLibraries). Phase B adds
- * members with roles here, without touching routes.
+ * A signed-in person reaches the libraries they own and those shared with them, with their role
+ * (tempra-dev: v2/sharing); a token reaches its own library, at its creator's role; an app
+ * connection reaches the libraries its grant selects (grantLibraries).
  */
 export type Caller = { user: User } | { token: TokenInfo };
+
+/** A library the caller may reach, with what they may do there. */
+export type Authorized = LibraryRef & { role: Role };
 
 export function noLibrary(owner: string, slug: string): OkfError {
   return new OkfError(404, "no_library", `There is no library ${owner}/${slug}.`);
@@ -22,15 +25,26 @@ export async function authorizeLibrary(
   caller: Caller,
   owner: string,
   slug: string,
-): Promise<LibraryRef> {
+): Promise<Authorized> {
   if ("token" in caller) {
-    const lib = caller.token.library;
-    if (lib.owner && lib.owner === owner && lib.slug === slug) return lib;
+    const { library: lib, role } = caller.token;
+    if (lib.owner && lib.owner === owner && lib.slug === slug) return { ...lib, role };
     throw noLibrary(owner, slug);
   }
-  const ref = await accounts.library(owner, slug);
-  if (!ref || ref.ownerId !== caller.user.id) throw noLibrary(owner, slug);
-  return { id: ref.id, slug: ref.slug, do_id: ref.do_id, owner: ref.owner };
+  const found = await accounts.library(owner, slug);
+  if (!found) throw noLibrary(owner, slug);
+  const ref = { id: found.id, slug: found.slug, do_id: found.do_id, owner: found.owner };
+  if (found.ownerId === caller.user.id) return { ...ref, role: "owner" };
+  const role = await accounts.memberRole(found.id, caller.user.id);
+  if (!role) throw noLibrary(owner, slug);
+  return { ...ref, role };
+}
+
+/** Refuses anything but the library's owner (or a token acting for them). */
+export function requireOwner(role: Role, what: string): void {
+  if (role !== "owner") {
+    throw new OkfError(403, "owner_only", `Only the library's owner can ${what}.`);
+  }
 }
 
 /**
@@ -53,7 +67,7 @@ export interface AccountGrant {
 
 /**
  * The libraries a connection reaches now, each as the token it acts with there; null when the
- * account is gone or suspended.
+ * account is gone or suspended. Shared libraries join in TEMPRA-60.
  */
 export async function grantLibraries(
   accounts: Accounts,
@@ -73,6 +87,7 @@ export async function grantLibraries(
         mcp_tiers: grant.tiers,
         library: { id: l.id, slug: l.slug, do_id: l.do_id, owner: l.owner },
         created_by: user.id,
+        role: "owner",
       }),
     );
   return { user, libraries };

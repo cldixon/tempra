@@ -14,6 +14,25 @@ export interface LibraryRef {
   owner: string;
 }
 
+/**
+ * What a caller may do in a library (tempra-dev: v2/sharing): `read` reads and comments, `write`
+ * also writes content and verifies, the owner also deletes, transfers, restores and shares.
+ */
+export type Role = "owner" | "write" | "read";
+/** A member's role; the owner is `libraries.owner`, never a member. */
+export type MemberRole = Exclude<Role, "owner">;
+
+/** A library the account reaches, as its owner or as a member. */
+export type ReachableLibrary = LibraryRef & { role: Role };
+
+/** A member of a library, as its owner sees the list. */
+export interface Member {
+  user: string;
+  handle: string;
+  role: MemberRole;
+  created: string;
+}
+
 export interface User {
   id: string;
   email: string;
@@ -73,6 +92,27 @@ export interface Accounts {
   account(userId: string): Promise<User | null>;
   /** The libraries the user owns, by name. */
   libraries(userId: string): Promise<LibraryRef[]>;
+  /**
+   * The libraries the user reaches: their own, then those shared with them, each with the
+   * user's role (tempra-dev: v2/sharing). Owner-only screens and limits use `libraries`.
+   */
+  reachable(userId: string): Promise<ReachableLibrary[]>;
+  /** The user's role as a member of a library; null when they are not one. */
+  memberRole(libraryId: string, userId: string): Promise<MemberRole | null>;
+  /** A library's members, by handle. */
+  members(libraryId: string): Promise<Member[]>;
+  /**
+   * Makes a user a member of a library, or changes their role; 409 for the library's owner.
+   * Invitations (TEMPRA-61) come later; until then the operator shares with `bun run admin`.
+   */
+  share(
+    libraryId: string,
+    userId: string,
+    role: MemberRole,
+    grantedBy: string | null,
+  ): Promise<void>;
+  /** Ends a membership; false when there was none. */
+  unshare(libraryId: string, userId: string): Promise<boolean>;
   /** A library by its path, with its owner's users row id; null when there is none. */
   library(owner: string, slug: string): Promise<(LibraryRef & { ownerId: string }) | null>;
   createLibrary(slug: string, owner: Pick<User, "id" | "handle">): Promise<LibraryRef>;
@@ -328,6 +368,63 @@ export function d1Accounts(db: D1Database): Accounts {
         .all<LibraryRef>();
       return r.results;
     },
+    async reachable(userId) {
+      const r = await db
+        .prepare(
+          `SELECT l.id, l.slug, l.do_id, u.handle AS owner, 'owner' AS role, 0 AS shared
+           FROM libraries l JOIN users u ON u.id = l.owner WHERE l.owner = ?1
+           UNION ALL
+           SELECT l.id, l.slug, l.do_id, u.handle AS owner, m.role, 1 AS shared
+           FROM library_members m JOIN libraries l ON l.id = m.library
+           JOIN users u ON u.id = l.owner
+           WHERE m.user = ?1 AND u.suspended IS NULL
+           ORDER BY shared, owner, slug`,
+        )
+        .bind(userId)
+        .all<ReachableLibrary & { shared: number }>();
+      return r.results.map(({ shared: _, ...l }) => l);
+    },
+    async memberRole(libraryId, userId) {
+      const row = await db
+        .prepare("SELECT role FROM library_members WHERE library = ? AND user = ?")
+        .bind(libraryId, userId)
+        .first<{ role: MemberRole }>();
+      return row?.role ?? null;
+    },
+    async members(libraryId) {
+      const r = await db
+        .prepare(
+          `SELECT m.user, u.handle, m.role, m.created FROM library_members m
+           JOIN users u ON u.id = m.user WHERE m.library = ? ORDER BY u.handle`,
+        )
+        .bind(libraryId)
+        .all<Member>();
+      return r.results;
+    },
+    async share(libraryId, userId, role, grantedBy) {
+      if (role !== "read" && role !== "write") {
+        throw new OkfError(400, "bad_role", "A member's role is read or write.");
+      }
+      const r = await db
+        .prepare(
+          `INSERT INTO library_members (library, user, role, granted_by, created)
+           SELECT ?1, ?2, ?3, ?4, ?5
+           WHERE EXISTS (SELECT 1 FROM libraries WHERE id = ?1 AND owner != ?2)
+           ON CONFLICT (library, user) DO UPDATE SET role = excluded.role`,
+        )
+        .bind(libraryId, userId, role, grantedBy, new Date().toISOString())
+        .run();
+      if (!r.meta.changes) {
+        throw new OkfError(409, "is_owner", "The library's owner cannot also be a member.");
+      }
+    },
+    async unshare(libraryId, userId) {
+      const r = await db
+        .prepare("DELETE FROM library_members WHERE library = ? AND user = ?")
+        .bind(libraryId, userId)
+        .run();
+      return r.meta.changes > 0;
+    },
     async library(owner, slug) {
       return db
         .prepare(
@@ -497,6 +594,7 @@ export function d1Accounts(db: D1Database): Accounts {
     async deleteLibrary(libraryId) {
       await db.batch([
         db.prepare("DELETE FROM tokens WHERE library = ?").bind(libraryId),
+        db.prepare("DELETE FROM library_members WHERE library = ?").bind(libraryId),
         db.prepare("DELETE FROM libraries WHERE id = ?").bind(libraryId),
       ]);
     },
@@ -504,7 +602,13 @@ export function d1Accounts(db: D1Database): Accounts {
       await db.batch([
         db.prepare("DELETE FROM sessions WHERE user = ?").bind(user.id),
         db.prepare("DELETE FROM sign_in_links WHERE email = ?").bind(user.email),
+        // Tokens left now are on others' libraries (theirs went with their libraries): a token
+        // with no creator would act for the owner, so these are revoked first.
+        db
+          .prepare("UPDATE tokens SET revoked = ? WHERE created_by = ? AND revoked IS NULL")
+          .bind(new Date().toISOString(), user.id),
         db.prepare("UPDATE tokens SET created_by = NULL WHERE created_by = ?").bind(user.id),
+        db.prepare("DELETE FROM library_members WHERE user = ?").bind(user.id),
         db.prepare("DELETE FROM users WHERE id = ?").bind(user.id),
         db
           .prepare("INSERT OR REPLACE INTO handle_holds (handle, user, released) VALUES (?, ?, ?)")

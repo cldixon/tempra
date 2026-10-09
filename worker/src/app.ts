@@ -2,7 +2,7 @@ import * as design from "@tempra/design";
 import { type Doc, parseMarkdown } from "@tempra/editor/doc";
 import { type Context, Hono } from "hono";
 import { registerAccountApi } from "./account-api";
-import { type Accounts, checkNewToken, type LibraryRef, type User } from "./accounts";
+import { type Accounts, checkNewToken, type User } from "./accounts";
 import type { Authenticate, TokenInfo } from "./auth";
 import {
   type BlobStore,
@@ -24,7 +24,7 @@ import { readCookie, SESSION_COOKIE, type Sessions } from "./session";
 import { type Mailer, registerSignInRoutes } from "./signin";
 import { OkfError } from "./store/errors";
 import type { ConceptContent, RequestContext, WriteOp, WriteResult } from "./store/store";
-import { authorizeLibrary } from "./tenancy";
+import { type Authorized, authorizeLibrary, requireOwner } from "./tenancy";
 import { faviconResponse } from "./ui/favicon";
 import { registerUiRoutes } from "./ui/routes";
 import { appHref, appScript } from "./ui/spa";
@@ -133,9 +133,32 @@ function requestContext(c: C, note?: unknown): RequestContext {
   };
 }
 
+/** Content writes: write, edit, move, delete, attach, revert, import, verify. */
 function requireWrite(c: C, ...paths: string[]) {
   const t = c.var.token;
-  if (t.scope !== "write") throw new OkfError(403, "read_only", "This token is read-only.");
+  if (t.scope !== "write") throw readOnly(t);
+  underTokenPrefix(t, paths);
+}
+
+/**
+ * Comments (tempra-dev: v2/sharing): a separate permission from writing content, which every
+ * caller that reaches the library has, read included; a prefix still limits where.
+ */
+function requireComment(c: C, path: string) {
+  underTokenPrefix(c.var.token, [path]);
+}
+
+function readOnly(t: TokenInfo): OkfError {
+  return new OkfError(
+    403,
+    "read_only",
+    t.role === "read"
+      ? "You have read access to this library: you can read and comment, not change it."
+      : "This token is read-only: it can read and comment, not change content.",
+  );
+}
+
+function underTokenPrefix(t: TokenInfo, paths: string[]) {
   if (t.prefix === null) return;
   const prefix = t.prefix;
   for (const p of paths) {
@@ -585,7 +608,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     if (typeof body.path !== "string") {
       throw new OkfError(400, "bad_request", "Give the concept's `path`.");
     }
-    requireWrite(c, body.path);
+    requireComment(c, body.path);
     const anchor = body.anchor
       ? {
           quote: String(body.anchor.quote ?? ""),
@@ -609,7 +632,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   const act = (kind: "reply" | "resolve" | "reopen") => async (c: C) => {
     const id = c.req.param("thread") ?? "";
     const { path } = await c.var.lib.thread(id);
-    requireWrite(c, path);
+    requireComment(c, path);
     // The body is optional for resolve and reopen: no JSON at all is fine.
     const sent = (await c.req.text()).trim();
     let raw: { body?: unknown } = {};
@@ -660,11 +683,14 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
       return { d, user: { id: who.user.id, handle: who.user.handle }, session: who.user };
     }
     const token = who.token;
-    if (!token.actor.startsWith("human:") || !token.created_by || !token.library.owner) {
+    if (!token.actor.startsWith("human:") || !token.created_by) {
       throw new OkfError(403, "human_only", "Library and token management needs a human: token.");
     }
-    const user = { id: token.created_by, handle: token.library.owner };
-    return { d, user, session: null };
+    // The person who minted it, never the library's owner as such: on a shared library they
+    // are different people (tempra-dev: v2/sharing).
+    const account = await d.accounts.account(token.created_by);
+    if (!account) throw new OkfError(401, "no_account", "This token's account no longer exists.");
+    return { d, user: { id: account.id, handle: account.handle }, session: null };
   };
 
   // Who the caller acts as: the signed-in person, or the person a human: token acts for.
@@ -677,15 +703,16 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
 
   app.get("/api/v1/libraries", async (c) => {
     const { d, user } = await human(c);
-    const refs = await d.accounts.libraries(user.id);
+    const refs = await d.accounts.reachable(user.id);
     const libraries = await Promise.all(
-      refs.map(async ({ id, slug, owner, do_id }) => {
+      refs.map(async ({ id, slug, owner, do_id, role }) => {
         const lib = await d.libraryByDoId(do_id);
         const s = lib ? await lib.summary() : null;
         return {
           id,
           owner,
           slug,
+          role,
           ...(s && {
             seq: s.seq,
             concepts: s.concepts,
@@ -774,6 +801,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
       throw new OkfError(403, "human_only", "Point-in-time restore needs a human: token.");
     }
     const recovery = c.var.deps.recovery;
+    requireOwner(token.role, "restore it");
     if (!recovery) throw new OkfError(501, "unavailable", "Restore is not wired here.");
     return { recovery, ref: token.library, token };
   };
@@ -811,6 +839,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
 
   app.post(`${BASE}/maintain`, async (c) => {
     const ref = peopleOnly(c);
+    requireOwner(c.var.token.role, "run its maintainers");
     if (!c.var.deps.maintain)
       throw new OkfError(501, "unavailable", "Maintenance is not wired here.");
     const res = (await c.var.deps.maintain(ref.do_id)) as { export: { key?: string } };
@@ -822,6 +851,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     if (!c.var.token.id.startsWith("session:")) {
       throw new OkfError(403, "session_only", "A library is deleted only from the app's pages.");
     }
+    requireOwner(c.var.token.role, "delete it");
     const ref = c.var.token.library;
     const body = await c.req.json<{ confirm?: string }>().catch(() => ({}) as { confirm?: string });
     if (String(body.confirm ?? "").trim() !== ref.slug) {
@@ -892,17 +922,18 @@ async function principal(c: C, d: Deps): Promise<{ token: TokenInfo } | { user: 
 
 /**
  * The signed-in person acting on a library they may reach, as the token the routes act with:
- * attributed to their human: actor, full write access like the UI's own forms.
+ * attributed to their human: actor, with their role there (a `read` member reads and comments).
  */
-function sessionToken(user: User, library: LibraryRef): TokenInfo {
+function sessionToken(user: User, { role, ...library }: Authorized): TokenInfo {
   return {
     id: `session:${user.id}`,
     actor: user.actor,
-    scope: "write",
+    scope: role === "read" ? "read" : "write",
     prefix: null,
     mcp_tiers: "all",
     library,
     created_by: user.id,
+    role,
   };
 }
 
