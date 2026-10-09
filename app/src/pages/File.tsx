@@ -83,6 +83,8 @@ type FileJson =
       lint: { code: string; message: string }[];
       trust_tier: string;
       stale: boolean;
+      /** Within 14 days of stale_after. */
+      stale_soon?: boolean;
     }
   | { kind: "derived"; path: string; seq: number; doc: Doc }
   | {
@@ -1264,6 +1266,7 @@ function ReviewPanel(props: {
               <dd>
                 {when(String(fm.stale_after))}
                 {c.stale && <Chip text="stale" tone="bad" />}
+                {c.stale_soon && <Chip text="stale soon" />}
               </dd>
             </>
           )}

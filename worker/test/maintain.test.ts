@@ -1,3 +1,4 @@
+import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { nextRun, runMaintenance } from "../src/maintain";
 import { LibraryStore } from "../src/store/store";
@@ -131,6 +132,135 @@ describe("daily maintainers (spec: Tier 3)", () => {
       },
     ]);
     expect(store.work({ kind: "stale" }).items).toEqual([]);
+  });
+
+  test("staleness: a concept passing stale_after between two runs is flagged after the second", () => {
+    const clock = { t: Date.parse("2026-09-01T00:00:00Z") };
+    const store = newStore(clock);
+    store.apply(ctx(), [
+      { op: "write", path: "s.md", content: md("x\n", "stale_after: 2026-10-01T00:00:00Z\n") },
+      { op: "write", path: "far.md", content: md("x\n", "stale_after: 2027-06-01T00:00:00Z\n") },
+      { op: "write", path: "none.md", content: md("x\n") },
+    ]);
+    const paths = (kind: string) => store.work({ kind }).items.map((i) => i.path);
+    const run = () => store.maintainStaleness();
+
+    expect(run()).toEqual({ stale: 0, stale_soon: 0, became: { stale: [], stale_soon: [] } });
+    expect(paths("stale_soon")).toEqual([]);
+
+    // Twenty days on, s.md is within 14 days of its date: stale soon, not yet in the queue.
+    clock.t += 20 * 86_400_000;
+    expect(run()).toEqual({ stale: 0, stale_soon: 1, became: { stale: [], stale_soon: ["s.md"] } });
+    expect(paths("stale_soon")).toEqual(["s.md"]);
+    expect(paths("stale")).toEqual([]);
+    const queued = () => store.work().items.filter((i) => i.kind.startsWith("stale"));
+    expect(queued()).toEqual([]);
+    expect(store.summary()).toMatchObject({ open_work: 3, stale_soon: 1 }); // 3: lint
+    expect(store.outline().files.find((f) => f.path === "s.md")).toMatchObject({
+      stale: "stale_soon",
+    });
+    const view = store.read("s.md");
+    expect(view.kind === "concept" && [view.stale, view.stale_soon]).toEqual([false, true]);
+    // A second run the same day changes nothing.
+    expect(run().became).toEqual({ stale: [], stale_soon: [] });
+
+    // Past the date: stale at once from the stored flag, and recorded as such by the next run.
+    clock.t += 11 * 86_400_000;
+    expect(paths("stale")).toEqual(["s.md"]);
+    expect(run()).toEqual({ stale: 1, stale_soon: 0, became: { stale: ["s.md"], stale_soon: [] } });
+    expect(paths("stale_soon")).toEqual([]);
+    expect(queued().map((i) => i.path)).toEqual(["s.md"]);
+    expect(store.stats().maintainers.staleness).toMatchObject({
+      kind: "process",
+      stale: 1,
+      stale_soon: 0,
+      lag: 0,
+    });
+  });
+
+  test("staleness: only a new stale_after resets the clock", () => {
+    const clock = { t: Date.parse("2026-09-30T00:00:00Z") };
+    const store = newStore(clock);
+    store.apply(ctx(), [
+      { op: "write", path: "s.md", content: md("x\n", "stale_after: 2026-09-01T00:00:00Z\n") },
+    ]);
+    const stale = () => store.work({ kind: "stale" }).items.map((i) => i.path);
+    const hash = () => {
+      const v = store.read("s.md");
+      if (v.kind !== "concept") throw new Error();
+      return v.hash;
+    };
+    const write = (content: string) =>
+      store.apply(ctx(), [{ op: "write", path: "s.md", content, if_match: hash() }]);
+    expect(stale()).toEqual(["s.md"]);
+
+    // A small edit that leaves stale_after alone: still stale.
+    write(md("x, fixed\n", "stale_after: 2026-09-01T00:00:00Z\n"));
+    expect(stale()).toEqual(["s.md"]);
+
+    // A date within the window: stale soon from the write itself, no run needed.
+    write(md("x, fixed\n", "stale_after: 2026-10-05T00:00:00Z\n"));
+    expect(stale()).toEqual([]);
+    expect(store.work({ kind: "stale_soon" }).items.map((i) => i.path)).toEqual(["s.md"]);
+
+    // Moved well forward, then removed: nothing flagged either way.
+    write(md("x, fixed\n", "stale_after: 2027-03-01T00:00:00Z\n"));
+    expect(store.work({ kind: "stale_soon" }).items).toEqual([]);
+    clock.t = Date.parse("2027-04-01T00:00:00Z");
+    expect(stale()).toEqual([]); // not flagged until the process runs
+    expect(store.maintainStaleness().became.stale).toEqual(["s.md"]);
+    write(md("x, fixed\n"));
+    expect(stale()).toEqual([]);
+    expect(store.maintainStaleness()).toMatchObject({ stale: 0, stale_soon: 0 });
+  });
+
+  test("staleness: the run reads only indexes, however large the library", () => {
+    const db = new Database(":memory:");
+    const handle = bunSqlHandle(db);
+    const seen: string[] = [];
+    const store = new LibraryStore(
+      {
+        ...handle,
+        all: (q, ...p) => {
+          seen.push(q);
+          return handle.all(q, ...p);
+        },
+      },
+      { now: () => new Date("2026-09-30T00:00:00Z") },
+    );
+    store.apply(ctx(), [
+      { op: "write", path: "a.md", content: md("A\n") },
+      { op: "write", path: "b.md", content: md("B\n") },
+    ]);
+    seen.length = 0;
+    expect(store.maintainStaleness()).toMatchObject({ stale: 0, stale_soon: 0 });
+    const reads = seen.filter((q) => /^\s*SELECT/i.test(q) && /concepts|flags/.test(q));
+    expect(reads.length).toBe(2);
+    for (const q of reads) {
+      const plan = db
+        .query(`EXPLAIN QUERY PLAN ${q}`)
+        .all(...(q.includes("?") ? [0] : []))
+        .map((r) => (r as { detail: string }).detail);
+      expect(plan.filter((d) => /^SCAN (c|concepts|flags)\b/.test(d))).toEqual([]);
+    }
+  });
+
+  test("staleness: a library from before the process gets the column, its index and a first run", () => {
+    const db = new Database(":memory:");
+    const clock = { t: Date.parse("2026-09-30T00:00:00Z") };
+    const first = new LibraryStore(bunSqlHandle(db), { now: () => new Date(clock.t) });
+    first.apply(ctx(), [
+      { op: "write", path: "s.md", content: md("x\n", "stale_after: 2026-09-01T00:00:00Z\n") },
+    ]);
+    // As it was stored before TEMPRA-63: no stale_ms, no flags for staleness.
+    db.run("DROP INDEX concepts_stale");
+    db.run("ALTER TABLE concepts DROP COLUMN stale_ms");
+    db.run("DELETE FROM flags WHERE kind IN ('stale', 'stale_soon')");
+    db.run("DELETE FROM meta WHERE key = 'stale_ms'");
+
+    const reopened = new LibraryStore(bunSqlHandle(db), { now: () => new Date(clock.t) });
+    expect(reopened.work({ kind: "stale" }).items.map((i) => i.path)).toEqual(["s.md"]);
+    expect(reopened.stats().maintainers.staleness.last_run).toBe("2026-09-30T00:00:00Z");
   });
 
   test("the next run is 03:00 UTC plus a per-library offset, always in the future", () => {

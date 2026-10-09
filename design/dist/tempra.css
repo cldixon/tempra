@@ -1355,7 +1355,8 @@ button.tree-row[aria-current="page"] {
   width: 16px;
 }
 
-/* Marks: ● an agent's change in the last minutes, ∗ changed since the last visit, open comments. */
+/* Marks: ● an agent's change in the last minutes, ∗ changed since the last visit, open comments,
+   a clock (stale) or an hourglass (stale soon). */
 .tree-mark {
   flex: none;
   color: var(--tempra-color-faint);

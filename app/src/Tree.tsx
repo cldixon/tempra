@@ -15,6 +15,8 @@ interface Entry {
   seq?: number | null;
   /** Open comment threads on it. */
   comments?: number;
+  /** Past its stale_after, or within 14 days of it (the staleness process's flags). */
+  stale?: "stale" | "stale_soon";
 }
 
 /** How long a file keeps its "an agent just changed this" mark. */
@@ -231,6 +233,17 @@ export function Tree(props: {
           <span className="visually-hidden">
             {e.comments} open comment{e.comments === 1 ? "" : "s"}
           </span>
+        </span>
+      ) : null}
+      {e.stale ? (
+        <span
+          className="tree-mark"
+          title={e.stale === "stale" ? "Stale: stale_after has passed" : "Stale soon"}
+        >
+          <span aria-hidden="true">
+            <Icon name={e.stale === "stale" ? "stale" : "soon"} size={12} />
+          </span>
+          <span className="visually-hidden">{e.stale === "stale" ? "stale" : "stale soon"}</span>
         </span>
       ) : null}
     </>
