@@ -43,6 +43,15 @@ import {
   underPrefix,
 } from "../okf/paths";
 import {
+  checkStructure,
+  dirIndex,
+  dirKey,
+  isDirKey,
+  type StructureEntry,
+  type StructureIssue,
+  structureAction,
+} from "../okf/structure";
+import {
   effectiveStatus,
   isStale,
   STALE_SOON_DAYS,
@@ -390,6 +399,19 @@ export class LibraryStore {
     migrate(sql);
     this.reindexSearch();
     this.addStaleTimes();
+    this.addStructure();
+  }
+
+  /**
+   * Libraries from before the structure process (TEMPRA-64) get a first run on open, so the work
+   * queue has every directory's flags at once, not only those of directories written since.
+   */
+  private addStructure() {
+    if (this.sql.all("SELECT 1 FROM meta WHERE key = 'structure'").length > 0) return;
+    this.sql.transaction(() => {
+      this.syncStructure(null, this.headSeq());
+      this.sql.run("INSERT INTO meta (key, value) VALUES ('structure', '1')");
+    });
   }
 
   /**
@@ -790,7 +812,129 @@ export class LibraryStore {
       const anchors = e?.kind === "concept" ? this.anchorLint(snap, e) : [];
       if (broken.length + anchors.length > 0) r.lint = [...r.lint, ...broken, ...anchors];
     }
+    this.refreshStructure(results, w);
     return results;
+  }
+
+  /**
+   * Keeps the structure flags of the directories a request touched current (TEMPRA-64): where
+   * files were written, moved from or deleted, and where the written concepts now link (a new
+   * link can end an orphan). What a write changes elsewhere, such as a removed link leaving a
+   * concept with none, waits for the daily run.
+   */
+  private refreshStructure(results: OpResult[], w: WriteState) {
+    const dirs = new Set<string>();
+    for (const r of results) {
+      if (r.op === "verify") continue;
+      dirs.add(dirname(r.path));
+      if (r.from) dirs.add(dirname(r.from));
+    }
+    if (dirs.size === 0) return;
+    const written = [...w.written.values()];
+    if (written.length > 0) {
+      for (const { path } of this.sql.all<{ path: string }>(
+        `SELECT DISTINCT p.path FROM links l JOIN paths p ON p.concept_id = l.to_id
+         WHERE l.from_id IN (SELECT value FROM json_each(?)) AND l.to_id <> l.from_id`,
+        JSON.stringify(written),
+      )) {
+        dirs.add(dirname(path));
+      }
+    }
+    this.syncStructure(dirs, this.headSeq());
+  }
+
+  /**
+   * What the structure checks read, for the directories given (every file under each) or the
+   * whole library: each file's place, a concept's title and description, and its inbound links.
+   */
+  private structureEntries(dirs: Set<string> | null): StructureEntry[] {
+    const select = `SELECT p.path, p.kind, p.concept_id, c.title, c.description, 0 AS inbound
+      FROM paths p LEFT JOIN concepts c ON c.concept_id = p.concept_id`;
+    type Row = StructureEntry;
+    let rows: Row[];
+    if (dirs === null || dirs.has("")) rows = this.sql.all<Row>(select);
+    else {
+      // The paths under each directory, a range over the primary key ('/' + 1 is '0').
+      const seen = new Set<string>();
+      rows = [];
+      for (const dir of dirs) {
+        for (const r of this.sql.all<Row>(
+          `${select} WHERE p.path > ? AND p.path < ?`,
+          `${dir}/`,
+          `${dir}0`,
+        )) {
+          if (seen.has(r.path)) continue;
+          seen.add(r.path);
+          rows.push(r);
+        }
+      }
+    }
+    const ids = rows.filter((r) => r.kind === "concept").map((r) => r.concept_id);
+    if (ids.length === 0) return rows;
+    const inbound = new Map(
+      this.sql
+        .all<{ to_id: string; n: number }>(
+          `SELECT to_id, COUNT(DISTINCT from_id) AS n FROM links
+           WHERE to_id IN (SELECT value FROM json_each(?)) AND from_id <> to_id GROUP BY to_id`,
+          JSON.stringify(ids),
+        )
+        .map((r) => [r.to_id, r.n]),
+    );
+    for (const r of rows) r.inbound = inbound.get(r.concept_id) ?? 0;
+    return rows;
+  }
+
+  /**
+   * Brings the stored structure flags in line with the checks, for the directories given or the
+   * whole library. A flag that stays keeps the seq it was first raised at. Returns the flags now
+   * set in scope, and the keys newly flagged.
+   */
+  private syncStructure(dirs: Set<string> | null, seq: number) {
+    const entries = this.structureEntries(dirs);
+    const total =
+      dirs === null
+        ? entries.filter((e) => e.kind === "concept").length
+        : (this.sql.all<{ n: number }>("SELECT COUNT(*) AS n FROM concepts")[0]?.n ?? 0);
+    const found = checkStructure(entries, dirs, total);
+    // The stored flags in scope: the directories' own, and their concepts'.
+    const keys =
+      dirs === null
+        ? null
+        : [
+            ...[...dirs].map(dirKey),
+            ...entries
+              .filter((e) => e.kind === "concept" && dirs.has(dirname(e.path)))
+              .map((e) => e.concept_id),
+          ];
+    const stored = new Map(
+      this.sql
+        .all<{ concept_id: string; detail: string }>(
+          `SELECT concept_id, detail FROM flags WHERE kind = 'structure'${
+            keys ? " AND concept_id IN (SELECT value FROM json_each(?))" : ""
+          }`,
+          ...(keys ? [JSON.stringify(keys)] : []),
+        )
+        .map((f) => [f.concept_id, f.detail]),
+    );
+    const mine = new Set(stored.keys());
+    const became: string[] = [];
+    for (const [key, issues] of found) {
+      mine.delete(key);
+      const detail = JSON.stringify(issues);
+      if (stored.get(key) === detail) continue;
+      if (!stored.has(key)) became.push(key);
+      this.sql.run(
+        `INSERT INTO flags (concept_id, kind, since_seq, detail) VALUES (?, 'structure', ?, ?)
+         ON CONFLICT(concept_id, kind) DO UPDATE SET detail = excluded.detail`,
+        key,
+        seq,
+        detail,
+      );
+    }
+    for (const key of mine) {
+      this.sql.run("DELETE FROM flags WHERE concept_id = ? AND kind = 'structure'", key);
+    }
+    return { found, became };
   }
 
   private conceptPath(input: string): string {
@@ -2578,7 +2722,8 @@ export class LibraryStore {
       detail: string;
     }>(
       `SELECT f.concept_id, f.kind, f.since_seq, f.detail FROM flags f
-       JOIN paths p ON p.concept_id = f.concept_id WHERE f.kind NOT IN ('stale', 'stale_soon')`,
+       JOIN paths p ON p.concept_id = f.concept_id
+       WHERE f.kind NOT IN ('stale', 'stale_soon', 'structure')`,
     );
     // A concept with only missing-heading lint gets a lint item too, dated by its latest version.
     for (const id of anchorLint.keys()) {
@@ -2616,6 +2761,30 @@ export class LibraryStore {
         suggested_action: action,
         inbound_links: this.inboundCount(e.concept_id),
       });
+    }
+    if (want("structure")) {
+      // The structure process's flags (TEMPRA-64): a concept's own, or a directory's, reported on
+      // its index.md. Directory flags are kept current by writes, so a directory gone has none.
+      for (const f of this.sql.all<{ concept_id: string; since_seq: number; detail: string }>(
+        "SELECT concept_id, since_seq, detail FROM flags WHERE kind = 'structure'",
+      )) {
+        const dir = isDirKey(f.concept_id) ? f.concept_id.slice(4) : null;
+        const e = dir === null ? snap.byId.get(f.concept_id) : undefined;
+        if (dir === null && e?.kind !== "concept") continue;
+        const path = e ? e.path : dirIndex(dir ?? "");
+        if (!mine(path)) continue;
+        const issues = JSON.parse(f.detail) as StructureIssue[];
+        items.push({
+          kind: "structure",
+          path,
+          since:
+            this.sql.all<{ ts: string }>("SELECT ts FROM events WHERE seq = ?", f.since_seq)[0]
+              ?.ts ?? "",
+          detail: issues.map((i) => i.message).join(" "),
+          suggested_action: structureAction(issues),
+          inbound_links: e ? this.inboundCount(e.concept_id) : 0,
+        });
+      }
     }
     if (want("comment")) {
       // One concept's page asks for its own threads only (the partial index, by concept).
@@ -2663,7 +2832,9 @@ export class LibraryStore {
       }
     }
     items.sort((a, b) => b.inbound_links - a.inbound_links || (a.since < b.since ? -1 : 1));
-    return { seq: snap.seq, total: items.length, items: items.slice(0, limit) };
+    const counts: Record<string, number> = {};
+    for (const i of items) counts[i.kind] = (counts[i.kind] ?? 0) + 1;
+    return { seq: snap.seq, total: items.length, counts, items: items.slice(0, limit) };
   }
 
   /**
@@ -3097,6 +3268,105 @@ export class LibraryStore {
     });
   }
 
+  /**
+   * The structure process (TEMPRA-64): directory and index health. Writes keep the flags of the
+   * directories they touch current; this daily run checks the whole library again, which catches
+   * what a write changed elsewhere (a concept left with no links in). It runs only when the ledger
+   * moved since its cursor. Returns the counts now, and what was newly flagged.
+   */
+  maintainStructure(): StructureRun {
+    const now = this.clock();
+    return this.sql.transaction(() => {
+      const seq = this.headSeq();
+      const cursor =
+        this.sql.all<{ seq: number }>("SELECT seq FROM cursors WHERE maintainer = 'structure'")[0]
+          ?.seq ?? -1;
+      const became = cursor === seq ? [] : this.syncStructure(null, seq).became;
+      const flags = this.sql.all<{ concept_id: string; detail: string }>(
+        "SELECT concept_id, detail FROM flags WHERE kind = 'structure'",
+      );
+      const run: StructureRun = {
+        skipped: cursor === seq,
+        concepts: 0,
+        directories: 0,
+        codes: {},
+        became: [],
+      };
+      for (const f of flags) {
+        if (isDirKey(f.concept_id)) run.directories++;
+        else run.concepts++;
+        for (const i of JSON.parse(f.detail) as StructureIssue[]) {
+          run.codes[i.code] = (run.codes[i.code] ?? 0) + 1;
+        }
+      }
+      const paths = new Map(
+        this.sql
+          .all<{ concept_id: string; path: string }>(
+            "SELECT concept_id, path FROM paths WHERE concept_id IN (SELECT value FROM json_each(?))",
+            JSON.stringify(became.filter((k) => !isDirKey(k))),
+          )
+          .map((r) => [r.concept_id, r.path]),
+      );
+      run.became = became
+        .map((k) => (isDirKey(k) ? dirIndex(k.slice(4)) : (paths.get(k) ?? "")))
+        .filter((p) => p !== "")
+        .sort();
+      this.sql.run(
+        `INSERT INTO cursors (maintainer, seq) VALUES ('structure', ?)
+         ON CONFLICT(maintainer) DO UPDATE SET seq = excluded.seq`,
+        seq,
+      );
+      this.setMaintenance({
+        structure_at: iso(now),
+        structure_counts: JSON.stringify({
+          concepts: run.concepts,
+          directories: run.directories,
+          codes: run.codes,
+        }),
+      });
+      return run;
+    });
+  }
+
+  /**
+   * The library's health summary (TEMPRA-66), worked out now: open work by kind, the concepts
+   * changed since anyone last verified them (the newest first), and when. No model involved.
+   */
+  private computeHealth(): LibraryHealth {
+    const work = this.work({ limit: 1 });
+    const n = (k: string) => work.counts[k] ?? 0;
+    const rows = this.sql.all<{ path: string; seq: number; ts: string; actor: string }>(
+      `SELECT p.path, p.last_seq AS seq, e.ts, e.actor FROM paths p JOIN events e ON e.seq = p.last_seq
+       WHERE p.kind = 'concept' AND e.op <> 'verify' ORDER BY p.last_seq DESC`,
+    );
+    return {
+      at: iso(this.clock()),
+      seq: this.headSeq(),
+      counts: {
+        stale: n("stale"),
+        stale_soon: this.work({ kind: "stale_soon", limit: 1 }).total,
+        broken_link: n("broken_link"),
+        lint: n("lint"),
+        structure: n("structure"),
+        comment: n("comment"),
+      },
+      unverified: { total: rows.length, newest: rows.slice(0, HEALTH_NEWEST) },
+    };
+  }
+
+  /** The health process: the summary, kept in meta for start, the app and the digests. */
+  maintainHealth(): LibraryHealth {
+    const health = this.computeHealth();
+    this.setMaintenance({ health: JSON.stringify(health) });
+    return health;
+  }
+
+  /** The summary the daily pass kept, or one worked out now before the first pass has run. */
+  health(): LibraryHealth {
+    const kept = this.maintenance().health;
+    return kept ? (JSON.parse(kept) as LibraryHealth) : this.computeHealth();
+  }
+
   /** The usage-rollup maintainer: drops read counts older than the usage window. */
   pruneUsage(): number {
     const before = this.sql.all<{ n: number }>("SELECT COUNT(*) AS n FROM access_log")[0]?.n ?? 0;
@@ -3178,6 +3448,9 @@ export class LibraryStore {
     const stalenessSeq =
       this.sql.all<{ seq: number }>("SELECT seq FROM cursors WHERE maintainer = 'staleness'")[0]
         ?.seq ?? 0;
+    const structureSeq =
+      this.sql.all<{ seq: number }>("SELECT seq FROM cursors WHERE maintainer = 'structure'")[0]
+        ?.seq ?? 0;
     return {
       seq,
       paths: one("SELECT COUNT(*) AS n FROM paths"),
@@ -3208,6 +3481,21 @@ export class LibraryStore {
           }),
           soon_days: STALE_SOON_DAYS,
         },
+        structure: {
+          kind: "process",
+          cursor: structureSeq,
+          lag: seq - structureSeq,
+          last_run: m.structure_at ?? null,
+          ...(JSON.parse(m.structure_counts ?? '{"concepts":0,"directories":0,"codes":{}}') as {
+            concepts: number;
+            directories: number;
+            codes: Record<string, number>;
+          }),
+        },
+        health: {
+          kind: "process",
+          last_run: m.health ? (JSON.parse(m.health) as LibraryHealth).at : null,
+        },
       },
       next_run: m.next_run ?? null,
     };
@@ -3235,6 +3523,7 @@ export class LibraryStore {
       types,
       open_work: this.work({ limit: 1 }).total,
       stale_soon: this.work({ kind: "stale_soon", limit: 1 }).total,
+      health: this.health(),
       open_comments: [...this.openThreadCounts().entries()]
         .filter(([id]) => snap.byId.has(id))
         .reduce((n, [, c]) => n + c, 0),
@@ -3282,6 +3571,42 @@ export class LibraryStore {
 export type DownloadPayload =
   | { k: "file"; path: string; hash: string; media: string | null }
   | { k: "export"; at: number; name?: string };
+
+/** What one run of the structure process found: flags now set, and what was newly flagged. */
+export interface StructureRun {
+  /** Nothing was written since the last run, so nothing was checked again. */
+  skipped: boolean;
+  /** Concepts and directories flagged, and how many flags carry each check. */
+  concepts: number;
+  directories: number;
+  codes: Record<string, number>;
+  /** Concepts, or directories' index.md, flagged by this run that were not before. */
+  became: string[];
+}
+
+/** How many of the newest unverified changes the health summary names. */
+export const HEALTH_NEWEST = 5;
+
+/** A library's health summary (TEMPRA-66), as the daily pass leaves it in meta. */
+export interface LibraryHealth {
+  /** When it was worked out, and the ledger's head then. */
+  at: string;
+  seq: number;
+  /** Open work by kind; stale_soon looks ahead and is not part of the queue. */
+  counts: {
+    stale: number;
+    stale_soon: number;
+    broken_link: number;
+    lint: number;
+    structure: number;
+    comment: number;
+  };
+  /** Concepts whose latest change came after their latest verification (or that have none). */
+  unverified: {
+    total: number;
+    newest: { path: string; seq: number; ts: string; actor: string }[];
+  };
+}
 
 /** What one run of the staleness process found: counts now, and paths that changed state. */
 export interface StalenessRun {

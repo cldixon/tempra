@@ -75,12 +75,14 @@ describe("MCP trial 2026-10-06", () => {
     ]);
     const del = s.apply(ctx(), [{ op: "delete", path: "g.md", if_match: concept(s, "g.md").hash }]);
     expect(codes(concept(s, "b.md").lint)).toEqual(["broken_link"]);
-    expect(s.work().items.map((i) => [i.kind, i.path])).toEqual([["broken_link", "b.md"]]);
+    expect(s.work({ kind: "broken_link" }).items.map((i) => [i.kind, i.path])).toEqual([
+      ["broken_link", "b.md"],
+    ]);
 
     s.revert(ctx(), { request_id: del.request_id });
     expect(s.links("g.md").inbound.map((l) => l.path)).toEqual(["b.md"]);
     expect(concept(s, "b.md").lint).toEqual([]);
-    expect(s.work().items).toEqual([]);
+    expect(s.work({ kind: "broken_link" }).items).toEqual([]);
   });
 
   test("TEMPRA-27: writes refuse a concept with no frontmatter, invalid YAML or no type", () => {
