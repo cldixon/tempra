@@ -19,6 +19,11 @@ export interface TokenInfo {
    * already capped by it: a `read` member's token is read-only, and may still comment.
    */
   role: Role;
+  /**
+   * The handle of the person it acts for, whose account its requests and writes count against
+   * (tempra-dev: v2/sharing); the library's owner when absent.
+   */
+  person?: string;
 }
 
 export type Authenticate = (secret: string) => Promise<TokenInfo>;
@@ -45,6 +50,7 @@ interface TokenRow {
   owner: string | null;
   owner_id: string | null;
   member_role: "read" | "write" | null;
+  person: string | null;
   suspended: string | null;
 }
 
@@ -65,10 +71,11 @@ export function d1Authenticate(
         .prepare(
           `SELECT t.id, t.actor, t.scope, t.prefix, t.mcp_tiers, t.expires, t.revoked, t.created_by,
                   l.id AS library_id, l.slug, l.do_id, u.handle AS owner, l.owner AS owner_id,
-                  m.role AS member_role, u.suspended
+                  m.role AS member_role, p.handle AS person, u.suspended
            FROM tokens t JOIN libraries l ON l.id = t.library
            LEFT JOIN users u ON u.id = l.owner
            LEFT JOIN library_members m ON m.library = l.id AND m.user = t.created_by
+           LEFT JOIN users p ON p.id = t.created_by
            WHERE t.hash = ?`,
         )
         .bind(hash)
@@ -100,6 +107,7 @@ export function d1Authenticate(
       mcp_tiers: row.mcp_tiers,
       library: { id: row.library_id, slug: row.slug, do_id: row.do_id, owner: row.owner ?? "" },
       created_by: row.created_by,
+      ...(row.person ? { person: row.person } : {}),
     };
   };
 }

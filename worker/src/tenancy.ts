@@ -67,7 +67,10 @@ export interface AccountGrant {
 
 /**
  * The libraries a connection reaches now, each as the token it acts with there; null when the
- * account is gone or suspended. Shared libraries join in TEMPRA-60.
+ * account is gone or suspended. "All libraries" means the account's own; a library shared with
+ * it is reached only when the grant selects it, at the lower of the grant's scope and the
+ * person's role now, so lowering or ending a membership applies on the next request
+ * (tempra-dev: v2/sharing).
  */
 export async function grantLibraries(
   accounts: Accounts,
@@ -76,18 +79,19 @@ export async function grantLibraries(
   const user = await accounts.account(grant.userId);
   if (!user) return null;
   const selected = grant.libraries === "all" ? null : new Set(grant.libraries);
-  const libraries = (await accounts.libraries(user.id))
-    .filter((l) => !selected || selected.has(l.id))
+  const libraries = (await accounts.reachable(user.id))
+    .filter((l) => (selected ? selected.has(l.id) : l.role === "owner"))
     .map(
-      (l): TokenInfo => ({
+      ({ role, ...l }): TokenInfo => ({
         id: `grant:${grant.id}`,
         actor: grant.actor,
-        scope: grant.scope,
+        scope: role === "read" ? "read" : grant.scope,
         prefix: grant.prefix,
         mcp_tiers: grant.tiers,
         library: { id: l.id, slug: l.slug, do_id: l.do_id, owner: l.owner },
         created_by: user.id,
-        role: "owner",
+        role,
+        person: user.handle,
       }),
     );
   return { user, libraries };

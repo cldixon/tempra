@@ -392,6 +392,72 @@ describe("OAuth for MCP clients", () => {
     expect((await apps(app))[0]?.libraries).toBe("all");
   });
 
+  test("a member connects their own agent to a shared library, held to their role", async () => {
+    const s = setup();
+    const friend = await s.stranger("friend@example.com");
+    await s.accounts.share("lib-1", friend.user.id, "write", "user_1");
+    const clientId = await register(friend.app);
+    const flow = await begin(friend.app, clientId);
+    // Their own demo by slug; the owner's as owner/slug, marked shared with their role.
+    expect(flow.html).toContain('name="library" value="demo"');
+    expect(flow.html).toContain('name="library" value="owner/demo"');
+    expect(flow.html).toContain("shared with you, write");
+    const done = await submit(friend.app, flow, {
+      ...approve,
+      libraries: "selected",
+      library: "owner/demo",
+    });
+    const tokens = await exchange(
+      friend.app,
+      clientId,
+      done.headers.get("Location") ?? "",
+      flow.verifier,
+    );
+    const { call } = await mcp(friend.app, tokens.access_token);
+    expect((await call("start")).text).toContain("# Library owner/demo");
+    const note = "---\ntype: Note\n---\nFrom the friend's agent.\n";
+    expect((await call("write", { path: "f.md", content: note })).isError).toBe(false);
+    // Their writes count against their own account, not the owner's.
+    const writes = s.usage.filter((e) => e.kind === "write").map((e) => e.account);
+    expect(writes).toContain("friend");
+    expect(writes).not.toContain("owner");
+    expect(await apps(friend.app)).toMatchObject([{ libraries: ["owner/demo"] }]);
+
+    // Lowered to read: the same connection reads and comments, and cannot write.
+    await s.accounts.share("lib-1", friend.user.id, "read", "user_1");
+    const refused = await call("write", { path: "g.md", content: note });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toContain("read_only");
+    const comment = await call("comment", { action: "open", path: "f.md", body: "A question." });
+    expect(comment.isError).toBe(false);
+
+    // Removed: the library is gone from the connection.
+    await s.accounts.unshare("lib-1", friend.user.id);
+    expect((await call("read", { library: "owner/demo", path: "f.md" })).text).toContain(
+      "no_library",
+    );
+  });
+
+  test("all libraries means the account's own, never ones shared with it", async () => {
+    const s = setup();
+    const friend = await s.stranger("friend@example.com");
+    await s.accounts.share("lib-1", friend.user.id, "write", "user_1");
+    const clientId = await register(friend.app);
+    const flow = await begin(friend.app, clientId);
+    const done = await submit(friend.app, flow, { ...approve, libraries: "all", library: "" });
+    const tokens = await exchange(
+      friend.app,
+      clientId,
+      done.headers.get("Location") ?? "",
+      flow.verifier,
+    );
+    const { call } = await mcp(friend.app, tokens.access_token);
+    expect((await call("start")).text).toContain("# Library friend/demo");
+    expect((await call("read", { library: "owner/demo", path: "a.md" })).text).toContain(
+      "no_library",
+    );
+  });
+
   test("selected libraries: only those, and a suspended account is cut off", async () => {
     const { app, accounts, db } = setup();
     await accounts.createLibrary("private", { id: "user_1", handle: "owner" });

@@ -560,7 +560,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     if (!feed) throw new OkfError(501, "unavailable", "The change feed is not wired here.");
     c.var.deps.meter?.({
       kind: "feed",
-      account: token.library.owner || token.library.id,
+      account: token.person || token.library.owner || token.library.id,
       library: token.library.id,
     });
     return feed(token.library.do_id, c.req.raw, c.req.query("prefix") ?? "");
@@ -765,8 +765,13 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
         mcp_tiers?: string;
       }>()
       .catch(() => ({}) as Record<string, undefined>);
-    const lib = (await d.accounts.libraries(user.id)).find(
-      (l) => l.slug === body.library || l.id === body.library,
+    // One of the person's own libraries by slug, or any they reach by id or owner/slug: a
+    // member mints on a shared library for their own agents (tempra-dev: v2/sharing).
+    const lib = (await d.accounts.reachable(user.id)).find(
+      (l) =>
+        l.id === body.library ||
+        `${l.owner}/${l.slug}` === body.library ||
+        (l.role === "owner" && l.slug === body.library),
     );
     if (!lib) throw new OkfError(404, "no_library", `There is no library ${body.library ?? ""}.`);
     // A person signed in to the app may mint a token as themselves (human:); a token may not.
@@ -780,12 +785,20 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
       },
       session ? session.actor : null,
     );
+    if (lib.role === "read" && fields.scope === "write") {
+      throw new OkfError(
+        403,
+        "read_only",
+        `You have read access to ${lib.owner}/${lib.slug}: mint a read token (it may still comment).`,
+      );
+    }
     const minted = await d.accounts.createToken({
       ...fields,
       libraryId: lib.id,
       createdBy: user.id,
     });
-    return c.json({ id: minted.id, secret: minted.secret, library: lib.slug, ...fields }, 201);
+    const library = lib.role === "owner" ? lib.slug : `${lib.owner}/${lib.slug}`;
+    return c.json({ id: minted.id, secret: minted.secret, library, ...fields }, 201);
   });
 
   app.delete("/api/v1/tokens/:id", async (c) => {
@@ -934,6 +947,7 @@ function sessionToken(user: User, { role, ...library }: Authorized): TokenInfo {
     library,
     created_by: user.id,
     role,
+    person: user.handle,
   };
 }
 

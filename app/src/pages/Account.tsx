@@ -141,11 +141,14 @@ export function Tokens({ me, library }: { me: Me | null; library: string | null 
   const loaded = useLoad("tokens", async () => {
     const [t, l] = await Promise.all([
       api<{ tokens: TokenRow[] }>("/api/v1/tokens"),
-      api<{ libraries: { slug: string; role?: string }[] }>("/api/v1/libraries"),
+      api<{ libraries: { owner: string; slug: string; role?: string }[] }>("/api/v1/libraries"),
     ]);
-    // Tokens are minted on the account's own libraries; shared ones come with TEMPRA-60.
-    const own = l.libraries.filter((x) => (x.role ?? "owner") === "owner");
-    return { tokens: t.tokens, libraries: own.map((x) => x.slug) };
+    // An own library by its slug; one shared with the person as owner/slug, the name the
+    // server mints on (a member's token is held to their role there).
+    const names = l.libraries.map((x) =>
+      (x.role ?? "owner") === "owner" ? x.slug : `${x.owner}/${x.slug}`,
+    );
+    return { tokens: t.tokens, libraries: names };
   });
   const [minted, setMinted] = useState<Minted | null>(null);
   const action = useAction();

@@ -358,6 +358,47 @@ describe("tenancy (v2 spec: Tenancy and authorization)", () => {
     expect(await gone.text()).toContain("no_access");
   });
 
+  test("a member mints tokens on a shared library at their role, on their own limit", async () => {
+    const s = setup();
+    const friend = await s.stranger("friend@example.com");
+    await s.accounts.share("lib-1", friend.user.id, "read", "user_1");
+    const mint = (scope: string) =>
+      friend.app.request("/api/v1/tokens", {
+        method: "POST",
+        headers: { Origin: ORIGIN, "Content-Type": "application/json" },
+        body: JSON.stringify({ library: "owner/demo", actor: "claude-code/friend", scope }),
+      });
+    const tooMuch = await mint("write");
+    expect(tooMuch.status).toBe(403);
+    expect(await tooMuch.text()).toContain("mint a read token");
+    const ok = await mint("read");
+    expect(ok.status).toBe(201);
+    const minted = (await ok.json()) as { id: string; library: string; secret: string };
+    expect(minted.library).toBe("owner/demo");
+    // The slug alone names their own library, never the shared one.
+    const own = await friend.app.request("/api/v1/tokens", {
+      method: "POST",
+      headers: { Origin: ORIGIN, "Content-Type": "application/json" },
+      body: JSON.stringify({ library: "demo", actor: "claude-code/mine", scope: "write" }),
+    });
+    expect(((await own.json()) as { library: string }).library).toBe("demo");
+
+    // Both see it; it counts against the member's limit, not the owner's.
+    const theirs = (await s.accounts.tokens(friend.user.id)).map((t) => t.library);
+    expect(theirs).toContain("owner/demo");
+    expect((await s.accounts.tokens("user_1")).map((t) => t.id)).toContain(minted.id);
+    expect((await s.accounts.usage("user_1")).tokens).toBe(0);
+    expect((await s.accounts.usage(friend.user.id)).tokens).toBe(4);
+
+    // The member may revoke their own; the owner may revoke any on their library.
+    const revoke = await friend.app.request(`/api/v1/tokens/${minted.id}`, {
+      method: "DELETE",
+      headers: { Origin: ORIGIN },
+    });
+    expect(revoke.status).toBe(204);
+    expect((await s.req("/tree", { token: minted.secret })).status).toBe(401);
+  });
+
   test("the owner is never a member; deletes take memberships with them", async () => {
     const s = setup();
     const friend = await s.stranger("friend@example.com");

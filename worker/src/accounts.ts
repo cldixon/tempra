@@ -116,11 +116,14 @@ export interface Accounts {
   /** A library by its path, with its owner's users row id; null when there is none. */
   library(owner: string, slug: string): Promise<(LibraryRef & { ownerId: string }) | null>;
   createLibrary(slug: string, owner: Pick<User, "id" | "handle">): Promise<LibraryRef>;
-  /** Tokens on the user's libraries, newest first, with the library's slug and the minter's email. */
+  /**
+   * Tokens on the user's libraries and those they minted on libraries shared with them, newest
+   * first, with the library (its slug, or owner/slug when shared) and the minter's email.
+   */
   tokens(userId: string): Promise<TokenRow[]>;
   /** Stores a new token's hash; returns the secret, which is shown once and never again. */
   createToken(t: NewToken): Promise<{ id: string; secret: string }>;
-  /** Revokes a token on one of the user's libraries; 404 for anything else. */
+  /** Revokes a token on one of the user's libraries, or one they minted; 404 for anything else. */
   revokeToken(id: string, userId: string): Promise<void>;
   /** The account's limits: defaults with its overrides. */
   limits(userId: string): Promise<Limits>;
@@ -141,6 +144,15 @@ export interface Accounts {
   /** Removes the user's rows (they own no libraries by now), keeps a tombstone, holds the handle. */
   deleteUser(user: Pick<User, "id" | "email" | "handle">): Promise<void>;
 }
+
+/**
+ * The account's tokens, for its token limit: those it minted, and older ones on its libraries
+ * with no recorded minter. A member's tokens on a shared library are the member's.
+ */
+const mintedBy = (n: number) =>
+  `(created_by = ?${n} OR (created_by IS NULL AND library IN (SELECT id FROM libraries WHERE owner = ?${n})))`;
+const MINTED_BY_1 = mintedBy(1);
+const MINTED_BY_11 = mintedBy(11);
 
 const AGENT_ACTOR = /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*$/;
 const PROCESS_ACTOR = /^process:[a-z0-9][a-z0-9._-]*$/;
@@ -463,11 +475,14 @@ export function d1Accounts(db: D1Database): Accounts {
     async tokens(userId) {
       const r = await db
         .prepare(
-          `SELECT t.id, l.slug AS library, t.actor, t.scope, t.prefix, t.expires, t.mcp_tiers,
+          `SELECT t.id,
+                  CASE WHEN l.owner = ?1 THEN l.slug ELSE o.handle || '/' || l.slug END AS library,
+                  t.actor, t.scope, t.prefix, t.expires, t.mcp_tiers,
                   u.email AS created_by, t.revoked
            FROM tokens t JOIN libraries l ON l.id = t.library
+           JOIN users o ON o.id = l.owner
            LEFT JOIN users u ON u.id = t.created_by
-           WHERE l.owner = ?
+           WHERE l.owner = ?1 OR t.created_by = ?1
            ORDER BY t.rowid DESC`,
         )
         .bind(userId)
@@ -482,14 +497,16 @@ export function d1Accounts(db: D1Database): Accounts {
         .bind(t.libraryId)
         .first<{ owner: string }>();
       if (!owner) throw new OkfError(404, "no_library", "No such library.");
-      const { tokens: max } = await limitsOf(owner.owner);
+      // A token counts against the account that minted it (a member's, on a shared library).
+      const account = t.createdBy ?? owner.owner;
+      const { tokens: max } = await limitsOf(account);
       const r = await db
         .prepare(
           `INSERT INTO tokens (id, hash, library, actor, scope, prefix, expires, mcp_tiers, created_by)
            SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9
            WHERE (SELECT COUNT(*) FROM tokens WHERE revoked IS NULL
                   AND (expires IS NULL OR expires > ?10)
-                  AND library IN (SELECT id FROM libraries WHERE owner = ?11)) < ?12`,
+                  AND ${MINTED_BY_11}) < ?12`,
         )
         .bind(
           id,
@@ -502,7 +519,7 @@ export function d1Accounts(db: D1Database): Accounts {
           t.mcpTiers,
           t.createdBy,
           new Date().toISOString(),
-          owner.owner,
+          account,
           max,
         )
         .run();
@@ -516,7 +533,7 @@ export function d1Accounts(db: D1Database): Accounts {
           `SELECT (SELECT COUNT(*) FROM libraries WHERE owner = ?1) AS libraries,
                   (SELECT COUNT(*) FROM tokens WHERE revoked IS NULL
                      AND (expires IS NULL OR expires > ?2)
-                     AND library IN (SELECT id FROM libraries WHERE owner = ?1)) AS tokens`,
+                     AND ${MINTED_BY_1}) AS tokens`,
         )
         .bind(userId, new Date().toISOString())
         .first<{ libraries: number; tokens: number }>();
@@ -537,8 +554,8 @@ export function d1Accounts(db: D1Database): Accounts {
     async revokeToken(id, userId) {
       const r = await db
         .prepare(
-          `UPDATE tokens SET revoked = ? WHERE id = ? AND revoked IS NULL
-           AND library IN (SELECT id FROM libraries WHERE owner = ?)`,
+          `UPDATE tokens SET revoked = ?1 WHERE id = ?2 AND revoked IS NULL
+           AND (library IN (SELECT id FROM libraries WHERE owner = ?3) OR created_by = ?3)`,
         )
         .bind(new Date().toISOString(), id, userId)
         .run();

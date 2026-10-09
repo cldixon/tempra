@@ -6,7 +6,7 @@ import {
   type OAuthHelpers,
 } from "@cloudflare/workers-oauth-provider";
 import type { Hono } from "hono";
-import type { LibraryRef } from "../accounts";
+import type { ReachableLibrary } from "../accounts";
 import { checkSlug } from "../accounts";
 import type { Deps } from "../app";
 import type { TokenInfo } from "../auth";
@@ -14,7 +14,7 @@ import { normalizeDir } from "../okf/paths";
 import { signedIn } from "../signin";
 import { OkfError } from "../store/errors";
 import type { AccountGrant } from "../tenancy";
-import { type ConsentForm, consentPage, messagePage } from "./pages";
+import { type ConsentForm, consentKey, consentPage, messagePage } from "./pages";
 
 /** OAuth scopes (spec: Apps under Auth). A grant never carries more than the person approved. */
 export const SCOPES = ["okf:read", "okf:write"];
@@ -44,7 +44,7 @@ function defaultActor(details: ConsentDescription): string {
 function defaultForm(
   request: AuthRequest,
   details: ConsentDescription,
-  libs: LibraryRef[],
+  libs: ReachableLibrary[],
 ): ConsentForm {
   const wantsWrite = request.scope.length === 0 || request.scope.includes("okf:write");
   return {
@@ -75,7 +75,7 @@ function readForm(form: FormData): ConsentForm {
 }
 
 /** Checks the form; returns an error message for the person, or null. */
-function validate(form: ConsentForm, libs: LibraryRef[]): string | null {
+function validate(form: ConsentForm, libs: ReachableLibrary[]): string | null {
   if (!AGENT_ACTOR.test(form.actor)) {
     return "The ledger name must look like app/label, e.g. claude-ai/connector: lowercase letters, digits, dots, hyphens or underscores on each side of one slash.";
   }
@@ -85,12 +85,12 @@ function validate(form: ConsentForm, libs: LibraryRef[]): string | null {
     } catch (e) {
       return (e as OkfError).message;
     }
-    if (libs.some((l) => l.slug === form.newLibrary.toLowerCase())) {
+    if (libs.some((l) => l.role === "owner" && l.slug === form.newLibrary.toLowerCase())) {
       return `You already have a library named ${form.newLibrary}; pick it from the list.`;
     }
   }
   if (form.libraries === "selected") {
-    if (form.selected.some((slug) => !libs.some((l) => l.slug === slug))) {
+    if (form.selected.some((key) => !libs.some((l) => consentKey(l) === key))) {
       return "Pick libraries from the list.";
     }
     if (form.selected.length === 0 && form.newLibrary === "") {
@@ -123,8 +123,9 @@ function authError(e: unknown): Response {
 }
 
 /**
- * /authorize and /apps, for the signed-in person (spec: Apps under Auth). Consent lists
- * only their own libraries, and a grant belongs to their account (v2 spec: Tenancy).
+ * /authorize and /apps, for the signed-in person (spec: Apps under Auth). Consent lists their
+ * own libraries and those shared with them, and a grant belongs to their account (v2 spec:
+ * Tenancy); a shared library is reached at most at the person's role there (v2/sharing).
  */
 export function registerAppRoutes<E extends AppEnv>(
   app: Hono<E>,
@@ -139,7 +140,7 @@ export function registerAppRoutes<E extends AppEnv>(
     try {
       const request = await oauth.parseAuthRequest(c.req.raw);
       const details = await oauth.describeConsent(request);
-      const libs = await accounts.libraries(user.id);
+      const libs = await accounts.reachable(user.id);
       const consent = await oauth.beginConsent(request);
       return html(
         consentPage({
@@ -170,7 +171,7 @@ export function registerAppRoutes<E extends AppEnv>(
         return new Response(null, { status: 302, headers: denied.headers });
       }
       const form = readForm(body);
-      const libs = await accounts.libraries(user.id);
+      const libs = await accounts.reachable(user.id);
       const problem = validate(form, libs);
       if (problem) {
         // The handle is still unused, so the same page can be shown again with the error. The
@@ -206,7 +207,7 @@ export function registerAppRoutes<E extends AppEnv>(
         form.libraries === "all"
           ? "all"
           : [
-              ...libs.filter((l) => form.selected.includes(l.slug)).map((l) => l.id),
+              ...libs.filter((l) => form.selected.includes(consentKey(l))).map((l) => l.id),
               ...(created ? [created.id] : []),
             ];
       const prefix = normalizeDir(form.prefix) || null;
