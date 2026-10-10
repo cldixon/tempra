@@ -201,11 +201,6 @@ function within<T>(ms: number, what: string, work: Promise<T>): Promise<T> {
 }
 
 /**
- * A browser page with the gate's checks attached. Given a browser already open, a second person
- * gets a fresh context in it (their own cookies), not a second browser: closing an extra
- * Chrome hangs on CI's runners.
- */
-/**
  * Closes a browser, giving up after a while: on CI's Google Chrome a close sometimes never
  * returns, after every check has run. The gate exits explicitly and the runner reaps the
  * process, so a stuck close is reported, not waited on.
@@ -216,13 +211,10 @@ async function closeBrowser(browser: Browser) {
   );
 }
 
-async function openBrowser(shared?: Browser) {
-  let browser = shared;
-  if (!browser) {
-    const executablePath = chromiumPath();
-    if (!executablePath) return "no Chromium found; set CHROME_PATH";
-    browser = await chromium.launch({ executablePath });
-  }
+async function openBrowser() {
+  const executablePath = chromiumPath();
+  if (!executablePath) return "no Chromium found; set CHROME_PATH";
+  const browser = await chromium.launch({ executablePath });
   const context = await browser.newContext();
   const page = await context.newPage();
   const problems: string[] = [];
@@ -1184,7 +1176,7 @@ async function freshAccountConnects(): Promise<string[]> {
     });
 
     // Sharing in the app (tempra-dev: v2/sharing): invite from the Members tab; the invitee
-    // accepts from Invitations in their own browser; as a reader there is no Edit, at write there is.
+    // accepts from Invitations; as a reader there is no Edit, at write there is.
     await step("a note to share", async () => {
       const put = await ui(
         `${base}/api/v1/libraries/newcomer/notes/files/shared.md`,
@@ -1204,45 +1196,44 @@ async function freshAccountConnects(): Promise<string[]> {
       await page.getByRole("button", { name: "Invite" }).click();
       await page.getByText("Invited @stranger").waitFor({ timeout: 15_000 });
     });
-    const invitee = await within(
-      STEP_MS,
-      "opening the invitee's browser",
-      openBrowser(browser),
-    ).catch((e) => String(e));
-    if (typeof invitee === "string") problems.push(invitee);
-    else {
-      try {
-        await invitee.step("the invitee accepts from Invitations", async () => {
-          await invitee.signInAs("stranger@localhost", "/invitations");
-          await invitee.page.getByRole("button", { name: "Accept" }).click();
-          await invitee.page.waitForURL(`${lib}/`, { timeout: 15_000 });
-        });
-        const markdownButton = () => invitee.page.getByRole("button", { name: "Markdown" });
-        await invitee.step("a reader sees the note and no Edit", async () => {
-          await invitee.page.goto(`${lib}/shared.md`);
-          await invitee.page.getByText("Read me.").waitFor({ timeout: 15_000 });
-          await markdownButton().waitFor({ timeout: 15_000 });
-          // The role loads with the library list; give it the moment it takes.
-          await invitee.page.waitForTimeout(500);
-          const edit = await invitee.page.getByRole("button", { name: "Edit" }).count();
-          if (edit !== 0) throw new Error("a read member is offered Edit");
-        });
-        await step("the owner gives the member write access", async () => {
-          await page.goto(`${lib}/-/members`);
-          await page.getByLabel("Access for @stranger").selectOption("write");
-          await page.getByText("@stranger now has write access").waitFor({ timeout: 15_000 });
-        });
-        await invitee.step("a writer is offered Edit", async () => {
-          await invitee.page.goto(`${lib}/shared.md`);
-          await invitee.page.getByRole("button", { name: "Edit" }).waitFor({ timeout: 15_000 });
-        });
-        problems.push(...invitee.problems.map((p) => `invitee: ${p}`));
-      } finally {
-        await within(STEP_MS, "closing the invitee's browser", invitee.context.close()).catch((e) =>
-          problems.push(String(e)),
-        );
-      }
-    }
+    // The invitee is the same tab under their own session: a second context or Chrome in one
+    // run has hung CI's Google Chrome (PR #52 and two runs on main), never Playwright's build.
+    const { context } = b;
+    const asOwner = await context.cookies();
+    const switchTo = async (cookies: typeof asOwner) => {
+      await context.clearCookies();
+      await context.addCookies(cookies);
+    };
+    let asInvitee: typeof asOwner = [];
+    await step("the invitee accepts from Invitations", async () => {
+      await context.clearCookies();
+      await b.signInAs("stranger@localhost", "/invitations");
+      await page.getByRole("button", { name: "Accept" }).click();
+      await page.waitForURL(`${lib}/`, { timeout: 15_000 });
+      asInvitee = await context.cookies();
+    });
+    await step("a reader sees the note and no Edit", async () => {
+      await page.goto(`${lib}/shared.md`);
+      await page.getByText("Read me.").waitFor({ timeout: 15_000 });
+      await page.getByRole("button", { name: "Markdown" }).waitFor({ timeout: 15_000 });
+      // The role loads with the library list; give it the moment it takes.
+      await page.waitForTimeout(500);
+      const edit = await page.getByRole("button", { name: "Edit" }).count();
+      if (edit !== 0) throw new Error("a read member is offered Edit");
+    });
+    await step("the owner gives the member write access", async () => {
+      await switchTo(asOwner);
+      await page.goto(`${lib}/-/members`);
+      await page.getByLabel("Access for @stranger").selectOption("write");
+      await page.getByText("@stranger now has write access").waitFor({ timeout: 15_000 });
+    });
+    await step("a writer is offered Edit", async () => {
+      await switchTo(asInvitee);
+      await page.goto(`${lib}/shared.md`);
+      await page.getByRole("button", { name: "Edit" }).waitFor({ timeout: 15_000 });
+    });
+    await switchTo(asOwner);
+    await page.goto(`${lib}/`);
 
     // Deleting the library wipes its Durable Object and ends the connection.
     await step("delete the library from its Delete tab", async () => {
