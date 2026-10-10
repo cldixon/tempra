@@ -205,6 +205,17 @@ function within<T>(ms: number, what: string, work: Promise<T>): Promise<T> {
  * gets a fresh context in it (their own cookies), not a second browser: closing an extra
  * Chrome hangs on CI's runners.
  */
+/**
+ * Closes a browser, giving up after a while: on CI's Google Chrome a close sometimes never
+ * returns, after every check has run. The gate exits explicitly and the runner reaps the
+ * process, so a stuck close is reported, not waited on.
+ */
+async function closeBrowser(browser: Browser) {
+  await within(30_000, "closing the browser", browser.close()).catch((e) =>
+    console.log(`  (note: ${String(e)}; carrying on)`),
+  );
+}
+
 async function openBrowser(shared?: Browser) {
   let browser = shared;
   if (!browser) {
@@ -866,7 +877,7 @@ async function browserRenders(
       if (!(await stayed())) throw new Error("the page reloaded");
     });
   } finally {
-    await browser.close();
+    await closeBrowser(browser);
   }
   return problems;
 }
@@ -1241,21 +1252,25 @@ async function freshAccountConnects(): Promise<string[]> {
       // The last library gone: first run again.
       await page.waitForURL(`${base}/welcome`, { timeout: 15_000 });
     });
-    const gone = await ui(`${lib}/`, {}, cookie);
-    if (gone.status !== 404) problems.push(`deleted library page: ${gone.status}`);
-    const mcp = await fetch(`${base}/mcp`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${access_token}`,
-        "Content-Type": "application/json",
-        Accept: "application/json, text/event-stream",
-      },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    await step("the deleted library's page is gone", async () => {
+      const gone = await ui(`${lib}/`, {}, cookie);
+      if (gone.status !== 404) throw new Error(`deleted library page: ${gone.status}`);
     });
-    if (mcp.status !== 401) problems.push(`MCP after delete: ${mcp.status}`);
+    await step("the connection ends with the library", async () => {
+      const mcp = await fetch(`${base}/mcp`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${access_token}`,
+          "Content-Type": "application/json",
+          Accept: "application/json, text/event-stream",
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+      });
+      if (mcp.status !== 401) throw new Error(`MCP after delete: ${mcp.status}`);
+    });
     return problems;
   } finally {
-    await browser.close();
+    await closeBrowser(browser);
   }
 }
 
