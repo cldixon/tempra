@@ -235,12 +235,15 @@ async function openBrowser() {
   page.on("pageerror", (e) => problems.push(`page error: ${e.message}`));
   let failures = 0;
   const step = async (what: string, run: () => Promise<unknown>) => {
+    const t0 = Date.now();
+    if (process.env.GATE_TRACE) console.log(`  [step] ${what}`);
     try {
       // A step that hangs (a wait with no timeout of its own) fails by name rather than
       // silently using up the CI job's time.
       await within(STEP_MS, what, run());
     } catch (e) {
       problems.push(`${what}: ${String(e).split("\n")[0]}`);
+      if (process.env.GATE_TRACE) console.log(`  [step failed after ${Date.now() - t0} ms] ${what}`);
       // GATE_SCREENSHOTS: what the page showed when the step failed.
       const shots = process.env.GATE_SCREENSHOTS;
       if (shots) {
