@@ -10,10 +10,14 @@ import { devMailer, flushMail, sendDigests } from "./notify-mail";
 import { listRestores, RESTORE_ID, restoresPrefix } from "./recovery";
 import { d1Sessions } from "./session";
 import type { Mailer } from "./signin";
+import { spikeAgents } from "./spike/comment";
+import { spikeFor } from "./spike/env";
 import { d1Orphans, digestText, pruneAccounts, sweep } from "./sweep";
 import { createWorker } from "./worker";
 
 export { Library } from "./library";
+export { LibraryAgent } from "./spike/agent-do";
+export { AgentRun } from "./spike/workflow";
 
 /**
  * A library's Durable Object by name. cloudflare.config.ts binds LIBRARY by Worker name, which
@@ -55,8 +59,9 @@ const storageLimitBytes = (env: Env) =>
 
 let authenticate: ReturnType<typeof d1Authenticate> | undefined;
 
-const depsFor = (env: Env): Deps => {
+export const depsFor = (env: Env): Deps => {
   authenticate ??= d1Authenticate(env.DB);
+  const spike = spikeFor(env);
   const client = (doId: string) => {
     const stub = libraryStub(env, doId);
     return makeClient((method, args) => stub.call(method, args));
@@ -67,6 +72,9 @@ const depsFor = (env: Env): Deps => {
     sessions: d1Sessions(env.DB),
     mailer: mailerFor(env),
     notifications: d1Notifications(env.DB),
+    // The agent spike (TEMPRA-67): preview Workers only; `@librarian` resolves there.
+    spike,
+    ...(spike ? { managedAgents: spikeAgents } : {}),
     async rateLimit(kind, key) {
       const limiter = kind === "write" ? env.WRITE_LIMITER : env.REQUEST_LIMITER;
       return (await limiter.limit({ key })).success;

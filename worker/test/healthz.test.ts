@@ -1,7 +1,11 @@
 import { describe, expect, mock, test } from "bun:test";
 
 // `cloudflare:workers` only exists inside workerd; stub it for unit tests under bun.
-mock.module("cloudflare:workers", () => ({ DurableObject: class {}, WorkerEntrypoint: class {} }));
+mock.module("cloudflare:workers", () => ({
+  DurableObject: class {},
+  WorkerEntrypoint: class {},
+  WorkflowEntrypoint: class {},
+}));
 
 const { default: worker } = await import("../src/index");
 

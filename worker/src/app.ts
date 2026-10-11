@@ -16,7 +16,7 @@ import {
 import { notificationsOf, registerInboxApi } from "./inbox-api";
 import { registerLegalRoutes } from "./legal";
 import { deleteLibrary } from "./lifecycle";
-import { type Notifications, postComment } from "./notify";
+import { type Notifications, type NotifyDeps, postComment } from "./notify";
 import { registerAppRoutes } from "./oauth/routes";
 import { splitFrontmatter } from "./okf/concept";
 import { normalizePath, underPrefix } from "./okf/paths";
@@ -25,6 +25,8 @@ import { fromThisSite } from "./origin";
 import type { RestoreOutcome, RestoreRecord } from "./recovery";
 import { readCookie, SESSION_COOKIE, type Sessions } from "./session";
 import { type Mailer, registerSignInRoutes } from "./signin";
+import { registerSpikeRoutes } from "./spike/routes";
+import type { SpikeDeps } from "./spike/runner";
 import { OkfError } from "./store/errors";
 import type { ConceptContent, RequestContext, WriteOp, WriteResult } from "./store/store";
 import { type Authorized, authorizeLibrary, requireOwner } from "./tenancy";
@@ -66,6 +68,10 @@ export interface Deps extends UsageDeps {
   feed?: (doId: string, request: Request, prefix: string) => Promise<Response>;
   /** The inbox, read cursors and mail settings in D1 (notify.ts); absent, nobody is notified. */
   notifications?: Notifications | null;
+  /** A library's managed agents, for mentions (notify.ts); none unless a deployment runs one. */
+  managedAgents?: NotifyDeps["managedAgents"];
+  /** The managed-agent spike (TEMPRA-67): bound on preview Workers only, absent elsewhere. */
+  spike?: SpikeDeps | null;
 }
 
 export interface RecoveryDeps {
@@ -1049,6 +1055,9 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     }
     return c.json({ id: lib.id, owner: lib.owner, slug: lib.slug }, 201);
   });
+
+  // The managed-agent spike (TEMPRA-67): owner only, and only where a preview binds it.
+  registerSpikeRoutes(app, BASE);
 
   registerAccountApi(app, deps, async (c, d) => {
     const who = await principal(c as C, d);

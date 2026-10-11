@@ -6,7 +6,11 @@
 import { mock } from "bun:test";
 
 // `cloudflare:workers` only exists inside workerd; the OAuth library imports WorkerEntrypoint.
-mock.module("cloudflare:workers", () => ({ DurableObject: class {}, WorkerEntrypoint: class {} }));
+mock.module("cloudflare:workers", () => ({
+  DurableObject: class {},
+  WorkerEntrypoint: class {},
+  WorkflowEntrypoint: class {},
+}));
 // As in cloudflare.config.ts: the OAuth library enables CIMD only under global_fetch_strictly_public.
 Object.assign(globalThis, {
   Cloudflare: { compatibilityFlags: { global_fetch_strictly_public: true } },

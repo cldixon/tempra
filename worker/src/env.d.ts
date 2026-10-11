@@ -8,6 +8,16 @@ interface AuthEnv {
   DEV_SIGNIN?: string;
   /** Injected by the OAuth provider into the default handler's env. */
   OAUTH_PROVIDER: OAuthHelpers;
+  /**
+   * The managed-agent spike (TEMPRA-67), bound in preview mode only (cloudflare.config.ts), so
+   * the types generated with no mode do not have them.
+   */
+  AGENT_SPIKE?: string;
+  LIBRARY_AGENT?: DurableObjectNamespace;
+  AGENT_RUN?: Workflow;
+  AI?: Ai;
+  /** A secret on preview Workers only (scripts/preview.ts); unset, the Claude arms answer "no key". */
+  ANTHROPIC_API_KEY?: string;
 }
 
 declare global {

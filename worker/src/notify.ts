@@ -427,7 +427,8 @@ export async function libraryPeople(
 /**
  * A library's managed agents, by the name a comment mentions them with. None exist yet: the
  * managed agent (TEMPRA-69) adds itself here, and its comment trigger reads `{agent}` mentions
- * from the comment's meta.
+ * from the comment's meta. A preview running the agent spike (TEMPRA-67) passes its own
+ * (NotifyDeps.managedAgents).
  */
 export function managedAgents(_ref: Pick<LibraryRef, "id">): { id: string; name: string }[] {
   return [];
@@ -470,6 +471,8 @@ export function resolveMentions(
 export interface NotifyDeps {
   accounts: Accounts;
   notifications?: Notifications | null;
+  /** A library's managed agents; managedAgents() (none) unless a deployment runs one. */
+  managedAgents?: (ref: Pick<LibraryRef, "id">) => { id: string; name: string }[];
 }
 
 /** `s` on one line, cut to `n` characters. */
@@ -493,7 +496,8 @@ export async function postComment(
 ): Promise<CommentResult> {
   const people = await libraryPeople(d.accounts, token.library);
   const body = typeof action.body === "string" ? action.body : "";
-  const mentions = body ? resolveMentions(body, people, managedAgents(token.library)) : [];
+  const agents = (d.managedAgents ?? managedAgents)(token.library);
+  const mentions = body ? resolveMentions(body, people, agents) : [];
   const res = await lib.comment(ctx, { ...action, mentions });
   try {
     await fanOut(d, token, ctx, action, res, people, mentions);

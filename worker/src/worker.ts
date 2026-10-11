@@ -2,8 +2,8 @@ import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { type AgentKey, agentName, connectionAgent, tokenAgent } from "./agents";
 import { actedBy, createApp, type Deps } from "./app";
 import { handleMcp, type McpContext } from "./mcp/server";
-import { postComment } from "./notify";
 import { type GrantProps, SCOPES } from "./oauth/routes";
+import { agentComment } from "./spike/comment";
 import { OkfError } from "./store/errors";
 import { grantLibraries } from "./tenancy";
 import { type Admission, admit, mcpWrites, tokenAdmission } from "./usage";
@@ -128,7 +128,8 @@ export function createWorker(deps: (env: Cloudflare.Env) => Deps): {
           return handleMcp(request, {
             ...caller,
             open: (t) => d.library(t),
-            comment: (t, req, action) => postComment(d, t, d.library(t), req, action),
+            // The spike's agent (TEMPRA-67) is held to its run here; anyone else posts as usual.
+            comment: (t, req, action) => agentComment(d, t, req, action),
             agentNames: async (ids) =>
               new Map((await d.accounts.agents(ids)).map((a) => [a.id, agentName(a)])),
             blobs: d.blobs,

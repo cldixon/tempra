@@ -29,6 +29,12 @@ interface Deployment {
   limiters?: { write: string; request: string };
   /** False: no daily sweep and digest. */
   cron?: false;
+  /**
+   * The managed-agent runtime spike (TEMPRA-67): the library agent object, its run Workflow,
+   * Workers AI and the flag that turns the spike's routes on. Previews only; production and
+   * staging never bind it.
+   */
+  agentSpike?: true;
 }
 
 const PRODUCTION: Deployment = {
@@ -74,6 +80,7 @@ export function previewDeployment(pr: string, ids: { d1?: string; kv?: string } 
     usage: "tempra_usage_preview",
     // One pair for every preview: each has its own D1, so keys rarely meet, and never production's.
     limiters: { write: "3001", request: "3002" },
+    agentSpike: true,
   };
 }
 
@@ -132,6 +139,13 @@ export default defineConfig(({ mode }) => {
       // export; this replaces Wrangler's `migrations` history (its v1 created the same class).
       exports: {
         Library: exports.durableObject({ storage: "sqlite" }),
+        // The agent spike (TEMPRA-67): one agent object per library, a Workflow per run.
+        ...(d.agentSpike
+          ? {
+              LibraryAgent: exports.durableObject({ storage: "sqlite" }),
+              AgentRun: exports.workflow({ name: `${d.name}-agent-run`, limits: { steps: 1000 } }),
+            }
+          : {}),
       },
 
       env: {
@@ -179,8 +193,23 @@ export default defineConfig(({ mode }) => {
           ? { EMAIL: bindings.sendEmail({ allowedSenderAddresses: [d.mailFrom] }) }
           : {}),
 
-        // Secrets (typed in src/env.d.ts): OPERATOR_EMAIL. For local dev, copy .dev.vars.sample to
-        // .dev.vars.
+        // The agent spike (TEMPRA-67), previews only: model calls go through the AI Gateway
+        // tempra-spike; ANTHROPIC_API_KEY is a secret set by scripts/preview.ts.
+        ...(d.agentSpike
+          ? {
+              AGENT_SPIKE: bindings.text("on"),
+              LIBRARY_AGENT: bindings.durableObject({ worker: d.name, exportName: "LibraryAgent" }),
+              AGENT_RUN: bindings.workflow({
+                name: `${d.name}-agent-run`,
+                worker: d.name,
+                exportName: "AgentRun",
+              }),
+              AI: bindings.ai(),
+            }
+          : {}),
+
+        // Secrets (typed in src/env.d.ts): OPERATOR_EMAIL, and on previews ANTHROPIC_API_KEY. For
+        // local dev, copy .dev.vars.sample to .dev.vars.
       },
     },
   };
