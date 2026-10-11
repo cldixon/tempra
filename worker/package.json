@@ -14,7 +14,8 @@
     "admin": "bun scripts/admin.ts",
     "preview": "bun scripts/preview.ts",
     "agents": "bun scripts/agents.ts",
-    "mcp": "bun scripts/mcp.ts"
+    "mcp": "bun scripts/mcp.ts",
+    "spike": "bun scripts/spike.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.133.0",

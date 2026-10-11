@@ -13,11 +13,10 @@
  * The actor is --actor (default claude-code/dev): every write is attributed to it in the ledger.
  * Nothing is created in production or staging: there, bring a token (TEMPRA_TOKEN or --token).
  */
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { previewToken } from "./preview-token";
 
 const { values, positionals } = parseArgs({
   args: process.argv.slice(2),
@@ -37,30 +36,6 @@ const [tool, rawArgs] = positionals;
 if (!tool || (!values.pr && !values.url)) {
   console.error(usage);
   process.exit(2);
-}
-
-const WORKER = join(import.meta.dir, "..");
-const CACHE = join(WORKER, ".mcp-tokens.json");
-type Cached = { url: string; owner: string; slug: string; actor: string; token: string };
-
-/** A token for the operator's library on PR N's preview: cached, or made once. */
-async function previewToken(pr: string, slug: string, actor: string): Promise<Cached> {
-  const key = `pr-${pr} ${slug} ${actor}`;
-  const cache: Record<string, Cached> = existsSync(CACHE)
-    ? JSON.parse(readFileSync(CACHE, "utf8"))
-    : {};
-  const hit = cache[key];
-  if (hit) return hit;
-  const proc = Bun.spawn(
-    ["bun", "scripts/preview.ts", "token", "--pr", pr, "--slug", slug, "--actor", actor],
-    { cwd: WORKER, stdout: "pipe", stderr: "inherit" },
-  );
-  const out = await new Response(proc.stdout).text();
-  if ((await proc.exited) !== 0) throw new Error(`Could not get a token for PR ${pr}.`);
-  const made = JSON.parse(out.trim().split("\n").at(-1) ?? "{}") as Cached;
-  cache[key] = made;
-  writeFileSync(CACHE, `${JSON.stringify(cache, null, 2)}\n`, { mode: 0o600 });
-  return made;
 }
 
 let base: string;
