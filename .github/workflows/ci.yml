@@ -44,17 +44,22 @@ jobs:
         with:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile
-      - run: mkdir -p gate-screenshots && bun run gate
+      # Which Chrome the gate drives (CHROME_PATH is unset here, so the runner's Google Chrome).
+      - run: google-chrome --version
+      - run: mkdir -p gate-diagnostics && bun run gate
         env:
           CF_SEND_TELEMETRY: "false"
-          # Each browser step as it starts, so a hang shows where it is; screenshots of failures.
+          # Each browser step as it starts, so a hang shows where it is; screenshots of failures;
+          # Chrome's own log, a trace of a failed flow and the page's state if the browser freezes.
           GATE_TRACE: "1"
-          GATE_SCREENSHOTS: ${{ github.workspace }}/gate-screenshots
-      - if: failure()
+          GATE_SCREENSHOTS: ${{ github.workspace }}/gate-diagnostics
+          GATE_LOGS: ${{ github.workspace }}/gate-diagnostics
+      # Also when the job is cancelled at its time limit, so a hang leaves its evidence.
+      - if: failure() || cancelled()
         uses: actions/upload-artifact@v4
         with:
-          name: gate-screenshots
-          path: gate-screenshots
+          name: gate-diagnostics
+          path: gate-diagnostics
           if-no-files-found: ignore
 
   # worker/ is the deployable project: it must install and build with nothing from the rest of

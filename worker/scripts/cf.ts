@@ -75,7 +75,10 @@ export async function cf(args: string[], opts: CfOptions = {}): Promise<string> 
     const outFile = join(dir, "out");
     const errFile = join(dir, "err");
     try {
+      // Its own process group: cf runs under bunx as a child process, which a kill of bunx alone
+      // leaves running (the gate leaked one per call, reparented to init, until the runner ended).
       const p = Bun.spawn(full, {
+        detached: true,
         cwd: opts.cwd ?? WORKER_DIR,
         env: { ...process.env, CF_SEND_TELEMETRY: "false", CI: "1" },
         stdin: "ignore",
@@ -99,13 +102,15 @@ export async function cf(args: string[], opts: CfOptions = {}): Promise<string> 
           quietSince = Date.now();
         } else if (completeJson(out) && Date.now() - quietSince > 1500) {
           lingered = true;
-          p.kill(9);
           break;
         }
-        if (Date.now() - started > timeout) {
-          p.kill(9);
-          break;
-        }
+        if (Date.now() - started > timeout) break;
+      }
+      // The whole group, whether cf exited or not: what it started must not outlive the call.
+      try {
+        process.kill(-p.pid, "SIGKILL");
+      } catch {
+        // The group is already gone.
       }
       await p.exited;
       const out = readFileSync(outFile, "utf8");

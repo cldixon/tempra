@@ -16,6 +16,7 @@
  *   bun run gate [--port 8799] [--keep]
  */
 import {
+  appendFileSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -26,7 +27,7 @@ import {
 } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { type Browser, chromium } from "playwright-core";
+import { chromium } from "playwright-core";
 import { readTar, writeTar } from "../src/util/tar";
 import { compareBundle } from "../test/compare";
 import { BUNDLES, loadBundle } from "../test/fixtures";
@@ -72,12 +73,38 @@ for (let i = 1; i <= 3; i++) {
   );
 }
 
+// Its own process group, so stopping it stops wrangler and workerd beneath it too (they share
+// its stderr, which ends only when all of them have).
 const dev = Bun.spawn(["bunx", "cf", "dev", "--port", String(port)], {
+  detached: true,
   cwd: project,
   env: { ...process.env, CF_SEND_TELEMETRY: "false", CI: "1" },
   stdout: "pipe",
   stderr: "pipe",
 });
+/**
+ * cf dev's output, read as it comes so a full pipe can never stall it: the last 64 KB of each
+ * stream kept for a failure, and all of it in GATE_LOGS/cf-dev.log.
+ */
+const devTail = { stdout: "", stderr: "" };
+async function drain(name: "stdout" | "stderr", stream: ReadableStream<Uint8Array>) {
+  const decoder = new TextDecoder();
+  for await (const chunk of stream) {
+    const text = decoder.decode(chunk, { stream: true });
+    devTail[name] = (devTail[name] + text).slice(-65_536);
+    if (process.env.GATE_LOGS) appendFileSync(join(process.env.GATE_LOGS, "cf-dev.log"), text);
+  }
+}
+const drained = Promise.all([drain("stdout", dev.stdout), drain("stderr", dev.stderr)]).catch(
+  () => {},
+);
+function stopDev() {
+  try {
+    process.kill(-dev.pid, "SIGKILL");
+  } catch {
+    // Already gone.
+  }
+}
 
 async function waitForHealth() {
   for (let i = 0; i < 120; i++) {
@@ -184,10 +211,6 @@ function chromiumPath(): string | null {
   return candidates.find((p): p is string => !!p && existsSync(p)) ?? null;
 }
 
-/**
- * Chromium with one page that records every failed response, console error and page error as a
- * problem; `step` runs a part of a check and records its failure without stopping the rest.
- */
 /** The longest one browser step may take before it is reported as hung. */
 const STEP_MS = 90_000;
 
@@ -203,28 +226,81 @@ function within<T>(ms: number, what: string, work: Promise<T>): Promise<T> {
 }
 
 /**
- * Closes a browser, giving up after a while: on CI's Google Chrome a close sometimes never
- * returns, after every check has run. The gate exits explicitly and the runner reaps the
- * process, so a stuck close is reported, not waited on.
+ * GATE_LOGS=<dir>: what a failed run leaves for diagnosis (CI uploads it). cf dev's output
+ * (cf-dev.log), and per browser N: Chrome's own log (chrome-N.log), a Playwright trace of its
+ * actions, network and console (trace-N.zip, kept only when a step failed) and, when the browser
+ * stops answering, the page's state at that moment (stuck-N.txt, also printed).
  */
-async function closeBrowser(browser: Browser) {
-  await within(30_000, "closing the browser", browser.close()).catch((e) =>
-    console.log(`  (note: ${String(e)}; carrying on)`),
-  );
+const LOGS = process.env.GATE_LOGS;
+let browsers = 0;
+
+/** At most `n` characters of `s`, on one line. */
+const clip = (s: string, n = 160) => s.replace(/\s+/g, " ").slice(0, n);
+
+/** Chrome's processes (state, CPU, memory, what each waits in): a busy renderer or a blocked one. */
+function chromeProcesses(exe: string): string[] {
+  const ps = Bun.spawnSync(["ps", "-eo", "pid,ppid,stat,pcpu,rss,etime,wchan:24,args"]);
+  const lines = ps.stdout.toString().split("\n");
+  return [lines[0] ?? "", ...lines.filter((l) => l.includes(exe))].map((l) => clip(l, 200));
 }
 
+/**
+ * Chromium with one page that records every failed response, console error and page error as a
+ * problem; `step` runs a part of a check and records its failure without stopping the rest.
+ */
 async function openBrowser() {
   const executablePath = chromiumPath();
   if (!executablePath) return "no Chromium found; set CHROME_PATH";
-  const browser = await chromium.launch({ executablePath });
+  const n = ++browsers;
+  /** Chrome's own log, written by Chrome: crashes, GPU, sandbox, IPC and network errors. */
+  const chromeLog = LOGS ? join(LOGS, `chrome-${n}.log`) : null;
+  const browser = await chromium.launch({
+    executablePath,
+    args: chromeLog ? ["--enable-logging", `--log-file=${chromeLog}`, "--v=0"] : [],
+  });
+  if (process.env.GATE_TRACE)
+    console.log(`  [browser ${n}] ${executablePath} ${browser.version()}`);
   const context = await browser.newContext();
+  // Actions, network and console; no screenshots or DOM snapshots, so the timing the checks
+  // depend on stays as it was.
+  if (LOGS) await context.tracing.start({ screenshots: false, snapshots: false });
   const page = await context.newPage();
   const problems: string[] = [];
+  /** The page's recent life, for when it stops answering. */
+  const recent: string[] = [];
+  const note = (line: string) => {
+    recent.push(`${new Date().toISOString()} ${clip(line)}`);
+    if (recent.length > 40) recent.shift();
+  };
+  const pending = new Map<object, { what: string; since: number }>();
+  const sockets = new Map<object, { url: string; since: number }>();
   // Failed requests are reported by URL below; the console only repeats them.
   page.on("console", (m) => {
+    note(`console.${m.type()}: ${m.text()}`);
     if (m.type() === "error" && !m.text().startsWith("Failed to load resource")) {
       problems.push(`console: ${m.text()}`);
     }
+  });
+  page.on("request", (r) =>
+    pending.set(r, { what: `${r.method()} ${r.url().replace(base, "")}`, since: Date.now() }),
+  );
+  page.on("requestfinished", (r) => pending.delete(r));
+  page.on("requestfailed", (r) => {
+    pending.delete(r);
+    note(`request failed: ${r.method()} ${r.url().replace(base, "")} ${r.failure()?.errorText}`);
+  });
+  page.on("websocket", (ws) => {
+    sockets.set(ws, { url: ws.url(), since: Date.now() });
+    ws.on("close", () => sockets.delete(ws));
+  });
+  page.on("framenavigated", (f) => {
+    if (f === page.mainFrame()) note(`navigated: ${f.url().replace(base, "")}`);
+  });
+  page.on("crash", () => note("the page crashed"));
+  // Handled here, so Playwright no longer dismisses dialogs itself: dismissed as it would, noted.
+  page.on("dialog", (d) => {
+    note(`dialog ${d.type()}: ${d.message()}`);
+    d.dismiss().catch(() => {});
   });
   page.on("response", (r) => {
     const path = new URL(r.url()).pathname;
@@ -235,6 +311,41 @@ async function openBrowser() {
     }
   });
   page.on("pageerror", (e) => problems.push(`page error: ${e.message}`));
+
+  /** What the browser and the page were doing when `what` got no answer; printed and kept. */
+  const diagnose = async (what: string) => {
+    const now = Date.now();
+    const age = (since: number) => `${((now - since) / 1000).toFixed(1)} s`;
+    // Whether the browser still answers outside the page tells a stuck renderer from a stuck
+    // browser process (or a stuck connection to it).
+    const targets = await within(
+      10_000,
+      "the browser's own CDP session",
+      browser
+        .newBrowserCDPSession()
+        .then((s) => s.send("Target.getTargets"))
+        .then((r) =>
+          r.targetInfos.map((t) => `${t.type}${t.attached ? " attached" : ""} ${clip(t.url, 100)}`),
+        ),
+    ).catch((e) => [String(e)]);
+    const lines = [
+      `the browser stopped answering in "${what}" (browser ${n}, ${browser.version()})`,
+      `page: ${page.url()}${page.isClosed() ? " (closed)" : ""}`,
+      `requests in flight (${pending.size}):`,
+      ...[...pending.values()].map((r) => `  ${r.what} for ${age(r.since)}`),
+      `open WebSockets (${sockets.size}):`,
+      ...[...sockets.values()].map((w) => `  ${w.url} for ${age(w.since)}`),
+      "the browser's targets:",
+      ...targets.map((t) => `  ${t}`),
+      "Chrome's processes:",
+      ...chromeProcesses(executablePath).map((l) => `  ${l}`),
+      "the page's last events:",
+      ...recent.map((l) => `  ${l}`),
+    ];
+    console.log(lines.map((l) => `  | ${l}`).join("\n"));
+    if (LOGS) writeFileSync(join(LOGS, `stuck-${n}.txt`), `${lines.join("\n")}\n`);
+  };
+
   let failures = 0;
   /** The step the browser stopped answering in; every later step is skipped, not waited out. */
   let stuck: string | null = null;
@@ -250,19 +361,44 @@ async function openBrowser() {
       // silently using up the CI job's time.
       await within(STEP_MS, what, run());
     } catch (e) {
+      failures++;
       problems.push(`${what}: ${String(e).split("\n")[0]}`);
       if (process.env.GATE_TRACE)
         console.log(`  [step failed after ${Date.now() - t0} ms] ${what}`);
-      if (e instanceof NoAnswer) stuck = what;
+      if (e instanceof NoAnswer) {
+        stuck = what;
+        await diagnose(what);
+      }
       // GATE_SCREENSHOTS: what the page showed when the step failed (if it still answers).
       const shots = process.env.GATE_SCREENSHOTS;
       if (shots) {
         await within(
           10_000,
           "screenshot",
-          page.screenshot({ path: `${shots}/failed-${++failures}.png`, fullPage: true }),
+          page.screenshot({ path: `${shots}/failed-${n}-${failures}.png`, fullPage: true }),
         ).catch(() => {});
       }
+    }
+  };
+  /**
+   * Closes the browser, giving up after a while: on CI's Google Chrome a close has never
+   * returned, after every check had run. A stuck close is diagnosed and reported, not waited on;
+   * the gate exits explicitly and the runner reaps what is left. The trace is kept only when a
+   * step failed.
+   */
+  const close = async () => {
+    if (LOGS) {
+      await within(
+        20_000,
+        "saving the trace",
+        context.tracing.stop(failures > 0 ? { path: join(LOGS, `trace-${n}.zip`) } : {}),
+      ).catch((e) => console.log(`  (note: ${String(e)})`));
+    }
+    try {
+      await within(30_000, "closing the browser", browser.close());
+    } catch (e) {
+      console.log(`  (note: ${String(e)}; carrying on)`);
+      if (!stuck) await diagnose("closing the browser");
     }
   };
   /** Signs in the way a person does: the email form, then the (dev, on-page) link. */
@@ -280,7 +416,7 @@ async function openBrowser() {
       .filter((c) => c.name.includes("session"))
       .map((c) => `${c.name}=${c.value}`)
       .join("; ");
-  return { browser, context, page, problems, step, signInAs, cookie };
+  return { browser, context, page, problems, step, close, signInAs, cookie };
 }
 
 /**
@@ -297,7 +433,7 @@ async function browserRenders(
 ): Promise<string[]> {
   const b = await openBrowser();
   if (typeof b === "string") return [b];
-  const { browser, page, step, problems } = b;
+  const { page, step, problems } = b;
   try {
     const enc = (p: string) => p.split("/").map(encodeURIComponent).join("/");
     /** Opens one of the concept's panels from the cluster (take 2), unless it is open. */
@@ -910,7 +1046,7 @@ async function browserRenders(
       if (!(await stayed())) throw new Error("the page reloaded");
     });
   } finally {
-    await closeBrowser(browser);
+    await b.close();
   }
   return problems;
 }
@@ -1136,7 +1272,7 @@ async function oauthConnect(
 async function freshAccountConnects(): Promise<string[]> {
   const b = await openBrowser();
   if (typeof b === "string") return [b];
-  const { browser, page, step, problems } = b;
+  const { page, step, problems } = b;
   try {
     await b.signInAs("newcomer@localhost", "/");
     await page.waitForURL(`${base}/welcome`);
@@ -1273,11 +1409,10 @@ async function freshAccountConnects(): Promise<string[]> {
       await page.goto(`${lib}/shared.md`);
       await page.getByRole("button", { name: "Edit" }).waitFor({ timeout: 15_000 });
     });
-    await switchTo(asOwner);
-    await page.goto(`${lib}/`);
-
     // Deleting the library wipes its Durable Object and ends the connection.
     await step("delete the library from its Delete tab", async () => {
+      await switchTo(asOwner);
+      await page.goto(`${lib}/`);
       await libraryLink("Delete");
       await page.locator('input[name="confirm"]').fill("notes");
       await page.getByRole("button", { name: "Delete library" }).click();
@@ -1302,7 +1437,7 @@ async function freshAccountConnects(): Promise<string[]> {
     });
     return problems;
   } finally {
-    await closeBrowser(browser);
+    await b.close();
   }
 }
 
@@ -1379,7 +1514,9 @@ try {
   );
   for (const p of tenancy) console.log(`  - ${p}`);
   if (tenancy.length > 0) failed = true;
-  const fresh = await freshAccountConnects();
+  // A failure outside a step (signing up, the OAuth connection) is the flow's failure, not the
+  // gate's: the checks after it still run.
+  const fresh = await freshAccountConnects().catch((e) => [String(e)]);
   console.log(
     `${fresh.length === 0 ? "PASS" : "FAIL"} a fresh account signs up, connects over OAuth, writes, uses its pages, deletes`,
   );
@@ -1410,9 +1547,12 @@ try {
 } catch (e) {
   failed = true;
   console.error(e);
-  console.error((await new Response(dev.stderr).text()).slice(-4000));
+  // cf dev's streams end only when it does: stop it first, or this waits forever.
+  stopDev();
+  await within(10_000, "cf dev's output", drained).catch(() => {});
+  console.error(devTail.stderr.slice(-4000));
 } finally {
-  dev.kill();
+  stopDev();
   await dev.exited;
   if (!values.keep) rmSync(project, { recursive: true, force: true });
 }
