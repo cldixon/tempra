@@ -1,6 +1,6 @@
 import { esc } from "../oauth/pages";
 import { sha256Hex } from "../okf/hash";
-import { type Arm, modelSpec } from "./models";
+import { type Arm, costOf, modelSpec } from "./models";
 import type { Grade, ItemResult, RecordedComment, Run } from "./state";
 import type { TaskItem, TaskSet } from "./tasks";
 
@@ -142,7 +142,13 @@ export interface ResultRow {
   output: number;
   cache_read: number;
   cache_write: number;
+  /** What was charged: Arm A at list price from tokens; Arm B the session's list cost. */
   cost: number;
+  /**
+   * The tokens at list price, the same way for both arms: Arm B's list cost also has session
+   * runtime ($0.08 an hour) and is rounded to the cent per session.
+   */
+  token_cost: number;
   latency_p50_ms: number | null;
   latency_p90_ms: number | null;
   latency_mean_ms: number | null;
@@ -183,6 +189,7 @@ export function resultsTable(data: SheetData): ResultRow[] {
         cache_read: 0,
         cache_write: 0,
         cost: 0,
+        token_cost: 0,
         latency_p50_ms: null,
         latency_p90_ms: null,
         latency_mean_ms: null,
@@ -215,6 +222,15 @@ export function resultsTable(data: SheetData): ResultRow[] {
     row.cache_read += res.cache_read;
     row.cache_write += res.cache_write;
     row.cost += res.cost;
+    const spec = modelSpec(run.model);
+    if (spec) {
+      row.token_cost += costOf(spec, {
+        input: res.input,
+        output: res.output,
+        cacheRead: res.cache_read,
+        cacheWrite: res.cache_write,
+      });
+    }
     row.retries += res.retries;
     row.failures += res.failures;
     if (res.status !== "skipped" && res.latency_ms !== null) row.lat.push(res.latency_ms);
@@ -240,6 +256,7 @@ export function resultsTable(data: SheetData): ResultRow[] {
         ...row,
         runs: runIds.size,
         cost: Math.round(row.cost * 10000) / 10000,
+        token_cost: Math.round(row.token_cost * 10000) / 10000,
         latency_p50_ms: percentile(sorted, 50),
         latency_p90_ms: percentile(sorted, 90),
         latency_mean_ms: sorted.length
@@ -264,10 +281,10 @@ export function reportPage(
   const rows = resultsTable(data);
   const name = (model: string) => modelSpec(model)?.label ?? model;
   const table = rows.length
-    ? `<table><thead><tr><th>Arm</th><th>Model</th><th>Runs</th><th>Items ok / failed / skipped</th><th>Tokens in / out / cache read / cache write</th><th>Cost (list)</th><th>Latency p50 / p90</th><th>Retries</th><th>Failures</th><th>Threads / replies</th><th>Useful / neutral / wrong / ungraded</th></tr></thead><tbody>${rows
+    ? `<table><thead><tr><th>Arm</th><th>Model</th><th>Runs</th><th>Items ok / failed / skipped</th><th>Tokens in / out / cache read / cache write</th><th>Cost charged / at token prices</th><th>Latency p50 / p90</th><th>Retries</th><th>Failures</th><th>Threads / replies</th><th>Useful / neutral / wrong / ungraded</th></tr></thead><tbody>${rows
         .map(
           (r) =>
-            `<tr><td>${r.arm.toUpperCase()}</td><td>${esc(name(r.model))}</td><td>${r.runs}</td><td>${r.ok} / ${r.failed} / ${r.skipped}</td><td>${r.input} / ${r.output} / ${r.cache_read} / ${r.cache_write}</td><td>$${r.cost.toFixed(4)}</td><td>${secs(r.latency_p50_ms)} / ${secs(r.latency_p90_ms)}</td><td>${r.retries}</td><td>${r.failures}</td><td>${r.threads} / ${r.replies}</td><td>${r.useful} / ${r.neutral} / ${r.wrong} / ${r.ungraded}</td></tr>`,
+            `<tr><td>${r.arm.toUpperCase()}</td><td>${esc(name(r.model))}</td><td>${r.runs}</td><td>${r.ok} / ${r.failed} / ${r.skipped}</td><td>${r.input} / ${r.output} / ${r.cache_read} / ${r.cache_write}</td><td>$${r.cost.toFixed(4)} / $${r.token_cost.toFixed(4)}</td><td>${secs(r.latency_p50_ms)} / ${secs(r.latency_p90_ms)}</td><td>${r.retries}</td><td>${r.failures}</td><td>${r.threads} / ${r.replies}</td><td>${r.useful} / ${r.neutral} / ${r.wrong} / ${r.ungraded}</td></tr>`,
         )
         .join("")}</tbody></table>`
     : "<p>No runs yet.</p>";
