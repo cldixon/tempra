@@ -10,7 +10,7 @@ import { devMailer, flushMail, sendDigests } from "./notify-mail";
 import { listRestores, RESTORE_ID, restoresPrefix } from "./recovery";
 import { d1Sessions } from "./session";
 import type { Mailer } from "./signin";
-import { d1Orphans, digestText, sweep } from "./sweep";
+import { d1Orphans, digestText, pruneAccounts, sweep } from "./sweep";
 import { createWorker } from "./worker";
 
 export { Library } from "./library";
@@ -220,6 +220,7 @@ export default {
         delete: (keys) => env.BLOBS.delete(keys),
       },
       orphans: d1Orphans(env.DB),
+      prune: () => pruneAccounts(env.DB, new Date()),
       storageLimitBytes: storageLimitBytes(env),
       now: new Date(),
     });

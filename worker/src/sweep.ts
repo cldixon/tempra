@@ -44,6 +44,8 @@ export interface SweepDeps {
     clear(hashes: string[]): Promise<void>;
   };
   storageLimitBytes: number;
+  /** The account D1's daily prune (pruneAccounts); its counts go in the digest. */
+  prune?: () => Promise<PruneResult>;
   now: Date;
 }
 
@@ -59,6 +61,8 @@ export interface SweepResult {
   attention: string[];
   /** Libraries with open work, from each one's health summary, the most first. */
   health: { path: string; counts: LibraryHealth["counts"] }[];
+  /** Rows the account prune deleted; absent when it did not run. */
+  pruned?: PruneResult;
 }
 
 export async function sweep(d: SweepDeps): Promise<SweepResult> {
@@ -84,6 +88,15 @@ export async function sweep(d: SweepDeps): Promise<SweepResult> {
   }
   health.sort((a, b) => openWork(b.counts) - openWork(a.counts) || (a.path < b.path ? -1 : 1));
 
+  let pruned: PruneResult | undefined;
+  if (d.prune) {
+    try {
+      pruned = await d.prune();
+    } catch (e) {
+      attention.push(`Account prune failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
   const stored: string[] = [];
   let cursor: string | undefined;
   do {
@@ -100,6 +113,7 @@ export async function sweep(d: SweepDeps): Promise<SweepResult> {
     deleted: 0,
     attention,
     health,
+    ...(pruned ? { pruned } : {}),
   };
   if (failed > 0) {
     result.skipped = `${failed} of ${libs.length} libraries did not answer`;
@@ -194,6 +208,11 @@ export function digestText(r: SweepResult): string {
         ]
       : []),
     `Libraries ${r.libraries}. Blobs stored ${r.stored}, referenced ${r.referenced}, waiting ${r.orphaned}, deleted ${r.deleted}.`,
+    ...(r.pruned
+      ? [
+          `Pruned sessions ${r.pruned.sessions}, sign-in links ${r.pruned.sign_in_links}, invitations ${r.pruned.invitations}.`,
+        ]
+      : []),
     "",
   ].join("\n");
 }
@@ -231,4 +250,65 @@ export function d1Orphans(db: D1Database): SweepDeps["orphans"] {
       }
     },
   };
+}
+
+/** How long a sign-in link row is kept: past its expiry, it only counts toward rate limits. */
+export const LINK_RETENTION_DAYS = 1;
+/** How long a declined, revoked or expired invitation is kept (a day's limit counts by created). */
+export const INVITATION_RETENTION_DAYS = 30;
+/** Rows deleted per statement, so the prune never holds D1 for long. */
+const PRUNE_BATCH = 1000;
+/** Statements per table per day; what is left waits for tomorrow. */
+const PRUNE_ROUNDS = 50;
+
+export interface PruneResult {
+  sessions: number;
+  sign_in_links: number;
+  invitations: number;
+}
+
+/**
+ * The account D1's daily prune (TEMPRA-79): expired sessions (idle_expires is never later than
+ * expires, so it covers both limits), sign-in links older than a day, and invitations declined,
+ * revoked or expired a month ago. Accepted invitations, deleted_accounts, handle_holds, invites
+ * and the waitlist are kept: guards and records, growing with people rather than events.
+ */
+export async function pruneAccounts(db: D1Database, now: Date): Promise<PruneResult> {
+  const t = now.getTime();
+  const iso = (ms: number) => new Date(ms).toISOString();
+  const nowIso = iso(t);
+  const invitationsBefore = iso(t - INVITATION_RETENTION_DAYS * DAY_MS);
+  return {
+    sessions: await pruneBatches(db, "sessions", "idle_expires <= ?1", [nowIso]),
+    sign_in_links: await pruneBatches(db, "sign_in_links", "created < ?1", [
+      iso(t - LINK_RETENTION_DAYS * DAY_MS),
+    ]),
+    invitations: await pruneBatches(
+      db,
+      "library_invitations",
+      "(status IN ('declined', 'revoked') AND decided < ?1) OR (status = 'pending' AND expires < ?1)",
+      [invitationsBefore],
+    ),
+  };
+}
+
+async function pruneBatches(
+  db: D1Database,
+  table: string,
+  where: string,
+  params: unknown[],
+): Promise<number> {
+  let total = 0;
+  for (let i = 0; i < PRUNE_ROUNDS; i++) {
+    const r = await db
+      .prepare(
+        `DELETE FROM ${table} WHERE rowid IN (SELECT rowid FROM ${table} WHERE ${where} LIMIT ${PRUNE_BATCH})`,
+      )
+      .bind(...params)
+      .run();
+    const n = r.meta.changes ?? 0;
+    total += n;
+    if (n < PRUNE_BATCH) break;
+  }
+  return total;
 }
