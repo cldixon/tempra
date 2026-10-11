@@ -71,6 +71,7 @@ import type {
   Verification,
 } from "../okf/types";
 import {
+  type ActionBy,
   type CommentAction,
   type CommentResult,
   type CommentView,
@@ -3085,6 +3086,8 @@ export class LibraryStore {
     const byThread = new Map<string, CommentView[]>();
     const actions = new Map<string, ThreadAction[]>();
     const mentioned = new Map<string, string[]>();
+    // Who did each action, by seq: a comment and the action that added it share one.
+    const bySeq = new Map<number, ActionBy>();
     if (rows.length > 0 && withComments) {
       // Every action from the ledger, where resolve and reopen are recorded too.
       const ids = [...new Set(rows.map((r) => r.concept_id))];
@@ -3094,10 +3097,20 @@ export class LibraryStore {
         ...ids,
       );
       for (const e of events) {
-        const c = (e.meta ? (JSON.parse(e.meta) as JsonObject) : {}).comment as
+        const meta = e.meta ? (JSON.parse(e.meta) as JsonObject) : {};
+        const c = meta.comment as
           | { kind?: string; thread?: string; id?: string; mentions?: Mention[] }
           | undefined;
         if (!c?.thread || !c.kind) continue;
+        const by = meta.by as { person?: unknown; agent?: unknown } | undefined;
+        if (by && typeof by.person === "string") {
+          bySeq.set(
+            e.seq,
+            typeof by.agent === "string"
+              ? { person: by.person, agent: by.agent }
+              : { person: by.person },
+          );
+        }
         if (c.id && Array.isArray(c.mentions) && c.mentions.length > 0) {
           mentioned.set(
             c.id,
@@ -3108,6 +3121,7 @@ export class LibraryStore {
         list.push({
           kind: c.kind as ThreadAction["kind"],
           actor: e.actor,
+          ...(bySeq.has(e.seq) ? { by: bySeq.get(e.seq) } : {}),
           ts: e.ts,
           seq: e.seq,
           comment: c.id ?? null,
@@ -3125,6 +3139,7 @@ export class LibraryStore {
         list.push({
           id: c.id,
           actor: c.actor,
+          ...(bySeq.has(c.seq) ? { by: bySeq.get(c.seq) } : {}),
           body: c.body,
           ts: c.ts,
           seq: c.seq,

@@ -58,3 +58,8 @@ export interface ActedBy {
   /** The agent acting for them, when it was not the person in the app. */
   agent?: string;
 }
+
+/** How an agent is named for whom it acts, as the app's agentLabel names it: "Claude for @ann". */
+export function agentName(a: { name: string; person: string }): string {
+  return `${a.name} for @${a.person}`;
+}

@@ -25,6 +25,11 @@ export interface McpContext {
    * without it, the library records the comment and nobody is told.
    */
   comment?(token: TokenInfo, req: RequestContext, action: CommentAction): Promise<CommentResult>;
+  /**
+   * Names agents by id for whom they act ("Claude for @ann", TEMPRA-77); unknown ids are left
+   * out. Without it, transcripts show the raw actor.
+   */
+  agentNames?(ids: string[]): Promise<Map<string, string>>;
   blobs: BlobStore;
   /** The Worker's origin, for download URLs. */
   origin: string;
@@ -853,6 +858,12 @@ export function buildServer(ctx: McpContext): McpServer {
         if (r.threads.length === 0) {
           return text(`No ${status === "all" ? "" : `${status ?? "open"} `}comment threads.`);
         }
+        // Agents named for whom they act, as the app names them; the actor where unknown.
+        const ids = r.threads.flatMap((t) => t.actions.flatMap((a) => a.by?.agent ?? []));
+        const names =
+          ctx.agentNames && ids.length > 0
+            ? await ctx.agentNames(ids).catch(() => new Map<string, string>())
+            : new Map<string, string>();
         const out = r.threads.map((t) => {
           const head = `## Thread ${t.id} · ${t.path} · ${t.status}${t.outdated ? " · outdated (the quote is no longer in the body)" : ""}`;
           const quote = t.anchor ? [`> ${t.anchor.quote.replace(/\n/g, "\n> ")}`] : [];
@@ -866,7 +877,8 @@ export function buildServer(ctx: McpContext): McpServer {
             const text = body ? `\n  ${body.replace(/\n/g, "\n  ")}` : "";
             const named = a.comment ? mentions.get(a.comment) : undefined;
             const to = named ? ` (mentioned ${named.join(", ")})` : "";
-            return `- ${a.actor}${verb} at ${a.ts}${to}${text ? ":" : "."}${text}`;
+            const who = (a.by?.agent && names.get(a.by.agent)) ?? a.actor;
+            return `- ${who}${verb} at ${a.ts}${to}${text ? ":" : "."}${text}`;
           });
           return [head, ...quote, ...said].join("\n");
         });

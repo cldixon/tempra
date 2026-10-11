@@ -6,6 +6,7 @@
 import { documentPos, locate, type Parsed, type QuoteSelector, textOffset } from "@tempra/editor";
 import type { Highlight } from "@tempra/editor/view";
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ActedBy, useAgentNames } from "./agents";
 import { api, useAction, useLoad } from "./api";
 import { MentionArea, useMentionable } from "./Mentions";
 import { Ago, Chip, who } from "./ui";
@@ -14,6 +15,8 @@ import type { Urls } from "./urls";
 export interface CommentT {
   id: string;
   actor: string;
+  /** Who wrote it, by id (TEMPRA-77); absent on comments from before it was kept. */
+  by?: ActedBy;
   body: string;
   ts: string;
   seq: number;
@@ -34,6 +37,7 @@ export interface Thread {
   actions?: {
     kind: "open" | "reply" | "resolve" | "reopen";
     actor: string;
+    by?: ActedBy;
     ts: string;
     seq: number;
     comment: string | null;
@@ -304,6 +308,11 @@ function ThreadView(props: {
   const { busy, error, run } = useAction();
   const [reply, setReply] = useState("");
   const people = useMentionable(urls);
+  // Agents named for their person (TEMPRA-77): "Claude for @ann".
+  const name = useAgentNames(
+    urls,
+    (t.actions ?? t.comments).map((a) => a.by?.agent),
+  );
   const act = (kind: "reply" | "resolve" | "reopen") => (e?: FormEvent) => {
     e?.preventDefault();
     const body = reply.trim();
@@ -323,10 +332,10 @@ function ThreadView(props: {
   const outdated = t.anchor !== null && t.at === null;
   const [now] = useState(() => Date.now());
   /** "who · when", then the text: the thread's first comment, replies a step in. */
-  const said = (c: { actor: string; ts: string; body: string }, reply: boolean, key: string) => (
+  const said = (c: CommentT, reply: boolean, key: string) => (
     <div key={key} className={reply ? "reply" : undefined}>
       <div className="thread-by">
-        <strong>{who(c.actor)}</strong> <Ago ts={c.ts} now={now} />
+        <strong>{name(c.actor, c.by)}</strong> <Ago ts={c.ts} now={now} />
       </div>
       <p className="comment">{c.body}</p>
     </div>
@@ -368,7 +377,7 @@ function ThreadView(props: {
             <div key={a.seq}>
               {change && (
                 <p className="small muted">
-                  {change} by {who(a.actor)} <Ago ts={a.ts} now={now} />
+                  {change} by {name(a.actor, a.by)} <Ago ts={a.ts} now={now} />
                   {c ? ":" : "."}
                 </p>
               )}

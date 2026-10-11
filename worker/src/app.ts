@@ -124,6 +124,30 @@ function bool(c: C, name: string): boolean | undefined {
   return v === "true" || v === "1";
 }
 
+/** How long the library list waits on one library's summary before listing it unavailable. */
+export const SUMMARY_MS = 5000;
+
+/** `run()`, refused after `ms`: one slow library never holds a list of them. */
+async function within<T>(ms: number, run: () => Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timed out after ${ms} ms`)), ms);
+  });
+  try {
+    return await Promise.race([run(), late]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+/** A catch that logs and answers `fallback`, for a part a page can do without. */
+const logged =
+  <T>(what: string, fallback: T) =>
+  (e: unknown): T => {
+    console.error(what, e);
+    return fallback;
+  };
+
 function etag(header: string | undefined): string | null {
   if (!header) return null;
   return header.trim().replace(/^W\//, "").replace(/^"|"$/g, "") || null;
@@ -960,31 +984,44 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     const { d, user } = await human(c);
     const refs = await d.accounts.reachable(user.id);
     // The tally (TEMPRA-72): unread items and cursors from D1 in one go; changes since the
-    // cursor ride on the summary call each library already gets.
+    // cursor ride on the summary call each library already gets. Each part fails on its own
+    // (TEMPRA-23): without them the list still names every library.
     const n = d.notifications;
-    const [seen, unread] = n
-      ? await Promise.all([n.seen(user.id), n.unread(user.id)])
-      : [{} as Record<string, number>, { libraries: {} as Record<string, number> }];
+    const [seen, unread] = await Promise.all([
+      n
+        ? n.seen(user.id).catch(logged("seen", {} as Record<string, number>))
+        : ({} as Record<string, number>),
+      n ? n.unread(user.id).catch(logged("unread", null)) : null,
+    ]);
     const libraries = await Promise.all(
       refs.map(async ({ id, slug, owner, do_id, role }) => {
-        const lib = await d.libraryByDoId(do_id);
+        const row = { id, owner, slug, role };
         const since = seen[id];
-        const s = lib
-          ? await lib.summary(since === undefined ? undefined : { since, person: user.id })
-          : null;
+        let s: Awaited<ReturnType<LibraryClient["summary"]>>;
+        try {
+          s = await within(SUMMARY_MS, async () => {
+            const lib = await d.libraryByDoId(do_id);
+            if (!lib) throw new Error("no library object");
+            return lib.summary(since === undefined ? undefined : { since, person: user.id });
+          });
+        } catch (e) {
+          // One library that fails (an error, a restart, too slow) is listed as unavailable,
+          // still linked so its pages, Delete among them, stay reachable.
+          console.error("library summary", `${owner}/${slug}`, e);
+          return { ...row, unavailable: true };
+        }
+        const forYou = unread ? (unread.libraries[id] ?? 0) : undefined;
         return {
-          id,
-          owner,
-          slug,
-          role,
-          ...(s && {
-            seq: s.seq,
-            concepts: s.concepts,
-            attachments: s.attachments,
-            open_work: s.open_work,
-            tally: { changes: s.activity?.changes ?? 0, for_you: unread.libraries[id] ?? 0 },
-            health: s.health,
-          }),
+          ...row,
+          seq: s.seq,
+          concepts: s.concepts,
+          attachments: s.attachments,
+          open_work: s.open_work,
+          tally: {
+            changes: s.activity?.changes ?? 0,
+            ...(forYou === undefined ? {} : { for_you: forYou }),
+          },
+          health: s.health,
         };
       }),
     );

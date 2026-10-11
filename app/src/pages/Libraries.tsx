@@ -18,7 +18,9 @@ interface Library {
   /** The daily check's summary: open work by kind (TEMPRA-66). */
   health?: Health;
   /** Since the person last looked (TEMPRA-72): changes by others, and items for them here. */
-  tally?: { changes: number; for_you: number };
+  tally?: { changes: number; for_you?: number };
+  /** Its summary could not be read just now (TEMPRA-23): listed and linked, without counts. */
+  unavailable?: boolean;
 }
 
 /** A library's tally as a few words: "2 for you · 5 new"; empty for none. */
@@ -84,6 +86,7 @@ export function Libraries() {
                         )}
                       </a>
                       {l.role && l.role !== "owner" && <span className="faint"> {l.role}</span>}
+                      {l.unavailable && <span className="faint"> couldn't load just now</span>}
                     </li>
                   ))}
                 </ul>
