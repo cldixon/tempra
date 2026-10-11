@@ -85,23 +85,21 @@ export function d1Sessions(db: D1Database, now = () => Date.now()): Sessions {
       if ((counts?.by_email ?? 0) >= LINKS_PER_EMAIL_HOUR) return null;
       if (ip && (counts?.by_ip ?? 0) >= LINKS_PER_IP_HOUR) return null;
       const secret = newSecret();
-      await db.batch([
-        // Links older than a day are of no further use, even for rate limiting.
-        db.prepare("DELETE FROM sign_in_links WHERE created < ?").bind(iso(t - DAY_MS)),
-        db
-          .prepare(
-            "INSERT INTO sign_in_links (hash, email, created, expires, ip, purpose, user) VALUES (?, ?, ?, ?, ?, ?, ?)",
-          )
-          .bind(
-            hash(secret),
-            email,
-            iso(t),
-            iso(t + LINK_MINUTES * 60_000),
-            ip,
-            change ? "email-change" : "sign-in",
-            change?.user ?? null,
-          ),
-      ]);
+      // Links older than a day are pruned by the daily cron (sweep.ts pruneAccounts).
+      await db
+        .prepare(
+          "INSERT INTO sign_in_links (hash, email, created, expires, ip, purpose, user) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        )
+        .bind(
+          hash(secret),
+          email,
+          iso(t),
+          iso(t + LINK_MINUTES * 60_000),
+          ip,
+          change ? "email-change" : "sign-in",
+          change?.user ?? null,
+        )
+        .run();
       return secret;
     },
 
