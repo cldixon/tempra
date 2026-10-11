@@ -1,11 +1,12 @@
 import { type BlobStore, bundleTar } from "./client";
-import type { StalenessRun } from "./store/store";
+import type { LibraryHealth, StalenessRun, StructureRun } from "./store/store";
 
 /**
  * The daily maintainers (spec: Tier 3). A library's maintainers are of two kinds: processes,
  * deterministic programs Tempra runs (these), and agents, managed agents that act on what the
- * processes flag (TEMPRA-56). The processes here are the nightly export to R2, the usage rollup
- * and staleness (TEMPRA-63). Free of Worker APIs, so the Library Durable Object's alarm and bun
+ * processes flag (TEMPRA-56). The processes here are the nightly export to R2, the usage rollup,
+ * staleness (TEMPRA-63), structure (TEMPRA-64) and, last, since it counts what the others flag,
+ * the health summary (TEMPRA-66). Free of Worker APIs, so the Library Durable Object's alarm and bun
  * tests run the same code.
  */
 
@@ -32,6 +33,8 @@ export interface MaintainedStore {
   dump(): string;
   pruneUsage(): number;
   maintainStaleness(): StalenessRun;
+  maintainStructure(): StructureRun;
+  maintainHealth(): LibraryHealth;
   maintenance(): Record<string, string>;
   setMaintenance(values: Record<string, string>): void;
 }
@@ -41,6 +44,8 @@ export interface MaintenanceResult {
   deleted: string[];
   pruned: number;
   staleness: StalenessRun;
+  structure: StructureRun;
+  health: LibraryHealth;
 }
 
 export const DEFAULT_RETENTION_DAYS = 30;
@@ -81,7 +86,9 @@ export async function runMaintenance(opts: {
   const pruned = store.pruneUsage();
   store.setMaintenance({ usage_at: stamp });
   const staleness = store.maintainStaleness();
-  return { export: exported, deleted, pruned, staleness };
+  const structure = store.maintainStructure();
+  const health = store.maintainHealth();
+  return { export: exported, deleted, pruned, staleness, structure, health };
 }
 
 /**

@@ -3,7 +3,7 @@ import { ApiError, api, field, useAction, useLoad } from "../api";
 import { useFeed, useTrailing } from "../live";
 import { useRole } from "../role";
 import { navigate } from "../router";
-import { Chip, Crumbs, plural, Status, useTitle, when } from "../ui";
+import { Chip, Crumbs, type Health, healthWords, plural, Status, useTitle, when } from "../ui";
 import { baseName, type Urls } from "../urls";
 import { ConnectSteps } from "./Account";
 import { DiffLines } from "./Diff";
@@ -58,17 +58,22 @@ const KINDS: [string | undefined, string][] = [
   ["stale_soon", "Stale soon"],
   ["broken_link", "Broken links"],
   ["lint", "Lint"],
+  ["structure", "Structure"],
 ];
 
-/** What needs doing: open comments, stale concepts, broken links, lint (as `work` shows agents). */
+/**
+ * What needs doing: open comments, stale concepts, broken links, lint, structure (as `work`
+ * shows agents), under a quiet line from the daily check (TEMPRA-66).
+ */
 export function Work({ urls, kind }: { urls: Urls; kind?: string }) {
   useTitle(`Work queue · ${urls.slug}`);
   const loaded = useLoad(`work ${urls.work(kind)}`, async () => {
-    const [w, stats] = await Promise.all([
+    const [w, stats, health] = await Promise.all([
       api<{ items: WorkItem[]; total: number }>(urls.api("work", { kind, limit: 200 })),
       api<{ seq: number }>(urls.api("stats")),
+      api<Health>(urls.api("health")),
     ]);
-    return { ...w, head: stats.seq };
+    return { ...w, head: stats.seq, health };
   });
   useLive(urls, loaded.state === "ready" ? loaded.data.head : null, loaded.reload);
   return (
@@ -83,45 +88,81 @@ export function Work({ urls, kind }: { urls: Urls; kind?: string }) {
         ))}
       </p>
       <Status loaded={loaded}>
-        {({ items, total }) =>
-          items.length === 0 ? (
-            <p>
-              <Chip text="nothing to do" tone="ok" />
-            </p>
-          ) : (
-            <>
-              <ol className="ledger">
-                {items.map((i) => (
-                  <li key={i.thread ?? `${i.kind} ${i.path} ${i.detail}`} className="request">
-                    <div className="req-head">
-                      <Chip
-                        text={i.kind.replace("_", " ")}
-                        tone={i.kind === "comment" ? "" : i.kind === "lint" ? "warn" : "bad"}
-                      />
-                      {/* A comment opens on its thread; its suggested action is for agents. */}
-                      <a href={i.thread ? `${urls.file(i.path)}#comments` : urls.file(i.path)}>
-                        {i.path}
-                      </a>
-                      <span className="muted small">{when(i.since)}</span>
-                      {i.inbound_links > 0 && (
-                        <span className="muted small">
-                          {plural(i.inbound_links, "inbound link")}
-                        </span>
-                      )}
-                    </div>
-                    <div className="note">{i.detail}</div>
-                    {!i.thread && <div className="small">→ {i.suggested_action}</div>}
-                  </li>
-                ))}
-              </ol>
-              {total > items.length && (
-                <p className="small muted">{total - items.length} more not shown.</p>
-              )}
-            </>
-          )
-        }
+        {({ items, total, health }) => (
+          <>
+            <HealthLine urls={urls} health={health} />
+            {items.length === 0 ? (
+              <p>
+                <Chip text="nothing to do" tone="ok" />
+              </p>
+            ) : (
+              <>
+                <ol className="ledger">
+                  {items.map((i) => (
+                    <li key={i.thread ?? `${i.kind} ${i.path} ${i.detail}`} className="request">
+                      <div className="req-head">
+                        <Chip
+                          text={i.kind.replace("_", " ")}
+                          tone={
+                            i.kind === "comment"
+                              ? ""
+                              : i.kind === "lint" || i.kind === "structure"
+                                ? "warn"
+                                : "bad"
+                          }
+                        />
+                        {/* A comment opens on its thread; its suggested action is for agents. */}
+                        <a href={i.thread ? `${urls.file(i.path)}#comments` : urls.file(i.path)}>
+                          {i.path}
+                        </a>
+                        <span className="muted small">{when(i.since)}</span>
+                        {i.inbound_links > 0 && (
+                          <span className="muted small">
+                            {plural(i.inbound_links, "inbound link")}
+                          </span>
+                        )}
+                      </div>
+                      <div className="note">{i.detail}</div>
+                      {!i.thread && <div className="small">→ {i.suggested_action}</div>}
+                    </li>
+                  ))}
+                </ol>
+                {total > items.length && (
+                  <p className="small muted">{total - items.length} more not shown.</p>
+                )}
+              </>
+            )}
+          </>
+        )}
       </Status>
     </>
+  );
+}
+
+/**
+ * The daily check's summary, quietly: when it ran, what it counted, and the newest changes
+ * nobody has verified since. The queue below is live; this line is as of the check.
+ */
+function HealthLine({ urls, health: h }: { urls: Urls; health: Health }) {
+  const words = healthWords(h.counts);
+  const newest = h.unverified.newest.slice(0, 3);
+  return (
+    <p className="small muted">
+      Checked {when(h.at)}: {words || "nothing open"}.
+      {h.unverified.total > 0 && (
+        <>
+          {" "}
+          {h.unverified.total} unverified, newest{" "}
+          {newest.map((c, i) => (
+            <span key={c.path}>
+              {i > 0 && ", "}
+              <a href={urls.file(c.path)}>{c.path}</a>
+            </span>
+          ))}
+          .
+        </>
+      )}
+    </p>
   );
 }
 

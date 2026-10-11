@@ -13,13 +13,13 @@ description: Read and maintain an OKF (Open Knowledge Format) knowledge library 
 - `sources` lists what a concept was derived from. Individual claims cite a source with a footnote whose label is a `sources[].id`: `…is sharded daily.[^ga4-schema]`. A `resource` inside the library (`/policies/margin-standard.md`) is tracked like a link: it follows moves and is flagged when missing.
 - Trust: `generated` records who wrote the current content (stamped by the server). `verified` records who checked it (a human or a process, never you). The trust tier is derived from these: unverified, machine-confirmed, or human-reviewed.
 - Lifecycle: `status` is `draft`, `stable` (default) or `deprecated`. `stale_after` is the instant the content should be re-checked: a full datetime with an offset (`2026-12-31T00:00:00Z`), not a plain date.
-- `index.md` (directory listings) and `log.md` (history) are synthesized by the server. Never write them.
+- `index.md` (directory listings) and `log.md` (history) are synthesized by the server. Never write them. An index is only as good as the titles and descriptions of the concepts in its directory: `work` items of kind `structure` point at what makes one poor (descriptions missing, over 200 characters or repeating the title, titles that read the same, concepts nothing links to, a nested directory holding a single concept, one with no concepts, one with over 50). Fix them by editing or moving concepts; nothing is fixed for you.
 
 Every write is attributed to your token's actor and recorded in a ledger. Nothing is lost: any change can be diffed and reverted.
 
 ## Reading: progressive disclosure
 
-1. `start` once per session: the root index, counts by type, open work, and house rules. If your connection reaches several libraries, `start` lists them; open one with `start` and `library` (`owner/slug`), then pass the same `library` on every call.
+1. `start` once per session: the root index, counts by type, open work, the daily health check (open work by kind, the newest changes nobody has verified), and house rules. If your connection reaches several libraries, `start` lists them; open one with `start` and `library` (`owner/slug`), then pass the same `library` on every call.
 2. `browse` a directory to see its concepts' titles and descriptions before opening any.
 3. `read` the concept you need. Look at the header first: trust tier, `stale`, `status`, lint, inbound links. Then read the frontmatter, then the body.
 4. Follow links to related concepts rather than guessing paths. Use `search` (ranked) or `grep` (exact text) when you do not know where something is.
@@ -80,7 +80,7 @@ These tools have no equivalent in a folder of files. Use them instead of greppin
 | Need | Tool |
 | --- | --- |
 | What others changed recently | `log` |
-| What needs fixing (open comments, stale, broken links, lint); what goes stale within 14 days (`kind: stale_soon`) | `work` |
+| What needs fixing (open comments, stale, broken links, lint, structure); what goes stale within 14 days (`kind: stale_soon`) | `work` |
 | Requests and questions people left on a concept | `comments`, then `comment` |
 | Find by meaning, ranked | `search` |
 | Filter by type, tag, status, trust, staleness | `query` |

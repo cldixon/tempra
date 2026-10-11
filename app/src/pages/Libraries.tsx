@@ -2,7 +2,7 @@ import { type FormEvent, useEffect, useRef, useState } from "react";
 import { ApiError, api, useLoad } from "../api";
 import { Icon } from "../chrome";
 import { navigate } from "../router";
-import { Status, useTitle } from "../ui";
+import { type Health, healthWords, Status, useTitle } from "../ui";
 import { Urls } from "../urls";
 
 interface Library {
@@ -15,6 +15,8 @@ interface Library {
   concepts?: number;
   attachments?: number;
   open_work?: number;
+  /** The daily check's summary: open work by kind (TEMPRA-66). */
+  health?: Health;
 }
 
 /** The account's libraries: one row each, a New button, and how agents get in. */
@@ -66,6 +68,9 @@ export function Libraries() {
                         {/* Another account's library (shared) says whose it is. */}
                         {owners.size > 1 && <span className="owner">{l.owner}/</span>}
                         {l.slug}
+                        {l.health && healthWords(l.health.counts) && (
+                          <span className="lib-health">{healthWords(l.health.counts)}</span>
+                        )}
                       </a>
                       {l.role && l.role !== "owner" && <span className="faint"> {l.role}</span>}
                     </li>

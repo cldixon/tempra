@@ -79,7 +79,7 @@ worker/src/client.ts     Worker <-> DO boundary: one `call` RPC, errors as data,
 worker/src/library.ts    Library DO: one per OKF library, hosts the store on its SQLite; its daily alarm runs the maintainers; holds the change feed's WebSockets (hibernation API)
 worker/src/maintain.ts   Daily maintainers (nightly export to R2 with retention, usage pruning), free of Worker APIs
 worker/src/recovery.ts   Point-in-time restore: pre-restore export, restore records in R2, undo; free of Worker APIs
-worker/src/okf/          OKF semantics: parse, record, render, links, footnotes, trust, lint, index/log render, diff
+worker/src/okf/          OKF semantics: parse, record, render, links, footnotes, trust, lint, structure (directory and index health), index/log render, diff
 worker/src/store/        Library schema and LibraryStore (writes, ledger, snapshots, queries, comment threads) against a plain SQLite handle; a concept's record holds its tree and the markdown generated from it; comments.ts: comment shapes and checks
 worker/src/util/tar.ts   Tar reader and writer for import and export
 worker/src/mcp/server.ts MCP server at /mcp: stateless Streamable HTTP, tier 1 and tier 2 tools, okf:// resources

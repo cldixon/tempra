@@ -169,7 +169,7 @@ describe("write path", () => {
     expect(r.results[0]?.notices?.map((l) => l.code)).toEqual(["generated_ignored"]);
     // Ignored fields are reported with the write only: nothing is left to fix on the concept.
     expect(conceptView(s.read("a.md")).lint).toEqual([]);
-    expect(s.work().items).toEqual([]);
+    expect(s.work({ kind: "broken_link" }).items).toEqual([]);
   });
 });
 
@@ -420,7 +420,7 @@ describe("tier 2", () => {
     expect(conceptView(s.read("a.md")).lint.map((l) => l.code)).toEqual(["broken_link"]);
     s.apply(ctx(), [{ op: "write", path: "b.md", content: md("Memo", "b\n") }]);
     expect(conceptView(s.read("a.md")).lint).toEqual([]);
-    expect(s.work().items).toEqual([]);
+    expect(s.work({ kind: "broken_link" }).items).toEqual([]);
   });
 
   test("internal sources follow moves, render in their written form, and flag when missing", () => {
@@ -456,7 +456,9 @@ describe("tier 2", () => {
     expect(before.lint[0]?.message).toContain("Source resource /pol/missing.md");
     // Unmoved, every resource renders exactly as written.
     expect(before.markdown).toContain(sources.slice("sources:\n".length, -1));
-    expect(s.work().items.map((i) => [i.kind, i.path])).toEqual([["broken_link", "m/x.md"]]);
+    expect(s.work({ kind: "broken_link" }).items.map((i) => [i.kind, i.path])).toEqual([
+      ["broken_link", "m/x.md"],
+    ]);
     expect(conceptView(s.read("pol/a.md")).inbound_links).toBe(1);
     const seqBefore = s.headSeq();
 
@@ -514,7 +516,7 @@ describe("tier 2", () => {
     // Writing the missing target clears the flag; exporting renders current paths.
     s.apply(ctx(), [{ op: "write", path: "pol/missing.md", content: md("Policy", "M\n") }]);
     expect(conceptView(s.read("m/x.md")).lint).toEqual([]);
-    expect(s.work().items).toEqual([]);
+    expect(s.work({ kind: "broken_link" }).items).toEqual([]);
     const exported = s.exportBundle().files.find((f) => f.path === "m/x.md");
     expect(exported && "text" in exported ? exported.text : "").toContain("/policies/a.md");
   });

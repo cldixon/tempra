@@ -837,11 +837,12 @@ function Contents({ parsed, skipFirst }: { parsed: Parsed; skipFirst: boolean })
   );
 }
 
-/** A work item (broken link, staleness) as a card: what it is, and what to do. */
+/** A work item (broken link, staleness, structure) as a card: what it is, and what to do. */
 function WorkCard({ w }: { w: WorkItem }) {
   return (
     <li className="inset">
-      <Chip text={w.kind.replace("_", " ")} tone="bad" /> <span>{w.detail}</span>
+      <Chip text={w.kind.replace("_", " ")} tone={w.kind === "structure" ? "warn" : "bad"} />{" "}
+      <span>{w.detail}</span>
       <div className="muted">→ {w.suggested_action}</div>
     </li>
   );
