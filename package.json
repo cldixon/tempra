@@ -19,7 +19,7 @@
     "format": "biome check --write .",
     "check": "bun run lint && bun run typecheck && bun run test",
     "seed": "bun run --filter worker seed",
-    "gate": "bun run --filter worker gate",
+    "gate": "bun run --cwd worker gate",
     "logs": "bun run --filter worker logs",
     "preview": "bun run --filter worker preview",
     "admin": "bun run --filter worker admin",
