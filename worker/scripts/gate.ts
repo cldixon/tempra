@@ -192,10 +192,12 @@ function chromiumPath(): string | null {
 const STEP_MS = 90_000;
 
 /** Resolves with `work`, or rejects once `ms` pass, naming what took too long. */
+class NoAnswer extends Error {}
+
 function within<T>(ms: number, what: string, work: Promise<T>): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${what}: no answer in ${ms / 1000} s`)), ms);
+    timer = setTimeout(() => reject(new NoAnswer(`${what}: no answer in ${ms / 1000} s`)), ms);
   });
   return Promise.race([work, late]).finally(() => clearTimeout(timer));
 }
@@ -234,7 +236,13 @@ async function openBrowser() {
   });
   page.on("pageerror", (e) => problems.push(`page error: ${e.message}`));
   let failures = 0;
+  /** The step the browser stopped answering in; every later step is skipped, not waited out. */
+  let stuck: string | null = null;
   const step = async (what: string, run: () => Promise<unknown>) => {
+    if (stuck) {
+      problems.push(`${what}: skipped, the browser stopped answering in "${stuck}"`);
+      return;
+    }
     const t0 = Date.now();
     if (process.env.GATE_TRACE) console.log(`  [step] ${what}`);
     try {
@@ -243,13 +251,17 @@ async function openBrowser() {
       await within(STEP_MS, what, run());
     } catch (e) {
       problems.push(`${what}: ${String(e).split("\n")[0]}`);
-      if (process.env.GATE_TRACE) console.log(`  [step failed after ${Date.now() - t0} ms] ${what}`);
-      // GATE_SCREENSHOTS: what the page showed when the step failed.
+      if (process.env.GATE_TRACE)
+        console.log(`  [step failed after ${Date.now() - t0} ms] ${what}`);
+      if (e instanceof NoAnswer) stuck = what;
+      // GATE_SCREENSHOTS: what the page showed when the step failed (if it still answers).
       const shots = process.env.GATE_SCREENSHOTS;
       if (shots) {
-        await page
-          .screenshot({ path: `${shots}/failed-${++failures}.png`, fullPage: true })
-          .catch(() => {});
+        await within(
+          10_000,
+          "screenshot",
+          page.screenshot({ path: `${shots}/failed-${++failures}.png`, fullPage: true }),
+        ).catch(() => {});
       }
     }
   };
@@ -1199,8 +1211,8 @@ async function freshAccountConnects(): Promise<string[]> {
       await page.getByRole("button", { name: "Invite" }).click();
       await page.getByText("Invited @stranger").waitFor({ timeout: 15_000 });
     });
-    // The invitee is the same tab under their own session: a second context or Chrome in one
-    // run has hung CI's Google Chrome (PR #52 and two runs on main), never Playwright's build.
+    // The invitee is the same tab under their own session, the cookies swapped: one browser,
+    // one context, as for everything else here.
     const { context } = b;
     const asOwner = await context.cookies();
     const switchTo = async (cookies: typeof asOwner) => {
