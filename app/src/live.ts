@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import type { ActedBy } from "./agents";
 import { api } from "./api";
 import type { Urls } from "./urls";
 
@@ -14,6 +15,8 @@ export interface FeedEvent {
   hash: string | null;
   note: string | null;
   from_path: string | null;
+  /** The person and agent behind the actor, by id; absent on events from before it was kept. */
+  by?: ActedBy | null;
 }
 
 export type Message =
@@ -204,8 +207,8 @@ async function readEvents(urls: Urls, since: number): Promise<FeedEvent[]> {
   const out: FeedEvent[] = [];
   for (let after = since; ; ) {
     const page = await api<{
-      events: (Omit<FeedEvent, "note" | "from_path"> & {
-        meta: { note?: unknown; from_path?: unknown } | null;
+      events: (Omit<FeedEvent, "note" | "from_path" | "by"> & {
+        meta: { note?: unknown; from_path?: unknown; by?: ActedBy } | null;
       })[];
       next: number | null;
     }>(urls.api("events", { since: after, limit: 1000 }));
@@ -214,6 +217,7 @@ async function readEvents(urls: Urls, since: number): Promise<FeedEvent[]> {
         ...e,
         note: typeof e.meta?.note === "string" ? e.meta.note : null,
         from_path: typeof e.meta?.from_path === "string" ? e.meta.from_path : null,
+        by: typeof e.meta?.by?.person === "string" ? e.meta.by : null,
       });
     }
     if (page.next === null || page.events.length === 0) return out;

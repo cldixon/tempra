@@ -1,12 +1,12 @@
 import type { FormEvent } from "react";
 import { useEffect } from "react";
+import { agentNames, type Contributor } from "../agents";
 import { api, useLoad } from "../api";
 import { markSeen, useFeed, useLastSeen, useTrailing } from "../live";
 import { type Done, navigate } from "../router";
 import { Chip, plural, Status, useTitle, when } from "../ui";
 import type { LedgerFilters, Urls } from "../urls";
 import { CONTENT_OPS } from "./File";
-import { agentLabel, type Contributor } from "./Manage";
 
 interface LedgerEvent {
   seq: number;
@@ -37,9 +37,7 @@ export function Ledger(props: { urls: Urls; filters: LedgerFilters; done: Done; 
       api<{ contributors: Contributor[] }>(urls.api("agents")),
     ]);
     // Agents named for whom they work: "Claude for @ann" (tempra-dev: agents act for a person).
-    const names: Record<string, string> = {};
-    for (const c of agents.contributors) if (c.agent) names[c.agent.id] = agentLabel(c);
-    return { ...page, head: stats.seq, names };
+    return { ...page, head: stats.seq, names: agentNames(agents.contributors) };
   });
   // Live tail (tempra-dev: app/live): on the newest page, a new request that the filters may
   // match reloads the list; the server applies the filters.

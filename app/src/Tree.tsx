@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type ActedBy, useAgentNames } from "./agents";
 import { api } from "./api";
 import { Icon } from "./chrome";
 import { type FeedEvent, useFeed, useLastSeen } from "./live";
@@ -100,7 +101,14 @@ export function Tree(props: {
   const [files, setFiles] = useState<Entry[] | null>(null);
   const [expanded, setExpanded] = useState(() => loadExpanded(urls));
   const [seq, setSeq] = useState<number | null>(null);
-  const [active, setActive] = useState<Map<string, { actor: string; at: number }>>(new Map());
+  const [active, setActive] = useState<
+    Map<string, { actor: string; by?: ActedBy | null; at: number }>
+  >(new Map());
+  // Agents named for their person (TEMPRA-77): "Claude for @ann changed this just now".
+  const actorName = useAgentNames(
+    urls,
+    [...active.values()].map((a) => a.by?.agent),
+  );
   const [now, setNow] = useState(() => Date.now());
   const seen = useLastSeen(urls);
   const dirs = useMemo(() => (files ? buildDirs(files) : null), [files]);
@@ -167,7 +175,7 @@ export function Tree(props: {
       if (agents.length > 0) {
         setActive((a) => {
           const next = new Map(a);
-          for (const e of agents) next.set(e.path, { actor: e.actor, at: Date.now() });
+          for (const e of agents) next.set(e.path, { actor: e.actor, by: e.by, at: Date.now() });
           return next;
         });
       }
@@ -251,10 +259,11 @@ export function Tree(props: {
   const change = (e: Entry) => {
     const a = active.get(e.path);
     if (a && now - a.at < ACTIVE_MS) {
+      const by = actorName(a.actor, a.by);
       return (
-        <span className="tree-mark" title={`${a.actor} changed this just now`}>
+        <span className="tree-mark" title={`${by} changed this just now`}>
           <span aria-hidden="true">●</span>
-          <span className="visually-hidden">changed by {a.actor} just now</span>
+          <span className="visually-hidden">changed by {by} just now</span>
         </span>
       );
     }

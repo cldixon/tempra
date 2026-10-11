@@ -426,6 +426,11 @@ async function browserRenders(
       if ((await sidebar.locator('.tree-mark[title*="changed this just now"]').count()) === 0) {
         throw new Error("no activity mark on the agent's file");
       }
+      // Named for its person, not by the raw actor (TEMPRA-77): "… for @dev changed this".
+      await sidebar
+        .locator('.tree-mark[title*=" for @"][title*="changed this just now"]')
+        .first()
+        .waitFor({ timeout: 5000 });
       const target = folder ? `${folder}/gate-live.md` : "moved/gate-live.md";
       const moved = await fetch(`${libApi}/files/gate-live.md/move`, {
         method: "POST",

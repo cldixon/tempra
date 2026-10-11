@@ -11,6 +11,7 @@ import {
 } from "@tempra/editor";
 import type { Hovered, Reader as ReaderHandle } from "@tempra/editor/view";
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAgentNames } from "../agents";
 import { ApiError, api, prefetch, useLoad } from "../api";
 import {
   CommentsPanel,
@@ -337,8 +338,8 @@ function useIdle(ms: number): boolean {
   return idle;
 }
 
-/** "claude-ai/connector changed this 4 s ago, seq 41: the note." */
-function changeLine(e: FeedEvent, since: string): string {
+/** "Claude for @ann changed this 4 s ago, seq 41: the note." */
+function changeLine(e: FeedEvent, by: string, since: string): string {
   const what =
     e.op === "delete"
       ? "deleted this"
@@ -347,7 +348,7 @@ function changeLine(e: FeedEvent, since: string): string {
         : e.op === "verify"
           ? "verified this"
           : "changed this";
-  return `${e.actor} ${what} ${since} ago, seq ${e.seq}${e.note ? `: ${e.note}` : ""}.`;
+  return `${by} ${what} ${since} ago, seq ${e.seq}${e.note ? `: ${e.note}` : ""}.`;
 }
 
 /**
@@ -357,16 +358,17 @@ function changeLine(e: FeedEvent, since: string): string {
 function NewVersion({ urls, live }: { urls: Urls; live: Live }) {
   const e = live.change;
   const since = useAgo(e.ts);
+  const by = useAgentNames(urls, [e.by?.agent])(e.actor, e.by);
   return (
     <div className="new-version">
       <Menu
         name="New version"
-        title={`New version · ${e.actor}${e.note ? ` · ${e.note}` : ""}`}
+        title={`New version · ${by}${e.note ? ` · ${e.note}` : ""}`}
         buttonClass="icon-button"
         align="end"
         label={<Icon name="refresh" />}
       >
-        <p role="status">{changeLine(e, since)}</p>
+        <p role="status">{changeLine(e, by, since)}</p>
         {CONTENT_OPS.has(e.op) && <a href={urls.diff(e.path, live.shownSeq, e.seq)}>Show diff</a>}
         {live.onSwap ? (
           <button type="button" onClick={live.onSwap}>
@@ -387,9 +389,10 @@ function NewVersion({ urls, live }: { urls: Urls; live: Live }) {
 function LiveNotice({ urls, live }: { urls: Urls; live: Live }) {
   const e = live.change;
   const since = useAgo(e.ts);
+  const by = useAgentNames(urls, [e.by?.agent])(e.actor, e.by);
   return (
     <div className="notice" role="status">
-      {changeLine(e, since)}{" "}
+      {changeLine(e, by, since)}{" "}
       {e.op === "move" ? (
         <a href={urls.pinned(undefined).file(e.path)}>Go to {e.path}</a>
       ) : e.op === "delete" ? (

@@ -1,4 +1,5 @@
 import { type FormEvent, useState } from "react";
+import { agentLabel, type Contributor } from "../agents";
 import { ApiError, api, field, useAction, useLoad } from "../api";
 import { useFeed, useTrailing } from "../live";
 import { useRole } from "../role";
@@ -747,22 +748,6 @@ interface MembersData {
   members: { handle: string; role: "read" | "write"; created: string }[];
   /** The owner's view only. */
   invitations?: { id: string; handle: string; role: "read" | "write"; expires: string }[];
-}
-
-/** Someone who has worked in the library: a person in the app, or one of their agents. */
-export interface Contributor {
-  person: string | null;
-  agent: { id: string; name: string | null; platform: string | null; client: string | null } | null;
-  actor: string;
-  requests: number;
-  last_ts: string;
-}
-
-/** How an agent is named (tempra-dev: decisions/agents-act-for-a-person): "Claude for @ann". */
-export function agentLabel(c: Pick<Contributor, "person" | "agent" | "actor">): string {
-  const who = c.person ? `@${c.person}` : "a deleted account";
-  if (!c.agent) return `${who} in the app`;
-  return `${c.agent.name ?? c.actor} for ${who}`;
 }
 
 const ROLE_WORDS = { read: "Read and comment", write: "Read and write" } as const;

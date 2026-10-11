@@ -3,6 +3,7 @@
  * open WebSockets. Free of Worker APIs; the Library DO holds the sockets (hibernation API) and
  * calls these.
  */
+import type { ActedBy } from "./agents";
 import { normalizeDir, underPrefix } from "./okf/paths";
 import type { EventRow } from "./store/store";
 
@@ -21,6 +22,8 @@ export interface FeedEvent {
   from_path: string | null;
   /** For a comment: what was done, to which thread. */
   comment: { kind: string; thread: string } | null;
+  /** The person and agent behind the actor (TEMPRA-75), by id; null before they were kept. */
+  by: ActedBy | null;
 }
 
 /** What the feed sends: on connect, the head; after each write, its events. */
@@ -64,7 +67,16 @@ export function feedEvent(e: EventRow): FeedEvent {
     note: typeof meta.note === "string" ? meta.note : null,
     from_path: typeof meta.from_path === "string" ? meta.from_path : null,
     comment: commentOf(meta.comment),
+    by: byOf(meta.by),
   };
+}
+
+/** The `by` of an event's meta, if it has a well-formed one. */
+export function byOf(v: unknown): ActedBy | null {
+  if (!v || typeof v !== "object") return null;
+  const b = v as { person?: unknown; agent?: unknown };
+  if (typeof b.person !== "string") return null;
+  return typeof b.agent === "string" ? { person: b.person, agent: b.agent } : { person: b.person };
 }
 
 function commentOf(v: unknown): FeedEvent["comment"] {

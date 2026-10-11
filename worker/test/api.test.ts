@@ -239,3 +239,75 @@ describe("import and export round-trip the sample bundles (through the API)", ()
     });
   }
 });
+
+describe("GET /api/v1/libraries (TEMPRA-23)", () => {
+  type Row = {
+    id: string;
+    role: string;
+    owner: string;
+    slug: string;
+    unavailable?: boolean;
+    seq?: number;
+    health?: unknown;
+    tally?: { changes: number; for_you?: number };
+  };
+  const list = async (s: ReturnType<typeof setup>) => {
+    const r = await s.app.request("/api/v1/libraries");
+    expect(r.status).toBe(200);
+    return ((await r.json()) as { libraries: Row[] }).libraries;
+  };
+
+  test("one library that fails is listed as unavailable; the rest are unaffected", async () => {
+    const s = setup();
+    const made = await s.app.request("/api/v1/libraries", {
+      method: "POST",
+      headers: { Origin: "http://localhost", "Content-Type": "application/json" },
+      body: JSON.stringify({ slug: "broken" }),
+    });
+    expect(made.status).toBe(201);
+    const broken = (await s.accounts.reachable("user_1")).find((l) => l.slug === "broken");
+    if (!broken) throw new Error("no broken library");
+    const real = s.deps.libraryByDoId;
+    s.deps.libraryByDoId = async (doId) => {
+      const lib = await real(doId);
+      if (doId !== broken.do_id || !lib) return lib;
+      return {
+        ...lib,
+        summary: async () => {
+          throw new Error("Library schema version 4 is not 1");
+        },
+      };
+    };
+    const libs = await list(s);
+    const bad = libs.find((l) => l.slug === "broken");
+    const good = libs.find((l) => l.slug === "demo");
+    expect(bad).toEqual({
+      id: broken.id,
+      owner: "owner",
+      slug: "broken",
+      role: "owner",
+      unavailable: true,
+    });
+    expect(good?.unavailable).toBeUndefined();
+    expect(good?.seq).toBeNumber();
+    expect(good?.health).toBeDefined();
+    expect(good?.tally).toEqual({ changes: 0, for_you: 0 });
+  });
+
+  test("a library with no object, or a failing tally, still lists", async () => {
+    const s = setup();
+    s.deps.libraryByDoId = async () => null;
+    expect(await list(s)).toEqual([
+      { id: "lib-1", owner: "owner", slug: "demo", role: "owner", unavailable: true },
+    ]);
+    const s2 = setup();
+    const n = s2.deps.notifications;
+    if (!n) throw new Error("no notifications");
+    n.unread = async () => {
+      throw new Error("D1 down");
+    };
+    const [row] = await list(s2);
+    expect(row?.unavailable).toBeUndefined();
+    expect(row?.tally).toEqual({ changes: 0 });
+  });
+});

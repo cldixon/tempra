@@ -43,9 +43,17 @@ export type CommentAction = (
 
 export type ThreadStatus = "open" | "resolved";
 
+/** The person and agent behind an actor (TEMPRA-75), by id, from the event's meta. */
+export interface ActionBy {
+  person: string;
+  agent?: string;
+}
+
 export interface CommentView {
   id: string;
   actor: string;
+  /** Who wrote it, by id; absent for comments recorded before `by` was kept. */
+  by?: ActionBy;
   body: string;
   ts: string;
   seq: number;
@@ -83,6 +91,7 @@ export interface ThreadView {
 export interface ThreadAction {
   kind: "open" | "reply" | "resolve" | "reopen";
   actor: string;
+  by?: ActionBy;
   ts: string;
   seq: number;
   comment: string | null;
