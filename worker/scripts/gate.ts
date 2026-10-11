@@ -16,6 +16,7 @@
  *   bun run gate [--port 8799] [--keep]
  */
 import {
+  appendFileSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -81,6 +82,22 @@ const dev = Bun.spawn(["bunx", "cf", "dev", "--port", String(port)], {
   stdout: "pipe",
   stderr: "pipe",
 });
+/**
+ * cf dev's output, read as it comes so a full pipe can never stall it: the last 64 KB of each
+ * stream kept for a failure, and all of it in GATE_LOGS/cf-dev.log.
+ */
+const devTail = { stdout: "", stderr: "" };
+async function drain(name: "stdout" | "stderr", stream: ReadableStream<Uint8Array>) {
+  const decoder = new TextDecoder();
+  for await (const chunk of stream) {
+    const text = decoder.decode(chunk, { stream: true });
+    devTail[name] = (devTail[name] + text).slice(-65_536);
+    if (process.env.GATE_LOGS) appendFileSync(join(process.env.GATE_LOGS, "cf-dev.log"), text);
+  }
+}
+const drained = Promise.all([drain("stdout", dev.stdout), drain("stderr", dev.stderr)]).catch(
+  () => {},
+);
 function stopDev() {
   try {
     process.kill(-dev.pid, "SIGKILL");
@@ -209,10 +226,10 @@ function within<T>(ms: number, what: string, work: Promise<T>): Promise<T> {
 }
 
 /**
- * GATE_LOGS=<dir>: what a failed browser flow leaves for diagnosis (CI uploads it). Per browser
- * N: Chrome's own output (chrome-N.log), a Playwright trace of its actions, network and console
- * (trace-N.zip, kept only when a step failed), and, when the browser stops answering, the page's
- * state at that moment (stuck-N.txt, also printed).
+ * GATE_LOGS=<dir>: what a failed run leaves for diagnosis (CI uploads it). cf dev's output
+ * (cf-dev.log), and per browser N: Chrome's own log (chrome-N.log), a Playwright trace of its
+ * actions, network and console (trace-N.zip, kept only when a step failed) and, when the browser
+ * stops answering, the page's state at that moment (stuck-N.txt, also printed).
  */
 const LOGS = process.env.GATE_LOGS;
 let browsers = 0;
@@ -1525,9 +1542,10 @@ try {
 } catch (e) {
   failed = true;
   console.error(e);
-  // cf dev's stderr ends only when it does: stop it first, or this waits forever.
+  // cf dev's streams end only when it does: stop it first, or this waits forever.
   stopDev();
-  console.error((await new Response(dev.stderr).text()).slice(-4000));
+  await within(10_000, "cf dev's output", drained).catch(() => {});
+  console.error(devTail.stderr.slice(-4000));
 } finally {
   stopDev();
   await dev.exited;
