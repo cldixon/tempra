@@ -725,6 +725,7 @@ export function d1Accounts(db: D1Database): Accounts {
       return { id, slug, do_id: id, owner: owner.handle };
     },
     async tokens(userId) {
+      // A union, not `l.owner = ?1 OR t.created_by = ?1`: an OR across two tables scans tokens.
       const r = await db
         .prepare(
           `SELECT t.id,
@@ -734,7 +735,9 @@ export function d1Accounts(db: D1Database): Accounts {
            FROM tokens t JOIN libraries l ON l.id = t.library
            JOIN users o ON o.id = l.owner
            LEFT JOIN users u ON u.id = t.created_by
-           WHERE l.owner = ?1 OR t.created_by = ?1
+           WHERE t.rowid IN (
+             SELECT t2.rowid FROM tokens t2 JOIN libraries l2 ON l2.id = t2.library WHERE l2.owner = ?1
+             UNION SELECT rowid FROM tokens WHERE created_by = ?1)
            ORDER BY t.rowid DESC`,
         )
         .bind(userId)
