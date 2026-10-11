@@ -133,4 +133,4 @@ CD (tempra-dev: `delivery/ci-cd.md`) runs after those three, each stage off unti
 
 The `site/ builds` job checks, tests and builds the landing page; its previews and deploys come from Workers Builds.
 
-Secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `PREVIEW_EMAIL` (the operator, seeded as each preview's account), optional `STAGING_MCP_TOKEN`, `PRODUCTION_MCP_TOKEN` (read-only smoke).
+Secrets: `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `PREVIEW_EMAIL` (the operator, seeded as each preview's account), optional `STAGING_MCP_TOKEN`, `PRODUCTION_MCP_TOKEN` (read-only smoke), optional `ANTHROPIC_API_KEY` (only the preview job's `preview up` step sees it, and sets it on the `tempra-pr-N` Worker as a secret through Cloudflare's API; the managed-agent spike, TEMPRA-67).
