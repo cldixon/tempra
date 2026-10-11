@@ -150,6 +150,9 @@ jobs:
       - run: bun install --frozen-lockfile
       - id: up
         working-directory: worker
+        # Only this step sees the key: `preview up` sets it on the preview Worker as a secret.
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: bun run preview up --pr ${{ github.event.pull_request.number }}
       - name: Comment the URL on the PR
         env:

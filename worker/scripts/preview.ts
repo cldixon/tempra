@@ -125,8 +125,10 @@ async function up(pr: string, email: string | undefined): Promise<string> {
   }
   if (!d1 || !kv) throw new Error(`Could not create or find the D1 or KV for PR ${pr}.`);
 
+  // The Anthropic key goes to the preview Worker as a secret (below), never to a subprocess.
+  const { ANTHROPIC_API_KEY: anthropicKey, ...inherited } = process.env;
   const env = {
-    ...process.env,
+    ...inherited,
     TEMPRA_MODE: "preview",
     TEMPRA_PR: pr,
     TEMPRA_PREVIEW_D1_ID: d1,
@@ -135,9 +137,33 @@ async function up(pr: string, email: string | undefined): Promise<string> {
   };
   // The deploy script applies the migrations, then runs cf deploy --mode preview.
   await run(["bun", "scripts/deploy.ts", "--mode", "preview"], env, { show: true });
+  if (anthropicKey) await setWorkerSecret(names.name, "ANTHROPIC_API_KEY", anthropicKey);
   await waitForHealth(url);
   await seedAndSmoke(url, email, env);
   return url;
+}
+
+/**
+ * Sets a secret on one preview Worker through Cloudflare's API: the value travels only in the
+ * request body, never on a command line or in the log. Previews only (the managed-agent spike,
+ * TEMPRA-67, calls Claude with it); staging and production get secrets by hand.
+ */
+async function setWorkerSecret(worker: string, name: string, text: string) {
+  if (!/^tempra-pr-[0-9]+$/.test(worker)) throw new Error(`Not a preview Worker: ${worker}`);
+  const account = process.env.CLOUDFLARE_ACCOUNT_ID;
+  const token = process.env.CLOUDFLARE_API_TOKEN;
+  if (!account || !token)
+    throw new Error("CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN are needed");
+  const r = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${account}/workers/scripts/${worker}/secrets`,
+    {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ name, text, type: "secret_text" }),
+    },
+  );
+  if (!r.ok) throw new Error(`Setting ${name} on ${worker}: ${r.status}`);
+  console.log(`Set ${name} on ${worker}`);
 }
 
 /** Runs a command in worker/; returns its output, or with `show` streams it to the log. */
@@ -242,8 +268,10 @@ async function previewEnv(pr: string) {
   const d1 = await d1Id(names.d1.name);
   const kv = await kvId(`tempra-oauth-pr-${pr}`);
   if (!d1 || !kv) throw new Error(`PR ${pr} has no preview; bring it up first.`);
+  // The Anthropic key goes to the preview Worker as a secret (below), never to a subprocess.
+  const { ANTHROPIC_API_KEY: anthropicKey, ...inherited } = process.env;
   const env = {
-    ...process.env,
+    ...inherited,
     TEMPRA_MODE: "preview",
     TEMPRA_PR: pr,
     TEMPRA_PREVIEW_D1_ID: d1,
