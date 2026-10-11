@@ -184,7 +184,7 @@ teaches the workflow to agents that load skills.
   --set libraries=10` overrides). Per library: 100 MB of storage (`LIBRARY_STORAGE_MB`); past it,
   writes get `507` but reads, deletes and moves still work. Tokens and connected apps get 60 writes a
   minute per account and 600 requests a minute each (`429`). Usage is metered to the Analytics Engine
-  dataset `tempra_usage`.
+  dataset `tempra_usage` (staging's to `tempra_usage_staging`, previews' to `tempra_usage_preview`).
 - **Daily sweep.** At 04:30 UTC a cron asks every library which attachment files it uses and deletes
   files no library has used for 31 days (longer than the restore window). It emails `OPERATOR_EMAIL` a
   digest when an export is stale, maintenance is overdue, a library is over 80% full, or the sweep was

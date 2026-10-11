@@ -21,6 +21,12 @@ interface Deployment {
   mailFrom: string;
   /** Analytics Engine dataset for metering; tempra_usage unless set. */
   usage?: string;
+  /**
+   * Rate-limit namespace ids for WRITE_LIMITER and REQUEST_LIMITER. Namespaces are account-wide,
+   * so each deployment needs its own or its counters are shared with production (TEMPRA-76).
+   * Production's (1001, 1002) unless set.
+   */
+  limiters?: { write: string; request: string };
   /** False: no daily sweep and digest. */
   cron?: false;
 }
@@ -42,6 +48,10 @@ const STAGING: Deployment = {
   r2: "tempra-blobs-staging",
   kv: "b63bffc9b65743a99783013effb89324",
   mailFrom: "noreply@mail.tempra.dev",
+  // Staging's traffic and counters stay out of production's (TEMPRA-76). Datasets are created on
+  // first write and namespaces are only ids, so neither needs a resource made.
+  usage: "tempra_usage_staging",
+  limiters: { write: "2001", request: "2002" },
 };
 
 /**
@@ -62,6 +72,8 @@ export function previewDeployment(pr: string, ids: { d1?: string; kv?: string } 
     // and their traffic stays out of the usage data.
     cron: false,
     usage: "tempra_usage_preview",
+    // One pair for every preview: each has its own D1, so keys rarely meet, and never production's.
+    limiters: { write: "3001", request: "3002" },
   };
 }
 
@@ -147,9 +159,12 @@ export default defineConfig(({ mode }) => {
 
         // Per-minute limits (v2 spec: Limits): writes per account, requests per token or app. The
         // per-account numbers in limits.ts match; overrides above them need a separate limiter.
-        WRITE_LIMITER: bindings.rateLimit({ namespace: "1001", simple: { limit: 60, period: 60 } }),
+        WRITE_LIMITER: bindings.rateLimit({
+          namespace: d.limiters?.write ?? "1001",
+          simple: { limit: 60, period: 60 },
+        }),
         REQUEST_LIMITER: bindings.rateLimit({
-          namespace: "1002",
+          namespace: d.limiters?.request ?? "1002",
           simple: { limit: 600, period: 60 },
         }),
 
