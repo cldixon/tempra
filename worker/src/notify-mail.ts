@@ -179,6 +179,17 @@ export interface LibraryDigest {
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
+/** The health summary's counts, as the digest words them (one, many). */
+const HEALTH_WORDS: Record<string, [string, string]> = {
+  stale: ["stale", "stale"],
+  stale_soon: ["stale soon", "stale soon"],
+  broken_link: ["broken link", "broken links"],
+  lint: ["lint", "lint"],
+  structure: ["structure finding", "structure findings"],
+  comment: ["open comment", "open comments"],
+  unverified: ["unverified", "unverified"],
+};
+
 /** One library's lines in the digest; null when nothing happened there. */
 export function digestLines(lib: ReachableLibrary, g: LibraryDigest): string[] | null {
   const { changes, threads, health } = g;
@@ -192,12 +203,14 @@ export function digestLines(lib: ReachableLibrary, g: LibraryDigest): string[] |
   if (threads.opened + threads.resolved > 0) {
     lines.push(`  ${plural(threads.opened, "thread")} opened, ${threads.resolved} resolved`);
   }
-  // The library health summary (TEMPRA-66) slots in here when it lands; until then the counts
-  // the staleness process keeps.
-  const health_ = Object.entries(health)
+  // Where the library stands: its health summary (TEMPRA-66).
+  const now = Object.entries(health)
     .filter(([, n]) => n > 0)
-    .map(([k, n]) => `${n} ${k.replace(/_/g, " ")}`);
-  if (health_.length > 0) lines.push(`  Now: ${health_.join(", ")}`);
+    .map(([k, n]) => {
+      const [one, many] = HEALTH_WORDS[k] ?? [k.replace(/_/g, " "), k.replace(/_/g, " ")];
+      return `${n} ${n === 1 ? one : many}`;
+    });
+  if (now.length > 0) lines.push(`  Now: ${now.join(", ")}`);
   return lines;
 }
 

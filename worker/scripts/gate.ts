@@ -192,26 +192,31 @@ function chromiumPath(): string | null {
 const STEP_MS = 90_000;
 
 /** Resolves with `work`, or rejects once `ms` pass, naming what took too long. */
+class NoAnswer extends Error {}
+
 function within<T>(ms: number, what: string, work: Promise<T>): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const late = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`${what}: no answer in ${ms / 1000} s`)), ms);
+    timer = setTimeout(() => reject(new NoAnswer(`${what}: no answer in ${ms / 1000} s`)), ms);
   });
   return Promise.race([work, late]).finally(() => clearTimeout(timer));
 }
 
 /**
- * A browser page with the gate's checks attached. Given a browser already open, a second person
- * gets a fresh context in it (their own cookies), not a second browser: closing an extra
- * Chrome hangs on CI's runners.
+ * Closes a browser, giving up after a while: on CI's Google Chrome a close sometimes never
+ * returns, after every check has run. The gate exits explicitly and the runner reaps the
+ * process, so a stuck close is reported, not waited on.
  */
-async function openBrowser(shared?: Browser) {
-  let browser = shared;
-  if (!browser) {
-    const executablePath = chromiumPath();
-    if (!executablePath) return "no Chromium found; set CHROME_PATH";
-    browser = await chromium.launch({ executablePath });
-  }
+async function closeBrowser(browser: Browser) {
+  await within(30_000, "closing the browser", browser.close()).catch((e) =>
+    console.log(`  (note: ${String(e)}; carrying on)`),
+  );
+}
+
+async function openBrowser() {
+  const executablePath = chromiumPath();
+  if (!executablePath) return "no Chromium found; set CHROME_PATH";
+  const browser = await chromium.launch({ executablePath });
   const context = await browser.newContext();
   const page = await context.newPage();
   const problems: string[] = [];
@@ -231,19 +236,32 @@ async function openBrowser(shared?: Browser) {
   });
   page.on("pageerror", (e) => problems.push(`page error: ${e.message}`));
   let failures = 0;
+  /** The step the browser stopped answering in; every later step is skipped, not waited out. */
+  let stuck: string | null = null;
   const step = async (what: string, run: () => Promise<unknown>) => {
+    if (stuck) {
+      problems.push(`${what}: skipped, the browser stopped answering in "${stuck}"`);
+      return;
+    }
+    const t0 = Date.now();
+    if (process.env.GATE_TRACE) console.log(`  [step] ${what}`);
     try {
       // A step that hangs (a wait with no timeout of its own) fails by name rather than
       // silently using up the CI job's time.
       await within(STEP_MS, what, run());
     } catch (e) {
       problems.push(`${what}: ${String(e).split("\n")[0]}`);
-      // GATE_SCREENSHOTS: what the page showed when the step failed.
+      if (process.env.GATE_TRACE)
+        console.log(`  [step failed after ${Date.now() - t0} ms] ${what}`);
+      if (e instanceof NoAnswer) stuck = what;
+      // GATE_SCREENSHOTS: what the page showed when the step failed (if it still answers).
       const shots = process.env.GATE_SCREENSHOTS;
       if (shots) {
-        await page
-          .screenshot({ path: `${shots}/failed-${++failures}.png`, fullPage: true })
-          .catch(() => {});
+        await within(
+          10_000,
+          "screenshot",
+          page.screenshot({ path: `${shots}/failed-${++failures}.png`, fullPage: true }),
+        ).catch(() => {});
       }
     }
   };
@@ -887,7 +905,7 @@ async function browserRenders(
       if (!(await stayed())) throw new Error("the page reloaded");
     });
   } finally {
-    await browser.close();
+    await closeBrowser(browser);
   }
   return problems;
 }
@@ -1194,7 +1212,7 @@ async function freshAccountConnects(): Promise<string[]> {
     });
 
     // Sharing in the app (tempra-dev: v2/sharing): invite from the Members tab; the invitee
-    // accepts from Invitations in their own browser; as a reader there is no Edit, at write there is.
+    // accepts from Invitations; as a reader there is no Edit, at write there is.
     await step("a note to share", async () => {
       const put = await ui(
         `${base}/api/v1/libraries/newcomer/notes/files/shared.md`,
@@ -1214,45 +1232,44 @@ async function freshAccountConnects(): Promise<string[]> {
       await page.getByRole("button", { name: "Invite" }).click();
       await page.getByText("Invited @stranger").waitFor({ timeout: 15_000 });
     });
-    const invitee = await within(
-      STEP_MS,
-      "opening the invitee's browser",
-      openBrowser(browser),
-    ).catch((e) => String(e));
-    if (typeof invitee === "string") problems.push(invitee);
-    else {
-      try {
-        await invitee.step("the invitee accepts from Invitations", async () => {
-          await invitee.signInAs("stranger@localhost", "/invitations");
-          await invitee.page.getByRole("button", { name: "Accept" }).click();
-          await invitee.page.waitForURL(`${lib}/`, { timeout: 15_000 });
-        });
-        const markdownButton = () => invitee.page.getByRole("button", { name: "Markdown" });
-        await invitee.step("a reader sees the note and no Edit", async () => {
-          await invitee.page.goto(`${lib}/shared.md`);
-          await invitee.page.getByText("Read me.").waitFor({ timeout: 15_000 });
-          await markdownButton().waitFor({ timeout: 15_000 });
-          // The role loads with the library list; give it the moment it takes.
-          await invitee.page.waitForTimeout(500);
-          const edit = await invitee.page.getByRole("button", { name: "Edit" }).count();
-          if (edit !== 0) throw new Error("a read member is offered Edit");
-        });
-        await step("the owner gives the member write access", async () => {
-          await page.goto(`${lib}/-/members`);
-          await page.getByLabel("Access for @stranger").selectOption("write");
-          await page.getByText("@stranger now has write access").waitFor({ timeout: 15_000 });
-        });
-        await invitee.step("a writer is offered Edit", async () => {
-          await invitee.page.goto(`${lib}/shared.md`);
-          await invitee.page.getByRole("button", { name: "Edit" }).waitFor({ timeout: 15_000 });
-        });
-        problems.push(...invitee.problems.map((p) => `invitee: ${p}`));
-      } finally {
-        await within(STEP_MS, "closing the invitee's browser", invitee.context.close()).catch((e) =>
-          problems.push(String(e)),
-        );
-      }
-    }
+    // The invitee is the same tab under their own session, the cookies swapped: one browser,
+    // one context, as for everything else here.
+    const { context } = b;
+    const asOwner = await context.cookies();
+    const switchTo = async (cookies: typeof asOwner) => {
+      await context.clearCookies();
+      await context.addCookies(cookies);
+    };
+    let asInvitee: typeof asOwner = [];
+    await step("the invitee accepts from Invitations", async () => {
+      await context.clearCookies();
+      await b.signInAs("stranger@localhost", "/invitations");
+      await page.getByRole("button", { name: "Accept" }).click();
+      await page.waitForURL(`${lib}/`, { timeout: 15_000 });
+      asInvitee = await context.cookies();
+    });
+    await step("a reader sees the note and no Edit", async () => {
+      await page.goto(`${lib}/shared.md`);
+      await page.getByText("Read me.").waitFor({ timeout: 15_000 });
+      await page.getByRole("button", { name: "Markdown" }).waitFor({ timeout: 15_000 });
+      // The role loads with the library list; give it the moment it takes.
+      await page.waitForTimeout(500);
+      const edit = await page.getByRole("button", { name: "Edit" }).count();
+      if (edit !== 0) throw new Error("a read member is offered Edit");
+    });
+    await step("the owner gives the member write access", async () => {
+      await switchTo(asOwner);
+      await page.goto(`${lib}/-/members`);
+      await page.getByLabel("Access for @stranger").selectOption("write");
+      await page.getByText("@stranger now has write access").waitFor({ timeout: 15_000 });
+    });
+    await step("a writer is offered Edit", async () => {
+      await switchTo(asInvitee);
+      await page.goto(`${lib}/shared.md`);
+      await page.getByRole("button", { name: "Edit" }).waitFor({ timeout: 15_000 });
+    });
+    await switchTo(asOwner);
+    await page.goto(`${lib}/`);
 
     // Deleting the library wipes its Durable Object and ends the connection.
     await step("delete the library from its Delete tab", async () => {
@@ -1262,21 +1279,25 @@ async function freshAccountConnects(): Promise<string[]> {
       // The last library gone: first run again.
       await page.waitForURL(`${base}/welcome`, { timeout: 15_000 });
     });
-    const gone = await ui(`${lib}/`, {}, cookie);
-    if (gone.status !== 404) problems.push(`deleted library page: ${gone.status}`);
-    const mcp = await fetch(`${base}/mcp`, {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${access_token}`,
-        "Content-Type": "application/json",
-        Accept: "application/json, text/event-stream",
-      },
-      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    await step("the deleted library's page is gone", async () => {
+      const gone = await ui(`${lib}/`, {}, cookie);
+      if (gone.status !== 404) throw new Error(`deleted library page: ${gone.status}`);
     });
-    if (mcp.status !== 401) problems.push(`MCP after delete: ${mcp.status}`);
+    await step("the connection ends with the library", async () => {
+      const mcp = await fetch(`${base}/mcp`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${access_token}`,
+          "Content-Type": "application/json",
+          Accept: "application/json, text/event-stream",
+        },
+        body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+      });
+      if (mcp.status !== 401) throw new Error(`MCP after delete: ${mcp.status}`);
+    });
     return problems;
   } finally {
-    await browser.close();
+    await closeBrowser(browser);
   }
 }
 

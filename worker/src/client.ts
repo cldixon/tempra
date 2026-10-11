@@ -30,6 +30,7 @@ export const LIBRARY_METHODS = [
   "comments",
   "thread",
   "summary",
+  "health",
   "signDownload",
   "openDownload",
   "dump",

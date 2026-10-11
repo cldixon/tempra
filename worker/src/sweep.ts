@@ -1,4 +1,5 @@
 import { blobKey } from "./client";
+import type { LibraryHealth } from "./store/store";
 
 /**
  * The daily sweep and operator digest (v2 spec: A3). Attachment bytes live in R2 by hash and are
@@ -20,6 +21,8 @@ export interface Inventory {
     maintainers: { export: { lag: number; last_run: string | null } };
     next_run: string | null;
   };
+  /** The library's health summary (TEMPRA-66); absent from a library that predates it. */
+  health?: LibraryHealth;
 }
 
 export interface SweepDeps {
@@ -54,12 +57,15 @@ export interface SweepResult {
   skipped?: string;
   /** Things the operator should look at. */
   attention: string[];
+  /** Libraries with open work, from each one's health summary, the most first. */
+  health: { path: string; counts: LibraryHealth["counts"] }[];
 }
 
 export async function sweep(d: SweepDeps): Promise<SweepResult> {
   const libs = await d.libraries();
   const referenced = new Set<string>();
   const attention: string[] = [];
+  const health: SweepResult["health"] = [];
   let failed = 0;
   for (const lib of libs) {
     let inv: Inventory;
@@ -72,7 +78,11 @@ export async function sweep(d: SweepDeps): Promise<SweepResult> {
     }
     for (const h of inv.hashes) referenced.add(h);
     attention.push(...libraryProblems(lib.path, inv, d.storageLimitBytes, d.now));
+    if (inv.health && openWork(inv.health.counts) > 0) {
+      health.push({ path: lib.path, counts: inv.health.counts });
+    }
   }
+  health.sort((a, b) => openWork(b.counts) - openWork(a.counts) || (a.path < b.path ? -1 : 1));
 
   const stored: string[] = [];
   let cursor: string | undefined;
@@ -89,6 +99,7 @@ export async function sweep(d: SweepDeps): Promise<SweepResult> {
     orphaned: 0,
     deleted: 0,
     attention,
+    health,
   };
   if (failed > 0) {
     result.skipped = `${failed} of ${libs.length} libraries did not answer`;
@@ -142,12 +153,46 @@ export function libraryProblems(
   return out;
 }
 
+/** Open work in a health summary; stale soon looks ahead and is not counted. */
+const openWork = (c: LibraryHealth["counts"]) =>
+  c.stale + c.broken_link + c.lint + c.structure + c.comment;
+
+/** How many libraries' health the digest lists. */
+export const DIGEST_HEALTH_LIBRARIES = 20;
+
+/** One library's open work for the digest: "owner/slug: stale 2 · lint 1". */
+export function healthLine(path: string, c: LibraryHealth["counts"]): string {
+  const parts: [string, number][] = [
+    ["stale", c.stale],
+    ["stale soon", c.stale_soon],
+    ["broken links", c.broken_link],
+    ["lint", c.lint],
+    ["structure", c.structure],
+    ["open comments", c.comment],
+  ];
+  return `${path}: ${parts
+    .filter(([, n]) => n > 0)
+    .map(([k, n]) => `${k} ${n}`)
+    .join(" · ")}`;
+}
+
 export function digestText(r: SweepResult): string {
+  const shown = r.health.slice(0, DIGEST_HEALTH_LIBRARIES);
   return [
     "Tempra daily digest",
     "",
     ...r.attention.map((a) => `- ${a}`),
     "",
+    ...(shown.length > 0
+      ? [
+          "Library health (open work):",
+          ...shown.map((h) => `- ${healthLine(h.path, h.counts)}`),
+          ...(r.health.length > shown.length
+            ? [`- and ${r.health.length - shown.length} more libraries`]
+            : []),
+          "",
+        ]
+      : []),
     `Libraries ${r.libraries}. Blobs stored ${r.stored}, referenced ${r.referenced}, waiting ${r.orphaned}, deleted ${r.deleted}.`,
     "",
   ].join("\n");

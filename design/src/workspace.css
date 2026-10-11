@@ -241,6 +241,14 @@ body.ground {
   font-weight: 400;
 }
 
+/* The library's open work from the daily check (TEMPRA-66): one quiet line under its name. */
+.lib-list .lib-health {
+  display: block;
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-meta);
+  font-weight: 400;
+}
+
 .page-foot {
   margin: 32px 18px 0;
   color: var(--tempra-color-muted);

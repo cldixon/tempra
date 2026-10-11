@@ -22,9 +22,7 @@ describe("mentions in the comment box (TEMPRA-73)", () => {
 describe("a library's tally (TEMPRA-72)", () => {
   test("says only what is there", () => {
     expect(tallyText({})).toBe("");
-    expect(tallyText({ tally: { changes: 0, for_you: 0 }, open_comments: 0 })).toBe("");
-    expect(tallyText({ tally: { changes: 5, for_you: 2 }, open_comments: 1 })).toBe(
-      "2 for you · 5 new · 1 open thread",
-    );
+    expect(tallyText({ tally: { changes: 0, for_you: 0 } })).toBe("");
+    expect(tallyText({ tally: { changes: 5, for_you: 2 } })).toBe("2 for you · 5 new");
   });
 });

@@ -155,6 +155,35 @@ export const switcherKey = () =>
 
 export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
+/** A library's health summary, as the daily check leaves it (TEMPRA-66, `GET …/health`). */
+export interface Health {
+  at: string;
+  seq: number;
+  counts: {
+    stale: number;
+    stale_soon: number;
+    broken_link: number;
+    lint: number;
+    structure: number;
+    comment: number;
+  };
+  unverified: { total: number; newest: { path: string; seq: number; ts: string; actor: string }[] };
+}
+
+/** "2 stale · 1 broken link · 3 structure": the kinds with something open, or "" when none is. */
+export function healthWords(c: Health["counts"]): string {
+  return [
+    c.stale > 0 && `${c.stale} stale`,
+    c.stale_soon > 0 && `${c.stale_soon} stale soon`,
+    c.broken_link > 0 && plural(c.broken_link, "broken link"),
+    c.lint > 0 && `${c.lint} lint`,
+    c.structure > 0 && `${c.structure} structure`,
+    c.comment > 0 && plural(c.comment, "open comment"),
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
 /** An element id for a footnote label or source id (as the server's anchorId). */
 export const anchorId = (prefix: string, label: string) =>
   `${prefix}-${label.replace(/[^\w.-]/g, "_")}`;

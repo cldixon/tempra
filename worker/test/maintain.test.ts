@@ -155,7 +155,8 @@ describe("daily maintainers (spec: Tier 3)", () => {
     expect(paths("stale")).toEqual([]);
     const queued = () => store.work().items.filter((i) => i.kind.startsWith("stale"));
     expect(queued()).toEqual([]);
-    expect(store.summary()).toMatchObject({ open_work: 3, stale_soon: 1 }); // 3: lint
+    // 4: lint on each (no description), and the root's one structure item (descriptions, orphans).
+    expect(store.summary()).toMatchObject({ open_work: 4, stale_soon: 1 });
     expect(store.outline().files.find((f) => f.path === "s.md")).toMatchObject({
       stale: "stale_soon",
     });

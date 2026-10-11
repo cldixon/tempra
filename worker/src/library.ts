@@ -17,7 +17,7 @@ import {
 } from "./maintain";
 import { prepareRestore, type RestoreOutcome, type RestoreTarget } from "./recovery";
 import { doSqlHandle } from "./store/sql";
-import { LibraryStore } from "./store/store";
+import { type LibraryHealth, LibraryStore } from "./store/store";
 
 /** One OKF library: its blobs, ledger and derived indexes in the object's SQLite. */
 export class Library extends DurableObject<Env> {
@@ -125,12 +125,14 @@ export class Library extends DurableObject<Env> {
     hashes: string[];
     bytes: number;
     stats: ReturnType<LibraryStore["stats"]>;
+    health: LibraryHealth;
   }> {
     if (this.restarting) throw new Error("The library is restarting.");
     return {
       hashes: this.store.blobHashes(),
       bytes: this.store.storageBytes(),
       stats: this.store.stats(),
+      health: this.store.health(),
     };
   }
 

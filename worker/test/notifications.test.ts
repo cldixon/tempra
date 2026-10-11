@@ -435,7 +435,9 @@ describe("notification mail (TEMPRA-74)", () => {
     expect(m?.subject).toBe("Tempra digest: 1 library");
     expect(m?.text).toContain("owner/demo");
     expect(m?.text).toContain("1 thread opened, 0 resolved");
-    expect(m?.text).toContain("Now: 1 open comments");
+    // The health summary (TEMPRA-66): the open thread, and the concept nobody has verified.
+    expect(m?.text).toMatch(/Now: .*1 open comment\b/);
+    expect(m?.text).toMatch(/Now: .*1 unverified/);
     expect(m?.headers?.["List-Unsubscribe"]).toContain("/unsubscribe?k=");
     // Since the last digest, nothing new: no mail.
     expect(await sendDigests({ ...digestDeps, now: new Date(Date.now() + 2000) })).toEqual({

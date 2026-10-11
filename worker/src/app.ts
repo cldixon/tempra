@@ -619,6 +619,9 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   // Counts for the library's home page: concepts, attachments, types, open work.
   app.get(`${BASE}/summary`, async (c) => c.json(await c.var.lib.summary()));
 
+  // The daily health summary (TEMPRA-66): open work by kind and the newest unverified changes.
+  app.get(`${BASE}/health`, async (c) => c.json(await c.var.lib.health()));
+
   app.get(`${BASE}/work`, async (c) =>
     c.json(
       await c.var.lib.work({
@@ -979,8 +982,8 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
             concepts: s.concepts,
             attachments: s.attachments,
             open_work: s.open_work,
-            open_comments: s.open_comments,
             tally: { changes: s.activity?.changes ?? 0, for_you: unread.libraries[id] ?? 0 },
+            health: s.health,
           }),
         };
       }),

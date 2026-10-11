@@ -135,6 +135,7 @@ describe("MCP server", () => {
     const start = (await call("start")).text;
     expect(start).toContain("Concepts: 3 · attachments: 0");
     expect(start).toContain("Types: Memo 3");
+    expect(start).toContain("Health (checked ");
   });
 
   test("beyond files: search, query, links, log, history, diff, revert, work", async () => {
