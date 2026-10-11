@@ -6,6 +6,7 @@ import type { TokenInfo } from "../auth";
 import { type BlobStore, type LibraryClient, mediaFor, putBlob } from "../client";
 import { normalizePath, underPrefix } from "../okf/paths";
 import type { LintWarning } from "../okf/types";
+import type { CommentAction, CommentResult } from "../store/comments";
 import { OkfError } from "../store/errors";
 import type { LibraryHealth, RequestContext, WriteOp, WriteResult } from "../store/store";
 
@@ -19,6 +20,11 @@ export interface McpContext {
   /** The person and agent behind the actor, for the ledger (TEMPRA-75). */
   by?: RequestContext["by"];
   open(token: TokenInfo): LibraryClient;
+  /**
+   * Posts a comment action and notifies whom it addresses (notify.ts: mentions, the inbox);
+   * without it, the library records the comment and nobody is told.
+   */
+  comment?(token: TokenInfo, req: RequestContext, action: CommentAction): Promise<CommentResult>;
   blobs: BlobStore;
   /** The Worker's origin, for download URLs. */
   origin: string;
@@ -207,6 +213,10 @@ export function buildServer(ctx: McpContext): McpServer {
     note: note ?? null,
     by: ctx.by ?? null,
   });
+
+  /** A comment action, told to the people it addresses where the Worker wires that. */
+  const post = (token: TokenInfo, lib: LibraryClient, action: CommentAction) =>
+    ctx.comment ? ctx.comment(token, request(), action) : lib.comment(request(), action);
 
   const checkWrite = (token: TokenInfo, ...paths: string[]) => {
     if (token.scope !== "write") {
@@ -848,12 +858,15 @@ export function buildServer(ctx: McpContext): McpServer {
           const quote = t.anchor ? [`> ${t.anchor.quote.replace(/\n/g, "\n> ")}`] : [];
           // Every action in order: who said what, and when it was resolved and reopened.
           const bodies = new Map(t.comments.map((c) => [c.id, c.body]));
+          const mentions = new Map(t.comments.map((c) => [c.id, c.mentions]));
           const said = t.actions.map((a) => {
             const body = a.comment ? bodies.get(a.comment) : undefined;
             const verb =
               a.kind === "resolve" ? " resolved it" : a.kind === "reopen" ? " reopened it" : "";
             const text = body ? `\n  ${body.replace(/\n/g, "\n  ")}` : "";
-            return `- ${a.actor}${verb} at ${a.ts}${text ? ":" : "."}${text}`;
+            const named = a.comment ? mentions.get(a.comment) : undefined;
+            const to = named ? ` (mentioned ${named.join(", ")})` : "";
+            return `- ${a.actor}${verb} at ${a.ts}${to}${text ? ":" : "."}${text}`;
           });
           return [head, ...quote, ...said].join("\n");
         });
@@ -866,7 +879,7 @@ export function buildServer(ctx: McpContext): McpServer {
       "comment",
       {
         title: "Comment, reply or resolve",
-        description: `${BEYOND}answer a comment thread or start one. \`reply\` adds to a thread; \`resolve\` closes it (with an optional closing reply, e.g. what you changed); \`reopen\` opens it again; \`open\` starts a thread on a concept, optionally on a \`quote\` copied from its body as \`read\` shows it (matched by the text it reads as, markup aside; it must occur once; quote more of the sentence if it repeats). Resolve only what you actually addressed. Comments never change the concept; edit it with the write tools.`,
+        description: `${BEYOND}answer a comment thread or start one. \`reply\` adds to a thread; \`resolve\` closes it (with an optional closing reply, e.g. what you changed); \`reopen\` opens it again; \`open\` starts a thread on a concept, optionally on a \`quote\` copied from its body as \`read\` shows it (matched by the text it reads as, markup aside; it must occur once; quote more of the sentence if it repeats). Resolve only what you actually addressed. Write \`@handle\` in a body to address someone who can reach the library: it reaches their inbox. Comments never change the concept; edit it with the write tools.`,
         inputSchema: {
           action: z.enum(["reply", "resolve", "reopen", "open"]),
           thread: z.string().optional().describe("reply, resolve, reopen: the thread id."),
@@ -890,7 +903,7 @@ export function buildServer(ctx: McpContext): McpServer {
         if (action === "open") {
           if (!path) throw new OkfError(400, "bad_request", "`open` needs the concept's `path`.");
           checkComment(token, path);
-          const r = await lib.comment(request(), {
+          const r = await post(token, lib, {
             kind: "open",
             path,
             body: body ?? "",
@@ -902,7 +915,7 @@ export function buildServer(ctx: McpContext): McpServer {
           throw new OkfError(400, "bad_request", `\`${action}\` needs the \`thread\` id.`);
         const t = await lib.thread(thread);
         checkComment(token, t.path);
-        const r = await lib.comment(request(), { kind: action, thread, body: body ?? "" });
+        const r = await post(token, lib, { kind: action, thread, body: body ?? "" });
         const verb = { reply: "Replied to", resolve: "Resolved", reopen: "Reopened" }[action];
         return text(
           `${verb} thread ${thread} on ${r.thread.path} (seq ${r.seq}); it is ${r.thread.status}.`,

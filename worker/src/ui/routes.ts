@@ -169,7 +169,15 @@ export function registerUiRoutes<E extends AppEnv>(
     }
     return shell(p);
   });
-  for (const path of ["/welcome", "/connect", "/tokens", "/account", "/apps", "/invitations"]) {
+  for (const path of [
+    "/welcome",
+    "/connect",
+    "/tokens",
+    "/account",
+    "/apps",
+    "/invitations",
+    "/inbox",
+  ]) {
     get(path, shell);
   }
 

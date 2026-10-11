@@ -733,6 +733,27 @@ async function browserRenders(
         await page.getByText("Resolved (1)").waitFor({ timeout: 10_000 });
         await mark.first().waitFor({ state: "detached", timeout: 10_000 });
         if (!(await stayed())) throw new Error("the page reloaded");
+        // Notifications (TEMPRA-72, TEMPRA-74): the agent's reply on the person's thread is in
+        // their inbox, its count shows in the open page's header without a reload, and the
+        // batched mail lands in the dev outbox.
+        await page.locator(".inbox-link .count").waitFor({ timeout: 10_000 });
+        const inbox = (await (await apiAs(devCookie, "/api/v1/inbox")).json()) as {
+          items: { kind: string; excerpt: string; href: string }[];
+        };
+        const item = inbox.items.find((i) => i.excerpt === "Checked it; it holds.");
+        if (item?.kind !== "reply" || !item.href.endsWith("#comments")) {
+          throw new Error(`inbox: ${JSON.stringify(inbox.items.slice(0, 3))}`);
+        }
+        const sent = await ui(`${base}/_dev/mail/send`, {
+          method: "POST",
+          headers: { Accept: "application/json" },
+        });
+        const outbox = (await (await ui(`${base}/_dev/mail.json`)).json()) as {
+          mails: { to: string; text: string }[];
+        };
+        if (!sent.ok || !outbox.mails.some((m) => m.text.includes("Checked it; it holds."))) {
+          throw new Error(`dev outbox: ${sent.status} ${JSON.stringify(outbox.mails[0] ?? null)}`);
+        }
       },
     );
     // The editor (TEMPRA-15): a person edits the body in place and saves with a note; an agent's

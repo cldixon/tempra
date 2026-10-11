@@ -7,6 +7,7 @@ import { documentPos, locate, type Parsed, type QuoteSelector, textOffset } from
 import type { Highlight } from "@tempra/editor/view";
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, useAction, useLoad } from "./api";
+import { MentionArea, useMentionable } from "./Mentions";
 import { Ago, Chip, who } from "./ui";
 import type { Urls } from "./urls";
 
@@ -219,6 +220,7 @@ function NewComment(props: {
   const { busy, error, run } = useAction();
   const [text, setText] = useState("");
   const box = useRef<HTMLTextAreaElement>(null);
+  const people = useMentionable(props.urls);
   const { draft, onClearDraft } = props;
   // A comment started from the selection toolbar: the box takes the focus.
   useEffect(() => {
@@ -251,11 +253,12 @@ function NewComment(props: {
       <label className="visually-hidden" htmlFor="new-comment">
         Comment
       </label>
-      <textarea
+      <MentionArea
         id="new-comment"
-        ref={box}
+        inputRef={box}
         value={text}
-        onChange={(e) => setText(e.currentTarget.value)}
+        onValue={setText}
+        people={people}
         onFocus={() => setFocused(true)}
         // Escape drops the draft; leaving an empty draft drops it too (as a click away does).
         onKeyDown={(e) => {
@@ -300,6 +303,7 @@ function ThreadView(props: {
   const { urls, thread: t } = props;
   const { busy, error, run } = useAction();
   const [reply, setReply] = useState("");
+  const people = useMentionable(urls);
   const act = (kind: "reply" | "resolve" | "reopen") => (e?: FormEvent) => {
     e?.preventDefault();
     const body = reply.trim();
@@ -387,10 +391,11 @@ function ThreadView(props: {
               <label className="visually-hidden" htmlFor={`reply-${t.id}`}>
                 Reply
               </label>
-              <textarea
+              <MentionArea
                 id={`reply-${t.id}`}
                 value={reply}
-                onChange={(e) => setReply(e.currentTarget.value)}
+                onValue={setReply}
+                people={people}
                 onFocus={() => props.onActive(t.id)}
                 placeholder="Reply"
               />

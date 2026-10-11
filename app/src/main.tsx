@@ -5,6 +5,7 @@ import { Account, Apps, ConnectAccount, Invitations, Tokens, Welcome } from "./p
 import { Diff } from "./pages/Diff";
 import { Directory } from "./pages/Directory";
 import { File } from "./pages/File";
+import { Inbox } from "./pages/Inbox";
 import { Ledger } from "./pages/Ledger";
 import { Libraries } from "./pages/Libraries";
 import {
@@ -66,6 +67,8 @@ function App() {
     page = <Account done={route.done} />;
   } else if (route.page === "invitations") {
     page = <Invitations />;
+  } else if (route.page === "inbox") {
+    page = <Inbox all={route.all} />;
   } else {
     const urls = urlsFor(route.owner, route.slug, "at" in route ? route.at : undefined);
     const place: Place = { file: null, dir: null, view: null };

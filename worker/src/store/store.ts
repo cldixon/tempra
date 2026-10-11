@@ -76,6 +76,7 @@ import {
   type CommentView,
   checkQuote,
   commentBody,
+  type Mention,
   type StoredAnchor,
   type ThreadAction,
   type ThreadStatus,
@@ -2883,7 +2884,12 @@ export class LibraryStore {
         const id = action.kind === "open" ? this.openThread(w, action) : this.actOn(w, action);
         const view = this.threadViews(this.threadRows("t.id = ?", [id]), true)[0];
         if (!view) throw new Error("thread vanished");
-        return { request_id: ctx.request_id, seq: this.headSeq(), thread: view };
+        return {
+          request_id: ctx.request_id,
+          seq: this.headSeq(),
+          thread: view,
+          people: this.peopleOf(id),
+        };
       }),
     );
   }
@@ -2944,6 +2950,7 @@ export class LibraryStore {
           id: commentId,
           body,
           anchor: anchor as unknown as JsonObject | null,
+          ...mentionsMeta(a.mentions),
         },
       },
     });
@@ -2993,7 +3000,7 @@ export class LibraryStore {
         comment: {
           kind: a.kind,
           thread: t.id,
-          ...(commentId ? { id: commentId, body } : {}),
+          ...(commentId ? { id: commentId, body, ...mentionsMeta(a.mentions) } : {}),
         },
       },
     });
@@ -3033,6 +3040,32 @@ export class LibraryStore {
     );
   }
 
+  /**
+   * The people a thread's action may concern, by users id from each event's `by`: who opened or
+   * wrote in the thread, and who wrote or verified its concept (TEMPRA-72).
+   */
+  private peopleOf(thread: string): CommentResult["people"] {
+    const persons = (where: string, ...params: SqlValue[]) =>
+      this.sql
+        .all<{ person: string | null }>(
+          `SELECT DISTINCT json_extract(meta, '$.by.person') AS person FROM events
+           WHERE ${where} AND meta IS NOT NULL LIMIT 100`,
+          ...params,
+        )
+        .flatMap((r) => (r.person ? [r.person] : []));
+    const t = this.sql.all<{ concept_id: string }>(
+      "SELECT concept_id FROM threads WHERE id = ?",
+      thread,
+    )[0];
+    return {
+      participants: persons(
+        "op = 'comment' AND json_extract(meta, '$.comment.thread') = ? AND json_extract(meta, '$.comment.body') IS NOT NULL",
+        thread,
+      ),
+      writers: t ? persons("op NOT IN ('comment', 'move') AND concept_id = ?", t.concept_id) : [],
+    };
+  }
+
   /** A concept's text at head, which anchors quote. */
   private textOf(e: Entry) {
     return docText(this.record(e.hash).doc);
@@ -3051,6 +3084,7 @@ export class LibraryStore {
   private threadViews(rows: ThreadRow[], withComments: boolean): ThreadView[] {
     const byThread = new Map<string, CommentView[]>();
     const actions = new Map<string, ThreadAction[]>();
+    const mentioned = new Map<string, string[]>();
     if (rows.length > 0 && withComments) {
       // Every action from the ledger, where resolve and reopen are recorded too.
       const ids = [...new Set(rows.map((r) => r.concept_id))];
@@ -3061,9 +3095,15 @@ export class LibraryStore {
       );
       for (const e of events) {
         const c = (e.meta ? (JSON.parse(e.meta) as JsonObject) : {}).comment as
-          | { kind?: string; thread?: string; id?: string }
+          | { kind?: string; thread?: string; id?: string; mentions?: Mention[] }
           | undefined;
         if (!c?.thread || !c.kind) continue;
+        if (c.id && Array.isArray(c.mentions) && c.mentions.length > 0) {
+          mentioned.set(
+            c.id,
+            c.mentions.map((m) => ("handle" in m ? `@${m.handle}` : `@${m.name}`)),
+          );
+        }
         const list = actions.get(c.thread) ?? [];
         list.push({
           kind: c.kind as ThreadAction["kind"],
@@ -3081,7 +3121,15 @@ export class LibraryStore {
       );
       for (const c of comments) {
         const list = byThread.get(c.thread_id) ?? [];
-        list.push({ id: c.id, actor: c.actor, body: c.body, ts: c.ts, seq: c.seq });
+        const mentions = mentioned.get(c.id);
+        list.push({
+          id: c.id,
+          actor: c.actor,
+          body: c.body,
+          ts: c.ts,
+          seq: c.seq,
+          ...(mentions ? { mentions } : {}),
+        });
         byThread.set(c.thread_id, list);
       }
     }
@@ -3501,8 +3549,67 @@ export class LibraryStore {
     };
   }
 
-  /** Counts for the MCP `start` entry point. */
-  summary() {
+  /**
+   * What happened since a person last looked (TEMPRA-72): changes to content after `since`, by
+   * anyone but that person acting in the app themselves (their agents count: the owner wants to
+   * see what their agents did). Counted in requests, so a batch is one change.
+   */
+  activity(opts: { since: number; person?: string | null }) {
+    const since = Math.max(0, Math.floor(opts.since || 0));
+    const row = this.sql.all<{ n: number; last: number | null }>(
+      `SELECT COUNT(DISTINCT request_id) AS n, MAX(seq) AS last FROM events
+       WHERE seq > ? AND op != 'comment'
+         AND NOT (? != '' AND COALESCE(json_extract(meta, '$.by.person'), '') = ?
+                  AND json_extract(meta, '$.by.agent') IS NULL)`,
+      since,
+      opts.person ?? "",
+      opts.person ?? "",
+    )[0];
+    return { since, head: this.headSeq(), changes: row?.n ?? 0 };
+  }
+
+  /**
+   * The daily digest's counts for one library (TEMPRA-74): what happened since `since` (an ISO
+   * time), by people and by agents, comment threads opened and resolved, and where the library
+   * stands: the library health summary's counts (TEMPRA-66) and its unverified concepts.
+   */
+  digest(opts: { since: string }) {
+    const rows = this.sql.all<{
+      actor: string;
+      op: string;
+      meta: string | null;
+      request_id: string;
+    }>("SELECT actor, op, meta, request_id FROM events WHERE ts >= ? ORDER BY seq", opts.since);
+    const people = new Set<string>();
+    const agents = new Set<string>();
+    let opened = 0;
+    let resolved = 0;
+    for (const r of rows) {
+      if (r.op === "comment") {
+        const kind = (r.meta ? (JSON.parse(r.meta) as JsonObject) : {}).comment as
+          | { kind?: string }
+          | undefined;
+        if (kind?.kind === "open") opened++;
+        if (kind?.kind === "resolve") resolved++;
+        continue;
+      }
+      (r.actor.startsWith("human:") ? people : agents).add(r.request_id);
+    }
+    // The library's health summary (TEMPRA-66), as the daily pass left it.
+    const health = this.health();
+    return {
+      head: this.headSeq(),
+      changes: { people: people.size, agents: agents.size },
+      threads: { opened, resolved },
+      health: { ...health.counts, unverified: health.unverified.total } as Record<string, number>,
+    };
+  }
+
+  /**
+   * Counts for the MCP `start` entry point and the library list; with a person's cursor, also
+   * what changed since they last looked (`activity`).
+   */
+  summary(seen?: { since: number; person?: string | null }) {
     const snap = this.snapshot();
     const types: Record<string, number> = {};
     let concepts = 0;
@@ -3527,6 +3634,7 @@ export class LibraryStore {
       open_comments: [...this.openThreadCounts().entries()]
         .filter(([id]) => snap.byId.has(id))
         .reduce((n, [, c]) => n + c, 0),
+      ...(seen ? { activity: this.activity(seen) } : {}),
     };
   }
 
@@ -3624,6 +3732,12 @@ export interface WorkItem {
   inbound_links: number;
   /** For a `comment` item: the thread to answer. */
   thread?: string;
+}
+
+/** A comment's mentions for its event's meta: only when there are some. */
+function mentionsMeta(mentions: Mention[] | undefined): JsonObject {
+  if (!mentions || mentions.length === 0) return {};
+  return { mentions: mentions.slice(0, 20) as unknown as JsonObject[] } as JsonObject;
 }
 
 /** `s` on one line, cut to `n` characters. */

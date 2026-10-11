@@ -15,6 +15,7 @@ import {
   SlidersHorizontal,
 } from "lucide-react";
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
+import { useUnread } from "./inbox";
 import type { Me } from "./ui";
 
 /*
@@ -127,6 +128,21 @@ export function Menu(props: {
   );
 }
 
+/** The inbox and its unread count (TEMPRA-72), beside the avatar in every header. */
+export function InboxLink() {
+  const unread = useUnread();
+  return (
+    <a
+      className="inbox-link"
+      href="/inbox"
+      aria-label={unread > 0 ? `Inbox, ${unread} unread` : "Inbox"}
+    >
+      Inbox
+      {unread > 0 && <span className="count">{unread}</span>}
+    </a>
+  );
+}
+
 /** The avatar and its menu: the account's pages and signing out. */
 export function AccountMenu({ me }: { me: Me | null }) {
   const handle = me?.handle ?? "";
@@ -139,6 +155,7 @@ export function AccountMenu({ me }: { me: Me | null }) {
       align="end"
     >
       {me && <div className="menu-who">{me.email}</div>}
+      <a href="/inbox">Inbox</a>
       <a href="/connect">Connect an agent</a>
       <a href="/tokens">Tokens</a>
       <a href="/apps">Connected apps</a>

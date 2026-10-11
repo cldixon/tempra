@@ -1,7 +1,7 @@
 import type { FormEvent } from "react";
 import { useEffect } from "react";
 import { api, useLoad } from "../api";
-import { lastSeen, markSeen, useFeed, useTrailing } from "../live";
+import { markSeen, useFeed, useLastSeen, useTrailing } from "../live";
 import { type Done, navigate } from "../router";
 import { Chip, plural, Status, useTitle, when } from "../ui";
 import type { LedgerFilters, Urls } from "../urls";
@@ -60,7 +60,7 @@ export function Ledger(props: { urls: Urls; filters: LedgerFilters; done: Done; 
     },
     reload,
   );
-  const seen = lastSeen(urls);
+  const seen = useLastSeen(urls);
   const newest =
     loaded.state === "ready" ? (loaded.data.requests[0]?.events.at(-1)?.seq ?? null) : null;
   useEffect(() => {

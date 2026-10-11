@@ -14,7 +14,14 @@ export interface StoredAnchor extends QuoteSelector {
   seq: number;
 }
 
-export type CommentAction =
+/**
+ * Who a comment names (TEMPRA-73), resolved by the Worker before the write against the people
+ * who can reach the library, and kept in the action's meta as they were then: a person by users
+ * id and the handle used, or a library's managed agent (none yet: TEMPRA-69 will add them).
+ */
+export type Mention = { user: string; handle: string } | { agent: string; name: string };
+
+export type CommentAction = (
   | {
       kind: "open";
       path: string;
@@ -28,7 +35,11 @@ export type CommentAction =
     }
   | { kind: "reply"; thread: string; body: string }
   | { kind: "resolve"; thread: string; body?: string | null }
-  | { kind: "reopen"; thread: string; body?: string | null };
+  | { kind: "reopen"; thread: string; body?: string | null }
+) & {
+  /** Resolved by the Worker (notify.ts); never taken from a client as sent. */
+  mentions?: Mention[];
+};
 
 export type ThreadStatus = "open" | "resolved";
 
@@ -38,6 +49,8 @@ export interface CommentView {
   body: string;
   ts: string;
   seq: number;
+  /** The handles (or agent names) the comment mentioned, as they were when it was written. */
+  mentions?: string[];
 }
 
 export interface ThreadView {
@@ -79,6 +92,11 @@ export interface CommentResult {
   request_id: string;
   seq: number;
   thread: ThreadView;
+  /**
+   * Who the action may concern, as users ids from the ledger's `by` (notify.ts decides who is
+   * told): the people who opened or wrote in the thread, and who wrote or verified the concept.
+   */
+  people: { participants: string[]; writers: string[] };
 }
 
 /** A comment body, trimmed; refused when empty or too long. */

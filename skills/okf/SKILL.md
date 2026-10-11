@@ -100,7 +100,7 @@ Comments are how people ask you for changes. A thread sits on a concept, often o
 - Make the change the thread asks for with the normal write tools, then `comment` with `reply` saying what you did, and `resolve` (a resolve can carry that closing reply).
 - Unsure what is meant? `reply` with a question and leave the thread open. If the last reply is yours, wait for an answer.
 - Resolve only what you addressed. `reopen` a thread you resolved by mistake.
-- You can start a thread too (`comment` with `open`, a `path` and optionally a `quote` copied from the body as `read` shows it; it is matched by the text it reads as, markup aside), to ask a person something you cannot decide.
+- You can start a thread too (`comment` with `open`, a `path` and optionally a `quote` copied from the body as `read` shows it; it is matched by the text it reads as, markup aside), to ask a person something you cannot decide. Write `@handle` in a comment to address a person who can reach the library: it lands in their inbox (and their mail, if they have it on); `comments` shows who each comment mentioned.
 - An outdated thread's quote is gone from the body; it may already be fixed. Check, then answer it.
 - A concept with open threads cannot be deleted (409 `open_comments`): answer and resolve them first.
 

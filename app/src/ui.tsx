@@ -1,6 +1,6 @@
 import { Component, type ReactNode, useEffect, useState } from "react";
 import type { ApiError, Loaded } from "./api";
-import { AccountMenu } from "./chrome";
+import { AccountMenu, InboxLink } from "./chrome";
 import { baseName, type Urls } from "./urls";
 
 /** The person the app acts for (GET /api/v1/me). */
@@ -18,6 +18,7 @@ export function Header({ me }: { me: Me | null }) {
         Tempra
       </a>
       <span className="spacer" />
+      <InboxLink />
       <AccountMenu me={me} />
     </header>
   );

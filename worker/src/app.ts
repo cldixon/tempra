@@ -13,8 +13,10 @@ import {
   mediaFor,
   putBlob,
 } from "./client";
+import { notificationsOf, registerInboxApi } from "./inbox-api";
 import { registerLegalRoutes } from "./legal";
 import { deleteLibrary } from "./lifecycle";
+import { type Notifications, postComment } from "./notify";
 import { registerAppRoutes } from "./oauth/routes";
 import { splitFrontmatter } from "./okf/concept";
 import { normalizePath, underPrefix } from "./okf/paths";
@@ -62,6 +64,8 @@ export interface Deps extends UsageDeps {
    * (feed.ts); `prefix` limits it to a directory.
    */
   feed?: (doId: string, request: Request, prefix: string) => Promise<Response>;
+  /** The inbox, read cursors and mail settings in D1 (notify.ts); absent, nobody is notified. */
+  notifications?: Notifications | null;
 }
 
 export interface RecoveryDeps {
@@ -664,7 +668,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
           from: typeof body.anchor.from === "number" ? body.anchor.from : undefined,
         }
       : null;
-    const res = await c.var.lib.comment(requestContext(c), {
+    const res = await postComment(c.var.deps, c.var.token, c.var.lib, requestContext(c), {
       kind: "open",
       path: body.path,
       body: String(body.body ?? ""),
@@ -691,7 +695,13 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
       throw new OkfError(400, "bad_json", "The request body must be JSON.");
     }
     const text = typeof raw.body === "string" ? raw.body : "";
-    return c.json(await c.var.lib.comment(requestContext(c), { kind, thread: id, body: text }));
+    return c.json(
+      await postComment(c.var.deps, c.var.token, c.var.lib, requestContext(c), {
+        kind,
+        thread: id,
+        body: text,
+      }),
+    );
   };
   app.post(`${BASE}/comments/:thread`, act("reply"));
   app.post(`${BASE}/comments/:thread/resolve`, act("resolve"));
@@ -749,6 +759,22 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     const inviter = c.var.token.created_by ?? "";
     const { renewed } = await accounts.invite(ref.id, invitee.id, role, inviter);
     if (!renewed) {
+      // The invitation mails at once, below; the inbox keeps it too (TEMPRA-72).
+      await c.var.deps.notifications
+        ?.add([
+          {
+            user: invitee.id,
+            library: ref.id,
+            kind: "invitation",
+            place: `${ref.owner}/${ref.slug}`,
+            actor: c.var.token.actor,
+            by_user: inviter || null,
+            excerpt: `${role === "write" ? "Read and write" : "Read and comment"} access`,
+          },
+        ])
+        .catch((e) =>
+          console.error(JSON.stringify({ notify_failed: "invitation", error: String(e) })),
+        );
       const origin = new URL(c.req.url).origin;
       const who = c.var.token.actor.replace(/^human:/, "@");
       await c.var.deps.mailer
@@ -779,6 +805,25 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     return c.body(null, 204);
   });
 
+  /** Tells a member the owner changed their access (TEMPRA-72); never fails the change. */
+  const accessChanged = async (c: C, user: string, excerpt: string) => {
+    const ref = c.var.token.library;
+    await c.var.deps.notifications
+      ?.add([
+        {
+          user,
+          library: ref.id,
+          kind: "access",
+          place: `${ref.owner}/${ref.slug}`,
+          actor: c.var.token.actor,
+          by_user: c.var.token.created_by ?? null,
+          excerpt,
+          mail: true,
+        },
+      ])
+      .catch((e) => console.error(JSON.stringify({ notify_failed: "access", error: String(e) })));
+  };
+
   /** A member by handle, for changing their role or removing them. */
   const memberNamed = async (c: C) => {
     const accounts = c.var.deps.accounts;
@@ -799,6 +844,11 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
       role,
       c.var.token.created_by ?? null,
     );
+    await accessChanged(
+      c,
+      person.id,
+      role === "write" ? "Now read and write" : "Now read and comment",
+    );
     return c.json({ handle: person.handle, role });
   });
 
@@ -806,9 +856,51 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   app.delete(`${BASE}/members/:member`, async (c) => {
     sessionOnly(c, "Members are removed");
     const person = await memberNamed(c);
-    if (person.id !== c.var.token.created_by) requireOwner(c.var.token.role, "remove members");
+    const leaving = person.id === c.var.token.created_by;
+    if (!leaving) requireOwner(c.var.token.role, "remove members");
     await c.var.deps.accounts.unshare(c.var.token.library.id, person.id);
+    if (!leaving) await accessChanged(c, person.id, "Removed from the library");
     return c.body(null, 204);
+  });
+
+  // ------------------------------------------------------------------ read state and tally
+
+  // "Seen up to seq N" (TEMPRA-72): the person's cursor in this library, on the server so it
+  // follows them across devices. It only moves forward.
+  app.get(`${BASE}/seen`, async (c) => {
+    sessionOnly(c, "Read state is kept");
+    const n = notificationsOf(c.var.deps);
+    const seen = await n.seen(c.var.token.created_by ?? "");
+    return c.json({ seq: seen[c.var.token.library.id] ?? null });
+  });
+
+  app.put(`${BASE}/seen`, async (c) => {
+    sessionOnly(c, "Read state is kept");
+    const seq = (await json<{ seq?: unknown }>(c)).seq;
+    if (typeof seq !== "number" || !Number.isInteger(seq) || seq < 0) {
+      throw new OkfError(400, "bad_request", "Send { seq: <ledger sequence> }.");
+    }
+    const n = notificationsOf(c.var.deps);
+    return c.json({
+      seq: await n.setSeen(c.var.token.created_by ?? "", c.var.token.library.id, seq),
+    });
+  });
+
+  // The library's tally for the person (TEMPRA-72): changes by others since they last looked,
+  // and unread items for them here. One call to the library and one to D1.
+  app.get(`${BASE}/tally`, async (c) => {
+    sessionOnly(c, "The tally is read");
+    const n = notificationsOf(c.var.deps);
+    const user = c.var.token.created_by ?? "";
+    const [seen, unread] = await Promise.all([n.seen(user), n.unread(user)]);
+    const since = seen[c.var.token.library.id] ?? null;
+    const activity = await c.var.lib.activity({ since: since ?? 0, person: user });
+    return c.json({
+      seen: since,
+      head: activity.head,
+      changes: since === null ? 0 : activity.changes,
+      for_you: unread.libraries[c.var.token.library.id] ?? 0,
+    });
   });
 
   // ------------------------------------------------------------------ signed downloads
@@ -867,10 +959,19 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   app.get("/api/v1/libraries", async (c) => {
     const { d, user } = await human(c);
     const refs = await d.accounts.reachable(user.id);
+    // The tally (TEMPRA-72): unread items and cursors from D1 in one go; changes since the
+    // cursor ride on the summary call each library already gets.
+    const n = d.notifications;
+    const [seen, unread] = n
+      ? await Promise.all([n.seen(user.id), n.unread(user.id)])
+      : [{} as Record<string, number>, { libraries: {} as Record<string, number> }];
     const libraries = await Promise.all(
       refs.map(async ({ id, slug, owner, do_id, role }) => {
         const lib = await d.libraryByDoId(do_id);
-        const s = lib ? await lib.summary() : null;
+        const since = seen[id];
+        const s = lib
+          ? await lib.summary(since === undefined ? undefined : { since, person: user.id })
+          : null;
         return {
           id,
           owner,
@@ -881,6 +982,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
             concepts: s.concepts,
             attachments: s.attachments,
             open_work: s.open_work,
+            tally: { changes: s.activity?.changes ?? 0, for_you: unread.libraries[id] ?? 0 },
             health: s.health,
           }),
         };
@@ -917,6 +1019,12 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     return who.user;
   });
 
+  registerInboxApi(app, deps, async (c, d) => {
+    const who = await principal(c as C, d);
+    if (!("user" in who)) throw new OkfError(403, "session_only", "Sign in to the app.");
+    return who.user;
+  });
+
   // The signed-in person's pending invitations, and their answer (TEMPRA-61).
   const invitee = async (c: C) => {
     const d = deps(c.env);
@@ -939,6 +1047,9 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
         answer === "accept",
       );
       if (!done) throw new OkfError(404, "not_found", "No such open invitation for you.");
+      await d.notifications
+        ?.settle(user.id, "invitation", `${done.owner}/${done.slug}`)
+        .catch((e) => console.error(JSON.stringify({ notify_failed: "settle", error: String(e) })));
       return c.json({ ...done, accepted: answer === "accept" });
     });
   }

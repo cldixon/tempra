@@ -17,6 +17,16 @@ interface Library {
   open_work?: number;
   /** The daily check's summary: open work by kind (TEMPRA-66). */
   health?: Health;
+  /** Since the person last looked (TEMPRA-72): changes by others, and items for them here. */
+  tally?: { changes: number; for_you: number };
+}
+
+/** A library's tally as a few words: "2 for you · 5 new"; empty for none. */
+export function tallyText(l: Pick<Library, "tally">): string {
+  const parts: string[] = [];
+  if (l.tally?.for_you) parts.push(`${l.tally.for_you} for you`);
+  if (l.tally?.changes) parts.push(`${l.tally.changes} new`);
+  return parts.join(" · ");
 }
 
 /** The account's libraries: one row each, a New button, and how agents get in. */
@@ -68,6 +78,7 @@ export function Libraries() {
                         {/* Another account's library (shared) says whose it is. */}
                         {owners.size > 1 && <span className="owner">{l.owner}/</span>}
                         {l.slug}
+                        {tallyText(l) && <span className="tally">{tallyText(l)}</span>}
                         {l.health && healthWords(l.health.counts) && (
                           <span className="lib-health">{healthWords(l.health.counts)}</span>
                         )}

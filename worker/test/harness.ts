@@ -16,6 +16,7 @@ import { d1Accounts, type LibraryRef } from "../src/accounts";
 import type { Deps } from "../src/app";
 import { d1Authenticate, type TokenInfo } from "../src/auth";
 import { type BlobStore, callStore, type LibraryClient, makeClient } from "../src/client";
+import { d1Notifications } from "../src/notify";
 import { sha256Hex } from "../src/okf/hash";
 import type { RestoreRecord } from "../src/recovery";
 import { d1Sessions, SESSION_COOKIE } from "../src/session";
@@ -260,7 +261,14 @@ export function setup() {
   );
   const accounts = d1Accounts(d1);
   const sessions = d1Sessions(d1);
-  const outbox: { to: string; subject: string; text: string }[] = [];
+  const notifications = d1Notifications(d1);
+  const outbox: {
+    to: string;
+    subject: string;
+    text: string;
+    html?: string;
+    headers?: Record<string, string>;
+  }[] = [];
   /** Metered usage, as the Worker would write it to Analytics Engine. */
   const usage: UsageEvent[] = [];
   // No cache, so a revocation shows at once.
@@ -352,6 +360,7 @@ export function setup() {
     },
     accounts,
     sessions,
+    notifications,
     async destroyLibrary(doId) {
       stores.delete(doId);
       clients.delete(doId);
@@ -459,6 +468,7 @@ export function setup() {
     env,
     accounts,
     sessions,
+    notifications,
     outbox,
     db,
     deps,

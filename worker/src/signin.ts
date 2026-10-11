@@ -19,7 +19,15 @@ import {
  */
 
 export interface Mailer {
-  send(msg: { to: string; subject: string; text: string }): Promise<void>;
+  send(msg: {
+    to: string;
+    subject: string;
+    text: string;
+    /** Minimal HTML beside the text (notification mail). */
+    html?: string;
+    /** Extra headers: List-Unsubscribe and List-Unsubscribe-Post. */
+    headers?: Record<string, string>;
+  }): Promise<void>;
 }
 
 type AppEnv = { Bindings: Cloudflare.Env };
@@ -30,7 +38,7 @@ function isLoopback(url: URL): boolean {
 }
 
 /** Local dev and the gate: no mail provider, links shown on the page and logged. */
-function devSignIn(req: Request, env: Cloudflare.Env): boolean {
+export function devSignIn(req: Request, env: Cloudflare.Env): boolean {
   return env.DEV_SIGNIN === "1" && isLoopback(new URL(req.url));
 }
 

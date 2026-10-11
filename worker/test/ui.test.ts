@@ -62,6 +62,7 @@ describe("the app's pages (TEMPRA-9)", () => {
       "/tokens",
       "/apps",
       "/account",
+      "/inbox",
     ]) {
       const r = await page(s, path);
       expect(r.status).toBe(200);

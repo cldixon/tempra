@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "./api";
 import { Icon } from "./chrome";
-import { type FeedEvent, lastSeen, useFeed } from "./live";
+import { type FeedEvent, useFeed, useLastSeen } from "./live";
 import { prefetchFile } from "./prefetch";
 import { baseName, dirOf, type Urls } from "./urls";
 
@@ -102,7 +102,7 @@ export function Tree(props: {
   const [seq, setSeq] = useState<number | null>(null);
   const [active, setActive] = useState<Map<string, { actor: string; at: number }>>(new Map());
   const [now, setNow] = useState(() => Date.now());
-  const seen = lastSeen(urls);
+  const seen = useLastSeen(urls);
   const dirs = useMemo(() => (files ? buildDirs(files) : null), [files]);
 
   // Only the latest request's answer is kept (two loads may cross).

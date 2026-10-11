@@ -11,7 +11,9 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { api, useLoad } from "./api";
-import { AccountMenu, Icon, Menu } from "./chrome";
+import { AccountMenu, Icon, InboxLink, Menu } from "./chrome";
+import { inboxChanged } from "./inbox";
+import { SEEN_EVENT, useFeed, useTrailing } from "./live";
 import { libraryName, useLibraries, useRole } from "./role";
 import { lastNavigation } from "./router";
 import { Switcher } from "./Switcher";
@@ -249,6 +251,28 @@ export function Workspace(props: {
   );
   const counts = stats.state === "ready" ? stats.data : null;
 
+  // What changed since the person last looked (TEMPRA-72): the Ledger row's count, which the
+  // ledger clears. It follows the feed; a comment may be for the person, so the inbox reloads.
+  const tally = useLoad(`tally ${urls.owner}/${urls.slug}`, () =>
+    api<{ changes: number; for_you: number }>(urls.api("tally")),
+  );
+  const reloadTally = useTrailing(tally.reload, 1500);
+  useFeed(
+    urls,
+    null,
+    (events) => {
+      reloadTally();
+      // The inbox item is written just after the comment commits: ask a moment later.
+      if (events.some((e) => e.op === "comment")) setTimeout(inboxChanged, 1500);
+    },
+    reloadTally,
+  );
+  useEffect(() => {
+    window.addEventListener(SEEN_EVENT, tally.reload);
+    return () => window.removeEventListener(SEEN_EVENT, tally.reload);
+  }, [tally.reload]);
+  const fresh = tally.state === "ready" ? tally.data.changes : 0;
+
   const classes = ["workspace", hasPanel ? "has-panel" : ""].filter(Boolean);
   return (
     <div className={classes.join(" ")}>
@@ -270,6 +294,7 @@ export function Workspace(props: {
         </span>
         <LibraryMenu urls={urls} place={place} />
         <span className="spacer" />
+        <InboxLink />
         <AccountMenu me={props.me} />
       </header>
       <section
@@ -288,6 +313,11 @@ export function Workspace(props: {
             <li>
               <a href={urls.ledger()} aria-current={place.view === "ledger" ? "page" : undefined}>
                 <span>Ledger</span>
+                {fresh > 0 && (
+                  <span className="count" title="Changes since you last looked">
+                    {fresh} new
+                  </span>
+                )}
               </a>
             </li>
             <li>
