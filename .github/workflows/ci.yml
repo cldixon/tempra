@@ -44,9 +44,18 @@ jobs:
         with:
           bun-version-file: package.json
       - run: bun install --frozen-lockfile
-      - run: bun run gate
+      - run: mkdir -p gate-screenshots && bun run gate
         env:
           CF_SEND_TELEMETRY: "false"
+          # Each browser step as it starts, so a hang shows where it is; screenshots of failures.
+          GATE_TRACE: "1"
+          GATE_SCREENSHOTS: ${{ github.workspace }}/gate-screenshots
+      - if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gate-screenshots
+          path: gate-screenshots
+          if-no-files-found: ignore
 
   # worker/ is the deployable project: it must install and build with nothing from the rest of
   # this repository but the two packages it imports. `cf deploy --dry-run` builds and validates
