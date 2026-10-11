@@ -420,7 +420,11 @@ async function claudeLoop(
       };
     });
     messages.push({ role: "assistant", content: res.content });
-    if (res.stop_reason === "refusal") throw new OkfError(422, "refusal", "The model refused.");
+    if (res.stop_reason === "refusal") {
+      // Recorded as a failure with its category, to judge whether fallbacks matter here.
+      const category = res.stop_details?.category ?? "none";
+      throw new OkfError(422, "refusal", `The model refused (stop_details.category: ${category}).`);
+    }
     if (res.stop_reason !== "tool_use") {
       return res.content
         .flatMap((b) => (b.type === "text" ? [b.text] : []))
