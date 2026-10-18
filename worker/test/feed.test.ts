@@ -127,9 +127,9 @@ describe("GET /feed", () => {
 
   function wired() {
     const s = setup();
-    const calls: { doId: string; prefix: string }[] = [];
-    s.deps.feed = async (doId, _req, prefix) => {
-      calls.push({ doId, prefix });
+    const calls: { doId: string; prefix: string; account: string }[] = [];
+    s.deps.feed = async (doId, _req, { prefix, account }) => {
+      calls.push({ doId, prefix, account });
       // bun cannot make a 101; the Durable Object does that in workerd.
       return new Response("feed", { status: 200 });
     };
@@ -148,7 +148,7 @@ describe("GET /feed", () => {
       headers: { ...upgrade, Origin: ORIGIN },
     });
     expect(r.status).toBe(200);
-    expect(calls).toEqual([{ doId: "lib-1", prefix: "notes" }]);
+    expect(calls).toEqual([{ doId: "lib-1", prefix: "notes", account: "owner" }]);
     // Counted once, as a connection.
     expect(s.usage.filter((u) => u.kind === "feed")).toEqual([
       { kind: "feed", account: "owner", library: "lib-1" },

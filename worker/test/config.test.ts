@@ -12,6 +12,7 @@ async function counters(mode: string) {
     usage: worker.env.USAGE?.name,
     write: worker.env.WRITE_LIMITER?.namespace,
     request: worker.env.REQUEST_LIMITER?.namespace,
+    session: worker.env.SESSION_LIMITER?.namespace,
   };
 }
 
@@ -22,6 +23,7 @@ describe("each deployment meters and rate-limits on its own", () => {
       usage: "tempra_usage",
       write: "1001",
       request: "1002",
+      session: "1003",
     });
   });
 
@@ -30,14 +32,21 @@ describe("each deployment meters and rate-limits on its own", () => {
       await counters("production"),
       await counters("staging"),
       // The preview mode reads its ids from the environment; the deployment itself is the same.
-      (({ usage, limiters }) => ({ usage, write: limiters?.write, request: limiters?.request }))(
-        previewDeployment("7"),
-      ),
+      (({ usage, limiters }) => ({
+        usage,
+        write: limiters?.write,
+        request: limiters?.request,
+        session: limiters?.session,
+      }))(previewDeployment("7")),
     ];
-    for (const key of ["usage", "write", "request"] as const) {
+    for (const key of ["usage", "write", "request", "session"] as const) {
       const values = all.map((c) => c[key]);
       expect(new Set(values).size).toBe(values.length);
     }
+    // No namespace is used twice anywhere, within a deployment or across them.
+    const namespaces = all.flatMap((c) => [c.write, c.request, c.session]);
+    expect(namespaces.every(Boolean)).toBe(true);
+    expect(new Set(namespaces).size).toBe(namespaces.length);
     expect(all[1]?.usage).toBe("tempra_usage_staging");
   });
 });
