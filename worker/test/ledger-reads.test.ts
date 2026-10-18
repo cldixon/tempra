@@ -1,9 +1,11 @@
-import type { Database } from "bun:sqlite";
+import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { type LogRequest, renderLog } from "../src/okf/derived";
 import { normalizeDir, underPrefix } from "../src/okf/paths";
-import type { EventRow, LibraryStore, RequestContext } from "../src/store/store";
+import type { SqlHandle } from "../src/store/sql";
+import { type EventRow, LibraryStore, type RequestContext } from "../src/store/store";
 import { changes, library, md } from "./changes";
+import { bunSqlHandle } from "./sqlite";
 
 /**
  * TEMPRA-86: summary, health, stats, contributors and log.md read kept counts and narrower
@@ -62,6 +64,50 @@ describe("summary and health without the whole ledger (TEMPRA-86)", () => {
       if (mine.total > 0) checked++;
     }
     expect(checked).toBeGreaterThan(5);
+  });
+});
+
+describe("start, the library home and the list read no more of the ledger than its head", () => {
+  test("summary, health, stats and contributors look events up by seq only", () => {
+    const db = new Database(":memory:");
+    const inner = bunSqlHandle(db);
+    const sent: string[] = [];
+    const sql: SqlHandle = {
+      all: (q, ...p) => {
+        sent.push(q.replace(/\s+/g, " "));
+        return inner.all(q, ...p);
+      },
+      run: (q, ...p) => inner.run(q, ...p),
+      script: (q) => inner.script(q),
+      transaction: (fn) => inner.transaction(fn),
+    };
+    const store = new LibraryStore(sql, { now: () => new Date("2026-10-01T00:00:00Z") });
+    const hashes = new Map<string, string>();
+    for (let i = 0; i < 20; i++) {
+      const path = `c${i % 4}.md`;
+      const res = store.apply({ actor: "a/b", request_id: `r${i}`, by: { person: "p" } }, [
+        { op: "write", path, content: md(`T ${i}`, `Body ${i}.\n`), if_match: hashes.get(path) },
+      ]);
+      hashes.set(path, res.results[0]?.hash as string);
+    }
+    let seen = 0;
+    for (const read of [
+      () => store.summary(),
+      () => store.health(),
+      () => store.maintainHealth(),
+      () => store.stats(),
+      () => store.contributors(),
+    ]) {
+      sent.length = 0;
+      read();
+      const ledger = sent.filter((q) => /\b(FROM|JOIN) events\b/.test(q));
+      // The head (the primary key's last row) or one event by its seq; never a scan.
+      for (const q of ledger) {
+        expect(q).toMatch(/MAX\(seq\)|e\.seq = |WHERE seq = \?/);
+      }
+      seen += ledger.length;
+    }
+    expect(seen).toBeGreaterThan(5);
   });
 });
 

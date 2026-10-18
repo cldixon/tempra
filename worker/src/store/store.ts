@@ -196,18 +196,44 @@ interface PathRow extends Entry {
   created_seq: number;
 }
 
+/** What resolving a link reads of a library at a seq: a file by id or by path. */
+interface View {
+  readonly seq: number;
+  readonly byId: { get(id: string): Entry | undefined };
+  lookup(path: string): Entry | undefined;
+}
+
 /** The path-to-hash map of a library as of a sequence number (spec: The ledger, Snapshots). */
-class Snapshot {
+class Snapshot implements View {
   readonly byPath = new Map<string, Entry>();
   readonly byId = new Map<string, Entry>();
   constructor(
-    readonly seq: number,
+    public seq: number,
     entries: Entry[],
   ) {
     for (const e of entries) {
       this.byPath.set(e.path, e);
       this.byId.set(e.concept_id, e);
     }
+  }
+
+  /**
+   * Moves a head snapshot to `seq` in place (TEMPRA-87): the files of `ids` as they stand now
+   * (`rows`; an id with no row was deleted). Every change to `paths` is an event naming its
+   * concept, so the ids a write's events name are all that can differ.
+   */
+  advance(seq: number, ids: Iterable<string>, rows: Entry[]) {
+    for (const id of ids) {
+      const old = this.byId.get(id);
+      if (!old) continue;
+      this.byId.delete(id);
+      if (this.byPath.get(old.path)?.concept_id === id) this.byPath.delete(old.path);
+    }
+    for (const e of rows) {
+      this.byPath.set(e.path, e);
+      this.byId.set(e.concept_id, e);
+    }
+    this.seq = seq;
   }
 
   /** A path as addressed by a client: with or without the `.md` suffix. */
@@ -219,6 +245,37 @@ class Snapshot {
 
   sorted(): Entry[] {
     return [...this.byPath.values()].sort((a, b) => (a.path < b.path ? -1 : 1));
+  }
+}
+
+/**
+ * The head as `paths` holds it, looked up file by file with its indexes: what a write reads to
+ * resolve its own concepts' links, in place of a snapshot of every file (TEMPRA-87).
+ */
+class LiveView implements View {
+  private readonly ids = new Map<string, Entry | undefined>();
+  private readonly paths = new Map<string, Entry | undefined>();
+  readonly byId = { get: (id: string) => this.one(this.ids, "concept_id", id) };
+  constructor(
+    private readonly sql: SqlHandle,
+    readonly seq: number,
+  ) {}
+
+  lookup(path: string): Entry | undefined {
+    return (
+      this.one(this.paths, "path", path) ??
+      (path.endsWith(".md") ? undefined : this.one(this.paths, "path", `${path}.md`))
+    );
+  }
+
+  private one(memo: Map<string, Entry | undefined>, column: string, key: string) {
+    if (memo.has(key)) return memo.get(key);
+    const e = this.sql.all<Entry>(
+      `SELECT path, concept_id, hash, kind, last_seq AS seq FROM paths WHERE ${column} = ?`,
+      key,
+    )[0];
+    memo.set(key, e);
+    return e;
   }
 }
 
@@ -285,6 +342,9 @@ export interface StoreOptions {
 
 /** Reads are counted over this window for internal sources' usage (spec: What the service derives). */
 export const USAGE_WINDOW_DAYS = 30;
+
+/** Reads counted in memory before they are written to `access_log` (TEMPRA-87). */
+export const READ_FLUSH = 100;
 
 function iso(d: Date): string {
   return d.toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -392,6 +452,9 @@ export class LibraryStore {
   private readonly snapshots = new Map<number, Snapshot>();
   /** Missing-heading lint at head, by concept, for the seq it was worked out at (TEMPRA-86). */
   private anchorCache: { seq: number; lint: Map<string, LintWarning[]> } | null = null;
+  /** Reads counted in memory (TEMPRA-87), by day and concept, and how many in all. */
+  private readonly reads = new Map<string, Map<string, number>>();
+  private unflushed = 0;
   /** The write in progress: the seq it started from, and the files its content changes touched. */
   private touch: { before: number; ids: Set<string>; paths: Set<string> } | null = null;
   /** Committed writes since the kept lint's seq, in order: what each touched, from and to seq. */
@@ -410,6 +473,34 @@ export class LibraryStore {
     this.addStaleTimes();
     this.addStructure();
     this.addLedgerCounts();
+    this.addFtsRows();
+  }
+
+  /**
+   * Search rows are found by rowid through `fts_rows` (TEMPRA-87). Libraries from before get the
+   * table once, filled from the rowids their search rows already have.
+   */
+  private addFtsRows() {
+    if (this.sql.all("SELECT 1 FROM meta WHERE key = 'fts_rows'").length > 0) return;
+    this.sql.transaction(() => {
+      this.sql.script(
+        "CREATE TABLE IF NOT EXISTS fts_rows (concept_id TEXT PRIMARY KEY, fts_rowid INTEGER NOT NULL);",
+      );
+      this.sql.run("DELETE FROM fts_rows");
+      this.sql.run(
+        "INSERT OR REPLACE INTO fts_rows (concept_id, fts_rowid) SELECT concept_id, rowid FROM fts",
+      );
+      this.sql.run("INSERT INTO meta (key, value) VALUES ('fts_rows', '1')");
+    });
+  }
+
+  /** Removes a concept's search row, by rowid (TEMPRA-87). */
+  private dropSearchRow(id: string) {
+    this.sql.run(
+      "DELETE FROM fts WHERE rowid IN (SELECT fts_rowid FROM fts_rows WHERE concept_id = ?)",
+      id,
+    );
+    this.sql.run("DELETE FROM fts_rows WHERE concept_id = ?", id);
   }
 
   /**
@@ -615,12 +706,11 @@ export class LibraryStore {
   }
 
   /**
-   * The snapshot at `at` (default head). Committed snapshots are immutable and cached; `live`
-   * builds an uncached one from `paths`, for reads inside a write transaction.
+   * The snapshot at `at` (default head). Committed snapshots are cached; the head's is moved
+   * forward in place by each write (`settle`). Reads inside a write transaction use `live()`.
    */
-  private snapshot(at?: number, live = false): Snapshot {
+  private snapshot(at?: number): Snapshot {
     const head = this.headSeq();
-    if (live) return new Snapshot(head, this.headEntries());
     const seq = at === undefined ? head : at;
     if (!Number.isInteger(seq) || seq < 0 || seq > head) {
       throw new OkfError(400, "bad_seq", `Sequence ${at} is outside 0..${head}.`);
@@ -645,6 +735,11 @@ export class LibraryStore {
     if (this.snapshots.size > 32) this.snapshots.clear();
     this.snapshots.set(seq, snap);
     return snap;
+  }
+
+  /** The head inside a write transaction, file by file (TEMPRA-87). */
+  private live(): View {
+    return new LiveView(this.sql, this.headSeq());
   }
 
   private headEntries(): Entry[] {
@@ -690,7 +785,7 @@ export class LibraryStore {
     const extra: Record<string, unknown> = { ...e.extra, current_hash: row?.hash ?? null };
     if (typeof e.extra.current === "string") {
       if (row?.kind === "concept") {
-        extra.current = this.renderEntry(this.snapshot(undefined, true), row, false);
+        extra.current = this.renderEntry(this.live(), row, false);
       } else delete extra.current;
     }
     return new OkfError(e.status, e.code, e.message, extra);
@@ -766,9 +861,11 @@ export class LibraryStore {
   }
 
   private guard<T>(fn: () => T): T {
+    // The reads counted so far go in before the write, in their own transaction.
+    this.flushReads();
     try {
       const out = fn();
-      this.settleAnchors();
+      this.settle();
       return out;
     } catch (e) {
       // A rolled-back transaction may have cached state for sequence numbers it never committed.
@@ -781,19 +878,45 @@ export class LibraryStore {
   }
 
   /**
-   * Records what a committed write touched, for bringing the kept missing-heading lint up to date
-   * when it is next read (TEMPRA-86). Nothing is worked out on the write path.
+   * After a committed write: moves the head snapshot forward to it in place (TEMPRA-87), and
+   * records what it touched so the kept missing-heading lint catches up when next read
+   * (TEMPRA-86). What it touched is what its events name: their concepts, paths and moves' origins.
    */
-  private settleAnchors() {
+  private settle() {
     const touch = this.touch;
     this.touch = null;
-    if (!this.anchorCache || !touch) return;
+    if (!touch) return;
+    const head = this.headSeq();
+    if (head === touch.before) return;
+    for (const e of this.sql.all<{ concept_id: string; path: string; from: string | null }>(
+      "SELECT concept_id, path, json_extract(meta, '$.from_path') AS \"from\" FROM events WHERE seq > ?",
+      touch.before,
+    )) {
+      touch.ids.add(e.concept_id);
+      touch.paths.add(e.path);
+      if (typeof e.from === "string") touch.paths.add(e.from);
+    }
+    const snap = this.snapshots.get(touch.before);
+    if (snap) {
+      this.snapshots.delete(touch.before);
+      snap.advance(
+        head,
+        touch.ids,
+        this.sql.all<Entry>(
+          `SELECT path, concept_id, hash, kind, last_seq AS seq FROM paths
+           WHERE concept_id IN (SELECT value FROM json_each(?))`,
+          JSON.stringify([...touch.ids]),
+        ),
+      );
+      this.snapshots.set(head, snap);
+    }
+    if (!this.anchorCache) return;
     if (this.anchorTouched.length >= 1000) {
       this.anchorCache = null;
       this.anchorTouched = [];
       return;
     }
-    this.anchorTouched.push({ ...touch, after: this.headSeq() });
+    this.anchorTouched.push({ ...touch, after: head });
   }
 
   /**
@@ -912,18 +1035,8 @@ export class LibraryStore {
    * affected concepts.
    */
   private finish(w: WriteState, results: OpResult[]): OpResult[] {
-    if (this.touch) {
-      for (const e of this.sql.all<{ concept_id: string; path: string; from: string | null }>(
-        "SELECT concept_id, path, json_extract(meta, '$.from_path') AS \"from\" FROM events WHERE seq > ?",
-        this.touch.before,
-      )) {
-        this.touch.ids.add(e.concept_id);
-        this.touch.paths.add(e.path);
-        if (typeof e.from === "string") this.touch.paths.add(e.from);
-      }
-    }
     for (const id of w.affected) this.refreshBroken(id);
-    const snap = this.snapshot(undefined, true);
+    const snap = this.live();
     for (const r of results) {
       const id = w.written.get(r.path);
       if (!id || r.hash === null) continue;
@@ -1268,7 +1381,7 @@ export class LibraryStore {
    * decisions/link-lint-at-read-time, TEMPRA-41). `headings` caches each target version's anchors.
    */
   private anchorLint(
-    snap: Snapshot,
+    snap: View,
     e: Entry,
     headings = new Map<string, Set<string>>(),
   ): LintWarning[] {
@@ -1381,7 +1494,7 @@ export class LibraryStore {
     if (!Array.isArray(edits) || edits.length === 0) {
       throw new OkfError(400, "no_edits", "Send at least one { old, new } edit.");
     }
-    let doc = this.renderEntry(this.snapshot(undefined, true), row, false);
+    let doc = this.renderEntry(this.live(), row, false);
     for (const e of edits) {
       if (typeof e.old !== "string" || e.old === "" || typeof e.new !== "string") {
         throw new OkfError(
@@ -1815,13 +1928,17 @@ export class LibraryStore {
       });
     }
 
-    this.sql.run("DELETE FROM fts WHERE concept_id = ?", id);
+    this.dropSearchRow(id);
     this.sql.run(
       "INSERT INTO fts (concept_id, title, body, tags) VALUES (?, ?, ?, ?)",
       id,
       str(field(r, "title")) ?? "",
       searchText(r.doc),
       tags.join(" "),
+    );
+    this.sql.run(
+      "INSERT INTO fts_rows (concept_id, fts_rowid) VALUES (?, last_insert_rowid())",
+      id,
     );
 
     const nonLink = lint.filter((l) => l.code !== "broken_link");
@@ -1870,7 +1987,7 @@ export class LibraryStore {
       this.sql.run(`DELETE FROM ${t} WHERE concept_id = ?`, id);
     }
     this.sql.run("DELETE FROM links WHERE from_id = ?", id);
-    this.sql.run("DELETE FROM fts WHERE concept_id = ?", id);
+    this.dropSearchRow(id);
   }
 
   /**
@@ -1880,7 +1997,7 @@ export class LibraryStore {
    */
   private healLinksTo(w: WriteState, path: string, id: string) {
     const variants = [path, path.endsWith(".md") ? path.slice(0, -3) : `${path}.md`];
-    const where = `(to_path = ? OR to_path = ?) AND (to_id IS NULL OR to_id NOT IN (SELECT concept_id FROM paths))`;
+    const where = `(to_path = ? OR to_path = ?) AND (to_id IS NULL OR NOT EXISTS (SELECT 1 FROM paths p WHERE p.concept_id = links.to_id))`;
     const from = this.sql.all<{ from_id: string }>(
       `SELECT DISTINCT from_id FROM links WHERE ${where}`,
       ...variants,
@@ -1903,7 +2020,7 @@ export class LibraryStore {
   private refreshBroken(id: string): LintWarning[] {
     const broken = this.sql.all<{ to_path: string; raw: string; kind: string }>(
       `SELECT to_path, raw, kind FROM links WHERE from_id = ?
-         AND (to_id IS NULL OR to_id NOT IN (SELECT concept_id FROM paths))`,
+         AND (to_id IS NULL OR NOT EXISTS (SELECT 1 FROM paths p WHERE p.concept_id = links.to_id))`,
       id,
     );
     const exists = this.sql.all("SELECT 1 FROM paths WHERE concept_id = ?", id).length > 0;
@@ -1939,7 +2056,7 @@ export class LibraryStore {
   // ---------------------------------------------------------------- reads
 
   /** The href to render for a link, as of the snapshot (spec: Concept model, Reads and export). */
-  private href(snap: Snapshot, from: Entry, link: StoredLink | StoredSource): string {
+  private href(snap: View, from: Entry, link: StoredLink | StoredSource): string {
     if (isDerivedTarget(link)) return link.raw;
     const target = this.targetAt(snap, link);
     if (!target) return link.raw;
@@ -1962,7 +2079,7 @@ export class LibraryStore {
   }
 
   /** A link's target as of the snapshot: by ID, else by path, else through a redirect. */
-  private targetAt(snap: Snapshot, link: { path: string; target: string | null }) {
+  private targetAt(snap: View, link: { path: string; target: string | null }) {
     let target = link.target ? snap.byId.get(link.target) : undefined;
     if (!target) target = snap.lookup(link.path);
     if (!target) {
@@ -1976,7 +2093,7 @@ export class LibraryStore {
    * Stored lint with its `relative_link` items written anew from each link's current target, so
    * the path they suggest follows moves of either end (TEMPRA-46). Only where a write stored them.
    */
-  private freshLint(snap: Snapshot, e: Entry, lint: LintWarning[]): LintWarning[] {
+  private freshLint(snap: View, e: Entry, lint: LintWarning[]): LintWarning[] {
     if (!lint.some((l) => l.code === "relative_link")) return lint;
     const out = lint.filter((l) => l.code !== "relative_link");
     for (const l of this.record(e.hash).links) {
@@ -2014,7 +2131,7 @@ export class LibraryStore {
     return lint;
   }
 
-  private renderEntry(snap: Snapshot, e: Entry, computed: boolean, unstamped = false): string {
+  private renderEntry(snap: View, e: Entry, computed: boolean, unstamped = false): string {
     const stored = this.record(e.hash);
     const r = unstamped ? { ...stored, generated: null } : stored;
     const verified = this.verifiedAt(e.concept_id, snap.seq);
@@ -2026,7 +2143,7 @@ export class LibraryStore {
     });
   }
 
-  private computedValues(snap: Snapshot, e: Entry, r: ConceptRecord, verified: Verification[]) {
+  private computedValues(snap: View, e: Entry, r: ConceptRecord, verified: Verification[]) {
     const out: [string, Json][] = [
       ["trust_tier", trustTier(r.generated, verified)],
       ["stale", isStale(field(r, "stale_after"), this.clock().getTime())],
@@ -2038,24 +2155,60 @@ export class LibraryStore {
     return out;
   }
 
-  /** One more read of a concept's current version today (spec: usage-rollup maintainer). */
+  /**
+   * One more read of a concept's current version today (spec: usage-rollup maintainer), counted
+   * in memory so a read does not write (TEMPRA-87). Flushed to `access_log` by the next write,
+   * every READ_FLUSH reads, before the usage pass, and by the Durable Object's alarm.
+   */
   private countRead(id: string) {
-    this.sql.run(
-      `INSERT INTO access_log (day, concept_id, actor, reads) VALUES (?, ?, '', 1)
-       ON CONFLICT(day, concept_id, actor) DO UPDATE SET reads = reads + 1`,
-      iso(this.clock()).slice(0, 10),
-      id,
-    );
+    const day = iso(this.clock()).slice(0, 10);
+    let counts = this.reads.get(day);
+    if (!counts) {
+      counts = new Map();
+      this.reads.set(day, counts);
+    }
+    counts.set(id, (counts.get(id) ?? 0) + 1);
+    if (++this.unflushed >= READ_FLUSH) this.flushReads();
   }
 
-  /** Reads of a concept over the usage window, today included. */
+  /** Reads counted in memory and not yet in `access_log`. */
+  pendingReads(): number {
+    return this.unflushed;
+  }
+
+  /** Writes the reads counted in memory to `access_log`, in one transaction. */
+  flushReads(): number {
+    const n = this.unflushed;
+    if (n === 0) return 0;
+    this.sql.transaction(() => {
+      for (const [day, counts] of this.reads) {
+        for (const [id, reads] of counts) {
+          this.sql.run(
+            `INSERT INTO access_log (day, concept_id, actor, reads) VALUES (?, ?, '', ?)
+             ON CONFLICT(day, concept_id, actor) DO UPDATE SET reads = reads + excluded.reads`,
+            day,
+            id,
+            reads,
+          );
+        }
+      }
+    });
+    this.reads.clear();
+    this.unflushed = 0;
+    return n;
+  }
+
+  /** Reads of a concept over the usage window, today included, flushed or not. */
   private usageCount(id: string): number {
+    const start = this.windowStart();
+    let pending = 0;
+    for (const [day, counts] of this.reads) if (day >= start) pending += counts.get(id) ?? 0;
     return (
-      this.sql.all<{ n: number }>(
+      (this.sql.all<{ n: number }>(
         "SELECT COALESCE(SUM(reads), 0) AS n FROM access_log WHERE concept_id = ? AND day >= ?",
         id,
-        this.windowStart(),
-      )[0]?.n ?? 0
+        start,
+      )[0]?.n ?? 0) + pending
     );
   }
 
@@ -3639,6 +3792,7 @@ export class LibraryStore {
 
   /** The usage-rollup maintainer: drops read counts older than the usage window. */
   pruneUsage(): number {
+    this.flushReads();
     const before = this.sql.all<{ n: number }>("SELECT COUNT(*) AS n FROM access_log")[0]?.n ?? 0;
     this.sql.run("DELETE FROM access_log WHERE day < ?", this.windowStart());
     const after = this.sql.all<{ n: number }>("SELECT COUNT(*) AS n FROM access_log")[0]?.n ?? 0;
@@ -3664,9 +3818,12 @@ export class LibraryStore {
     ]
       .map((x, i) => (x === null ? null : i === 0 ? x - soonMs : x))
       .filter((x): x is number => x !== null);
-    const oldestRead = this.sql.all<{ day: string | null }>(
-      "SELECT MIN(day) AS day FROM access_log",
-    )[0]?.day;
+    const oldestRead = [
+      this.sql.all<{ day: string | null }>("SELECT MIN(day) AS day FROM access_log")[0]?.day,
+      ...this.reads.keys(),
+    ]
+      .filter((d): d is string => !!d)
+      .sort()[0];
     const expiry = m.export_expiry;
     return {
       exportPending: seq > 0 && seq !== Number(m.export_seq ?? -1),

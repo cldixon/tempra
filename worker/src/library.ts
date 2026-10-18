@@ -19,10 +19,15 @@ import { prepareRestore, type RestoreOutcome, type RestoreTarget } from "./recov
 import { doSqlHandle } from "./store/sql";
 import { type LibraryHealth, LibraryStore } from "./store/store";
 
+/** How long reads counted in memory wait before they are written to `access_log`. */
+const READ_FLUSH_MS = 5000;
+
 /** One OKF library: its blobs, ledger and derived indexes in the object's SQLite. */
 export class Library extends DurableObject<Env> {
   private opened: LibraryStore | null = null;
   private alarmChecked = false;
+  /** Writes the reads counted in memory a few seconds after the first of them (TEMPRA-87). */
+  private flushTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly schedule = new MaintenanceSchedule(
     {
       getAlarm: () => this.ctx.storage.getAlarm(),
@@ -79,7 +84,26 @@ export class Library extends DurableObject<Env> {
         console.error("maintenance alarm failed", e);
       }
     }
+    if (this.store.pendingReads() > 0) this.flushSoon();
     return result;
+  }
+
+  /**
+   * Reads are counted in memory (TEMPRA-87); a timer in the object writes them a few seconds
+   * after the first, one transaction for however many came in. A write or the 100th read writes
+   * them sooner. No storage call schedules it, and the timer keeps the object awake until then.
+   */
+  private flushSoon() {
+    if (this.flushTimer) return;
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = null;
+      if (this.restarting) return;
+      try {
+        this.store.flushReads();
+      } catch (e) {
+        console.error("read counts not written", e);
+      }
+    }, READ_FLUSH_MS);
   }
 
   // ---------------------------------------------------------------- the change feed

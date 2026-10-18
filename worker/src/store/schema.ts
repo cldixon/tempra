@@ -138,6 +138,8 @@ CREATE TABLE IF NOT EXISTS sources (
 );
 CREATE INDEX IF NOT EXISTS sources_concept ON sources(concept_id);
 CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(concept_id UNINDEXED, title, body, tags);
+-- Each concept's row in fts, so a write replaces it by rowid instead of scanning fts (TEMPRA-87).
+CREATE TABLE IF NOT EXISTS fts_rows (concept_id TEXT PRIMARY KEY, fts_rowid INTEGER NOT NULL);
 
 CREATE TABLE IF NOT EXISTS cursors (maintainer TEXT PRIMARY KEY, seq INTEGER NOT NULL);
 -- One row per day, concept and actor, so reads are counted with an upsert.
