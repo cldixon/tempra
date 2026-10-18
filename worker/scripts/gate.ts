@@ -1237,6 +1237,43 @@ async function oauthConnect(
  * pages (connected apps, tokens, account, work queue, import and export, recovery) work, and
  * the library is deleted from its Delete tab, which ends the connection.
  */
+/**
+ * The daily cron through cf dev's scheduled handler, run again every few seconds while the queue
+ * consumer counts each library (the first run holds deletion until every library has been counted
+ * once), until a run reports deletion no longer held and the attachments the gate imported as
+ * stored and referenced. Each run logs its result as {"sweep": …} on cf dev's output.
+ */
+async function blobSweep(): Promise<string[]> {
+  type Result = { held?: string; stored: number; referenced: number; recount: string };
+  const latest = (): Result | null => {
+    const lines = devTail.stdout.split("\n").filter((l) => l.includes('{"sweep":{"libraries"'));
+    const line = lines[lines.length - 1];
+    if (!line) return null;
+    try {
+      return (JSON.parse(line.slice(line.indexOf("{"))) as { sweep: Result }).sweep;
+    } catch {
+      return null;
+    }
+  };
+  let last: Result | null = null;
+  for (let i = 0; i < 20; i++) {
+    const cron = await fetch(`${base}/cdn-cgi/handler/scheduled?cron=30+4+*+*+*`);
+    if (!cron.ok) return [`the scheduled handler answered ${cron.status}`];
+    await Bun.sleep(3000);
+    last = latest();
+    if (last && !last.held && last.referenced > 0) break;
+  }
+  if (!last) return ["no sweep result in cf dev's output"];
+  const problems: string[] = [];
+  if (last.held) problems.push(`deletion still held: ${last.held}`);
+  if (last.stored === 0 || last.referenced === 0) {
+    problems.push(
+      `imported attachments not tracked (stored ${last.stored}, referenced ${last.referenced})`,
+    );
+  }
+  return problems;
+}
+
 async function freshAccountConnects(): Promise<string[]> {
   const b = await openBrowser();
   if (typeof b === "string") return [b];
@@ -1498,11 +1535,14 @@ try {
   );
   for (const p of fresh) console.log(`  - ${p}`);
   if (fresh.length > 0) failed = true;
-  // The daily blob sweep and digest (v2 spec: A3), run through cf dev's scheduled handler.
-  const cron = await fetch(`${base}/cdn-cgi/handler/scheduled?cron=30+4+*+*+*`);
-  const cronOk = cron.ok;
-  console.log(`${cronOk ? "PASS" : "FAIL"} the daily sweep runs (${cron.status})`);
-  if (!cronOk) failed = true;
+  // The daily blob sweep and digest (v2 spec: A3), run through cf dev's scheduled handler; its
+  // recounts go through the local queue (TEMPRA-81) until the sweep is no longer held.
+  const sweepProblems = await blobSweep();
+  console.log(
+    `${sweepProblems.length === 0 ? "PASS" : "FAIL"} the daily sweep runs, its recounts land through the queue, and deletion is no longer held`,
+  );
+  for (const p of sweepProblems) console.log(`  - ${p}`);
+  if (sweepProblems.length > 0) failed = true;
   const mcpOk = await mcpSmoke({ url: base, token: mcpToken });
   console.log(`${mcpOk ? "PASS" : "FAIL"} MCP smoke on an empty library`);
   if (!mcpOk) failed = true;

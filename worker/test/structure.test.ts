@@ -1,5 +1,6 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
+import { d1BlobRefs } from "../src/blobrefs";
 import { runMaintenance } from "../src/maintain";
 import { healthLines } from "../src/mcp/server";
 import { sha256Hex } from "../src/okf/hash";
@@ -13,6 +14,7 @@ import {
 } from "../src/okf/structure";
 import { type ImportFile, LibraryStore } from "../src/store/store";
 import { digestText, sweep } from "../src/sweep";
+import { bunD1 } from "./d1";
 import { BUNDLES, loadBundle, text } from "./fixtures";
 import { memoryBlobs, memoryBucket } from "./harness";
 import { bunSqlHandle } from "./sqlite";
@@ -287,9 +289,10 @@ describe("the health summary (TEMPRA-66)", () => {
     };
     const r = await sweep({
       libraries: async () => Object.keys(libs).map((id) => ({ id, path: `o/${id}` })),
-      inventory: async (id) => ({ hashes: [], bytes: 0, stats, health: libs[id] }),
-      bucket: { list: async () => ({ objects: [], truncated: false }), delete: async () => {} },
-      orphans: { all: async () => new Map(), mark: async () => {}, clear: async () => {} },
+      inventory: async (id) => ({ bytes: 0, stats, health: libs[id] }),
+      refs: d1BlobRefs(bunD1().d1),
+      queue: { send: async () => {}, sendBatch: async () => {} },
+      bucket: { delete: async () => {} },
       storageLimitBytes: 1e9,
       now: new Date("2026-10-01T04:30:00Z"),
     });

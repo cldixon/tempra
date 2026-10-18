@@ -760,18 +760,28 @@ export function d1Accounts(db: D1Database): Accounts {
            WHERE (SELECT COUNT(*) FROM libraries WHERE owner = ?3) < ?5`,
         )
         .bind(id, slug, owner.id, now, max, title, description);
-      const [r] = opts.grant
-        ? await db.batch([
-            insert,
-            // Only if the library above went in, and only for the person who owns it.
-            db
-              .prepare(
-                `INSERT INTO grant_libraries (grant_id, user, library, created)
-                 SELECT ?1, ?2, ?3, ?4 WHERE EXISTS (SELECT 1 FROM libraries WHERE id = ?3 AND owner = ?2)`,
-              )
-              .bind(opts.grant, owner.id, id, now),
-          ])
-        : [await insert.run()];
+      const [r] = await db.batch([
+        insert,
+        // A new library has no attachments, so its blob references are complete from the start:
+        // every later one is recorded by the write path (TEMPRA-91).
+        db
+          .prepare(
+            `INSERT OR IGNORE INTO blob_ref_libraries (library, counted)
+             SELECT ?1, ?2 WHERE EXISTS (SELECT 1 FROM libraries WHERE id = ?1)`,
+          )
+          .bind(id, now),
+        // Only if the library above went in, and only for the person who owns it.
+        ...(opts.grant
+          ? [
+              db
+                .prepare(
+                  `INSERT INTO grant_libraries (grant_id, user, library, created)
+                   SELECT ?1, ?2, ?3, ?4 WHERE EXISTS (SELECT 1 FROM libraries WHERE id = ?3 AND owner = ?2)`,
+                )
+                .bind(opts.grant, owner.id, id, now),
+            ]
+          : []),
+      ]);
       if (!r?.meta.changes) {
         const exists = await db
           .prepare("SELECT 1 AS x FROM libraries WHERE owner = ? AND slug = ?")

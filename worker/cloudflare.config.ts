@@ -17,6 +17,8 @@ interface Deployment {
   d1: { name: string; id: string };
   r2: string;
   kv: string;
+  /** The blob sweep's Queue (TEMPRA-81): recounts, the bucket listing and the drift scan. */
+  queue: string;
   /** The address sign-in links and the digest come from (Cloudflare Email Service). */
   mailFrom: string;
   /** Analytics Engine dataset for metering; tempra_usage unless set. */
@@ -37,6 +39,7 @@ const PRODUCTION: Deployment = {
   d1: { name: "tempra-accounts", id: "60dcce9c-4a20-44db-8d49-1ee040225c4d" },
   r2: "tempra-blobs",
   kv: "9e57232de5b940e4b2319f31da509f42",
+  queue: "tempra-sweep",
   // mail.tempra.dev is onboarded for Cloudflare Email Sending.
   mailFrom: "noreply@mail.tempra.dev",
 };
@@ -47,6 +50,7 @@ const STAGING: Deployment = {
   d1: { name: "tempra-accounts-staging", id: "d66e1ceb-591e-419d-ba51-9cc32b87f658" },
   r2: "tempra-blobs-staging",
   kv: "b63bffc9b65743a99783013effb89324",
+  queue: "tempra-sweep-staging",
   mailFrom: "noreply@mail.tempra.dev",
   // Staging's traffic and counters stay out of production's (TEMPRA-76). Datasets are created on
   // first write and namespaces are only ids, so neither needs a resource made.
@@ -67,6 +71,7 @@ export function previewDeployment(pr: string, ids: { d1?: string; kv?: string } 
     d1: { name: `tempra-accounts-pr-${pr}`, id: ids.d1 ?? "" },
     r2: `tempra-blobs-pr-${pr}`,
     kv: ids.kv ?? "",
+    queue: `tempra-sweep-pr-${pr}`,
     mailFrom: "noreply@mail.tempra.dev",
     // Previews are short-lived; the daily sweep and digest run on staging and production only,
     // and their traffic stays out of the usage data.
@@ -120,13 +125,18 @@ export default defineConfig(({ mode }) => {
       // The daily blob sweep, operator digest and people's digests (v2 spec: A3), after the
       // libraries' 03:00 exports; every 5 minutes, batched notification mail (TEMPRA-74). The
       // Worker tells them apart by schedule (src/index.ts).
-      triggers:
-        d.cron === false
+      triggers: [
+        ...(d.cron === false
           ? []
           : [
               triggers.scheduled({ schedule: "30 4 * * *" }),
               triggers.scheduled({ schedule: "*/5 * * * *" }),
-            ],
+            ]),
+        // The blob sweep's fan-out (TEMPRA-81). No dead-letter queue: a message that runs out of
+        // retries leaves its state in D1 (a library uncounted or pending, a listing or scan
+        // cursor), and the next day's cron sends it again.
+        triggers.queue({ name: d.queue, maxBatchSize: 10, maxRetries: 3, retryDelay: 60 }),
+      ],
 
       // One SQLite-backed Durable Object per library (spec: Backend architecture). Declared as an
       // export; this replaces Wrangler's `migrations` history (its v1 created the same class).
@@ -143,6 +153,9 @@ export default defineConfig(({ mode }) => {
 
         // Attachment blobs (blobs/<sha256>), exports and restore records.
         BLOBS: bindings.r2({ name: d.r2 }),
+
+        // The blob sweep's Queue: this Worker sends and consumes (src/index.ts queue()).
+        SWEEP_QUEUE: bindings.queue({ name: d.queue }),
 
         // OAuth clients and grants for MCP apps (Cloudflare's OAuth provider library).
         OAUTH_KV: bindings.kv({ id: d.kv }),

@@ -15,7 +15,14 @@ Object.assign(globalThis, {
 import { d1Accounts, type LibraryRef } from "../src/accounts";
 import type { Deps } from "../src/app";
 import { d1Authenticate, type TokenInfo } from "../src/auth";
-import { type BlobStore, callStore, type LibraryClient, makeClient } from "../src/client";
+import { d1BlobRefs } from "../src/blobrefs";
+import {
+  type BlobStore,
+  callStore,
+  type LibraryClient,
+  makeClient,
+  recordingBlobStore,
+} from "../src/client";
 import { d1Notifications } from "../src/notify";
 import { sha256Hex } from "../src/okf/hash";
 import type { RestoreRecord } from "../src/recovery";
@@ -239,7 +246,10 @@ export function setup() {
       const store = new LibraryStore(bunSqlHandle());
       stores.set(doId, store);
       c = makeClient((method, args) =>
-        callStore(store, blobs, method, args, { storageLimitBytes: limits.storageBytes }),
+        callStore(store, blobs, method, args, {
+          storageLimitBytes: limits.storageBytes,
+          references: (hashes) => d1BlobRefs(d1).reference(doId, hashes, new Date()),
+        }),
       );
       clients.set(doId, c);
     }
@@ -371,6 +381,7 @@ export function setup() {
           bucket.objects.delete(k);
         }
       }
+      await d1BlobRefs(d1).forget(doId, new Date());
     },
     mailer: {
       async send(msg) {
@@ -378,7 +389,7 @@ export function setup() {
       },
     },
     meter: (e) => usage.push(e),
-    blobs,
+    blobs: recordingBlobStore(blobs, d1BlobRefs(d1)),
     library: (token) => clientFor(token.library.do_id),
     libraryByDoId: async (doId) =>
       db.query("SELECT 1 FROM libraries WHERE do_id = ?").get(doId) ? clientFor(doId) : null,
