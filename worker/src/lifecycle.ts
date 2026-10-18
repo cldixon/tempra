@@ -30,9 +30,13 @@ export async function deleteLibrary(
   const remaining = new Set((await deps.accounts.libraries(user.id)).map((l) => l.id));
   remaining.delete(ref.id);
   for (const g of await grantsOf(oauth, user.id)) {
-    const m = g.metadata as { library?: string; libraries?: "all" | string[] } | undefined;
+    const m = g.metadata as
+      | { library?: string; libraries?: "all" | string[]; grant?: string }
+      | undefined;
+    // A selected connection also reaches the libraries it created (TEMPRA-100).
+    const created = m?.grant ? await deps.accounts.grantLibraries(m.grant, user.id) : [];
     const orphaned = Array.isArray(m?.libraries)
-      ? !m.libraries.some((id) => remaining.has(id))
+      ? ![...m.libraries, ...created].some((id) => remaining.has(id))
       : m?.libraries === undefined && m?.library === ref.slug;
     if (orphaned) await oauth.revokeGrant(g.id, user.id);
   }

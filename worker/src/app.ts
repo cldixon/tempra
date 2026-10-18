@@ -17,7 +17,7 @@ import { notificationsOf, registerInboxApi } from "./inbox-api";
 import { registerLegalRoutes } from "./legal";
 import { deleteLibrary } from "./lifecycle";
 import { type Notifications, postComment } from "./notify";
-import { registerAppRoutes } from "./oauth/routes";
+import { type GrantProps, registerAppRoutes } from "./oauth/routes";
 import { splitFrontmatter } from "./okf/concept";
 import { normalizePath, underPrefix } from "./okf/paths";
 import type { JsonObject } from "./okf/types";
@@ -27,7 +27,13 @@ import { readCookie, SESSION_COOKIE, type Sessions } from "./session";
 import { type Mailer, registerSignInRoutes } from "./signin";
 import { OkfError } from "./store/errors";
 import type { ConceptContent, RequestContext, WriteOp, WriteResult } from "./store/store";
-import { type Authorized, authorizeLibrary, requireOwner } from "./tenancy";
+import {
+  type AccountGrant,
+  type Authorized,
+  authorizeLibrary,
+  createLibraryForGrant,
+  requireOwner,
+} from "./tenancy";
 import { faviconResponse } from "./ui/favicon";
 import { registerUiRoutes } from "./ui/routes";
 import { appHref, appScript } from "./ui/spa";
@@ -1029,11 +1035,33 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   });
 
   app.post("/api/v1/libraries", async (c) => {
+    type Body = { slug?: string; starter?: boolean; title?: string; description?: string };
+    // An app connection's OAuth access token (TEMPRA-100): the same rules as its agent's
+    // create_library over MCP. Our own bearer tokens never contain a colon.
+    const oauthToken = /^Bearer\s+([^\s:]+:[^\s:]+:[^\s:]+)$/i.exec(
+      c.req.header("Authorization") ?? "",
+    )?.[1];
+    if (oauthToken) {
+      const d = deps(c.env);
+      const grant = await connectionGrant(c, oauthToken);
+      const account = await d.accounts.account(grant.userId);
+      if (!account) throw new OkfError(401, "suspended", "This account is suspended or deleted.");
+      await admit(d, { key: `grant:${grant.id}|${grant.actor}`, account: account.handle }, true);
+      const body = await c.req.json<Body>().catch(() => ({}) as Body);
+      const made = await createLibraryForGrant(d.accounts, grant, {
+        slug: body.slug ?? "",
+        title: body.title,
+        description: body.description,
+      });
+      const { id, owner, slug } = made.library;
+      return c.json({ id, owner, slug, title: made.title, description: made.description }, 201);
+    }
     const { d, user, session } = await human(c);
-    const body = await c.req
-      .json<{ slug?: string; starter?: boolean }>()
-      .catch(() => ({}) as { slug?: string; starter?: boolean });
-    const lib = await d.accounts.createLibrary(body.slug ?? "", user);
+    const body = await c.req.json<Body>().catch(() => ({}) as Body);
+    const lib = await d.accounts.createLibrary(body.slug ?? "", user, {
+      title: body.title,
+      description: body.description,
+    });
     // First run (v2 spec: Onboarding): a person's first library may begin with a note.
     if (body.starter && session) {
       const client = await d.libraryByDoId(lib.do_id);
@@ -1047,7 +1075,16 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
         [{ op: "write", path: "start-here.md", content: STARTER }],
       );
     }
-    return c.json({ id: lib.id, owner: lib.owner, slug: lib.slug }, 201);
+    return c.json(
+      {
+        id: lib.id,
+        owner: lib.owner,
+        slug: lib.slug,
+        title: lib.title,
+        description: lib.description,
+      },
+      201,
+    );
   });
 
   registerAccountApi(app, deps, async (c, d) => {
@@ -1278,6 +1315,31 @@ async function principal(c: C, d: Deps): Promise<{ token: TokenInfo } | { user: 
     );
   }
   return { user };
+}
+
+/**
+ * The app connection behind an OAuth access token, checked as the provider checks one on /mcp:
+ * live (not expired or revoked) and issued for this origin's MCP resource. Only connections
+ * approved since account-level access carry a grant; anything else is refused.
+ */
+async function connectionGrant(c: C, token: string): Promise<AccountGrant> {
+  const summary = await c.env.OAUTH_PROVIDER.unwrapToken<GrantProps>(token).catch(() => null);
+  const resource = `${new URL(c.req.url).origin}/mcp`;
+  if (!summary || summary.audience !== resource) {
+    throw new OkfError(401, "invalid_token", "This access token is not valid here.");
+  }
+  const grant = summary.grant.props?.grant;
+  if (grant && grant.userId !== summary.userId) {
+    throw new OkfError(401, "invalid_token", "This access token is not valid here.");
+  }
+  if (!grant) {
+    throw new OkfError(
+      403,
+      "create_not_allowed",
+      "This connection reaches one library and cannot create libraries; reconnect the app.",
+    );
+  }
+  return grant;
 }
 
 /**
