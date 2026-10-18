@@ -1,6 +1,5 @@
 import * as app from "@tempra/app";
 import { href as designHref } from "@tempra/design";
-import { esc } from "./layout";
 
 /** The app's client bundle, at a content-hashed URL like the design stylesheet. */
 export const appHref = app.href;
@@ -17,19 +16,17 @@ export function appScript(): Response {
 
 /**
  * The single page every rebuilt UI route answers with (TEMPRA-9): the design stylesheet, the
- * app's bundle and an empty root. Scripts only from this origin; styles from this origin plus a
- * per-response nonce, which Wordgard's runtime styles will use (Wordgard.cspNonce); no inline
- * scripts or styles. The page carries nothing private: the app reads everything through the API.
+ * app's bundle and an empty root. Scripts and styles only from this origin; no inline scripts or
+ * styles (the reader's popovers get their coordinates through the CSSOM, which CSP leaves alone).
+ * The page carries nothing private: the app reads everything through the API.
  */
 export function spaShell(request: Request): Response {
   const url = new URL(request.url);
   // The change feed's WebSocket, on this host (wss:, or ws: for local http).
   const socket = `${url.protocol === "https:" ? "wss" : "ws"}://${url.host}`;
-  const nonce = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(16))));
   const html = `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="csp-nonce" content="${esc(nonce)}">
 <title>Tempra</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="${designHref}">
@@ -41,7 +38,7 @@ export function spaShell(request: Request): Response {
       "Content-Security-Policy": [
         "default-src 'none'",
         "script-src 'self'",
-        `style-src 'self' 'nonce-${nonce}'`,
+        "style-src 'self'",
         "img-src 'self' https:",
         `connect-src 'self' ${socket}`,
         "form-action 'self'",

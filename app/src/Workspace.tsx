@@ -198,14 +198,14 @@ export function Workspace(props: {
     return () => document.removeEventListener("pointerdown", away);
   }, [drawer]);
 
-  // Escape closes the drawer, else the panel. Not from inside the body being edited, a dialog
-  // (the switcher, the link dialog), or a menu, which handle their own Escape.
+  // Escape closes the drawer, else the panel. Not from inside a dialog (the switcher) or a menu,
+  // which handle their own Escape.
   const hasPanel = hosts > 0 && panel !== null;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || e.defaultPrevented) return;
       const t = e.target instanceof Element ? e.target : null;
-      if (t?.closest("[contenteditable='true'], dialog, .link-dialog, .menu")) return;
+      if (t?.closest("dialog, .menu")) return;
       if (drawer) setDrawer(false);
       else if (hasPanel) choose(null);
     };
@@ -213,12 +213,10 @@ export function Workspace(props: {
     return () => document.removeEventListener("keydown", onKey);
   }, [drawer, hasPanel, choose]);
 
-  // Ctrl or Cmd+K opens the quick switcher, from anywhere in the workspace except a body being
-  // edited, where it makes a link.
+  // Ctrl or Cmd+K opens the quick switcher, from anywhere in the workspace.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      const editing = e.target instanceof Element && e.target.closest("[contenteditable='true']");
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k" && !editing) {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
         // The same keys close it again.
         setSwitching((on) => !on);

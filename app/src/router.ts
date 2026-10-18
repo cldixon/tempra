@@ -157,34 +157,15 @@ const ACCOUNT_PAGES = new Set([
   "/inbox",
 ]);
 
-/**
- * A page with unsaved work (the editor) registers a guard: asked before the app leaves the page,
- * it returns true to let it go. One at a time; the returned function removes it.
- */
-let leaveGuard: (() => boolean) | null = null;
-export function setLeaveGuard(guard: () => boolean): () => void {
-  leaveGuard = guard;
-  return () => {
-    if (leaveGuard === guard) leaveGuard = null;
-  };
-}
-
-/** The address shown, for putting it back when back or forward is refused. */
-let shown = typeof location === "undefined" ? "" : location.href;
-
 /** Goes to a URL without reloading when the app draws it, otherwise loads it in full. */
 export function navigate(href: string, opts: { replace?: boolean } = {}) {
   const url = new URL(href, location.href);
-  // A #fragment stays on the page; another path or query (?at=, ?done=) draws a new one.
-  const leaving = url.pathname + url.search !== location.pathname + location.search;
-  if (leaving && leaveGuard && !leaveGuard()) return;
   if (url.origin !== location.origin || !match(url)) {
     location.assign(url.href);
     return;
   }
   if (opts.replace) history.replaceState(null, "", url.href);
   else history.pushState(null, "", url.href);
-  shown = url.href;
   lastMove = "push";
   window.dispatchEvent(new Event(NAVIGATE));
   if (!url.hash) window.scrollTo(0, 0);
@@ -196,15 +177,6 @@ export function useLocation(): URL {
   useEffect(() => {
     const update = () => setUrl(new URL(location.href));
     const back = () => {
-      // Back or forward cannot be cancelled: refused, the page's address is put back.
-      const was = new URL(shown);
-      if (leaveGuard && location.pathname + location.search !== was.pathname + was.search) {
-        if (!leaveGuard()) {
-          history.pushState(null, "", shown);
-          return;
-        }
-      }
-      shown = location.href;
       lastMove = "pop";
       update();
     };

@@ -10,7 +10,6 @@ import {
   List,
   MessageSquare,
   PanelLeft,
-  Pencil,
   RefreshCw,
   SlidersHorizontal,
 } from "lucide-react";
@@ -29,7 +28,6 @@ import type { Me } from "./ui";
  */
 const ICONS = {
   refresh: RefreshCw,
-  edit: Pencil,
   markdown: Code,
   comments: MessageSquare,
   review: CircleCheck,
