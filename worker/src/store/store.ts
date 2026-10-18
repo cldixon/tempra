@@ -3438,6 +3438,40 @@ export class LibraryStore {
     return before - after;
   }
 
+  /**
+   * What the next maintenance pass would find to do (TEMPRA-82), for scheduling the library's
+   * alarm: whether the ledger moved since the last export, and when the next export, stale or
+   * stale-soon concept and read count falls due. Indexed lookups only.
+   */
+  maintenanceDue(now: Date): MaintenanceDue {
+    const t = now.getTime();
+    const m = this.maintenance();
+    const seq = this.headSeq();
+    const min = (q: string, ...p: SqlValue[]) =>
+      this.sql.all<{ t: number | null }>(q, ...p)[0]?.t ?? null;
+    const soonMs = STALE_SOON_DAYS * 86_400_000;
+    // The next concept to come within the stale-soon window, and the next to pass its date.
+    const staleAt = [
+      min("SELECT MIN(stale_ms) AS t FROM concepts WHERE stale_ms > ?", t + soonMs),
+      min("SELECT MIN(stale_ms) AS t FROM concepts WHERE stale_ms > ?", t),
+    ]
+      .map((x, i) => (x === null ? null : i === 0 ? x - soonMs : x))
+      .filter((x): x is number => x !== null);
+    const oldestRead = this.sql.all<{ day: string | null }>(
+      "SELECT MIN(day) AS day FROM access_log",
+    )[0]?.day;
+    const expiry = m.export_expiry;
+    return {
+      exportPending: seq > 0 && seq !== Number(m.export_seq ?? -1),
+      // Unknown until a pass has recorded it: due, so the next pass finds out.
+      exportExpiry: expiry === undefined ? t : expiry === "none" ? null : Date.parse(expiry),
+      staleAt: staleAt.length > 0 ? Math.min(...staleAt) : null,
+      usageExpiry: oldestRead
+        ? Date.parse(`${oldestRead}T00:00:00Z`) + USAGE_WINDOW_DAYS * 86_400_000
+        : null,
+    };
+  }
+
   /** Maintainer bookkeeping (last run, cursors) kept in the meta table under `maint:`. */
   maintenance(): Record<string, string> {
     const rows = this.sql.all<{ key: string; value: string }>(
@@ -3708,6 +3742,18 @@ export interface StructureRun {
 }
 
 /** How many of the newest unverified changes the health summary names. */
+/** What a library's next maintenance pass would have to do, and when (TEMPRA-82); times in ms. */
+export interface MaintenanceDue {
+  /** The ledger moved since the last export. */
+  exportPending: boolean;
+  /** When the oldest export but the newest passes retention; null with nothing to prune. */
+  exportExpiry: number | null;
+  /** The next moment a concept comes within the stale-soon window or passes `stale_after`. */
+  staleAt: number | null;
+  /** When the oldest read count leaves the usage window. */
+  usageExpiry: number | null;
+}
+
 export const HEALTH_NEWEST = 5;
 
 /** A library's health summary (TEMPRA-66), as the daily pass leaves it in meta. */

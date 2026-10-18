@@ -12,7 +12,7 @@ import { DEFAULT_STORAGE_MB } from "./limits";
 import {
   DEFAULT_RETENTION_DAYS,
   type MaintenanceResult,
-  nextRun,
+  MaintenanceSchedule,
   runMaintenance,
 } from "./maintain";
 import { prepareRestore, type RestoreOutcome, type RestoreTarget } from "./recovery";
@@ -23,6 +23,17 @@ import { type LibraryHealth, LibraryStore } from "./store/store";
 export class Library extends DurableObject<Env> {
   private opened: LibraryStore | null = null;
   private alarmChecked = false;
+  private readonly schedule = new MaintenanceSchedule(
+    {
+      getAlarm: () => this.ctx.storage.getAlarm(),
+      setAlarm: (at) => this.ctx.storage.setAlarm(at),
+    },
+    {
+      maintenanceDue: (now) => this.store.maintenanceDue(now),
+      setMaintenance: (v) => this.store.setMaintenance(v),
+    },
+    () => this.libraryId(),
+  );
   /** Set once a restore is armed: the object refuses work until it restarts into the restore. */
   private restarting = false;
 
@@ -53,13 +64,19 @@ export class Library extends DurableObject<Env> {
     const result = await callStore(this.store, r2BlobStore(this.env.BLOBS), method, args, {
       storageLimitBytes: mb * 1048576,
     });
-    // The write has committed (the store's transaction is synchronous): tell the feed. A
-    // failure here must not turn a committed write into an error (a client would retry it).
+    // The write has committed (the store's transaction is synchronous): tell the feed, and wake
+    // the maintainers for the export it calls for. A failure here must not turn a committed
+    // write into an error (a client would retry it).
     if (writes && result.ok) {
       try {
         this.publish(before);
       } catch (e) {
         console.error("feed publish failed", e);
+      }
+      try {
+        if (this.store.headSeq() > before) await this.schedule.wake();
+      } catch (e) {
+        console.error("maintenance alarm failed", e);
       }
     }
     return result;
@@ -141,7 +158,10 @@ export class Library extends DurableObject<Env> {
     return "ok";
   }
 
-  /** The daily maintainers run from one alarm (spec: Tier 3), set on the library's first use. */
+  /**
+   * The maintainers run from one alarm (spec: Tier 3), set on the library's first use for its
+   * next slot, then for the earliest slot with work (TEMPRA-82).
+   */
   private async ensureAlarm() {
     this.alarmChecked = true;
     // The object's name is its library id; alarms may not see it, so keep a copy.
@@ -149,20 +169,14 @@ export class Library extends DurableObject<Env> {
     if (name && this.store.maintenance().library_id !== name) {
       this.store.setMaintenance({ library_id: name });
     }
-    if ((await this.ctx.storage.getAlarm()) === null) await this.schedule();
-  }
-
-  private async schedule() {
-    const at = nextRun(new Date(), this.libraryId());
-    await this.ctx.storage.setAlarm(at);
-    this.store.setMaintenance({ next_run: at.toISOString().replace(/\.\d{3}Z$/, "Z") });
+    await this.schedule.ensure();
   }
 
   private libraryId(): string {
     return this.store.maintenance().library_id ?? this.ctx.id.name ?? this.ctx.id.toString();
   }
 
-  /** Runs the daily maintainers now ("Export now" in the UI); the alarm keeps its schedule. */
+  /** Runs the maintainers now ("Export now" in the UI); the alarm keeps its schedule. */
   async maintain(): Promise<MaintenanceResult> {
     if (this.restarting) throw new Error("The library is restarting after a restore.");
     if (!this.alarmChecked) await this.ensureAlarm();
@@ -226,10 +240,10 @@ export class Library extends DurableObject<Env> {
       const result = await this.maintain();
       console.log(JSON.stringify({ maintenance: this.libraryId(), ...result }));
     } catch (e) {
-      // Logged, not rethrown: tomorrow's run exports whatever this one missed.
+      // Logged, not rethrown: the next slot exports whatever this one missed.
       console.error(JSON.stringify({ maintenance: this.libraryId(), error: String(e) }));
     }
-    await this.schedule();
+    await this.schedule.afterPass();
   }
 }
 
