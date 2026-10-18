@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { d1Accounts } from "../src/accounts";
+import { d1BlobRefs } from "../src/blobrefs";
 import { d1Sessions } from "../src/session";
-import { d1Orphans, digestText, pruneAccounts, sweep } from "../src/sweep";
+import { digestText, pruneAccounts, sweep } from "../src/sweep";
 import { bunD1 } from "./d1";
 import { memoryBucket } from "./harness";
 
@@ -60,6 +61,16 @@ describe("D1 indexes (TEMPRA-78)", () => {
       "SELECT library FROM grant_libraries WHERE grant_id = ? AND user = ?",
     "delete a library's connection rows": "DELETE FROM grant_libraries WHERE library = ?",
     "delete an account's connection rows": "DELETE FROM grant_libraries WHERE user = ?",
+    // The blob sweep (TEMPRA-81, TEMPRA-91): what a normal day runs.
+    "sweep: libraries holding deletion": `SELECT COUNT(*) FROM blob_ref_libraries s
+      JOIN libraries l ON l.do_id = s.library WHERE s.counted IS NULL OR s.pending IS NOT NULL`,
+    "sweep: open libraries to recount": `SELECT library, pending FROM blob_ref_libraries
+      WHERE (counted IS NULL OR pending IS NOT NULL) AND library > ? ORDER BY library LIMIT ?`,
+    "sweep: expired orphans": `SELECT o.hash FROM blob_orphans o WHERE o.since <= ?
+      AND NOT EXISTS (SELECT 1 FROM blob_refs r WHERE r.hash = o.hash) ORDER BY o.since LIMIT ?`,
+    "sweep: a library's references": "SELECT hash, added FROM blob_refs WHERE library = ?",
+    "sweep: full dispatch page": `SELECT l.do_id AS library, s.pending FROM libraries l
+      LEFT JOIN blob_ref_libraries s ON s.library = l.do_id WHERE l.do_id > ? ORDER BY l.do_id LIMIT ?`,
   };
   for (const [name, sql] of Object.entries(queries)) {
     test(`${name} scans no table`, () => {
@@ -224,12 +235,13 @@ describe("daily account prune (TEMPRA-79)", () => {
     const { d1 } = seeded();
     const bucket = memoryBucket();
     const r = await sweep({
+      refs: d1BlobRefs(d1),
+      queue: { send: async () => {}, sendBatch: async () => {} },
       libraries: async () => [],
       inventory: async () => {
         throw new Error("no libraries");
       },
-      bucket: { list: (o) => bucket.list(o), delete: (keys) => bucket.delete(keys) },
-      orphans: d1Orphans(d1),
+      bucket: { delete: (keys) => bucket.delete(keys) },
       prune: () => pruneAccounts(d1, NOW),
       storageLimitBytes: 1048576,
       now: NOW,
@@ -242,10 +254,11 @@ describe("daily account prune (TEMPRA-79)", () => {
     const { d1 } = bunD1();
     const bucket = memoryBucket();
     const r = await sweep({
+      refs: d1BlobRefs(d1),
+      queue: { send: async () => {}, sendBatch: async () => {} },
       libraries: async () => [],
       inventory: async () => ({}) as never,
-      bucket: { list: (o) => bucket.list(o), delete: (keys) => bucket.delete(keys) },
-      orphans: d1Orphans(d1),
+      bucket: { delete: (keys) => bucket.delete(keys) },
       prune: async () => {
         throw new Error("D1 busy");
       },

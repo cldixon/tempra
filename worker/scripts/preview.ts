@@ -1,10 +1,10 @@
 /**
  * `bun run preview`: one pull request's preview deployment (tempra-dev library:
  * delivery/preview-deployments). PR N runs as its own Worker, tempra-pr-N on pr-N.tempra.dev, with
- * its own D1, R2 bucket and KV namespace, so it never touches staging or production data.
+ * its own D1, R2 bucket, KV namespace and Queue, so it never touches staging or production data.
  *
  *   bun run preview up --pr N [--email <operator>]   create what is missing, migrate, deploy, seed, smoke
- *   bun run preview down --pr N                      delete the Worker, D1, R2 (emptied first) and KV
+ *   bun run preview down --pr N                      delete the Worker, D1, R2 (emptied first), KV and Queue
  *   bun run preview sweep --keep 3,7                 tear down every preview whose PR is not listed
  *   bun run preview agents --pr N [--agents 3] [--scenario live] [--pace 2000] [--rounds 5]
  *                              [--patient] [--keep-files] [--email E]
@@ -91,6 +91,14 @@ async function buckets(): Promise<string[]> {
   return (r.buckets ?? []).map((b) => b.name);
 }
 
+async function queues(): Promise<{ queue_id: string; queue_name: string }[]> {
+  return json<{ queue_id: string; queue_name: string }[]>(["queues", "list"]);
+}
+
+async function queueId(name: string): Promise<string | null> {
+  return (await queues()).find((q) => q.queue_name === name)?.queue_id ?? null;
+}
+
 async function workers(): Promise<string[]> {
   const r = await json<{ id?: string; name?: string }[] | { result?: { id: string }[] }>([
     "workers",
@@ -124,6 +132,11 @@ async function up(pr: string, email: string | undefined): Promise<string> {
     kv = await kvId(kvTitle);
   }
   if (!d1 || !kv) throw new Error(`Could not create or find the D1 or KV for PR ${pr}.`);
+  // The blob sweep's queue (TEMPRA-81): the Worker consumes it, so it must exist before the deploy.
+  if (!(await queueId(names.queue))) {
+    console.log(`Creating Queue ${names.queue}`);
+    await cf(["queues", "create", "--queue-name", names.queue]);
+  }
 
   // The Anthropic key goes to the preview Worker as a secret (below), never to a subprocess.
   const { ANTHROPIC_API_KEY: anthropicKey, ...inherited } = process.env;
@@ -325,7 +338,7 @@ async function down(pr: string) {
   const names = previewDeployment(pr);
   if (dryRun) {
     console.log(
-      `Would delete PR ${pr}: ${names.name}, ${names.d1.name}, ${names.r2}, tempra-oauth-pr-${pr}`,
+      `Would delete PR ${pr}: ${names.name}, ${names.d1.name}, ${names.r2}, tempra-oauth-pr-${pr}, ${names.queue}`,
     );
     return;
   }
@@ -347,6 +360,12 @@ async function down(pr: string) {
   if (kv) {
     console.log(`Deleting KV tempra-oauth-pr-${pr}`);
     await cf(["kv", "namespaces", "delete", kv, "--force"]);
+  }
+  // After the Worker, its consumer.
+  const queue = await queueId(names.queue);
+  if (queue) {
+    console.log(`Deleting Queue ${names.queue}`);
+    await cf(["queues", "delete", queue, "--force"]);
   }
 }
 
@@ -397,6 +416,7 @@ async function previews(): Promise<string[]> {
     add(d.name, /^tempra-accounts-pr-([0-9]+)$/);
   for (const b of await buckets()) add(b, /^tempra-blobs-pr-([0-9]+)$/);
   for (const n of await kvNamespaces()) add(n.title, /^tempra-oauth-pr-([0-9]+)$/);
+  for (const q of await queues()) add(q.queue_name, /^tempra-sweep-pr-([0-9]+)$/);
   return [...found].sort((a, b) => Number(a) - Number(b));
 }
 

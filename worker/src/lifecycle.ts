@@ -4,8 +4,9 @@ import type { Deps } from "./app";
 
 /**
  * Deleting a library or a whole account (v2 spec: A2). Rows go first, so nothing can reach the
- * library while its storage is wiped. Attachment bytes are shared by hash across libraries and
- * stay in R2 until a blob sweep exists (v2 spec: Open questions, blob GC).
+ * library while its storage is wiped. Attachment bytes are shared by hash across libraries: the
+ * library's blob references are forgotten with its storage (Deps.destroyLibrary), and the daily
+ * sweep deletes the bytes 31 days after nothing references them (tempra-dev: v2/blob-sweep).
  */
 
 async function grantsOf(oauth: OAuthHelpers, userId: string) {

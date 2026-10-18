@@ -50,3 +50,31 @@ describe("each deployment meters and rate-limits on its own", () => {
     expect(all[1]?.usage).toBe("tempra_usage_staging");
   });
 });
+
+// TEMPRA-81: the blob sweep's queue, sent to and consumed by the same Worker, one per deployment.
+describe("each deployment has its own sweep queue", () => {
+  async function sweepQueue(mode: string) {
+    const worker = (await (
+      await config({ isPreview: false, mode } as never)
+    ).worker) as {
+      env: Record<string, { name?: string }>;
+      triggers: { type: string; name?: string }[];
+    };
+    return {
+      producer: worker.env.SWEEP_QUEUE?.name,
+      consumer: worker.triggers.find((t) => t.type === "queue")?.name,
+    };
+  }
+
+  test("production, staging and previews", async () => {
+    expect(await sweepQueue("production")).toEqual({
+      producer: "tempra-sweep",
+      consumer: "tempra-sweep",
+    });
+    expect(await sweepQueue("staging")).toEqual({
+      producer: "tempra-sweep-staging",
+      consumer: "tempra-sweep-staging",
+    });
+    expect(previewDeployment("7").queue).toBe("tempra-sweep-pr-7");
+  });
+});

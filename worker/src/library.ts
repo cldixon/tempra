@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { d1BlobRefs } from "./blobrefs";
 import { type CallResult, callStore, type LibraryMethod, r2BlobStore } from "./client";
 import {
   broadcast,
@@ -70,6 +71,8 @@ export class Library extends DurableObject<Env> {
     const before = writes ? this.store.headSeq() : 0;
     const result = await callStore(this.store, r2BlobStore(this.env.BLOBS), method, args, {
       storageLimitBytes: mb * 1048576,
+      references: (hashes) =>
+        d1BlobRefs(this.env.DB).reference(this.libraryId(), hashes, new Date()),
     });
     // The write has committed (the store's transaction is synchronous): tell the feed, and wake
     // the maintainers for the export it calls for. A failure here must not turn a committed
@@ -178,20 +181,24 @@ export class Library extends DurableObject<Env> {
     }
   }
 
-  /** For the daily sweep and digest: referenced attachments, storage and maintenance stats. */
+  /** For the daily digest: storage, maintenance stats and health. */
   async inventory(): Promise<{
-    hashes: string[];
     bytes: number;
     stats: ReturnType<LibraryStore["stats"]>;
     health: LibraryHealth;
   }> {
     if (this.restarting) throw new Error("The library is restarting.");
     return {
-      hashes: this.store.blobHashes(),
       bytes: this.store.storageBytes(),
       stats: this.store.stats(),
       health: this.store.health(),
     };
+  }
+
+  /** For a blob sweep recount (TEMPRA-81): every attachment hash this library references. */
+  async blobRefs(): Promise<string[]> {
+    if (this.restarting) throw new Error("The library is restarting.");
+    return this.store.blobHashes();
   }
 
   /** For /healthz: proves the namespace answers without touching any library's state. */
