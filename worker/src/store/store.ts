@@ -84,7 +84,7 @@ import {
   type ThreadView,
 } from "./comments";
 import { notFound, OkfError } from "./errors";
-import { migrate } from "./schema";
+import { LEDGER_COUNTS, migrate } from "./schema";
 import type { SqlHandle, SqlValue } from "./sql";
 
 /** Concepts over this many bytes of rendered markdown are refused (spec: OKF conformance). */
@@ -196,18 +196,44 @@ interface PathRow extends Entry {
   created_seq: number;
 }
 
+/** What resolving a link reads of a library at a seq: a file by id or by path. */
+interface View {
+  readonly seq: number;
+  readonly byId: { get(id: string): Entry | undefined };
+  lookup(path: string): Entry | undefined;
+}
+
 /** The path-to-hash map of a library as of a sequence number (spec: The ledger, Snapshots). */
-class Snapshot {
+class Snapshot implements View {
   readonly byPath = new Map<string, Entry>();
   readonly byId = new Map<string, Entry>();
   constructor(
-    readonly seq: number,
+    public seq: number,
     entries: Entry[],
   ) {
     for (const e of entries) {
       this.byPath.set(e.path, e);
       this.byId.set(e.concept_id, e);
     }
+  }
+
+  /**
+   * Moves a head snapshot to `seq` in place (TEMPRA-87): the files of `ids` as they stand now
+   * (`rows`; an id with no row was deleted). Every change to `paths` is an event naming its
+   * concept, so the ids a write's events name are all that can differ.
+   */
+  advance(seq: number, ids: Iterable<string>, rows: Entry[]) {
+    for (const id of ids) {
+      const old = this.byId.get(id);
+      if (!old) continue;
+      this.byId.delete(id);
+      if (this.byPath.get(old.path)?.concept_id === id) this.byPath.delete(old.path);
+    }
+    for (const e of rows) {
+      this.byPath.set(e.path, e);
+      this.byId.set(e.concept_id, e);
+    }
+    this.seq = seq;
   }
 
   /** A path as addressed by a client: with or without the `.md` suffix. */
@@ -219,6 +245,37 @@ class Snapshot {
 
   sorted(): Entry[] {
     return [...this.byPath.values()].sort((a, b) => (a.path < b.path ? -1 : 1));
+  }
+}
+
+/**
+ * The head as `paths` holds it, looked up file by file with its indexes: what a write reads to
+ * resolve its own concepts' links, in place of a snapshot of every file (TEMPRA-87).
+ */
+class LiveView implements View {
+  private readonly ids = new Map<string, Entry | undefined>();
+  private readonly paths = new Map<string, Entry | undefined>();
+  readonly byId = { get: (id: string) => this.one(this.ids, "concept_id", id) };
+  constructor(
+    private readonly sql: SqlHandle,
+    readonly seq: number,
+  ) {}
+
+  lookup(path: string): Entry | undefined {
+    return (
+      this.one(this.paths, "path", path) ??
+      (path.endsWith(".md") ? undefined : this.one(this.paths, "path", `${path}.md`))
+    );
+  }
+
+  private one(memo: Map<string, Entry | undefined>, column: string, key: string) {
+    if (memo.has(key)) return memo.get(key);
+    const e = this.sql.all<Entry>(
+      `SELECT path, concept_id, hash, kind, last_seq AS seq FROM paths WHERE ${column} = ?`,
+      key,
+    )[0];
+    memo.set(key, e);
+    return e;
   }
 }
 
@@ -285,6 +342,9 @@ export interface StoreOptions {
 
 /** Reads are counted over this window for internal sources' usage (spec: What the service derives). */
 export const USAGE_WINDOW_DAYS = 30;
+
+/** Reads counted in memory before they are written to `access_log` (TEMPRA-87). */
+export const READ_FLUSH = 100;
 
 function iso(d: Date): string {
   return d.toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -390,6 +450,16 @@ export class LibraryStore {
   private readonly size: (() => number) | null;
   private readonly records = new Map<string, ConceptRecord>();
   private readonly snapshots = new Map<number, Snapshot>();
+  /** Missing-heading lint at head, by concept, for the seq it was worked out at (TEMPRA-86). */
+  private anchorCache: { seq: number; lint: Map<string, LintWarning[]> } | null = null;
+  /** Reads counted in memory (TEMPRA-87), by day and concept, and how many in all. */
+  private readonly reads = new Map<string, Map<string, number>>();
+  private unflushed = 0;
+  /** The write in progress: the seq it started from, and the files its content changes touched. */
+  private touch: { before: number; ids: Set<string>; paths: Set<string> } | null = null;
+  /** Committed writes since the kept lint's seq, in order: what each touched, from and to seq. */
+  private anchorTouched: { before: number; after: number; ids: Set<string>; paths: Set<string> }[] =
+    [];
 
   constructor(
     private readonly sql: SqlHandle,
@@ -402,6 +472,61 @@ export class LibraryStore {
     this.reindexSearch();
     this.addStaleTimes();
     this.addStructure();
+    this.addLedgerCounts();
+    this.addFtsRows();
+  }
+
+  /**
+   * Search rows are found by rowid through `fts_rows` (TEMPRA-87). Libraries from before get the
+   * table once, filled from the rowids their search rows already have.
+   */
+  private addFtsRows() {
+    if (this.sql.all("SELECT 1 FROM meta WHERE key = 'fts_rows'").length > 0) return;
+    this.sql.transaction(() => {
+      this.sql.script(
+        "CREATE TABLE IF NOT EXISTS fts_rows (concept_id TEXT PRIMARY KEY, fts_rowid INTEGER NOT NULL);",
+      );
+      this.sql.run("DELETE FROM fts_rows");
+      this.sql.run(
+        "INSERT OR REPLACE INTO fts_rows (concept_id, fts_rowid) SELECT concept_id, rowid FROM fts",
+      );
+      this.sql.run("INSERT INTO meta (key, value) VALUES ('fts_rows', '1')");
+    });
+  }
+
+  /** Removes a concept's search row, by rowid (TEMPRA-87). */
+  private dropSearchRow(id: string) {
+    this.sql.run(
+      "DELETE FROM fts WHERE rowid IN (SELECT fts_rowid FROM fts_rows WHERE concept_id = ?)",
+      id,
+    );
+    this.sql.run("DELETE FROM fts_rows WHERE concept_id = ?", id);
+  }
+
+  /**
+   * The ledger's counts are kept by triggers (TEMPRA-86). Libraries from before get the tables
+   * and triggers once, filled from the ledger as it stands.
+   */
+  private addLedgerCounts() {
+    if (this.sql.all("SELECT 1 FROM meta WHERE key = 'ledger_counts'").length > 0) return;
+    this.sql.transaction(() => {
+      this.sql.script(LEDGER_COUNTS);
+      this.sql.run(
+        `UPDATE ledger_counts SET events = (SELECT COUNT(*) FROM events),
+           requests = (SELECT COUNT(DISTINCT request_id) FROM events) WHERE id = 1`,
+      );
+      this.sql.run("DELETE FROM contributors");
+      this.sql.run(
+        `INSERT INTO contributors (person, agent, agent_key, requests, first_seq, last_seq)
+         SELECT person, agent, CASE WHEN agent IS NULL THEN 'n' ELSE 's' || agent END,
+                COUNT(DISTINCT request_id), MIN(seq), MAX(seq)
+         FROM (SELECT json_extract(meta, '$.by.person') AS person,
+                      json_extract(meta, '$.by.agent') AS agent, request_id, seq
+               FROM events WHERE meta IS NOT NULL AND json_extract(meta, '$.by.person') IS NOT NULL)
+         GROUP BY person, agent`,
+      );
+      this.sql.run("INSERT INTO meta (key, value) VALUES ('ledger_counts', '1')");
+    });
   }
 
   /**
@@ -581,12 +706,11 @@ export class LibraryStore {
   }
 
   /**
-   * The snapshot at `at` (default head). Committed snapshots are immutable and cached; `live`
-   * builds an uncached one from `paths`, for reads inside a write transaction.
+   * The snapshot at `at` (default head). Committed snapshots are cached; the head's is moved
+   * forward in place by each write (`settle`). Reads inside a write transaction use `live()`.
    */
-  private snapshot(at?: number, live = false): Snapshot {
+  private snapshot(at?: number): Snapshot {
     const head = this.headSeq();
-    if (live) return new Snapshot(head, this.headEntries());
     const seq = at === undefined ? head : at;
     if (!Number.isInteger(seq) || seq < 0 || seq > head) {
       throw new OkfError(400, "bad_seq", `Sequence ${at} is outside 0..${head}.`);
@@ -611,6 +735,11 @@ export class LibraryStore {
     if (this.snapshots.size > 32) this.snapshots.clear();
     this.snapshots.set(seq, snap);
     return snap;
+  }
+
+  /** The head inside a write transaction, file by file (TEMPRA-87). */
+  private live(): View {
+    return new LiveView(this.sql, this.headSeq());
   }
 
   private headEntries(): Entry[] {
@@ -656,7 +785,7 @@ export class LibraryStore {
     const extra: Record<string, unknown> = { ...e.extra, current_hash: row?.hash ?? null };
     if (typeof e.extra.current === "string") {
       if (row?.kind === "concept") {
-        extra.current = this.renderEntry(this.snapshot(undefined, true), row, false);
+        extra.current = this.renderEntry(this.live(), row, false);
       } else delete extra.current;
     }
     return new OkfError(e.status, e.code, e.message, extra);
@@ -732,18 +861,120 @@ export class LibraryStore {
   }
 
   private guard<T>(fn: () => T): T {
+    // The reads counted so far go in before the write, in their own transaction.
+    this.flushReads();
     try {
-      return fn();
+      const out = fn();
+      this.settle();
+      return out;
     } catch (e) {
       // A rolled-back transaction may have cached state for sequence numbers it never committed.
       this.snapshots.clear();
+      this.anchorCache = null;
+      this.anchorTouched = [];
+      this.touch = null;
       throw e;
     }
+  }
+
+  /**
+   * After a committed write: moves the head snapshot forward to it in place (TEMPRA-87), and
+   * records what it touched so the kept missing-heading lint catches up when next read
+   * (TEMPRA-86). What it touched is what its events name: their concepts, paths and moves' origins.
+   */
+  private settle() {
+    const touch = this.touch;
+    this.touch = null;
+    if (!touch) return;
+    const head = this.headSeq();
+    if (head === touch.before) return;
+    for (const e of this.sql.all<{ concept_id: string; path: string; from: string | null }>(
+      "SELECT concept_id, path, json_extract(meta, '$.from_path') AS \"from\" FROM events WHERE seq > ?",
+      touch.before,
+    )) {
+      touch.ids.add(e.concept_id);
+      touch.paths.add(e.path);
+      if (typeof e.from === "string") touch.paths.add(e.from);
+    }
+    const snap = this.snapshots.get(touch.before);
+    if (snap) {
+      this.snapshots.delete(touch.before);
+      snap.advance(
+        head,
+        touch.ids,
+        this.sql.all<Entry>(
+          `SELECT path, concept_id, hash, kind, last_seq AS seq FROM paths
+           WHERE concept_id IN (SELECT value FROM json_each(?))`,
+          JSON.stringify([...touch.ids]),
+        ),
+      );
+      this.snapshots.set(head, snap);
+    }
+    if (!this.anchorCache) return;
+    if (this.anchorTouched.length >= 1000) {
+      this.anchorCache = null;
+      this.anchorTouched = [];
+      return;
+    }
+    this.anchorTouched.push({ ...touch, after: head });
+  }
+
+  /**
+   * The kept missing-heading lint brought up to `snap` from the writes since (TEMPRA-86): only the
+   * files they touched and the concepts with an anchored link to one of them are worked out
+   * again. False when the writes since are not all known, so the caller works it all out.
+   */
+  private catchUpAnchors(snap: Snapshot): boolean {
+    const cache = this.anchorCache;
+    const touched = this.anchorTouched;
+    this.anchorTouched = [];
+    if (!cache) return false;
+    const ids = new Set<string>();
+    const paths = new Set<string>();
+    let seq = cache.seq;
+    for (const t of touched) {
+      if (t.before !== seq) return false;
+      for (const id of t.ids) ids.add(id);
+      for (const p of t.paths) paths.add(p);
+      seq = t.after;
+    }
+    if (seq !== snap.seq) return false;
+    if (ids.size > 0) {
+      const idList = JSON.stringify([...ids]);
+      const pathList = JSON.stringify(
+        [...paths].flatMap((p) => [p, p.endsWith(".md") ? p.slice(0, -3) : `${p}.md`]),
+      );
+      const affected = new Set(ids);
+      for (const { from_id } of this.sql.all<{ from_id: string }>(
+        `SELECT DISTINCT from_id FROM links
+         WHERE kind = 'body' AND anchor IS NOT NULL AND anchor <> '#' AND (
+           to_id IN (SELECT value FROM json_each(?))
+           OR to_path IN (SELECT value FROM json_each(?))
+           OR to_path IN (SELECT old_path FROM redirects WHERE concept_id IN (SELECT value FROM json_each(?)))
+           OR to_path || '.md' IN (SELECT old_path FROM redirects WHERE concept_id IN (SELECT value FROM json_each(?))))`,
+        idList,
+        pathList,
+        idList,
+        idList,
+      )) {
+        affected.add(from_id);
+      }
+      const headings = new Map<string, Set<string>>();
+      for (const id of affected) {
+        const e = snap.byId.get(id);
+        const lint = e?.kind === "concept" ? this.anchorLint(snap, e, headings) : [];
+        if (lint.length > 0) cache.lint.set(id, lint);
+        else cache.lint.delete(id);
+      }
+    }
+    cache.seq = snap.seq;
+    return true;
   }
 
   private begin(ctx: RequestContext): WriteState {
     if (!ctx.actor) throw new OkfError(400, "no_actor", "Writes need an actor.");
     if (!ctx.request_id) throw new OkfError(400, "no_request_id", "Writes need a request id.");
+    this.touch = { before: this.headSeq(), ids: new Set(), paths: new Set() };
     return {
       ctx,
       now: iso(this.clock()),
@@ -805,7 +1036,7 @@ export class LibraryStore {
    */
   private finish(w: WriteState, results: OpResult[]): OpResult[] {
     for (const id of w.affected) this.refreshBroken(id);
-    const snap = this.snapshot(undefined, true);
+    const snap = this.live();
     for (const r of results) {
       const id = w.written.get(r.path);
       if (!id || r.hash === null) continue;
@@ -1150,7 +1381,7 @@ export class LibraryStore {
    * decisions/link-lint-at-read-time, TEMPRA-41). `headings` caches each target version's anchors.
    */
   private anchorLint(
-    snap: Snapshot,
+    snap: View,
     e: Entry,
     headings = new Map<string, Set<string>>(),
   ): LintWarning[] {
@@ -1263,7 +1494,7 @@ export class LibraryStore {
     if (!Array.isArray(edits) || edits.length === 0) {
       throw new OkfError(400, "no_edits", "Send at least one { old, new } edit.");
     }
-    let doc = this.renderEntry(this.snapshot(undefined, true), row, false);
+    let doc = this.renderEntry(this.live(), row, false);
     for (const e of edits) {
       if (typeof e.old !== "string" || e.old === "" || typeof e.new !== "string") {
         throw new OkfError(
@@ -1697,13 +1928,17 @@ export class LibraryStore {
       });
     }
 
-    this.sql.run("DELETE FROM fts WHERE concept_id = ?", id);
+    this.dropSearchRow(id);
     this.sql.run(
       "INSERT INTO fts (concept_id, title, body, tags) VALUES (?, ?, ?, ?)",
       id,
       str(field(r, "title")) ?? "",
       searchText(r.doc),
       tags.join(" "),
+    );
+    this.sql.run(
+      "INSERT INTO fts_rows (concept_id, fts_rowid) VALUES (?, last_insert_rowid())",
+      id,
     );
 
     const nonLink = lint.filter((l) => l.code !== "broken_link");
@@ -1752,7 +1987,7 @@ export class LibraryStore {
       this.sql.run(`DELETE FROM ${t} WHERE concept_id = ?`, id);
     }
     this.sql.run("DELETE FROM links WHERE from_id = ?", id);
-    this.sql.run("DELETE FROM fts WHERE concept_id = ?", id);
+    this.dropSearchRow(id);
   }
 
   /**
@@ -1762,7 +1997,7 @@ export class LibraryStore {
    */
   private healLinksTo(w: WriteState, path: string, id: string) {
     const variants = [path, path.endsWith(".md") ? path.slice(0, -3) : `${path}.md`];
-    const where = `(to_path = ? OR to_path = ?) AND (to_id IS NULL OR to_id NOT IN (SELECT concept_id FROM paths))`;
+    const where = `(to_path = ? OR to_path = ?) AND (to_id IS NULL OR NOT EXISTS (SELECT 1 FROM paths p WHERE p.concept_id = links.to_id))`;
     const from = this.sql.all<{ from_id: string }>(
       `SELECT DISTINCT from_id FROM links WHERE ${where}`,
       ...variants,
@@ -1785,7 +2020,7 @@ export class LibraryStore {
   private refreshBroken(id: string): LintWarning[] {
     const broken = this.sql.all<{ to_path: string; raw: string; kind: string }>(
       `SELECT to_path, raw, kind FROM links WHERE from_id = ?
-         AND (to_id IS NULL OR to_id NOT IN (SELECT concept_id FROM paths))`,
+         AND (to_id IS NULL OR NOT EXISTS (SELECT 1 FROM paths p WHERE p.concept_id = links.to_id))`,
       id,
     );
     const exists = this.sql.all("SELECT 1 FROM paths WHERE concept_id = ?", id).length > 0;
@@ -1821,7 +2056,7 @@ export class LibraryStore {
   // ---------------------------------------------------------------- reads
 
   /** The href to render for a link, as of the snapshot (spec: Concept model, Reads and export). */
-  private href(snap: Snapshot, from: Entry, link: StoredLink | StoredSource): string {
+  private href(snap: View, from: Entry, link: StoredLink | StoredSource): string {
     if (isDerivedTarget(link)) return link.raw;
     const target = this.targetAt(snap, link);
     if (!target) return link.raw;
@@ -1844,7 +2079,7 @@ export class LibraryStore {
   }
 
   /** A link's target as of the snapshot: by ID, else by path, else through a redirect. */
-  private targetAt(snap: Snapshot, link: { path: string; target: string | null }) {
+  private targetAt(snap: View, link: { path: string; target: string | null }) {
     let target = link.target ? snap.byId.get(link.target) : undefined;
     if (!target) target = snap.lookup(link.path);
     if (!target) {
@@ -1858,7 +2093,7 @@ export class LibraryStore {
    * Stored lint with its `relative_link` items written anew from each link's current target, so
    * the path they suggest follows moves of either end (TEMPRA-46). Only where a write stored them.
    */
-  private freshLint(snap: Snapshot, e: Entry, lint: LintWarning[]): LintWarning[] {
+  private freshLint(snap: View, e: Entry, lint: LintWarning[]): LintWarning[] {
     if (!lint.some((l) => l.code === "relative_link")) return lint;
     const out = lint.filter((l) => l.code !== "relative_link");
     for (const l of this.record(e.hash).links) {
@@ -1896,7 +2131,7 @@ export class LibraryStore {
     return lint;
   }
 
-  private renderEntry(snap: Snapshot, e: Entry, computed: boolean, unstamped = false): string {
+  private renderEntry(snap: View, e: Entry, computed: boolean, unstamped = false): string {
     const stored = this.record(e.hash);
     const r = unstamped ? { ...stored, generated: null } : stored;
     const verified = this.verifiedAt(e.concept_id, snap.seq);
@@ -1908,7 +2143,7 @@ export class LibraryStore {
     });
   }
 
-  private computedValues(snap: Snapshot, e: Entry, r: ConceptRecord, verified: Verification[]) {
+  private computedValues(snap: View, e: Entry, r: ConceptRecord, verified: Verification[]) {
     const out: [string, Json][] = [
       ["trust_tier", trustTier(r.generated, verified)],
       ["stale", isStale(field(r, "stale_after"), this.clock().getTime())],
@@ -1920,24 +2155,60 @@ export class LibraryStore {
     return out;
   }
 
-  /** One more read of a concept's current version today (spec: usage-rollup maintainer). */
+  /**
+   * One more read of a concept's current version today (spec: usage-rollup maintainer), counted
+   * in memory so a read does not write (TEMPRA-87). Flushed to `access_log` by the next write,
+   * every READ_FLUSH reads, before the usage pass, and by the Durable Object's alarm.
+   */
   private countRead(id: string) {
-    this.sql.run(
-      `INSERT INTO access_log (day, concept_id, actor, reads) VALUES (?, ?, '', 1)
-       ON CONFLICT(day, concept_id, actor) DO UPDATE SET reads = reads + 1`,
-      iso(this.clock()).slice(0, 10),
-      id,
-    );
+    const day = iso(this.clock()).slice(0, 10);
+    let counts = this.reads.get(day);
+    if (!counts) {
+      counts = new Map();
+      this.reads.set(day, counts);
+    }
+    counts.set(id, (counts.get(id) ?? 0) + 1);
+    if (++this.unflushed >= READ_FLUSH) this.flushReads();
   }
 
-  /** Reads of a concept over the usage window, today included. */
+  /** Reads counted in memory and not yet in `access_log`. */
+  pendingReads(): number {
+    return this.unflushed;
+  }
+
+  /** Writes the reads counted in memory to `access_log`, in one transaction. */
+  flushReads(): number {
+    const n = this.unflushed;
+    if (n === 0) return 0;
+    this.sql.transaction(() => {
+      for (const [day, counts] of this.reads) {
+        for (const [id, reads] of counts) {
+          this.sql.run(
+            `INSERT INTO access_log (day, concept_id, actor, reads) VALUES (?, ?, '', ?)
+             ON CONFLICT(day, concept_id, actor) DO UPDATE SET reads = reads + excluded.reads`,
+            day,
+            id,
+            reads,
+          );
+        }
+      }
+    });
+    this.reads.clear();
+    this.unflushed = 0;
+    return n;
+  }
+
+  /** Reads of a concept over the usage window, today included, flushed or not. */
   private usageCount(id: string): number {
+    const start = this.windowStart();
+    let pending = 0;
+    for (const [day, counts] of this.reads) if (day >= start) pending += counts.get(id) ?? 0;
     return (
-      this.sql.all<{ n: number }>(
+      (this.sql.all<{ n: number }>(
         "SELECT COALESCE(SUM(reads), 0) AS n FROM access_log WHERE concept_id = ? AND day >= ?",
         id,
-        this.windowStart(),
-      )[0]?.n ?? 0
+        start,
+      )[0]?.n ?? 0) + pending
     );
   }
 
@@ -2103,40 +2374,57 @@ export class LibraryStore {
   log(opts: { at?: number; prefix?: string } = {}): string {
     const at = opts.at ?? this.headSeq();
     const prefix = normalizeDir(opts.prefix);
-    const reqs = this.requestsUpTo(at, prefix);
     const snap = this.snapshot(at);
-    const out: LogRequest[] = reqs.map((r) => ({
-      ts: r.ts,
-      actor: r.actor,
-      note: r.note,
-      events: r.events.map((e) => ({
-        op: e.op,
-        path: e.path,
-        created: e.prev_hash === null,
-        fromPath: typeof e.meta?.from_path === "string" ? e.meta.from_path : null,
-        // Entries link to where the file is now (as of `at`), or to nothing once it is gone.
-        current: snap.byId.get(e.concept_id)?.path ?? null,
-      })),
-    }));
-    return renderLog(out, prefix ? `Log: ${prefix}` : "Library log");
-  }
-
-  private requestsUpTo(at: number, prefix: string): RequestRow[] {
-    const events = this.sql.all<EventRow & { meta: string | null }>(
-      "SELECT * FROM events WHERE seq <= ? ORDER BY seq DESC",
+    // log.md tells what changed in the content; comments are not content. Filtered in SQL, and
+    // meta parsed only where the log reads it (TEMPRA-86).
+    const events = this.sql.all<{
+      ts: string;
+      actor: string;
+      request_id: string;
+      op: string;
+      path: string;
+      prev_hash: string | null;
+      concept_id: string;
+      meta: string | null;
+    }>(
+      `SELECT ts, actor, request_id, op, path, prev_hash, concept_id, meta FROM events
+       WHERE seq <= ? AND op != 'comment' AND (? = '' OR path = ? OR substr(path, 1, ?) = ?)
+       ORDER BY seq DESC`,
       at,
+      prefix,
+      prefix,
+      prefix.length + 1,
+      `${prefix}/`,
     );
-    const byReq = new Map<string, EventRow[]>();
+    const byReq = new Map<string, (typeof events)[number][]>();
     for (const e of events) {
-      // log.md tells what changed in the content; comments are not content.
-      if (e.op === "comment") continue;
-      const row = { ...e, meta: e.meta ? (JSON.parse(e.meta) as JsonObject) : null };
-      if (!underPrefix(e.path, prefix)) continue;
-      const list = byReq.get(e.request_id) ?? [];
-      list.push(row);
-      byReq.set(e.request_id, list);
+      const list = byReq.get(e.request_id);
+      if (list) list.push(e);
+      else byReq.set(e.request_id, [e]);
     }
-    return [...byReq.entries()].map(([id, evs]) => this.toRequest(id, evs.reverse()));
+    const meta = (m: string | null) => (m ? (JSON.parse(m) as JsonObject) : null);
+    const out: LogRequest[] = [];
+    for (const evs of byReq.values()) {
+      evs.reverse();
+      const first = evs[0];
+      out.push({
+        ts: first?.ts ?? "",
+        actor: first?.actor ?? "",
+        note: (meta(first?.meta ?? null)?.note as string | undefined) ?? null,
+        events: evs.map((e) => {
+          const from = e.op === "move" ? meta(e.meta)?.from_path : undefined;
+          return {
+            op: e.op,
+            path: e.path,
+            created: e.prev_hash === null,
+            fromPath: typeof from === "string" ? from : null,
+            // Entries link to where the file is now (as of `at`), or to nothing once it is gone.
+            current: snap.byId.get(e.concept_id)?.path ?? null,
+          };
+        }),
+      });
+    }
+    return renderLog(out, prefix ? `Log: ${prefix}` : "Library log");
   }
 
   private toRequest(id: string, events: EventRow[]): RequestRow {
@@ -2707,14 +2995,9 @@ export class LibraryStore {
     // Missing-heading lint is not stored: work it out for every concept with an anchored link.
     const anchorLint = new Map<string, LintWarning[]>();
     if (want("lint")) {
-      const headings = new Map<string, Set<string>>();
-      for (const { from_id } of this.sql.all<{ from_id: string }>(
-        "SELECT DISTINCT from_id FROM links WHERE kind = 'body' AND anchor IS NOT NULL AND anchor <> '#'",
-      )) {
-        const e = snap.byId.get(from_id);
-        if (e?.kind !== "concept" || !mine(e.path)) continue;
-        const lint = this.anchorLint(snap, e, headings);
-        if (lint.length > 0) anchorLint.set(from_id, lint);
+      for (const [id, lint] of this.anchorLints(snap)) {
+        const e = snap.byId.get(id);
+        if (e && mine(e.path)) anchorLint.set(id, lint);
       }
     }
     const flags = this.sql.all<{
@@ -2837,6 +3120,78 @@ export class LibraryStore {
     const counts: Record<string, number> = {};
     for (const i of items) counts[i.kind] = (counts[i.kind] ?? 0) + 1;
     return { seq: snap.seq, total: items.length, counts, items: items.slice(0, limit) };
+  }
+
+  /**
+   * Every concept at head with a link to a heading its target does not have, and that lint;
+   * worked out from the snapshot like `anchorLint`, kept for the seq it was worked out at.
+   */
+  private anchorLints(snap = this.snapshot()): Map<string, LintWarning[]> {
+    if (this.anchorCache?.seq === snap.seq) return this.anchorCache.lint;
+    if (this.catchUpAnchors(snap) && this.anchorCache) return this.anchorCache.lint;
+    const lint = new Map<string, LintWarning[]>();
+    const headings = new Map<string, Set<string>>();
+    for (const { from_id } of this.sql.all<{ from_id: string }>(
+      "SELECT DISTINCT from_id FROM links WHERE kind = 'body' AND anchor IS NOT NULL AND anchor <> '#'",
+    )) {
+      const e = snap.byId.get(from_id);
+      if (e?.kind !== "concept") continue;
+      const found = this.anchorLint(snap, e, headings);
+      if (found.length > 0) lint.set(from_id, found);
+    }
+    this.anchorCache = { seq: snap.seq, lint };
+    this.anchorTouched = [];
+    return lint;
+  }
+
+  /**
+   * What `work()` counts, by kind, its total and the stale-soon total, from aggregate queries over
+   * the flags and threads rather than item by item (TEMPRA-86): for `summary` and `health`.
+   */
+  private workCounts(): { counts: Record<string, number>; total: number; stale_soon: number } {
+    const now = this.clock().getTime();
+    const counts: Record<string, number> = {};
+    const add = (kind: string, n: number) => {
+      if (n > 0) counts[kind] = (counts[kind] ?? 0) + n;
+    };
+    const stale = this.sql.all<{ stale: number | null; soon: number | null }>(
+      `SELECT SUM(c.stale_ms <= ?) AS stale, SUM(c.stale_ms > ?) AS soon FROM flags f
+       JOIN concepts c ON c.concept_id = f.concept_id
+       JOIN paths p ON p.concept_id = f.concept_id AND p.kind = 'concept'
+       WHERE f.kind IN ('stale', 'stale_soon') AND c.stale_ms IS NOT NULL`,
+      now,
+      now,
+    )[0];
+    add("stale", stale?.stale ?? 0);
+    for (const r of this.sql.all<{ kind: string; n: number }>(
+      `SELECT f.kind, COUNT(*) AS n FROM flags f JOIN paths p ON p.concept_id = f.concept_id
+       WHERE f.kind NOT IN ('stale', 'stale_soon', 'structure') GROUP BY f.kind`,
+    )) {
+      add(r.kind, r.n);
+    }
+    // A concept with only missing-heading lint has a lint item too.
+    const linted = new Set(
+      this.sql
+        .all<{ concept_id: string }>("SELECT concept_id FROM flags WHERE kind = 'lint'")
+        .map((r) => r.concept_id),
+    );
+    add("lint", [...this.anchorLints().keys()].filter((id) => !linted.has(id)).length);
+    add(
+      "structure",
+      this.sql.all<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM flags f LEFT JOIN paths p ON p.concept_id = f.concept_id
+         WHERE f.kind = 'structure' AND (f.concept_id LIKE 'dir:%' OR p.kind = 'concept')`,
+      )[0]?.n ?? 0,
+    );
+    add(
+      "comment",
+      this.sql.all<{ n: number }>(
+        `SELECT COUNT(*) AS n FROM threads t JOIN paths p ON p.concept_id = t.concept_id
+         JOIN events e ON e.seq = t.last_seq WHERE t.status = 'open'`,
+      )[0]?.n ?? 0,
+    );
+    const total = Object.values(counts).reduce((a, b) => a + b, 0);
+    return { counts, total, stale_soon: stale?.soon ?? 0 };
   }
 
   /**
@@ -3396,24 +3751,29 @@ export class LibraryStore {
    * changed since anyone last verified them (the newest first), and when. No model involved.
    */
   private computeHealth(): LibraryHealth {
-    const work = this.work({ limit: 1 });
+    const work = this.workCounts();
     const n = (k: string) => work.counts[k] ?? 0;
+    const unverified = `FROM paths p JOIN events e ON e.seq = p.last_seq
+       WHERE p.kind = 'concept' AND e.op <> 'verify'`;
     const rows = this.sql.all<{ path: string; seq: number; ts: string; actor: string }>(
-      `SELECT p.path, p.last_seq AS seq, e.ts, e.actor FROM paths p JOIN events e ON e.seq = p.last_seq
-       WHERE p.kind = 'concept' AND e.op <> 'verify' ORDER BY p.last_seq DESC`,
+      `SELECT p.path, p.last_seq AS seq, e.ts, e.actor ${unverified} ORDER BY p.last_seq DESC LIMIT ?`,
+      HEALTH_NEWEST,
     );
     return {
       at: iso(this.clock()),
       seq: this.headSeq(),
       counts: {
         stale: n("stale"),
-        stale_soon: this.work({ kind: "stale_soon", limit: 1 }).total,
+        stale_soon: work.stale_soon,
         broken_link: n("broken_link"),
         lint: n("lint"),
         structure: n("structure"),
         comment: n("comment"),
       },
-      unverified: { total: rows.length, newest: rows.slice(0, HEALTH_NEWEST) },
+      unverified: {
+        total: this.sql.all<{ n: number }>(`SELECT COUNT(*) AS n ${unverified}`)[0]?.n ?? 0,
+        newest: rows,
+      },
     };
   }
 
@@ -3432,10 +3792,48 @@ export class LibraryStore {
 
   /** The usage-rollup maintainer: drops read counts older than the usage window. */
   pruneUsage(): number {
+    this.flushReads();
     const before = this.sql.all<{ n: number }>("SELECT COUNT(*) AS n FROM access_log")[0]?.n ?? 0;
     this.sql.run("DELETE FROM access_log WHERE day < ?", this.windowStart());
     const after = this.sql.all<{ n: number }>("SELECT COUNT(*) AS n FROM access_log")[0]?.n ?? 0;
     return before - after;
+  }
+
+  /**
+   * What the next maintenance pass would find to do (TEMPRA-82), for scheduling the library's
+   * alarm: whether the ledger moved since the last export, and when the next export, stale or
+   * stale-soon concept and read count falls due. Indexed lookups only.
+   */
+  maintenanceDue(now: Date): MaintenanceDue {
+    const t = now.getTime();
+    const m = this.maintenance();
+    const seq = this.headSeq();
+    const min = (q: string, ...p: SqlValue[]) =>
+      this.sql.all<{ t: number | null }>(q, ...p)[0]?.t ?? null;
+    const soonMs = STALE_SOON_DAYS * 86_400_000;
+    // The next concept to come within the stale-soon window, and the next to pass its date.
+    const staleAt = [
+      min("SELECT MIN(stale_ms) AS t FROM concepts WHERE stale_ms > ?", t + soonMs),
+      min("SELECT MIN(stale_ms) AS t FROM concepts WHERE stale_ms > ?", t),
+    ]
+      .map((x, i) => (x === null ? null : i === 0 ? x - soonMs : x))
+      .filter((x): x is number => x !== null);
+    const oldestRead = [
+      this.sql.all<{ day: string | null }>("SELECT MIN(day) AS day FROM access_log")[0]?.day,
+      ...this.reads.keys(),
+    ]
+      .filter((d): d is string => !!d)
+      .sort()[0];
+    const expiry = m.export_expiry;
+    return {
+      exportPending: seq > 0 && seq !== Number(m.export_seq ?? -1),
+      // Unknown until a pass has recorded it: due, so the next pass finds out.
+      exportExpiry: expiry === undefined ? t : expiry === "none" ? null : Date.parse(expiry),
+      staleAt: staleAt.length > 0 ? Math.min(...staleAt) : null,
+      usageExpiry: oldestRead
+        ? Date.parse(`${oldestRead}T00:00:00Z`) + USAGE_WINDOW_DAYS * 86_400_000
+        : null,
+    };
   }
 
   /** Maintainer bookkeeping (last run, cursors) kept in the meta table under `maint:`. */
@@ -3482,6 +3880,7 @@ export class LibraryStore {
    * library's members the first time it acts here. Requests recorded before then have none.
    */
   contributors() {
+    // Kept by the ledger's triggers (TEMPRA-86): the groups of `by` with their counts.
     const rows = this.sql.all<{
       person: string;
       agent: string | null;
@@ -3489,10 +3888,8 @@ export class LibraryStore {
       first_seq: number;
       last_seq: number;
     }>(
-      `SELECT json_extract(meta, '$.by.person') AS person, json_extract(meta, '$.by.agent') AS agent,
-              COUNT(DISTINCT request_id) AS requests, MIN(seq) AS first_seq, MAX(seq) AS last_seq
-       FROM events WHERE meta IS NOT NULL AND json_extract(meta, '$.by.person') IS NOT NULL
-       GROUP BY person, agent ORDER BY last_seq DESC LIMIT 500`,
+      `SELECT person, agent, requests, first_seq, last_seq FROM contributors
+       ORDER BY last_seq DESC LIMIT 500`,
     );
     return rows.map((r) => {
       const last = this.sql.all<{ actor: string; ts: string }>(
@@ -3506,6 +3903,10 @@ export class LibraryStore {
   stats() {
     const one = (q: string) => this.sql.all<{ n: number }>(q)[0]?.n ?? 0;
     const seq = this.headSeq();
+    // Kept by the ledger's triggers (TEMPRA-86), not counted over it.
+    const ledger = this.sql.all<{ events: number; requests: number }>(
+      "SELECT events, requests FROM ledger_counts WHERE id = 1",
+    )[0];
     const m = this.maintenance();
     const exportSeq = m.export_seq ? Number(m.export_seq) : 0;
     const stalenessSeq =
@@ -3519,8 +3920,8 @@ export class LibraryStore {
       paths: one("SELECT COUNT(*) AS n FROM paths"),
       concepts: one("SELECT COUNT(*) AS n FROM paths WHERE kind = 'concept'"),
       attachments: one("SELECT COUNT(*) AS n FROM paths WHERE kind = 'attachment'"),
-      events: one("SELECT COUNT(*) AS n FROM events"),
-      requests: one("SELECT COUNT(DISTINCT request_id) AS n FROM events"),
+      events: ledger?.events ?? 0,
+      requests: ledger?.requests ?? 0,
       bytes: this.size ? this.size() : null,
       // Every maintainer here is a process: deterministic, run by Tempra from the daily alarm.
       // Managed agents will be listed beside them as kind "agent".
@@ -3625,30 +4026,38 @@ export class LibraryStore {
    * what changed since they last looked (`activity`).
    */
   summary(seen?: { since: number; person?: string | null }) {
-    const snap = this.snapshot();
+    // Counted in SQL, never a record per concept (TEMPRA-86); types in the order the paths were
+    // first stored, as a walk of the snapshot met them.
+    const rows = this.sql.all<{ kind: Kind; type: string; n: number }>(
+      `SELECT p.kind, CASE WHEN p.kind = 'concept' THEN COALESCE(NULLIF(c.type, ''), '(no type)') END AS type,
+              COUNT(*) AS n
+       FROM paths p LEFT JOIN concepts c ON c.concept_id = p.concept_id
+       GROUP BY 1, 2 ORDER BY MIN(p.rowid)`,
+    );
     const types: Record<string, number> = {};
     let concepts = 0;
     let attachments = 0;
-    for (const e of snap.byPath.values()) {
-      if (e.kind === "attachment") {
-        attachments++;
-        continue;
+    for (const r of rows) {
+      if (r.kind === "attachment") attachments += r.n;
+      else {
+        concepts += r.n;
+        types[r.type] = (types[r.type] ?? 0) + r.n;
       }
-      concepts++;
-      const t = str(field(this.record(e.hash), "type")) || "(no type)";
-      types[t] = (types[t] ?? 0) + 1;
     }
+    const work = this.workCounts();
     return {
-      seq: snap.seq,
+      seq: this.headSeq(),
       concepts,
       attachments,
       types,
-      open_work: this.work({ limit: 1 }).total,
-      stale_soon: this.work({ kind: "stale_soon", limit: 1 }).total,
+      open_work: work.total,
+      stale_soon: work.stale_soon,
       health: this.health(),
-      open_comments: [...this.openThreadCounts().entries()]
-        .filter(([id]) => snap.byId.has(id))
-        .reduce((n, [, c]) => n + c, 0),
+      open_comments:
+        this.sql.all<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM threads t JOIN paths p ON p.concept_id = t.concept_id
+           WHERE t.status = 'open'`,
+        )[0]?.n ?? 0,
       ...(seen ? { activity: this.activity(seen) } : {}),
     };
   }
@@ -3708,6 +4117,18 @@ export interface StructureRun {
 }
 
 /** How many of the newest unverified changes the health summary names. */
+/** What a library's next maintenance pass would have to do, and when (TEMPRA-82); times in ms. */
+export interface MaintenanceDue {
+  /** The ledger moved since the last export. */
+  exportPending: boolean;
+  /** When the oldest export but the newest passes retention; null with nothing to prune. */
+  exportExpiry: number | null;
+  /** The next moment a concept comes within the stale-soon window or passes `stale_after`. */
+  staleAt: number | null;
+  /** When the oldest read count leaves the usage window. */
+  usageExpiry: number | null;
+}
+
 export const HEALTH_NEWEST = 5;
 
 /** A library's health summary (TEMPRA-66), as the daily pass leaves it in meta. */
