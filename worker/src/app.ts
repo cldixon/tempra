@@ -17,6 +17,7 @@ import { notificationsOf, registerInboxApi } from "./inbox-api";
 import { registerLegalRoutes } from "./legal";
 import { deleteLibrary } from "./lifecycle";
 import { type Notifications, postComment } from "./notify";
+import { messagePage } from "./oauth/pages";
 import { type GrantProps, registerAppRoutes } from "./oauth/routes";
 import { splitFrontmatter } from "./okf/concept";
 import { normalizePath, underPrefix } from "./okf/paths";
@@ -38,7 +39,7 @@ import { faviconResponse } from "./ui/favicon";
 import { registerUiRoutes } from "./ui/routes";
 import { appHref, appScript } from "./ui/spa";
 import { STARTER } from "./ui/starter";
-import { admit, tokenAdmission, type UsageDeps } from "./usage";
+import { admit, admitSession, RETRY_AFTER_S, tokenAdmission, type UsageDeps } from "./usage";
 import { maybeGunzip, readTar } from "./util/tar";
 import { registerWaitlistRoutes } from "./waitlist";
 
@@ -67,9 +68,14 @@ export interface Deps extends UsageDeps {
   destroyLibrary?: (doId: string) => Promise<void>;
   /**
    * Hands a WebSocket upgrade to the library's Durable Object, which holds the change feed
-   * (feed.ts); `prefix` limits it to a directory.
+   * (feed.ts); `prefix` limits it to a directory. `account` is whose cap on open sockets it
+   * counts against (TEMPRA-80).
    */
-  feed?: (doId: string, request: Request, prefix: string) => Promise<Response>;
+  feed?: (
+    doId: string,
+    request: Request,
+    opts: { prefix: string; account: string },
+  ) => Promise<Response>;
   /** The inbox, read cursors and mail settings in D1 (notify.ts); absent, nobody is notified. */
   notifications?: Notifications | null;
 }
@@ -252,6 +258,13 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
 
   app.onError((err, c) => {
     if (err instanceof OkfError) {
+      // Over a per-minute limit: when to try again, for scripts and the app's quiet backoff.
+      if (err.status === 429) c.header("Retry-After", String(RETRY_AFTER_S));
+      if (err.status === 429 && !c.req.path.startsWith("/api/")) {
+        const res = messagePage("Slow down", err.message, 429);
+        res.headers.set("Retry-After", String(RETRY_AFTER_S));
+        return res;
+      }
       return c.json(err.toJSON(), err.status as 400);
     }
     console.error(err);
@@ -287,13 +300,23 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   // The tab's icon, linked from every page's head.
   app.get("/favicon.svg", () => faviconResponse());
 
+  // Everything below (pages, the API, downloads, feed upgrades) counts against a browser
+  // session's limit when it carries the session cookie and no bearer token (TEMPRA-80); the
+  // static files above do not. A request with a token is limited per token instead.
+  app.use("*", async (c, next) => {
+    const secret =
+      c.req.header("Authorization") === undefined ? readCookie(c.req.raw, SESSION_COOKIE) : null;
+    if (secret) await admitSession(deps(c.env), secret);
+    await next();
+  });
+
   app.use(`${BASE}/*`, async (c, next) => {
     const d = deps(c.env);
     const who = await principal(c, d);
     const ref = await authorizeLibrary(d.accounts, who, c.req.param("owner"), c.req.param("lib"));
     const token = "token" in who ? who.token : sessionToken(who.user, ref);
-    // A person signed in to the app is metered but not rate limited (usage.ts), so agents
-    // spending the account's write budget never lock its owner out of the UI.
+    // A person signed in to the app is metered here but limited only per session (above), so
+    // agents spending the account's write budget never lock its owner out of the UI.
     const write = c.req.method !== "GET" && c.req.method !== "HEAD";
     await admit(d, tokenAdmission(token), write, "token" in who);
     c.set("deps", d);
@@ -638,12 +661,9 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     }
     const feed = c.var.deps.feed;
     if (!feed) throw new OkfError(501, "unavailable", "The change feed is not wired here.");
-    c.var.deps.meter?.({
-      kind: "feed",
-      account: token.person || token.library.owner || token.library.id,
-      library: token.library.id,
-    });
-    return feed(token.library.do_id, c.req.raw, c.req.query("prefix") ?? "");
+    const account = token.person || token.library.owner || token.library.id;
+    c.var.deps.meter?.({ kind: "feed", account, library: token.library.id });
+    return feed(token.library.do_id, c.req.raw, { prefix: c.req.query("prefix") ?? "", account });
   });
 
   // Counts for the library's home page: concepts, attachments, types, open work.

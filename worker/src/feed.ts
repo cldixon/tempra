@@ -50,6 +50,26 @@ export const FEED_MAX_AGE_MS = 10 * 60_000;
 /** The close code that asks a client to reconnect (and be authorized again) at once. */
 export const FEED_REAUTHORIZE = 4001;
 
+/**
+ * Open feed sockets one library holds at most (TEMPRA-80): each write's fan-out is O(sockets ×
+ * events), and the app opens one socket per library per tab. Counted in the Library DO from
+ * `getWebSockets()`, which hibernation keeps, never from memory.
+ */
+export const FEED_SOCKETS_PER_LIBRARY = 200;
+
+/**
+ * Open feed sockets one account holds at most, across every library it reaches (its person's
+ * tabs and agents together). Counted by the account's AccountFeeds object (feed-leases.ts).
+ */
+export const FEED_SOCKETS_PER_ACCOUNT = 50;
+
+/**
+ * The close code for a feed connection refused over a cap: the socket opens and closes at once
+ * with it, as a browser cannot read an HTTP refusal of a WebSocket. The client polls
+ * `GET /events?since=` instead and tries the socket again later.
+ */
+export const FEED_FULL = 4029;
+
 /** The DO's write methods: a call to one of these may add events. */
 export const WRITE_METHODS = new Set(["apply", "import", "revert", "verify", "comment"]);
 
