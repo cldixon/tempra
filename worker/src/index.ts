@@ -1,9 +1,11 @@
+import type { AccountFeeds } from "./account-feeds";
 import { d1Accounts } from "./accounts";
 import type { Deps } from "./app";
 import { d1Authenticate } from "./auth";
 import { d1BlobRefs } from "./blobrefs";
 import { makeClient, r2BlobStore, recordingBlobStore } from "./client";
-import type { Library } from "./library";
+import { FEED_SOCKETS_PER_ACCOUNT } from "./feed";
+import { type Library, refuseFeed } from "./library";
 import { DEFAULT_STORAGE_MB } from "./limits";
 import { exportsPrefix, listExports } from "./maintain";
 import { d1Notifications } from "./notify";
@@ -22,6 +24,7 @@ import {
 } from "./sweep";
 import { createWorker } from "./worker";
 
+export { AccountFeeds } from "./account-feeds";
 export { Library } from "./library";
 
 /**
@@ -90,7 +93,12 @@ const depsFor = (env: Env): Deps => {
     mailer: mailerFor(env),
     notifications: d1Notifications(env.DB),
     async rateLimit(kind, key) {
-      const limiter = kind === "write" ? env.WRITE_LIMITER : env.REQUEST_LIMITER;
+      const limiter =
+        kind === "write"
+          ? env.WRITE_LIMITER
+          : kind === "session"
+            ? env.SESSION_LIMITER
+            : env.REQUEST_LIMITER;
       return (await limiter.limit({ key })).success;
     },
     meter(e) {
@@ -192,9 +200,17 @@ const depsFor = (env: Env): Deps => {
       },
     },
     library: (token) => client(token.library.do_id),
-    feed: (doId, request, prefix) => {
+    feed: async (doId, request, { prefix, account }) => {
+      // A place under the account's cap first (feed-leases.ts), then the library's own cap.
+      const lease = crypto.randomUUID();
+      const ns = env.ACCOUNT_FEEDS as DurableObjectNamespace<AccountFeeds>;
+      const counter = ns.get(ns.idFromName(account));
+      if (!(await counter.acquire({ id: lease, doId }, FEED_SOCKETS_PER_ACCOUNT))) {
+        return refuseFeed("This account has too many live connections; polling instead.");
+      }
       const url = new URL("https://library/feed");
       if (prefix) url.searchParams.set("prefix", prefix);
+      url.searchParams.set("lease", lease);
       return libraryStub(env, doId).fetch(new Request(url, request));
     },
     // Checked against D1 first, so a forged download URL cannot create Durable Objects.

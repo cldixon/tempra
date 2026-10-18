@@ -13,8 +13,21 @@ export class ApiError extends Error {
 }
 
 /**
+ * Until when the server asked the app to hold back (ms since the epoch): a 429's `Retry-After`,
+ * the browser session's per-minute limit (TEMPRA-80). Every call waits it out; prefetches skip.
+ */
+let holdUntil = 0;
+
+/** Whether the app is holding back after a 429. */
+export const holding = () => Date.now() < holdUntil;
+
+/** Reads tried again after a 429 before the error reaches the page. */
+const RETRIES_429 = 2;
+
+/**
  * A JSON call to the REST API as the signed-in person (the session cookie). A lapsed session
- * goes back through sign-in to the same page.
+ * goes back through sign-in to the same page. Over the session's limit, a read waits as long as
+ * the server says and tries again, quietly; a write reports it.
  */
 export async function api<T>(url: string, init: RequestInit = {}): Promise<T> {
   const headers = new Headers(init.headers);
@@ -22,7 +35,17 @@ export async function api<T>(url: string, init: RequestInit = {}): Promise<T> {
   if (init.body !== undefined && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
-  const res = await fetch(url, { ...init, headers, credentials: "same-origin" });
+  const read = (init.method ?? "GET") === "GET";
+  let res: Response;
+  for (let attempt = 0; ; attempt++) {
+    const wait = holdUntil - Date.now();
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    res = await fetch(url, { ...init, headers, credentials: "same-origin" });
+    if (res.status !== 429) break;
+    const after = Number(res.headers.get("Retry-After"));
+    holdUntil = Math.max(holdUntil, Date.now() + (after > 0 ? Math.min(after, 120) : 10) * 1000);
+    if (!read || attempt >= RETRIES_429) break;
+  }
   if (res.status === 401) {
     location.assign(`/sign-in?next=${encodeURIComponent(location.pathname + location.search)}`);
   }
@@ -87,7 +110,7 @@ function fetchOnce<T>(
  * from the cache when it opens. Does nothing when a fresh prefetch is here or one is on its way.
  */
 export function prefetch<T>(key: string, load: () => Promise<T>) {
-  if (cache.fresh(key) || inflight.has(key)) return;
+  if (cache.fresh(key) || inflight.has(key) || holding()) return;
   const { started, promise } = fetchOnce(key, load);
   promise.then(
     (data) => cache.put(key, data, started, true),
@@ -136,8 +159,9 @@ export function useLoad<T>(key: string, load: () => Promise<T>): Loaded<T> & { r
       (e: unknown) => {
         if (!live) return;
         const error = e instanceof ApiError ? e : new ApiError(0, "network", String(e));
-        // Offline: what was shown stays. An answer (gone, not allowed) replaces it.
-        if (error.status === 0 && cache.has(key)) return;
+        // Offline, or still over the session's limit: what was shown stays. An answer (gone,
+        // not allowed) replaces it.
+        if ((error.status === 0 || error.status === 429) && cache.has(key)) return;
         cache.drop(key);
         setResult({ key, value: { state: "error", error } });
       },

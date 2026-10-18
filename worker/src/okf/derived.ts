@@ -83,7 +83,11 @@ const VERBS: Record<string, string> = {
  * labelled by it; a mixed one says what happened to each file. Moves name both paths. Each file
  * links to where it is now, so links keep working after a move; a file that is gone is plain text.
  */
-export function renderLog(requests: LogRequest[], title = "Library log"): string {
+export function renderLog(
+  requests: LogRequest[],
+  title = "Library log",
+  older: { before: number | null; prefix?: string } = { before: null },
+): string {
   const out: string[] = [`# ${title}\n`];
   let day = "";
   for (const [i, r] of requests.entries()) {
@@ -117,6 +121,12 @@ export function renderLog(requests: LogRequest[], title = "Library log"): string
     if (!next || next.ts.slice(0, 10) !== day) out.push("");
   }
   if (requests.length === 0) out.push("*No changes yet.*\n");
+  if (older.before !== null) {
+    const q = older.prefix ? `&prefix=${encodeURIComponent(older.prefix)}` : "";
+    out.push(
+      `*The latest ${requests.length} requests. Older ones: the MCP \`log\` tool with \`before: ${older.before}\`, or \`GET …/requests?before=${older.before}${q}\`.*\n`,
+    );
+  }
   return out.join("\n");
 }
 

@@ -1,10 +1,15 @@
 import type { TokenInfo } from "./auth";
+import { sha256Hex } from "./okf/hash";
 import { OkfError } from "./store/errors";
 
 /**
- * Rate limits and metering for tokens and connected apps (v2 spec: Limits, Metering). People in
- * the web UI are not rate limited; their writes are few and deliberate.
+ * Rate limits and metering (tempra-dev: v2/limits): tokens and connected apps by request and by
+ * the account's writes; a browser session by request alone (TEMPRA-80), so agents spending the
+ * account's write budget never lock its person out of the app.
  */
+
+/** Seconds a client over a per-minute limit is told to wait (`Retry-After`): the limiters' period. */
+export const RETRY_AFTER_S = 60;
 
 export interface UsageEvent {
   /** A request, a write, a sign-in email, or a change-feed connection opened. */
@@ -17,7 +22,7 @@ export interface UsageEvent {
 
 export interface UsageDeps {
   /** True when the call may go ahead; absent means no limits (tests, local dev). */
-  rateLimit?: (kind: "write" | "request", key: string) => Promise<boolean>;
+  rateLimit?: (kind: "write" | "request" | "session", key: string) => Promise<boolean>;
   /** Records a data point; never throws, never blocks. */
   meter?: (e: UsageEvent) => void;
 }
@@ -56,7 +61,7 @@ export function tokenAdmission(token: TokenInfo): Admission {
 
 /**
  * Counts a request (and a write); 429 when it is over a per-minute limit. `limited: false` meters
- * without limiting: a person in the web UI, whose requests are few and deliberate.
+ * without these limits: a person in the web UI, held to their session's own (admitSession).
  */
 export async function admit(
   d: UsageDeps,
@@ -77,6 +82,22 @@ export async function admit(
   }
   d.meter?.({ kind: "request", account, library });
   if (write) d.meter?.({ kind: "write", account, library });
+}
+
+/**
+ * Counts a request made with a session cookie (TEMPRA-80): every page, API call and feed upgrade
+ * of one browser session, keyed by the session's stored hash (the cookie's secret never leaves
+ * the Worker). Per session, as a token is limited per token; a second session takes a sign-in
+ * link, and those are limited too. 429 when over SESSION_LIMITER's per-minute limit.
+ */
+export async function admitSession(d: UsageDeps, secret: string): Promise<void> {
+  if (d.rateLimit && !(await d.rateLimit("session", `session:${sha256Hex(secret)}`))) {
+    throw new OkfError(
+      429,
+      "rate_limited",
+      "Too many requests from this browser session; wait a minute.",
+    );
+  }
 }
 
 /** Whether a JSON-RPC body (one message or a batch) calls a tool that writes. */

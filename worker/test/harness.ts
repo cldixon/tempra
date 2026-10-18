@@ -489,5 +489,7 @@ export function setup() {
     limits,
     stranger,
     sessionFor,
+    /** The cookie secret `app` sends. */
+    ownerSession,
   };
 }

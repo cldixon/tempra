@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { sha256Hex } from "../src/okf/hash";
 import { API, ORIGIN, setup } from "./harness";
 
 // The app's own pages call the REST API with the session cookie (TEMPRA-9).
@@ -21,12 +22,56 @@ describe("session on the REST API", () => {
     expect(await res.json()).toHaveProperty("seq");
   });
 
-  test("a person in the app is metered but never rate limited, even when agents spent the budget", async () => {
+  test("a person in the app is metered but not held to the agents' budgets, even when spent", async () => {
     const s = setup();
-    s.deps.rateLimit = async () => false;
+    // Every token and account limit spent; the session's own still has room.
+    s.deps.rateLimit = async (kind) => kind === "session";
     expect((await s.app.request(`${API}/tree`)).status).toBe(200);
     expect((await s.app.request(`${API}/files/a.md`, put({ Origin: ORIGIN }))).status).toBe(200);
     expect(s.usage.filter((u) => u.kind === "write")).toHaveLength(1);
+  });
+
+  // TEMPRA-80: a runaway tab or a script with the cookie is limited like a token is.
+  test("a session over its own limit gets a 429 with Retry-After, on the API and on pages", async () => {
+    const s = setup();
+    const keys: string[] = [];
+    let room = true;
+    s.deps.rateLimit = async (kind, key) => {
+      keys.push(`${kind}:${key}`);
+      return kind !== "session" || room;
+    };
+    expect((await s.app.request(`${API}/tree`)).status).toBe(200);
+    // Keyed by the session's stored hash, never the cookie's secret.
+    expect(keys).toContain(`session:session:${sha256Hex(s.ownerSession)}`);
+    expect(keys.join()).not.toContain(s.ownerSession);
+    room = false;
+    const api = await s.app.request(`${API}/tree`);
+    expect(api.status).toBe(429);
+    expect(api.headers.get("Retry-After")).toBe("60");
+    expect(((await api.json()) as { code: string }).code).toBe("rate_limited");
+    const page = await s.app.request("/owner/demo/");
+    expect(page.status).toBe(429);
+    expect(page.headers.get("Retry-After")).toBe("60");
+    expect(page.headers.get("Content-Type")).toContain("text/html");
+    const account = await s.app.request("/api/v1/account");
+    expect(account.status).toBe(429);
+  });
+
+  test("static files, and requests with a token, do not count against a session", async () => {
+    const s = setup();
+    const kinds: string[] = [];
+    s.deps.rateLimit = async (kind) => {
+      kinds.push(kind);
+      return kind !== "session";
+    };
+    expect((await s.app.request("/favicon.svg")).status).toBe(200);
+    expect((await s.app.request("/healthz")).status).toBeLessThan(500);
+    // A token wins over a cookie sent alongside it: limited per token.
+    const withToken = await s.app.request(`${API}/tree`, {
+      headers: { Authorization: "Bearer writer" },
+    });
+    expect(withToken.status).toBe(200);
+    expect(kinds).not.toContain("session");
   });
 
   test("no session and no token is 401, not a sign-in redirect", async () => {

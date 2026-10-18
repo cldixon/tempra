@@ -42,6 +42,15 @@ interface Subscription {
 const REAUTHORIZE = 4001;
 
 /**
+ * The close code for a connection refused over the library's or the account's cap on open
+ * sockets (TEMPRA-80): the feed polls the ledger instead and tries a socket again much later.
+ */
+export const FEED_FULL = 4029;
+
+/** How often a feed refused a socket reads the ledger, and when it first tries a socket again. */
+export const FALLBACK = { pollMs: 15_000, retryMs: 5 * 60_000, maxRetryMs: 30 * 60_000 };
+
+/**
  * The change feed of one library (tempra-dev: app/live): one WebSocket shared by every page of
  * the library that listens. It reconnects with backoff and, after any gap, catches up from
  * `GET /events?since=` so no event is missed; listeners see each event once, in order. A page
@@ -59,18 +68,24 @@ export class LibraryFeed {
   private catching: Promise<void> | null = null;
   /** A gap was seen while a catch-up was running: run it again when it ends. */
   private again = false;
+  /** Set while the server refuses a socket (FEED_FULL): the ledger is polled instead. */
+  private polling: ReturnType<typeof setInterval> | undefined;
+  private retrySocket: ReturnType<typeof setTimeout> | undefined;
+  /** Sockets refused in a row, to space out the next try. */
+  private refused = 0;
 
   constructor(
     private urls: Urls,
     private open: (url: URL) => WebSocket = (url) => new WebSocket(url),
     private read: typeof readEvents = readEvents,
+    private fallback = FALLBACK,
   ) {}
 
   subscribe(listener: Listener): Subscription & { close(): void } {
     const sub: Subscription = { listener, from: null, pending: [] };
     this.subs.add(sub);
     clearTimeout(this.idle);
-    if (!this.socket) this.connect();
+    if (!this.socket && this.polling === undefined) this.connect();
     return Object.assign(sub, {
       close: () => {
         this.subs.delete(sub);
@@ -104,10 +119,48 @@ export class LibraryFeed {
       if (this.socket !== ws) return;
       this.socket = null;
       if (this.subs.size === 0) return;
+      // Over a cap on open sockets: poll, and try a socket again much later, never in a loop.
+      if (e.code === FEED_FULL) {
+        this.poll();
+        return;
+      }
+      this.stopPolling();
+      this.refused = 0;
       // Asked to reconnect (the server re-checks access): at once; otherwise back off.
       const wait = e.code === REAUTHORIZE ? 0 : Math.min(30_000, 1000 * 2 ** this.retry++);
       setTimeout(() => this.subs.size && !this.socket && this.connect(), wait);
     };
+  }
+
+  /**
+   * The socket was refused: read the ledger every so often instead (the same catch-up a gap
+   * runs), and try a socket again after a wait that doubles with each refusal.
+   */
+  private poll() {
+    if (this.polling === undefined) {
+      this.polling = setInterval(() => {
+        if (this.subs.size === 0) return;
+        // Never connected: start from what the pages loaded, not from the ledger's beginning.
+        if (this.last === null) {
+          const from = [...this.subs].flatMap((s) => (s.from === null ? [] : [s.from]));
+          if (from.length === 0) return;
+          this.last = Math.min(...from);
+          for (const sub of this.subs) void this.replay(sub);
+        }
+        void this.catchUp();
+      }, this.fallback.pollMs);
+    }
+    const wait = Math.min(this.fallback.maxRetryMs, this.fallback.retryMs * 2 ** this.refused++);
+    clearTimeout(this.retrySocket);
+    this.retrySocket = setTimeout(() => {
+      if (this.subs.size && !this.socket) this.connect();
+    }, wait);
+  }
+
+  private stopPolling() {
+    clearInterval(this.polling);
+    clearTimeout(this.retrySocket);
+    this.polling = undefined;
   }
 
   /** A message from the socket. */
@@ -123,6 +176,9 @@ export class LibraryFeed {
       if (m.type === "hello") return;
     }
     if (m.type === "hello") {
+      // A socket is open again: the server took it, so stop polling.
+      this.stopPolling();
+      this.refused = 0;
       if (this.last === null) this.last = m.head;
       else if (m.head > this.last) void this.catchUp();
       for (const sub of this.subs) void this.replay(sub);
@@ -196,6 +252,8 @@ export class LibraryFeed {
 
   private close() {
     clearInterval(this.ping);
+    this.stopPolling();
+    this.refused = 0;
     const ws = this.socket;
     this.socket = null;
     ws?.close(1000, "done");
