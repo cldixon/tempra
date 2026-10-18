@@ -35,10 +35,10 @@ export function limitsFrom(json: string | null | undefined): Limits {
   return limits;
 }
 
-export function overLimit(what: string, limit: number): OkfError {
+export function overLimit(what: string, limit: number, code = "limit_reached"): OkfError {
   return new OkfError(
     403,
-    "limit_reached",
+    code,
     `You have reached the limit of ${limit} ${what}. Delete some, or ask for more.`,
   );
 }

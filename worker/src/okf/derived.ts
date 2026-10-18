@@ -86,7 +86,7 @@ const VERBS: Record<string, string> = {
 export function renderLog(requests: LogRequest[], title = "Library log"): string {
   const out: string[] = [`# ${title}\n`];
   let day = "";
-  for (const r of requests) {
+  for (const [i, r] of requests.entries()) {
     const d = r.ts.slice(0, 10);
     if (d !== day) {
       out.push(`## ${d}\n`);
@@ -113,7 +113,7 @@ export function renderLog(requests: LogRequest[], title = "Library log"): string
     if (entries.length > 10) shown.push(`and ${entries.length - 10} more`);
     const note = r.note ? ` ${oneLine(r.note)}` : "";
     out.push(`* **${label}** by \`${r.actor}\`:${note} ${shown.join(", ")}`);
-    const next = requests[requests.indexOf(r) + 1];
+    const next = requests[i + 1];
     if (!next || next.ts.slice(0, 10) !== day) out.push("");
   }
   if (requests.length === 0) out.push("*No changes yet.*\n");

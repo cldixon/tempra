@@ -1,153 +1,19 @@
 import { describe, expect, test } from "bun:test";
-import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { sha256 } from "@noble/hashes/sha2.js";
 import { ORIGIN, setup } from "./harness";
-
-const REDIRECT = "https://claude.ai/api/mcp/auth_callback";
-
-const b64url = (bytes: Uint8Array) =>
-  btoa(String.fromCharCode(...bytes))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-
-type App = ReturnType<typeof setup>["app"];
-
-async function register(app: App, name = "Claude", redirect = REDIRECT) {
-  const r = await app.request("/register", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      client_name: name,
-      redirect_uris: [redirect],
-      token_endpoint_auth_method: "none",
-      grant_types: ["authorization_code", "refresh_token"],
-      response_types: ["code"],
-    }),
-  });
-  expect(r.status).toBe(201);
-  return ((await r.json()) as { client_id: string }).client_id;
-}
-
-/** Starts an authorization: returns the consent page, its handle and cookies, and the PKCE verifier. */
-async function begin(
-  app: App,
-  clientId: string,
-  scope = "okf:read okf:write",
-  redirect = REDIRECT,
-) {
-  const verifier = b64url(crypto.getRandomValues(new Uint8Array(32)));
-  const challenge = b64url(sha256(new TextEncoder().encode(verifier)));
-  const query = new URLSearchParams({
-    response_type: "code",
-    client_id: clientId,
-    redirect_uri: redirect,
-    scope,
-    state: "st4te",
-    code_challenge: challenge,
-    code_challenge_method: "S256",
-    resource: `${ORIGIN}/mcp`,
-  });
-  const url = `/authorize?${query}`;
-  const page = await app.request(url);
-  const html = await page.text();
-  const handle = /name="handle" value="([^"]+)"/.exec(html)?.[1] ?? "";
-  const cookies = page.headers
-    .getSetCookie()
-    .map((c) => c.split(";")[0])
-    .join("; ");
-  return { page, html, handle, cookies, url, verifier };
-}
-
-async function submit(
-  app: App,
-  flow: Awaited<ReturnType<typeof begin>>,
-  fields: Record<string, string>,
-) {
-  return app.request(flow.url, {
-    method: "POST",
-    headers: { Cookie: flow.cookies, "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({ handle: flow.handle, decision: "approve", ...fields }),
-    redirect: "manual",
-  });
-}
-
-async function exchange(
-  app: App,
-  clientId: string,
-  location: string,
-  verifier: string,
-  redirect = REDIRECT,
-) {
-  const code = new URL(location).searchParams.get("code") ?? "";
-  const r = await app.request("/token", {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: new URLSearchParams({
-      grant_type: "authorization_code",
-      code,
-      redirect_uri: redirect,
-      client_id: clientId,
-      code_verifier: verifier,
-      resource: `${ORIGIN}/mcp`,
-    }),
-  });
-  expect(r.status).toBe(200);
-  return (await r.json()) as { access_token: string; refresh_token: string; scope: string };
-}
-
-type Apps = {
-  apps: { id: string; app: string; actor: string | null; libraries: "all" | string[] }[];
-};
-
-async function apps(app: App): Promise<Apps["apps"]> {
-  const r = await app.request("/api/v1/apps");
-  expect(r.status).toBe(200);
-  return ((await r.json()) as Apps).apps;
-}
-
-/** The app's API, as its pages call it: JSON, from this site. */
-function api(app: App, path: string, method: string, body?: unknown, origin = ORIGIN) {
-  return app.request(path, {
-    method,
-    headers: { Origin: origin, "Content-Type": "application/json" },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-}
-
-async function mcp(app: App, token: string) {
-  const transport = new StreamableHTTPClientTransport(new URL(`${ORIGIN}/mcp`), {
-    requestInit: { headers: { Authorization: `Bearer ${token}` } },
-    fetch: async (url, init) => app.request(url.toString(), init as RequestInit),
-  });
-  const client = new Client({ name: "oauth-test", version: "1.0.0" });
-  await client.connect(transport);
-  const call = async (name: string, args: Record<string, unknown> = {}) => {
-    const r = await client.callTool({ name, arguments: args });
-    return {
-      text: (r.content as { text: string }[]).map((c) => c.text).join("\n"),
-      isError: !!r.isError,
-    };
-  };
-  return { client, call };
-}
-
-/** Makes a second account with its own library; returns its handle. */
-async function setupStranger(accounts: ReturnType<typeof setup>["accounts"]): Promise<string> {
-  const user = await accounts.user("stranger@example.com");
-  await accounts.createLibrary("demo", user);
-  return user.handle;
-}
-
-const approve = {
-  library: "demo",
-  new_library: "",
-  access: "write",
-  prefix: "",
-  actor: "claude-ai/connector",
-  tiers: "all",
-};
+import {
+  type App,
+  api,
+  approve,
+  apps,
+  begin,
+  connectApp,
+  exchange,
+  mcp,
+  REDIRECT,
+  register,
+  setupStranger,
+  submit,
+} from "./oauth-flow";
 
 describe("OAuth for MCP clients", () => {
   test("discovery: /mcp challenges with protected-resource metadata", async () => {
@@ -617,5 +483,143 @@ describe("OAuth for MCP clients", () => {
     const { app } = setup();
     const { call } = await mcp(app, "writer");
     expect((await call("start")).text).toContain("You are claude-code/test");
+  });
+
+  describe("Create libraries (TEMPRA-100)", () => {
+    const creates = { ...approve, create_libraries: "on" };
+
+    test("consent offers it, on, for a write connection, and the choice round-trips", async () => {
+      const { app } = setup();
+      const clientId = await register(app);
+      const flow = await begin(app, clientId);
+      expect(flow.html).toContain('name="create_libraries" value="on" checked');
+      const readFlow = await begin(app, clientId, "okf:read");
+      expect(readFlow.html).not.toContain("create_libraries");
+
+      const on = await connectApp(app, creates);
+      const off = await connectApp(app, approve);
+      // Kept only with read and write and all tools, whatever the form says.
+      const files = await connectApp(app, { ...creates, tiers: "files" });
+      const read = await connectApp(app, { ...creates, access: "read" });
+      const listed = (await apps(app)) as unknown as { actor: string; create_libraries: boolean }[];
+      expect(listed.map((a) => a.create_libraries).sort()).toEqual([false, false, false, true]);
+
+      expect((await on.call("create_library", { slug: "made" })).isError).toBe(false);
+      for (const c of [off, files, read]) {
+        expect((await c.call("create_library", { slug: "nope" })).text).toContain(
+          "create_not_allowed",
+        );
+      }
+    });
+
+    test("a selected grant reaches the library it created and no other", async () => {
+      const { app, accounts } = setup();
+      await accounts.createLibrary("private", { id: "user_1", handle: "owner" });
+      const first = await connectApp(app, { ...creates, libraries: "selected" });
+      const second = await connectApp(app, { ...creates, libraries: "selected" });
+
+      expect((await first.call("create_library", { slug: "made" })).isError).toBe(false);
+      const started = await first.call("start");
+      expect(started.text).toContain("# Your libraries (2)");
+      expect(started.text).toContain("- owner/demo");
+      expect(started.text).toContain("- owner/made");
+      expect(started.text).not.toContain("private");
+      expect((await first.call("read", { library: "owner/private", path: "a.md" })).text).toContain(
+        "no_library",
+      );
+      // A library made later in the app is not added to it.
+      await accounts.createLibrary("later", { id: "user_1", handle: "owner" });
+      expect((await first.call("start")).text).not.toContain("later");
+
+      // The person's other selected connection is untouched.
+      expect((await second.call("start")).text).toContain("# Library owner/demo");
+      expect((await second.call("read", { library: "owner/made", path: "a.md" })).text).toContain(
+        "no_library",
+      );
+      // ...and so is each one's own creation.
+      expect((await second.call("create_library", { slug: "made-two" })).isError).toBe(false);
+      expect(
+        (await first.call("read", { library: "owner/made-two", path: "a.md" })).text,
+      ).toContain("no_library");
+
+      const byLibs = (await apps(app)).map((a) => a.libraries).sort();
+      expect(byLibs).toEqual([
+        ["demo", "made"],
+        ["demo", "made-two"],
+      ]);
+
+      // Deleting the library picked at consent keeps a connection that still has what it made.
+      const del = await api(app, "/api/v1/libraries/owner/demo/delete", "POST", {
+        confirm: "demo",
+      });
+      expect(del.status).toBe(204);
+      expect((await first.call("start")).text).toContain("# Library owner/made");
+      expect((await apps(app)).map((a) => a.libraries).sort()).toEqual([["made"], ["made-two"]]);
+      // Deleting that too leaves it nothing: revoked.
+      await api(app, "/api/v1/libraries/owner/made/delete", "POST", { confirm: "made" });
+      expect((await apps(app)).map((a) => a.libraries)).toEqual([["made-two"]]);
+    });
+
+    test("a member's agent creates only in its own person's name", async () => {
+      const s = setup();
+      const friend = await s.stranger("friend@example.com");
+      await s.accounts.share("lib-1", friend.user.id, "write", "user_1");
+      const c = await connectApp(friend.app, {
+        ...creates,
+        libraries: "selected",
+        library: "owner/demo",
+      });
+      expect((await c.call("create_library", { slug: "owner/x" })).text).toContain("bad_slug");
+      const made = await c.call("create_library", { slug: "x" });
+      expect(made.text).toContain("Created library friend/x, owned by @friend");
+      expect(await s.accounts.library("owner", "x")).toBeNull();
+      expect((await s.accounts.library("friend", "x"))?.ownerId).toBe(friend.user.id);
+      // The owner cannot see it; the friend's agent still reaches the shared library at its role.
+      expect((await s.app.request("/api/v1/libraries/friend/x/tree")).status).toBe(404);
+      expect((await c.call("start")).text).toContain("- owner/demo");
+    });
+
+    test("POST /api/v1/libraries takes an app's access token under the same rules", async () => {
+      const { app, anon, accounts, db } = setup();
+      const post = (token: string, body: unknown) =>
+        anon.request("/api/v1/libraries", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+      const on = await connectApp(app, { ...creates, libraries: "selected" });
+      const r = await post(on.tokens.access_token, { slug: "via-rest", title: "Via REST" });
+      expect(r.status).toBe(201);
+      expect(await r.json()).toMatchObject({
+        owner: "owner",
+        slug: "via-rest",
+        title: "Via REST",
+      });
+      expect((await on.call("start", { library: "owner/via-rest" })).text).toContain(
+        "Title: Via REST",
+      );
+      expect((await post(on.tokens.access_token, { slug: "via-rest" })).status).toBe(409);
+
+      const off = await connectApp(app, approve);
+      const refused = await post(off.tokens.access_token, { slug: "nope" });
+      expect(refused.status).toBe(403);
+      expect(((await refused.json()) as { code: string }).code).toBe("create_not_allowed");
+      // A forged or revoked token is not one.
+      const forged = await post(`user_1:x:${"a".repeat(32)}`, { slug: "nope" });
+      expect(forged.status).toBe(401);
+      // An agent's bearer token still cannot; a human: token still can.
+      expect((await post("writer", { slug: "nope" })).status).toBe(403);
+      expect((await post("human", { slug: "by-human" })).status).toBe(201);
+
+      // Revoked at /apps: the token is gone.
+      const revoke = await connectApp(app, creates);
+      const id = revoke.tokens.access_token.split(":")[1] ?? "";
+      expect((await api(app, `/api/v1/apps/${id}`, "DELETE")).status).toBe(204);
+      expect((await post(revoke.tokens.access_token, { slug: "nope" })).status).toBe(401);
+      // A suspended account creates nothing, over REST or MCP.
+      db.run("UPDATE users SET suspended = ? WHERE id = ?", [new Date().toISOString(), "user_1"]);
+      expect((await post(on.tokens.access_token, { slug: "nope" })).status).toBe(401);
+      expect(await accounts.library("owner", "nope")).toBeNull();
+    });
   });
 });

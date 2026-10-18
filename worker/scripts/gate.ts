@@ -21,13 +21,14 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  renameSync,
   rmSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
-import { chromium } from "playwright-core";
+import { type Browser, chromium } from "playwright-core";
 import { readTar, writeTar } from "../src/util/tar";
 import { compareBundle } from "../test/compare";
 import { BUNDLES, loadBundle } from "../test/fixtures";
@@ -233,6 +234,8 @@ function within<T>(ms: number, what: string, work: Promise<T>): Promise<T> {
  */
 const LOGS = process.env.GATE_LOGS;
 let browsers = 0;
+/** How long one Chrome launch may take; playwright's default is 180 s. */
+const LAUNCH_TIMEOUT_MS = 30_000;
 
 /** At most `n` characters of `s`, on one line. */
 const clip = (s: string, n = 160) => s.replace(/\s+/g, " ").slice(0, n);
@@ -254,10 +257,26 @@ async function openBrowser() {
   const n = ++browsers;
   /** Chrome's own log, written by Chrome: crashes, GPU, sandbox, IPC and network errors. */
   const chromeLog = LOGS ? join(LOGS, `chrome-${n}.log`) : null;
-  const browser = await chromium.launch({
-    executablePath,
-    args: chromeLog ? ["--enable-logging", `--log-file=${chromeLog}`, "--v=0"] : [],
-  });
+  const launch = () =>
+    chromium.launch({
+      executablePath,
+      args: chromeLog ? ["--enable-logging", `--log-file=${chromeLog}`, "--v=0"] : [],
+      timeout: LAUNCH_TIMEOUT_MS,
+    });
+  // Chrome now and then fails to start on CI runners (spawn ENOENT, then a launch that never
+  // answers; run 38174138102). A launch that fails is tried once more: playwright gives each
+  // launch a fresh profile dir of its own, and the first attempt's Chrome log stays as
+  // chrome-N-failed.log. Only the launch is retried; a step that fails later fails the gate.
+  let browser: Browser;
+  try {
+    browser = await launch();
+  } catch (e) {
+    if (chromeLog && existsSync(chromeLog))
+      renameSync(chromeLog, chromeLog.replace(/\.log$/, "-failed.log"));
+    if (process.env.GATE_TRACE)
+      console.log(`  [browser ${n}] launch failed, trying once more: ${clip(String(e), 400)}`);
+    browser = await launch();
+  }
   if (process.env.GATE_TRACE)
     console.log(`  [browser ${n}] ${executablePath} ${browser.version()}`);
   const context = await browser.newContext();

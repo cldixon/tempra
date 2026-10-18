@@ -1,13 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { API, ORIGIN, setup, UI } from "./harness";
+import { approve, connectApp } from "./oauth-flow";
 
 type S = ReturnType<typeof setup>;
 
 /** Fills a route pattern's parameters and wildcard with plausible values. */
-function fill(path: string): string {
+function fill(path: string, lib = "demo"): string {
   return path
     .replace(":owner", "owner")
-    .replace(":lib", "demo")
+    .replace(":lib", lib)
     .replace(":request", "req_1")
     .replace(":date", "2026-10-01")
     .replace(":file", "bundle.tar")
@@ -40,6 +41,69 @@ async function seedOwnerContent(s: S) {
   expect(r.status).toBe(200);
 }
 
+/**
+ * Every library route, on the owner's library `lib`, as a stranger's session, write token and
+ * human: token: what did not answer 404, or showed the owner's secret note.
+ */
+async function strangerFailures(
+  s: S,
+  other: Awaited<ReturnType<S["stranger"]>>,
+  routes: Awaited<ReturnType<typeof libraryRoutes>>,
+  lib = "demo",
+): Promise<string[]> {
+  const failures: string[] = [];
+  for (const r of routes) {
+    const path = fill(r.path, lib);
+    const attempts: [string, Promise<Response>][] = !path.startsWith("/api/")
+      ? [
+          [
+            "session",
+            other.app.request(path, {
+              method: r.method,
+              headers: { Origin: ORIGIN },
+              body: r.method === "GET" ? undefined : new URLSearchParams({ confirm: lib }),
+              redirect: "manual",
+            }),
+          ],
+        ]
+      : [
+          ...[other.writer, other.human].map((token): [string, Promise<Response>] => [
+            token === other.writer ? "write token" : "human token",
+            s.anon.request(path, {
+              method: r.method,
+              headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+              body:
+                r.method === "GET" || r.method === "DELETE"
+                  ? undefined
+                  : JSON.stringify({ confirm: lib }),
+            }),
+          ]),
+          // The app's own pages call the API with the session (TEMPRA-9).
+          [
+            "session",
+            other.app.request(path, {
+              method: r.method,
+              headers: { Origin: ORIGIN, "Content-Type": "application/json" },
+              body:
+                r.method === "GET" || r.method === "DELETE"
+                  ? undefined
+                  : JSON.stringify({ confirm: lib }),
+            }),
+          ],
+        ];
+    for (const [who, res] of attempts) {
+      const got = await res;
+      const body = await got.text();
+      // Adding the trailing slash redirects any name alike, so it tells nothing.
+      if (got.status === 301 && got.headers.get("Location") === `${path}/`) continue;
+      if (got.status !== 404 || body.includes("secret note")) {
+        failures.push(`${r.method} ${r.path} as the stranger's ${who}: ${got.status}`);
+      }
+    }
+  }
+  return failures;
+}
+
 describe("tenancy (v2 spec: Tenancy and authorization)", () => {
   test("every library route answers a stranger's session or tokens with 404", async () => {
     const s = setup();
@@ -50,60 +114,32 @@ describe("tenancy (v2 spec: Tenancy and authorization)", () => {
     expect(routes.filter((r) => !r.path.startsWith("/api/")).length).toBeGreaterThan(15);
     expect(routes.filter((r) => r.path.startsWith("/api/")).length).toBeGreaterThan(20);
 
-    const failures: string[] = [];
-    for (const r of routes) {
-      const path = fill(r.path);
-      const attempts: [string, Promise<Response>][] = !path.startsWith("/api/")
-        ? [
-            [
-              "session",
-              other.app.request(path, {
-                method: r.method,
-                headers: { Origin: ORIGIN },
-                body: r.method === "GET" ? undefined : new URLSearchParams({ confirm: "demo" }),
-                redirect: "manual",
-              }),
-            ],
-          ]
-        : [
-            ...[other.writer, other.human].map((token): [string, Promise<Response>] => [
-              token === other.writer ? "write token" : "human token",
-              s.anon.request(path, {
-                method: r.method,
-                headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-                body:
-                  r.method === "GET" || r.method === "DELETE"
-                    ? undefined
-                    : JSON.stringify({ confirm: "demo" }),
-              }),
-            ]),
-            // The app's own pages call the API with the session (TEMPRA-9).
-            [
-              "session",
-              other.app.request(path, {
-                method: r.method,
-                headers: { Origin: ORIGIN, "Content-Type": "application/json" },
-                body:
-                  r.method === "GET" || r.method === "DELETE"
-                    ? undefined
-                    : JSON.stringify({ confirm: "demo" }),
-              }),
-            ],
-          ];
-      for (const [who, res] of attempts) {
-        const got = await res;
-        const body = await got.text();
-        // Adding the trailing slash redirects any name alike, so it tells nothing.
-        if (got.status === 301 && got.headers.get("Location") === `${path}/`) continue;
-        if (got.status !== 404 || body.includes("secret note")) {
-          failures.push(`${r.method} ${r.path} as the stranger's ${who}: ${got.status}`);
-        }
-      }
-    }
-    expect(failures).toEqual([]);
+    expect(await strangerFailures(s, other, routes)).toEqual([]);
 
     // Nothing was written to the owner's library.
     expect(s.store().headSeq()).toBe(1);
+  });
+
+  test("a library the owner's agent created is a 404 to a stranger on every route", async () => {
+    const s = setup();
+    const { call } = await connectApp(s.app, {
+      ...approve,
+      libraries: "all",
+      library: "",
+      create_libraries: "on",
+    });
+    expect((await call("create_library", { slug: "agent-made" })).isError).toBe(false);
+    const w = await call("write", {
+      library: "owner/agent-made",
+      path: "a.md",
+      content: "---\ntype: Note\n---\nThe owner's secret note.\n",
+    });
+    expect(w.isError).toBe(false);
+    const other = await s.stranger();
+    const routes = await libraryRoutes(s);
+    expect(await strangerFailures(s, other, routes, "agent-made")).toEqual([]);
+    // Its owner is the person, with the agent's write attributed to them.
+    expect((await s.app.request("/api/v1/libraries/owner/agent-made/files/a.md")).status).toBe(200);
   });
 
   test("the same name under another owner is a different library", async () => {

@@ -122,9 +122,20 @@ export function registerAccountApi(
       if (client?.clientName) names.set(id, client.clientName);
     }
     grants.sort((a, b) => b.createdAt - a.createdAt);
+    // What each selected connection created since consent (TEMPRA-100) counts as selected.
+    const created = new Map<string, string[]>();
+    for (const g of grants) {
+      const m = (g.metadata ?? {}) as GrantMetadata;
+      if (m.grant && Array.isArray(m.libraries)) {
+        created.set(g.id, await d.accounts.grantLibraries(m.grant, user.id));
+      }
+    }
     return c.json({
       apps: grants.map((g) => {
         const m = (g.metadata ?? {}) as GrantMetadata;
+        const selected = Array.isArray(m.libraries)
+          ? [...m.libraries, ...(created.get(g.id) ?? [])]
+          : null;
         return {
           id: g.id,
           app: names.get(g.clientId) ?? g.clientId,
@@ -132,9 +143,9 @@ export function registerAccountApi(
           libraries:
             m.libraries === "all"
               ? "all"
-              : Array.isArray(m.libraries)
+              : selected
                 ? libs
-                    .filter((l) => m.libraries?.includes(l.id))
+                    .filter((l) => selected.includes(l.id))
                     .map((l) => (l.role === "owner" ? l.slug : `${l.owner}/${l.slug}`))
                 : m.library
                   ? [m.library]
@@ -142,6 +153,7 @@ export function registerAccountApi(
           access: m.access === "write" ? "write" : "read",
           prefix: m.prefix ?? null,
           tiers: m.tiers === "files" ? "files" : "all",
+          create_libraries: m.create === true,
           created: new Date(g.createdAt * 1000).toISOString(),
         };
       }),
@@ -156,8 +168,13 @@ export function registerAccountApi(
   });
 }
 
-/** Grant metadata: `libraries` since account-level access, `library` (a slug) before it. */
+/**
+ * Grant metadata: `libraries` since account-level access, `library` (a slug) before it; `grant`
+ * (the props' grant id) and `create` since TEMPRA-100.
+ */
 type GrantMetadata = {
+  grant?: string;
+  create?: boolean;
   libraries?: "all" | string[];
   library?: string;
   actor?: string;

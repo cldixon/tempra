@@ -59,7 +59,7 @@ worker/src/worker.ts     Cloudflare's OAuth provider in front of the app: discov
 worker/src/app.ts        Hono app: REST routes under /api/v1/libraries/{owner}/{lib}/, with injectable deps
 worker/src/auth.ts       Bearer tokens: hash lookup in D1, scope, prefix, expiry, revocation, suspension
 worker/src/accounts.ts   Users (handles), libraries and tokens in D1, every query scoped to one account
-worker/src/tenancy.ts    authorizeLibrary: the one check that a caller may reach {owner}/{slug} (its owner, or a member in D1 `library_members`) and with what role; 404 otherwise. requireOwner for owner-only routes. grantLibraries: what an app connection reaches
+worker/src/tenancy.ts    authorizeLibrary: the one check that a caller may reach {owner}/{slug} (its owner, or a member in D1 `library_members`) and with what role; 404 otherwise. requireOwner for owner-only routes. grantLibraries: what an app connection reaches (a selected one also reaches what it created, D1 `grant_libraries`). createLibraryForGrant: an agent creating a library for its person (TEMPRA-100, tempra-dev: v2/sharing): only a read-and-write, all-tools connection granted "Create libraries" at consent (connections from before the choice cannot; the person reconnects); the person owns it; MCP `create_library` and `POST /api/v1/libraries` with the app's access token; the agent still cannot invite, share, transfer, delete or restore
 worker/src/agents.ts     Agent identity (TEMPRA-75): an agent is a person's agents on one platform (claude.ai, chatgpt.com, a CLI, a token's app), id derived from (person, platform); D1 `agents` names them; every ledger event's meta carries `by: {person, agent}`; GET …/agents lists who acted. Never authorizes
 worker/src/session.ts    Magic links and sessions in D1 (hashes only), the session cookie
 worker/src/signin.ts     /sign-in, /sign-out and signedIn(); SIGNUP (open, invite, closed) decides who gets a link
@@ -73,7 +73,7 @@ worker/src/notify.ts     Notifications in D1 (items, read cursors, mail settings
 worker/src/notify-mail.ts  Batched notification mail, the daily digest, unsubscribe links, the dev outbox; free of Worker APIs
 worker/src/inbox-api.ts  The inbox and mail settings API (session only), one-click unsubscribe, /_dev/mail
 worker/src/legal.ts      /terms and /privacy redirect to the landing page
-worker/src/oauth/        /authorize consent (all or selected libraries, like GitHub repo access), a server page
+worker/src/oauth/        /authorize consent (all or selected libraries, like GitHub repo access; "Create libraries", TEMPRA-100), a server page
 worker/src/handles.ts    Handle rules: syntax, reserved names (routes, roles, brand), the 90-day hold on released handles
 worker/src/ui/spa.ts     The SPA's shell and its bundle route; favicon.ts the tab's icon (/favicon.svg)
 worker/src/ui/           The app's URLs at the root (`/`, `/<handle>/<library>/…`, library pages under `/-/`; old `/app/…` URLs 308): routes.ts answers each with the shell after sign-in and authorizeLibrary, plus downloads and the email-change link
@@ -107,7 +107,7 @@ fixtures/                Google's four sample OKF bundles, vendored unchanged; d
 - Tenancy (`worker/test/tenancy.test.ts`) walks every registered `{owner}/{lib}` route as a stranger and expects 404. A new library route needs nothing extra to be covered, but must go through `authorizeLibrary`. Roles (tempra-dev: v2/sharing): `read` reads and comments, `write` also writes content (`requireWrite`) and verifies, the owner alone deletes, restores and runs maintainers (`requireOwner`); comments check `requireComment`, not write. The same file walks every state-changing route as a `read` member and expects nothing to land.
 - MCP tool descriptions and `INSTRUCTIONS` in `worker/src/mcp/server.ts` carry the agent workflow; keep them in step with `skills/okf/SKILL.md`.
 - Comments: `worker/test/comments.test.ts` (the store: lifecycle, anchors through edits, moves and deletes, snapshots and reverts untouched, work items, paging, the ledger dump), `comments-api.test.ts` (REST and MCP, refusals, tenancy), `editor/anchor.test.ts` (the resolver).
-- `worker/test/oauth.test.ts` drives the OAuth flow as an MCP client would: discovery, DCR, consent (dev sign-in), token with PKCE, MCP calls, revocation.
+- `worker/test/oauth.test.ts` drives the OAuth flow as an MCP client would: discovery, DCR, consent (dev sign-in), token with PKCE, MCP calls, revocation, and "Create libraries" (the choice, selected grants reaching what they made and nothing else, REST with an access token). Its helpers are `worker/test/oauth-flow.ts` (`connectApp` connects with given consent choices), also used by the MCP and tenancy tests.
 - The DO write transaction must stay synchronous (no awaits); hash with `okf/hash.ts`, not WebCrypto.
 
 ## Cloudflare

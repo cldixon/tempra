@@ -39,3 +39,17 @@ export function transientCfError(output: string): boolean {
 export function retryDelayMs(attempt: number): number {
   return 1000 * 2 ** Math.min(attempt, 3);
 }
+
+/**
+ * Whether a failed `cf deploy` failed only because Cloudflare had not yet caught up with the Worker
+ * it had just uploaded: the first deploy of a new Worker (a PR preview) uploads the script, then
+ * attaching its custom domain can answer 10007 "This Worker does not exist" for a few seconds
+ * (PR 64). Deploying again uploads the same script and attaches the same domain, so it is safe to
+ * repeat. Only a failure after the upload counts: a missing Worker before it is a real one.
+ */
+export function workerNotYetVisible(output: string): boolean {
+  return /\bUploaded \S+/.test(output) && /\b10007\b|This Worker does not exist/i.test(output);
+}
+
+/** Waits before each new deploy while a new Worker propagates: about 60 s in all. */
+export const PROPAGATION_DELAYS_MS = [3_000, 6_000, 12_000, 18_000, 21_000];

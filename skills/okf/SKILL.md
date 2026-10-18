@@ -20,6 +20,7 @@ Every write is attributed to your token's actor and recorded in a ledger. Nothin
 ## Reading: progressive disclosure
 
 1. `start` once per session: the root index, counts by type, open work, the daily health check (open work by kind, the newest changes nobody has verified), and house rules. If your connection reaches several libraries, `start` lists them; open one with `start` and `library` (`owner/slug`), then pass the same `library` on every call.
+   - When the person asks for a new library, `create_library` (`slug`, optional one-line `title` and `description`) makes one they own, exactly as if they made it in the app, and opens it as `start` does. It works only on a read-and-write app connection the person allowed to create libraries at consent, and counts against their library limit. Inviting people, sharing, transferring and deleting stay with the person, in the app.
 2. `browse` a directory to see its concepts' titles and descriptions before opening any.
 3. `read` the concept you need. Look at the header first: trust tier, `stale`, `status`, lint, inbound links. Then read the frontmatter, then the body.
 4. Follow links to related concepts rather than guessing paths. Use `search` (ranked) or `grep` (exact text) when you do not know where something is.
@@ -120,7 +121,7 @@ Split when a concept covers more than one idea, mixes definitions with procedure
 
 The server speaks MCP over Streamable HTTP at `https://app.tempra.dev/mcp`. An app connection reaches the libraries its approver chose (all of the account's, or a selection); a bearer token reaches one library.
 
-- **claude.ai, ChatGPT and other apps:** add the URL as a custom connector and approve it in the browser (OAuth; the approver picks all libraries or selected ones, read or write access, and the name your changes carry).
+- **claude.ai, ChatGPT and other apps:** add the URL as a custom connector and approve it in the browser (OAuth; the approver picks all libraries or selected ones, read or write access, whether you may create libraries for them, and the name your changes carry). A connection to selected libraries also reaches the libraries it creates, and nothing else.
 - **Claude Code and scripts:** use a bearer token, minted by a human on the service's Tokens page (`https://app.tempra.dev/tokens`):
 
 ```sh
