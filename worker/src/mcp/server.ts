@@ -452,7 +452,7 @@ export function buildServer(ctx: McpContext): McpServer {
     {
       title: "Read a file",
       description:
-        "Read a concept as OKF markdown (frontmatter and body), with its hash, sequence, trust tier, staleness, lint and inbound link count above it. Pass the hash as `if_match` when you edit, replace or delete. Check trust tier and `stale` before relying on the content. Also reads index.md and log.md; for an attachment returns its size and a short-lived download URL.",
+        "Read a concept as OKF markdown (frontmatter and body), with its hash, sequence, trust tier, staleness, lint and inbound link count above it. Pass the hash as `if_match` when you edit, replace or delete. Check trust tier and `stale` before relying on the content. Also reads index.md and log.md (the latest 200 requests; `log` pages back further); for an attachment returns its size and a short-lived download URL.",
       inputSchema: readSchema,
       annotations: readOnly,
     },
@@ -779,17 +779,22 @@ export function buildServer(ctx: McpContext): McpServer {
       "log",
       {
         title: "What changed",
-        description: `${BEYOND}recent requests newest first: who (actor), when, their note, and the files each touched. Use it to see what other agents and humans did before you start.`,
+        description: `${BEYOND}recent requests newest first: who (actor), when, their note, and the files each touched. Use it to see what other agents and humans did before you start, and to page back past what log.md shows (its latest 200 requests).`,
         inputSchema: {
           prefix: z.string().optional(),
           since: z.number().int().optional().describe("Only requests after this sequence number."),
+          before: z
+            .number()
+            .int()
+            .optional()
+            .describe("Only requests before this sequence number: the cursor for older pages."),
           limit: z.number().int().optional(),
           ...libArg,
         },
         annotations: readOnly,
       },
-      guarded(async ({ prefix, since, limit, library }) => {
-        const r = await pick(library).lib.requests({ prefix, since, limit });
+      guarded(async ({ prefix, since, before, limit, library }) => {
+        const r = await pick(library).lib.requests({ prefix, since, before, limit });
         if (r.requests.length === 0) return text("No changes.");
         const out = r.requests.map((q) => {
           const seqs = q.events.map((e) => e.seq);
@@ -802,8 +807,7 @@ export function buildServer(ctx: McpContext): McpServer {
           if (q.events.length > 20) evs.push(`  … and ${q.events.length - 20} more`);
           return [head, ...evs].join("\n");
         });
-        if (r.next)
-          out.push(`(older: pass before=${r.next} via the REST API, or narrow with prefix)`);
+        if (r.next) out.push(`(older: pass before=${r.next}, or narrow with prefix)`);
         return text(out.join("\n"));
       }),
     );

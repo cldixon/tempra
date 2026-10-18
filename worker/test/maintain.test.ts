@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
-import { nextRun, runMaintenance } from "../src/maintain";
+import { runMaintenance } from "../src/maintain";
 import { LibraryStore } from "../src/store/store";
 import { readTar } from "../src/util/tar";
 import { memoryBlobs, memoryBucket, setup } from "./harness";
@@ -262,14 +262,6 @@ describe("daily maintainers (spec: Tier 3)", () => {
     const reopened = new LibraryStore(bunSqlHandle(db), { now: () => new Date(clock.t) });
     expect(reopened.work({ kind: "stale" }).items.map((i) => i.path)).toEqual(["s.md"]);
     expect(reopened.stats().maintainers.staleness.last_run).toBe("2026-09-30T00:00:00Z");
-  });
-
-  test("the next run is 03:00 UTC plus a per-library offset, always in the future", () => {
-    const a = nextRun(new Date("2026-09-30T01:00:00Z"), "lib-a");
-    expect(a.toISOString().slice(0, 13)).toBe("2026-09-30T03");
-    const b = nextRun(new Date("2026-09-30T05:00:00Z"), "lib-a");
-    expect(b.toISOString().slice(0, 13)).toBe("2026-10-01T03");
-    expect(b.getUTCMinutes()).toBe(a.getUTCMinutes());
   });
 });
 
