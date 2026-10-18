@@ -107,7 +107,9 @@ async function day(now: Date) {
   for (let m = queued.shift(); m; m = queued.shift()) {
     const s = performance.now();
     await handleSweepMessage(m, consumer);
-    (times[m.kind] ??= []).push(performance.now() - s);
+    const list = times[m.kind] ?? [];
+    list.push(performance.now() - s);
+    times[m.kind] = list;
   }
   return {
     cron_ms: cronMs,
