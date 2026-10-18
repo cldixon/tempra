@@ -346,6 +346,12 @@ export const USAGE_WINDOW_DAYS = 30;
 /** Reads counted in memory before they are written to `access_log` (TEMPRA-87). */
 export const READ_FLUSH = 100;
 
+/**
+ * Requests log.md shows before pointing to the rest: one full page of `GET …/requests` (its
+ * largest `limit`), so the next page picks up exactly where the file stops.
+ */
+export const LOG_REQUESTS = 200;
+
 function iso(d: Date): string {
   return d.toISOString().replace(/\.\d{3}Z$/, "Z");
 }
@@ -2370,14 +2376,20 @@ export class LibraryStore {
     });
   }
 
-  /** The synthesized log.md: requests newest first, grouped by day (spec: Tier 2). */
-  log(opts: { at?: number; prefix?: string } = {}): string {
+  /**
+   * The synthesized log.md: requests newest first, grouped by day (spec: Tier 2). It shows the
+   * latest `limit` requests (LOG_REQUESTS by default) and then where the rest are; `limit: null`
+   * lists them all, as exports do.
+   */
+  log(opts: { at?: number; prefix?: string; limit?: number | null } = {}): string {
     const at = opts.at ?? this.headSeq();
     const prefix = normalizeDir(opts.prefix);
+    const limit = opts.limit === undefined ? LOG_REQUESTS : opts.limit;
     const snap = this.snapshot(at);
     // log.md tells what changed in the content; comments are not content. Filtered in SQL, and
     // meta parsed only where the log reads it (TEMPRA-86).
-    const events = this.sql.all<{
+    type LogEvent = {
+      seq: number;
       ts: string;
       actor: string;
       request_id: string;
@@ -2386,16 +2398,44 @@ export class LibraryStore {
       prev_hash: string | null;
       concept_id: string;
       meta: string | null;
-    }>(
-      `SELECT ts, actor, request_id, op, path, prev_hash, concept_id, meta FROM events
-       WHERE seq <= ? AND op != 'comment' AND (? = '' OR path = ? OR substr(path, 1, ?) = ?)
-       ORDER BY seq DESC`,
-      at,
-      prefix,
-      prefix,
-      prefix.length + 1,
-      `${prefix}/`,
-    );
+    };
+    const page = (before: number, n: number) =>
+      this.sql.all<LogEvent>(
+        `SELECT seq, ts, actor, request_id, op, path, prev_hash, concept_id, meta FROM events
+         WHERE seq <= ? AND op != 'comment' AND (? = '' OR path = ? OR substr(path, 1, ?) = ?)
+         ORDER BY seq DESC LIMIT ?`,
+        before,
+        prefix,
+        prefix,
+        prefix.length + 1,
+        `${prefix}/`,
+        n,
+      );
+    let events: LogEvent[];
+    let older: number | null = null;
+    if (limit === null) events = page(at, -1);
+    else {
+      // A request's events are consecutive seqs, so walking back from `at` in pages and stopping
+      // at the first event of request limit + 1 reads what the log shows and no more (TEMPRA-86).
+      events = [];
+      const seen = new Set<string>();
+      let cursor = at;
+      walk: for (;;) {
+        const rows = page(cursor, 1000);
+        for (const e of rows) {
+          if (!seen.has(e.request_id)) {
+            if (seen.size === limit) {
+              older = events.at(-1)?.seq ?? at + 1;
+              break walk;
+            }
+            seen.add(e.request_id);
+          }
+          events.push(e);
+        }
+        if (rows.length < 1000) break;
+        cursor = (rows.at(-1) as LogEvent).seq - 1;
+      }
+    }
     const byReq = new Map<string, (typeof events)[number][]>();
     for (const e of events) {
       const list = byReq.get(e.request_id);
@@ -2424,7 +2464,10 @@ export class LibraryStore {
         }),
       });
     }
-    return renderLog(out, prefix ? `Log: ${prefix}` : "Library log");
+    return renderLog(out, prefix ? `Log: ${prefix}` : "Library log", {
+      before: older,
+      prefix,
+    });
   }
 
   private toRequest(id: string, events: EventRow[]): RequestRow {
@@ -2842,7 +2885,7 @@ export class LibraryStore {
     for (const d of [...dirs].sort()) {
       files.push({ path: d ? `${d}/index.md` : "index.md", text: this.index(d, snap) });
     }
-    files.push({ path: "log.md", text: this.log({ at: snap.seq }) });
+    files.push({ path: "log.md", text: this.log({ at: snap.seq, limit: null }) });
     return { seq: snap.seq, files };
   }
 
