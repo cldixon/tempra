@@ -4,8 +4,16 @@ import { href as designHref } from "@tempra/design";
 /** The app's client bundle, at a content-hashed URL like the design stylesheet. */
 export const appHref = app.href;
 
-export function appScript(): Response {
-  return new Response(app.js, {
+/** The bundle's entry at its hashed name, or a chunk it imports on demand; null for anything else. */
+export function appScript(file: string): Response | null {
+  const js =
+    `/_app/${file}` === appHref
+      ? app.js
+      : Object.hasOwn(app.chunks, file)
+        ? app.chunks[file]
+        : undefined;
+  if (js === undefined) return null;
+  return new Response(js, {
     headers: {
       "Content-Type": "text/javascript; charset=utf-8",
       "Cache-Control": "public, max-age=31536000, immutable",

@@ -192,8 +192,13 @@ export function offsetAtPoint(root: Element, x: number, y: number): number | nul
     caretPositionFromPoint?(x: number, y: number): { offsetNode: Node; offset: number } | null;
     caretRangeFromPoint?(x: number, y: number): Range | null;
   };
+  // Inside a rich block that draws its own text (a diagram), there is no offset to open.
+  const at = (node: Node, offset: number) =>
+    (node.nodeType === ELEMENT ? (node as Element) : node.parentElement)?.closest("[data-opaque]")
+      ? null
+      : offsetAt(root, node, offset, false);
   const pos = doc.caretPositionFromPoint?.(x, y);
-  if (pos) return offsetAt(root, pos.offsetNode, pos.offset, false);
+  if (pos) return at(pos.offsetNode, pos.offset);
   const r = doc.caretRangeFromPoint?.(x, y);
-  return r ? offsetAt(root, r.startContainer, r.startOffset, false) : null;
+  return r ? at(r.startContainer, r.startOffset) : null;
 }

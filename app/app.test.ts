@@ -82,4 +82,8 @@ test("the generated module names the bundle by its content hash", () => {
   const a = moduleSource("console.log(1)");
   expect(a).toMatch(/export const hash = "[0-9a-f]{12}";/);
   expect(a).not.toBe(moduleSource("console.log(2)"));
+  // Code-split: the entry keeps the name Vite hashed it by, which its chunks import it by.
+  const b = moduleSource("x", { "pele-abc.js": "y" }, "app.BHyq_u-v.js");
+  expect(b).toContain('export const hash = "BHyq_u-v";');
+  expect(b).toContain('"pele-abc.js":"y"');
 });

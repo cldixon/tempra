@@ -37,7 +37,7 @@ import {
 } from "./tenancy";
 import { faviconResponse } from "./ui/favicon";
 import { registerUiRoutes } from "./ui/routes";
-import { appHref, appScript } from "./ui/spa";
+import { appScript } from "./ui/spa";
 import { STARTER } from "./ui/starter";
 import { admit, admitSession, RETRY_AFTER_S, tokenAdmission, type UsageDeps } from "./usage";
 import { maybeGunzip, readTar } from "./util/tar";
@@ -293,9 +293,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   });
 
   // The app's client bundle (TEMPRA-9), at a content-hashed URL like the stylesheet.
-  app.get("/_app/:file", (c) =>
-    `/_app/${c.req.param("file")}` === appHref ? appScript() : c.notFound(),
-  );
+  app.get("/_app/:file", (c) => appScript(c.req.param("file")) ?? c.notFound());
 
   // The tab's icon, linked from every page's head.
   app.get("/favicon.svg", () => faviconResponse());

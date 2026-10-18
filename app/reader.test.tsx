@@ -115,10 +115,8 @@ describe("the reader counts text as docText does (tempra-dev: app/reader)", () =
         const from = offsetAt(root, range.startContainer, range.startOffset, false);
         const to = offsetAt(root, range.endContainer, range.endOffset, true);
         expect({ file, from, to }).toEqual({ file, from: b.from + 1, to: b.to - 1 });
-        // …and the stored selector made from it finds the same text again (a quote that occurs
-        // once: repeated table cells share their table's block ID, TEMPRA-101).
-        const quote = text.text.slice(b.from + 1, b.to - 1);
-        if (text.text.indexOf(quote) !== text.text.lastIndexOf(quote)) continue;
+        // …and the stored selector made from it finds the same text again, repeated table cells
+        // included (they share their table's block ID, TEMPRA-101).
         const sel = selectorAt(text, b.from + 1, b.to - 1);
         expect(locate(text, sel)).toEqual({ from: b.from + 1, to: b.to - 1 });
       }

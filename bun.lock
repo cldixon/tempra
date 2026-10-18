@@ -13,6 +13,7 @@
       "dependencies": {
         "@tempra/editor": "workspace:*",
         "lucide-react": "^1.52.0",
+        "pele": "1.6.0",
         "react": "^19.3.0",
         "react-dom": "^19.3.0",
       },
@@ -65,6 +66,7 @@
         "@types/hast": "^3.0.5",
         "@types/mdast": "^4.0.4",
         "cf": "1.0.0-beta.9",
+        "pele": "1.6.0",
         "playwright-core": "^1.63.0",
         "typescript": "^7.0.2",
         "wrangler": "^4.142.0",
@@ -629,6 +631,8 @@
     "path-to-regexp": ["path-to-regexp@6.3.0", "", {}, "sha512-Yhpw4T9C6hPpgPeA28us07OJeqZ5EzQTkbfwuhsUg0c237RomFoETJgmp2sa3F/41gfLE6G5cqcYwznmeEeOlQ=="],
 
     "pathe": ["pathe@2.0.3", "", {}, "sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w=="],
+
+    "pele": ["pele@1.6.0", "", {}, "sha512-VfAiVItsOGlGhvnBfphdT28VCG7mXMZxQNOwAGsCtxI2ztbUsT39MraEOYjsapLxVETkdUZscm0DdotYDQMLdw=="],
 
     "picocolors": ["picocolors@1.1.1", "", {}, "sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA=="],
 

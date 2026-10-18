@@ -8,6 +8,8 @@ export interface LintWarning {
   message: string;
   /** The path the warning is about, when it is not the concept itself (e.g. a broken link). */
   target?: string;
+  /** The body block the warning is about (e.g. a diagram that does not parse). */
+  block?: string;
 }
 
 /**
