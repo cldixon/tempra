@@ -712,7 +712,7 @@ async function browserRenders(
           "---\ntype: Note\ntitle: Gate diagram\ndescription: A diagram and a broken one.\n---",
           "Before.\n",
           "```mermaid\nflowchart LR\n  A[Agent writes] --> B{Parses?}\n  B -->|yes| C[Drawn]\n  B -->|no| D[Source and lint]\n```\n",
-          "```mermaid\nsequenceDiagram\n  Alice->>: hi\n```\n",
+          "```mermaid\nflowchart LR\n  X[Never closed --> Y\n```\n",
           "After.\n",
         ].join("\n"),
       });
@@ -720,7 +720,7 @@ async function browserRenders(
       const lint =
         ((await put.json()) as { lint?: { code: string; message: string }[] }).lint ?? [];
       const bad = lint.filter((l) => l.code === "diagram_invalid");
-      if (bad.length !== 1 || !/line 2, column \d+/.test(bad[0]?.message ?? "")) {
+      if (bad.length !== 1 || !/line 2, column 4 of the fence/.test(bad[0]?.message ?? "")) {
         throw new Error(`diagram lint: ${JSON.stringify(lint)}`);
       }
       await page.goto(`${base}/${owner}/${slug}/gate-diagram.md`);
@@ -732,7 +732,7 @@ async function browserRenders(
       const notice = page.locator(".body figure.diagram.failed .diagram-notice");
       await notice.waitFor({ timeout: 10_000 });
       const source = await page.locator(".body figure.diagram.failed pre[data-text]").innerText();
-      if (!source.startsWith("sequenceDiagram")) throw new Error(`broken diagram: ${source}`);
+      if (!source.includes("Never closed")) throw new Error(`broken diagram: ${source}`);
       await page.getByText("After.", { exact: true }).waitFor();
       // At phone width it fits the column: the page does not scroll sideways.
       await page.setViewportSize({ width: 390, height: 844 });

@@ -54,12 +54,12 @@ Gross margin equals recognized [revenue](/metrics/revenue.md) minus full COGS.[^
 - A `description` of one sentence: it is what `browse` and indexes show.
 - Absolute links (`/dir/file.md`). A link to a concept that does not exist yet is allowed; it shows up in `work` as a broken link until someone writes it.
 - Every footnote label matches a `sources[].id`, and every `[^id]` in the text has a `[^id]: …` definition line at the end of the body (without one, renderers show it as literal text).
-- Diagrams are Mermaid in a `mermaid` fence: the app draws them. One that does not parse is saved anyway, shown as its source, and comes back as `diagram_invalid` lint with the line and column inside the fence; fix the fence.
+- Diagrams are Mermaid in a `mermaid` fence: the app draws them. One with an unknown type, nothing after its header, or a bracket or quote left open comes back as `diagram_invalid` lint with the line and column inside the fence; it is saved anyway and the app shows its source (and a quiet notice for anything subtler the app cannot draw). Fix the fence.
 - Timestamps (`stale_after`, `sources[].last_modified`) are ISO 8601 datetimes with an offset (`2026-06-30T14:00:00Z`). A plain date such as `2026-12-31` is flagged.
 - Set `status` and `stale_after` honestly: `draft` when unsure; a `stale_after` when the content depends on something that changes.
 - Only a new `stale_after` resets a concept's clock: an edit that leaves it alone leaves the concept stale (or stale soon, within 14 days of it). Move it forward when you have re-checked the content, not because you touched the file.
 - Do not write `generated` or `verified`. The server ignores them and says so in the write result's notes.
-- A file with no frontmatter, frontmatter that is not valid YAML, or no `type` is refused (400) and nothing is written; fix it and write again. The rest of this list is lint: a generic `type`, no `description` or `status`, a relative link, an uncited footnote definition, a Mermaid fence that does not parse, and a link to a heading its target does not have (rechecked whenever you read, so it follows changes to the target). A `stale_after` already past comes back as a note.
+- A file with no frontmatter, frontmatter that is not valid YAML, or no `type` is refused (400) and nothing is written; fix it and write again. The rest of this list is lint: a generic `type`, no `description` or `status`, a relative link, an uncited footnote definition, a Mermaid fence that is plainly broken, and a link to a heading its target does not have (rechecked whenever you read, so it follows changes to the target). A `stale_after` already past comes back as a note.
 
 ## Editing
 
