@@ -503,3 +503,55 @@ describe("blob references on the write path (TEMPRA-91)", () => {
     expect((await req("/files/b.bin")).status).toBe(404);
   });
 });
+
+describe("which writes touch D1 (TEMPRA-91)", () => {
+  test("text writes and attachments the library already holds make no D1 call", async () => {
+    const { db, store } = setup();
+    const { callStore } = await import("../src/client");
+    const { memoryBlobs } = await import("./harness");
+    const blobs = memoryBlobs();
+    const calls: string[][] = [];
+    const references = async (h: string[]) => {
+      calls.push(h);
+    };
+    const ctx = { actor: "claude-code/test", request_id: "r1" };
+    const doc = "---\ntype: Note\ntitle: T\ndescription: D.\n---\n# T\n\nText.\n";
+    await callStore(store(), blobs, "apply", [ctx, [{ op: "write", path: "a.md", content: doc }]], {
+      references,
+    });
+    expect(calls).toEqual([]);
+
+    const { sha256Hex } = await import("../src/okf/hash");
+    const h1 = sha256Hex(new Uint8Array([1]));
+    await blobs.put(h1, new Uint8Array([1]), null);
+    const attach = (path: string) => ({
+      op: "attach",
+      path,
+      blob: { hash: h1, size: 1, media: null },
+    });
+    let r = await callStore(
+      store(),
+      blobs,
+      "apply",
+      [{ ...ctx, request_id: "r2" }, [attach("x.bin")]],
+      {
+        references,
+      },
+    );
+    expect(r).toMatchObject({ ok: true });
+    expect(calls).toEqual([[h1]]);
+    // The same bytes again, at another path: already held, no D1 call.
+    r = await callStore(
+      store(),
+      blobs,
+      "apply",
+      [{ ...ctx, request_id: "r3" }, [attach("y.bin")]],
+      {
+        references,
+      },
+    );
+    expect(r.ok).toBe(true);
+    expect(calls).toEqual([[h1]]);
+    expect(db).toBeDefined();
+  });
+});

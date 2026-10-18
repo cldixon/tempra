@@ -199,10 +199,14 @@ export async function callStore(
       );
     }
     await verifyBlobs(blobs, method, args);
-    const attached = opts.references ? attachedBlobs(method, args) : [];
-    if (opts.references && attached.length > 0) {
+    // Only blobs new to this library cost a D1 call: a text write, or an attachment the library
+    // already holds (its reference is recorded already, or its first count will find it), never do.
+    const attached = opts.references ? attachedBlobs(method, args).map((a) => a.blob.hash) : [];
+    const held = attached.length > 0 ? store.hasBlobs(attached) : new Set<string>();
+    const fresh = [...new Set(attached)].filter((h) => !held.has(h));
+    if (opts.references && fresh.length > 0) {
       try {
-        await opts.references(attached.map((a) => a.blob.hash));
+        await opts.references(fresh);
       } catch (e) {
         console.error("blob references not recorded", e);
         throw new OkfError(
