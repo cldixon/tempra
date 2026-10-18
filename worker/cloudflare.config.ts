@@ -22,11 +22,11 @@ interface Deployment {
   /** Analytics Engine dataset for metering; tempra_usage unless set. */
   usage?: string;
   /**
-   * Rate-limit namespace ids for WRITE_LIMITER and REQUEST_LIMITER. Namespaces are account-wide,
-   * so each deployment needs its own or its counters are shared with production (TEMPRA-76).
-   * Production's (1001, 1002) unless set.
+   * Rate-limit namespace ids for WRITE_LIMITER, REQUEST_LIMITER and SESSION_LIMITER. Namespaces
+   * are account-wide, so each deployment needs its own or its counters are shared with
+   * production (TEMPRA-76). Production's (1001, 1002, 1003) unless set.
    */
-  limiters?: { write: string; request: string };
+  limiters?: { write: string; request: string; session: string };
   /** False: no daily sweep and digest. */
   cron?: false;
 }
@@ -51,7 +51,7 @@ const STAGING: Deployment = {
   // Staging's traffic and counters stay out of production's (TEMPRA-76). Datasets are created on
   // first write and namespaces are only ids, so neither needs a resource made.
   usage: "tempra_usage_staging",
-  limiters: { write: "2001", request: "2002" },
+  limiters: { write: "2001", request: "2002", session: "2003" },
 };
 
 /**
@@ -73,9 +73,15 @@ export function previewDeployment(pr: string, ids: { d1?: string; kv?: string } 
     cron: false,
     usage: "tempra_usage_preview",
     // One pair for every preview: each has its own D1, so keys rarely meet, and never production's.
-    limiters: { write: "3001", request: "3002" },
+    limiters: { write: "3001", request: "3002", session: "3003" },
   };
 }
+
+/**
+ * SESSION_LIMITER's limit; scripts/gate.ts measures the app against it. Kept here, not in Worker
+ * code, because this file must not import the Worker.
+ */
+export const SESSION_REQUESTS_PER_MINUTE = 2400;
 
 /** The CLI's environment; the Worker's tsconfig has no Node types, so it is reached by hand. */
 const env: Record<string, string | undefined> =
@@ -130,13 +136,17 @@ export default defineConfig(({ mode }) => {
 
       // One SQLite-backed Durable Object per library (spec: Backend architecture). Declared as an
       // export; this replaces Wrangler's `migrations` history (its v1 created the same class).
+      // One more per account (TEMPRA-80): leases on its open change-feed sockets, for the
+      // per-account cap; it holds no sockets and sleeps between connects.
       exports: {
         Library: exports.durableObject({ storage: "sqlite" }),
+        AccountFeeds: exports.durableObject({ storage: "sqlite" }),
       },
 
       env: {
         // Bound by Worker name, which cf/config cannot type; src/index.ts types the stub.
         LIBRARY: bindings.durableObject({ worker: d.name, exportName: "Library" }),
+        ACCOUNT_FEEDS: bindings.durableObject({ worker: d.name, exportName: "AccountFeeds" }),
 
         // Account layer (users, libraries, tokens, sessions); migrations in ./migrations.
         DB: bindings.d1(d.d1),
@@ -166,6 +176,13 @@ export default defineConfig(({ mode }) => {
         REQUEST_LIMITER: bindings.rateLimit({
           namespace: d.limiters?.request ?? "1002",
           simple: { limit: 600, period: 60 },
+        }),
+        // Requests per browser session (TEMPRA-80): every page, API call and feed upgrade made
+        // with the session cookie, set well above what the app does while someone reads fast
+        // (the gate checks a busy browse stays under a quarter of it).
+        SESSION_LIMITER: bindings.rateLimit({
+          namespace: d.limiters?.session ?? "1003",
+          simple: { limit: SESSION_REQUESTS_PER_MINUTE, period: 60 },
         }),
 
         // Metering: one data point per request, write and email (v2 spec: Metering).

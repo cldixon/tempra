@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { type FeedEvent, LibraryFeed, type Message } from "./src/live";
+import { FEED_FULL, type FeedEvent, LibraryFeed, type Message } from "./src/live";
 import { Urls } from "./src/urls";
 
 // The feed client (app/src/live.ts) without a browser: a fake socket and a fake ledger.
@@ -21,7 +21,7 @@ const ev = (seq: number, path = `p${seq}.md`): FeedEvent => ({
 });
 
 /** A feed whose ledger holds events 1..head; `read` can be held to stage races. */
-function harness() {
+function harness(fallback?: ConstructorParameters<typeof LibraryFeed>[3]) {
   const ledger: FeedEvent[] = [];
   const holds: (() => void)[] = [];
   let hold = false;
@@ -36,7 +36,7 @@ function harness() {
     }
     return served;
   };
-  const sockets: { onmessage?: unknown }[] = [];
+  const sockets: WebSocket[] = [];
   const feed = new LibraryFeed(
     new Urls("ann", "notes"),
     () => {
@@ -45,6 +45,7 @@ function harness() {
       return ws;
     },
     read,
+    fallback,
   );
   const heard: number[] = [];
   let resets = 0;
@@ -66,6 +67,7 @@ function harness() {
     send,
     tick,
     ledger,
+    sockets,
     hold: (on: boolean) => {
       hold = on;
       if (!on) for (const r of holds.splice(0)) r();
@@ -155,5 +157,38 @@ describe("LibraryFeed", () => {
     h.commit(1);
     h.send({ type: "events", head: 13, events: [ev(13)] });
     expect(h.heard).toEqual([13]);
+  });
+
+  // TEMPRA-80: over a cap on open sockets the server opens and closes the socket with FEED_FULL.
+  test("a refused socket falls back to polling the ledger and retries a socket rarely", async () => {
+    const h = harness({ pollMs: 20, retryMs: 100, maxRetryMs: 1000 });
+    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    const refuse = (i: number) => h.sockets[i]?.onclose?.({ code: FEED_FULL } as CloseEvent);
+    h.commit(5);
+    h.feed.sync(h.sub, 3);
+    refuse(0);
+    await wait(50);
+    // Polled from where the page's data stands, with no new socket.
+    expect(h.heard).toEqual([4, 5]);
+    expect(h.sockets).toHaveLength(1);
+    h.commit(1);
+    await wait(40);
+    expect(h.heard).toEqual([4, 5, 6]);
+    // Tried again once, later; refused again, the next try waits twice as long.
+    await wait(60);
+    expect(h.sockets).toHaveLength(2);
+    refuse(1);
+    await wait(120);
+    expect(h.sockets).toHaveLength(2);
+    await wait(120);
+    expect(h.sockets).toHaveLength(3);
+    // Taken this time: polling stops, and the socket carries the events.
+    h.send({ type: "hello", head: 6 });
+    h.commit(1);
+    await wait(60);
+    expect(h.heard).toEqual([4, 5, 6]);
+    h.send({ type: "events", head: 7, events: [ev(7)] });
+    expect(h.heard).toEqual([4, 5, 6, 7]);
+    h.sub.close();
   });
 });

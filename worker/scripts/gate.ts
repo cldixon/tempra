@@ -29,6 +29,8 @@ import {
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { type Browser, chromium } from "playwright-core";
+import { SESSION_REQUESTS_PER_MINUTE } from "../cloudflare.config";
+import { FEED_FULL, FEED_SOCKETS_PER_ACCOUNT, FEED_SOCKETS_PER_LIBRARY } from "../src/feed";
 import { readTar, writeTar } from "../src/util/tar";
 import { compareBundle } from "../test/compare";
 import { BUNDLES, loadBundle } from "../test/fixtures";
@@ -293,6 +295,15 @@ async function openBrowser() {
   };
   const pending = new Map<object, { what: string; since: number }>();
   const sockets = new Map<object, { url: string; since: number }>();
+  /**
+   * When each request that counts against the browser session's limit was sent (TEMPRA-80):
+   * pages, API calls and feed upgrades to the app; not the static files.
+   */
+  const counted: { at: number; what: string }[] = [];
+  const countsAgainstSession = (url: string) => {
+    const u = new URL(url);
+    return u.origin === base && !/^\/(_app|_design)\/|^\/(favicon\.svg|healthz)$/.test(u.pathname);
+  };
   // Failed requests are reported by URL below; the console only repeats them.
   page.on("console", (m) => {
     note(`console.${m.type()}: ${m.text()}`);
@@ -300,9 +311,16 @@ async function openBrowser() {
       problems.push(`console: ${m.text()}`);
     }
   });
-  page.on("request", (r) =>
-    pending.set(r, { what: `${r.method()} ${r.url().replace(base, "")}`, since: Date.now() }),
-  );
+  page.on("request", (r) => {
+    pending.set(r, { what: `${r.method()} ${r.url().replace(base, "")}`, since: Date.now() });
+    if (countsAgainstSession(r.url())) {
+      const path = new URL(r.url()).pathname.replace(/^\/api\/v1\/libraries\/[^/]+\/[^/]+/, "…");
+      counted.push({
+        at: Date.now(),
+        what: `${r.method()} ${path.replace(/\/files\/.*/, "/files/*")}`,
+      });
+    }
+  });
   page.on("requestfinished", (r) => pending.delete(r));
   page.on("requestfailed", (r) => {
     pending.delete(r);
@@ -310,6 +328,7 @@ async function openBrowser() {
   });
   page.on("websocket", (ws) => {
     sockets.set(ws, { url: ws.url(), since: Date.now() });
+    counted.push({ at: Date.now(), what: "feed socket" });
     ws.on("close", () => sockets.delete(ws));
   });
   page.on("framenavigated", (f) => {
@@ -433,7 +452,32 @@ async function openBrowser() {
       .filter((c) => c.name.includes("session"))
       .map((c) => `${c.name}=${c.value}`)
       .join("; ");
-  return { browser, context, page, problems, step, close, signInAs, cookie };
+  /**
+   * The most counted requests in any 60 seconds so far (from `since`), when that minute began,
+   * and what they were (the commonest first).
+   */
+  const busiestMinute = (since = 0) => {
+    let peak = 0;
+    let first = 0;
+    for (let i = 0, j = 0; j < counted.length; j++) {
+      if ((counted[j]?.at ?? 0) < since) {
+        i = j + 1;
+        continue;
+      }
+      while ((counted[j]?.at ?? 0) - (counted[i]?.at ?? 0) >= 60_000) i++;
+      if (j - i + 1 > peak) {
+        peak = j - i + 1;
+        first = i;
+      }
+    }
+    const kinds = new Map<string, number>();
+    for (const c of counted.slice(first, first + peak)) {
+      kinds.set(c.what, (kinds.get(c.what) ?? 0) + 1);
+    }
+    const what = [...kinds].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${n} ${k}`);
+    return { peak, from: counted[first]?.at ?? 0, what };
+  };
+  return { browser, context, page, problems, step, close, signInAs, cookie, busiestMinute };
 }
 
 /**
@@ -1062,6 +1106,61 @@ async function browserRenders(
       }
       if (!(await stayed())) throw new Error("the page reloaded");
     });
+    // TEMPRA-80: normal use never comes near the session's limit. A minute of someone skimming
+    // within the app: every folder opened, every file hovered (a prefetch each), file after file
+    // opened with a glance at each, the ledger and back, while an agent writes (the tree's refresh, the feed's
+    // catch-up, the open page's reloads). That minute must stay under a quarter of the limit.
+    // The busiest minute of the whole run is reported too, and must stay under half: it is the
+    // gate's own full page loads, one after another, which nobody does by hand.
+    await step(
+      "a busy minute of browsing stays under a quarter of the session's limit",
+      async () => {
+        const t0 = Date.now();
+        for (let pass = 0; pass < 4; pass++) {
+          const closed = sidebar.locator('button[aria-expanded="false"]');
+          const n = await closed.count();
+          if (n === 0) break;
+          for (let i = n - 1; i >= 0; i--) await closed.nth(i).click();
+        }
+        const files = sidebar.locator("a[title$='.md']");
+        const titles = await files.evaluateAll((els) => els.map((e) => e.getAttribute("title")));
+        let opened = 0;
+        while (Date.now() - t0 < 60_000) {
+          for (const title of titles) {
+            await sidebar.locator(`a[title="${title}"]`).hover();
+            await page.waitForTimeout(80);
+          }
+          for (const title of titles) {
+            if (Date.now() - t0 >= 60_000) break;
+            await sidebar.locator(`a[title="${title}"]`).click();
+            await page.locator(".body .prose").first().waitFor({ timeout: 15_000 });
+            // Skimming: a glance at each (someone reading opens one every several seconds).
+            await page.waitForTimeout(1500);
+            if (++opened % 4 === 0) await agentAppends(`A busy reader's sentence ${opened}.`);
+          }
+          await page.getByRole("link", { name: /^Ledger/ }).click();
+          await page.locator("li.request").first().waitFor({ timeout: 15_000 });
+          await page.goBack();
+        }
+        await page.waitForTimeout(2000); // the feed's catch-up and the tree's refresh settle
+        const busy = b.busiestMinute(t0);
+        const run = b.busiestMinute();
+        const pct = (n: number) => Math.round((100 * n) / SESSION_REQUESTS_PER_MINUTE);
+        console.log(
+          `  a busy minute of browsing (${opened} files opened): ${busy.peak} requests, ${pct(busy.peak)}% of the session limit (${SESSION_REQUESTS_PER_MINUTE}/min)\n    ${busy.what.slice(0, 12).join(", ")}\n  the run's busiest minute (full page loads): ${run.peak} requests, ${pct(run.peak)}%\n    ${run.what.slice(0, 12).join(", ")}`,
+        );
+        if (busy.peak * 4 > SESSION_REQUESTS_PER_MINUTE) {
+          throw new Error(
+            `${busy.peak} requests in a minute of browsing is over a quarter of the session limit (${SESSION_REQUESTS_PER_MINUTE})`,
+          );
+        }
+        if (run.peak * 2 > SESSION_REQUESTS_PER_MINUTE) {
+          throw new Error(
+            `${run.peak} requests in the run's busiest minute is over half the session limit (${SESSION_REQUESTS_PER_MINUTE})`,
+          );
+        }
+      },
+    );
   } finally {
     await b.close();
   }
@@ -1466,6 +1565,52 @@ async function freshAccountConnects(): Promise<string[]> {
   }
 }
 
+/**
+ * The per-account cap on open feed sockets (TEMPRA-80), end to end: one account's token opens
+ * sockets until one is refused, which must be with FEED_FULL, at the cap at most (the leases the
+ * gate's own browser and agents took in the last minute still count).
+ */
+async function feedCap(owner: string, slug: string, token: string): Promise<string[]> {
+  const url = `${base.replace(/^http/, "ws")}/api/v1/libraries/${owner}/${slug}/feed`;
+  const open: WebSocket[] = [];
+  const problems: string[] = [];
+  try {
+    for (let i = 0; i < FEED_SOCKETS_PER_ACCOUNT + 5; i++) {
+      const ws = new WebSocket(url, {
+        headers: { Authorization: `Bearer ${token}` },
+      } as unknown as string[]);
+      const outcome = await within(
+        10_000,
+        `feed socket ${i + 1}`,
+        new Promise<"open" | number>((resolve) => {
+          ws.onmessage = () => resolve("open");
+          ws.onclose = (e) => resolve(e.code);
+        }),
+      );
+      if (outcome === "open") {
+        open.push(ws);
+        continue;
+      }
+      if (outcome !== FEED_FULL) problems.push(`socket ${i + 1} closed with ${outcome}`);
+      // The scripted agents' sockets of the last minute still hold places, so only the upper
+      // bound is exact here; feed-leases.test.ts checks the count itself.
+      if (open.length > FEED_SOCKETS_PER_ACCOUNT || open.length === 0) {
+        problems.push(
+          `refused after ${open.length} sockets; the cap is ${FEED_SOCKETS_PER_ACCOUNT}`,
+        );
+      }
+      console.log(
+        `  feed sockets: refused with ${outcome} after ${open.length} (account cap ${FEED_SOCKETS_PER_ACCOUNT}, library cap ${FEED_SOCKETS_PER_LIBRARY})`,
+      );
+      return problems;
+    }
+    problems.push(`${open.length} sockets opened and none was refused`);
+    return problems;
+  } finally {
+    for (const ws of open) ws.close(1000, "done");
+  }
+}
+
 let failed = false;
 try {
   await waitForHealth();
@@ -1569,6 +1714,13 @@ try {
   });
   console.log(formatReport(agents).replace(/^(PASS|FAIL)/, "$1 scripted agents:"));
   if (!agents.ok) failed = true;
+  // Last: the leases it takes keep counting for a minute after its sockets close.
+  const cap = first ? await feedCap(first.owner, first.slug, first.token) : ["no library"];
+  console.log(
+    `${cap.length === 0 ? "PASS" : "FAIL"} a socket past the account's feed cap is refused`,
+  );
+  for (const p of cap) console.log(`  - ${p}`);
+  if (cap.length > 0) failed = true;
 } catch (e) {
   failed = true;
   console.error(e);

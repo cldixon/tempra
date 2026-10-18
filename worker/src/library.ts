@@ -2,6 +2,8 @@ import { DurableObject } from "cloudflare:workers";
 import { type CallResult, callStore, type LibraryMethod, r2BlobStore } from "./client";
 import {
   broadcast,
+  FEED_FULL,
+  FEED_SOCKETS_PER_LIBRARY,
   type FeedMessage,
   type FeedSocket,
   feedEvent,
@@ -109,21 +111,28 @@ export class Library extends DurableObject<Env> {
   // ---------------------------------------------------------------- the change feed
 
   /**
-   * The feed's WebSocket (tempra-dev: app/live). The Worker has already authorized the caller
-   * and counted the connection; this accepts the socket with the hibernation API, so an idle
-   * library costs nothing while browsers stay connected, and says where the ledger stands.
+   * The feed's WebSocket (tempra-dev: app/live). The Worker has already authorized the caller,
+   * counted the connection and leased it a place under the account's cap; this accepts the
+   * socket with the hibernation API, so an idle library costs nothing while browsers stay
+   * connected, and says where the ledger stands. Past the library's cap, counted from
+   * `getWebSockets()` (which survives hibernation), the socket is refused (TEMPRA-80).
    */
   override async fetch(request: Request): Promise<Response> {
     if (request.headers.get("Upgrade")?.toLowerCase() !== "websocket") {
       return new Response("Expected a WebSocket.", { status: 426 });
     }
     if (this.restarting) return new Response("Restarting.", { status: 503 });
+    if (this.ctx.getWebSockets().length >= FEED_SOCKETS_PER_LIBRARY) {
+      return refuseFeed("This library has too many live connections; polling instead.");
+    }
+    const params = new URL(request.url).searchParams;
     const pair = new WebSocketPair();
     const [client, server] = [pair[0], pair[1]];
     this.ctx.acceptWebSocket(server);
     server.serializeAttachment({
-      prefix: feedPrefix(new URL(request.url).searchParams.get("prefix")),
+      prefix: feedPrefix(params.get("prefix")),
       opened: Date.now(),
+      lease: params.get("lease"),
     });
     const hello: FeedMessage = { type: "hello", head: this.store.headSeq() };
     server.send(JSON.stringify(hello));
@@ -148,6 +157,14 @@ export class Library extends DurableObject<Env> {
       };
     });
     broadcast(feed, head, events.map(feedEvent));
+  }
+
+  /** The account leases of the open feed sockets, for the per-account cap (feed-leases.ts). */
+  async feedLeases(): Promise<string[]> {
+    return this.ctx.getWebSockets().flatMap((ws) => {
+      const a = ws.deserializeAttachment() as { lease?: string | null } | null;
+      return a?.lease ? [a.lease] : [];
+    });
   }
 
   /** The feed is one-way; anything a client sends (other than ping) is ignored. */
@@ -269,6 +286,19 @@ export class Library extends DurableObject<Env> {
     }
     await this.schedule.afterPass();
   }
+}
+
+/**
+ * A feed connection refused over a cap: opened and closed at once with FEED_FULL, which a
+ * browser can read (it cannot read an HTTP refusal of a WebSocket). Not hibernatable, so it is
+ * never counted among the library's sockets.
+ */
+export function refuseFeed(reason: string): Response {
+  const pair = new WebSocketPair();
+  const [client, server] = [pair[0], pair[1]];
+  server.accept();
+  server.close(FEED_FULL, reason);
+  return new Response(null, { status: 101, webSocket: client });
 }
 
 const RESTARTING = {
