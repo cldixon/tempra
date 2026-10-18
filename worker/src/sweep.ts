@@ -1,20 +1,47 @@
+import type { BlobRefs } from "./blobrefs";
 import { blobKey } from "./client";
 import type { LibraryHealth } from "./store/store";
 
 /**
- * The daily sweep and operator digest (v2 spec: A3). Attachment bytes live in R2 by hash and are
- * shared across libraries, so deleting a library cannot delete them. Each day this asks every
- * library which hashes it references, records blobs nobody references in blob_orphans, and deletes
- * those unreferenced for GRACE_DAYS in a row: longer than the 30-day point-in-time window, so an
- * undone restore never finds an attachment gone. If any library fails to answer, nothing is
- * deleted that day. Free of Worker APIs.
+ * The daily sweep and operator digest (v2 spec: A3; TEMPRA-81, TEMPRA-91; tempra-dev:
+ * v2/blob-sweep). Attachment bytes live in R2 by hash and are shared across libraries, so deleting
+ * a library cannot delete them. Which blobs are stored and which libraries reference them is kept
+ * in D1 as it changes (blobrefs.ts); the daily run deletes blobs unreferenced for GRACE_DAYS:
+ * longer than the 30-day point-in-time window, so an undone restore never finds an attachment
+ * gone. It lists no bucket and calls no library for the sweep: recounts, the one-time listing and
+ * the drift scan are messages on SWEEP_QUEUE, a page or a library each. Deletion waits while any
+ * library has not been counted once or has a restore's recount pending. Free of Worker APIs.
  */
 
 export const GRACE_DAYS = 31;
 const DAY_MS = 86_400_000;
 
+/** How often every library is recounted, as a safety net against drift. */
+export const FULL_RECOUNT_DAYS = 7;
+/** Libraries per dispatch message; recounts are sent 100 to a batch (the Queues limit). */
+export const DISPATCH_PAGE = 500;
+/** Orphans per delete page (R2 deletes at most 1,000 keys a call), and pages per day. */
+export const DELETE_PAGE = 1000;
+export const DELETE_PAGES = 50;
+/** Keys per listing page and stored blobs per scan page. */
+export const LIST_PAGE = 1000;
+/** A listing or scan chain that has not moved in this long is started again from where it was. */
+const STALLED_MS = 6 * 3_600_000;
+
+/** What travels on SWEEP_QUEUE. Every kind is safe to run twice. */
+export type SweepMessage =
+  | { kind: "dispatch"; all: boolean; after: string }
+  | { kind: "recount"; library: string; token?: string }
+  | { kind: "list"; cursor?: string }
+  | { kind: "scan"; after: string };
+
+export interface SweepQueue {
+  send(message: SweepMessage): Promise<void>;
+  sendBatch(messages: SweepMessage[]): Promise<void>;
+}
+
+/** The digest's view of one library (until TEMPRA-92 gives each library a health row). */
 export interface Inventory {
-  hashes: string[];
   bytes: number;
   stats: {
     seq: number;
@@ -26,23 +53,12 @@ export interface Inventory {
 }
 
 export interface SweepDeps {
+  refs: BlobRefs;
+  queue: SweepQueue;
+  bucket: { delete(keys: string[]): Promise<void> };
   /** Every library: its id (the Durable Object name) and path, for the digest. */
   libraries(): Promise<{ id: string; path: string }[]>;
   inventory(libraryId: string): Promise<Inventory>;
-  bucket: {
-    list(opts: { prefix: string; cursor?: string }): Promise<{
-      objects: { key: string }[];
-      truncated: boolean;
-      cursor?: string;
-    }>;
-    delete(keys: string[]): Promise<void>;
-  };
-  /** blob_orphans in D1. */
-  orphans: {
-    all(): Promise<Map<string, string>>;
-    mark(hashes: string[], since: string): Promise<void>;
-    clear(hashes: string[]): Promise<void>;
-  };
   storageLimitBytes: number;
   /** The account D1's daily prune (pruneAccounts); its counts go in the digest. */
   prune?: () => Promise<PruneResult>;
@@ -55,8 +71,10 @@ export interface SweepResult {
   referenced: number;
   orphaned: number;
   deleted: number;
-  /** Why nothing was deleted, when it was not. */
-  skipped?: string;
+  /** Which libraries were sent to be recounted: all of them, or those uncounted or pending. */
+  recount: "all" | "open";
+  /** Why nothing was deleted, when deletion was held. */
+  held?: string;
   /** Things the operator should look at. */
   attention: string[];
   /** Libraries with open work, from each one's health summary, the most first. */
@@ -66,27 +84,14 @@ export interface SweepResult {
 }
 
 export async function sweep(d: SweepDeps): Promise<SweepResult> {
-  const libs = await d.libraries();
-  const referenced = new Set<string>();
   const attention: string[] = [];
-  const health: SweepResult["health"] = [];
-  let failed = 0;
-  for (const lib of libs) {
-    let inv: Inventory;
-    try {
-      inv = await d.inventory(lib.id);
-    } catch (e) {
-      failed++;
-      attention.push(`${lib.path}: did not answer (${e instanceof Error ? e.message : String(e)})`);
-      continue;
-    }
-    for (const h of inv.hashes) referenced.add(h);
-    attention.push(...libraryProblems(lib.path, inv, d.storageLimitBytes, d.now));
-    if (inv.health && openWork(inv.health.counts) > 0) {
-      health.push({ path: lib.path, counts: inv.health.counts });
-    }
-  }
-  health.sort((a, b) => openWork(b.counts) - openWork(a.counts) || (a.path < b.path ? -1 : 1));
+  const recount = await dispatch(d, attention);
+  const { deleted, held, more } = await deleteExpired(d);
+  if (held) attention.push(`Blob sweep held: ${held}.`);
+  if (more) attention.push("Blob sweep: more expired blobs than a day deletes; the rest wait.");
+
+  const report = await reportLibraries(d);
+  attention.push(...report.attention);
 
   let pruned: PruneResult | undefined;
   if (d.prune) {
@@ -97,50 +102,233 @@ export async function sweep(d: SweepDeps): Promise<SweepResult> {
     }
   }
 
-  const stored: string[] = [];
-  let cursor: string | undefined;
-  do {
-    const page = await d.bucket.list({ prefix: "blobs/", cursor });
-    for (const o of page.objects) stored.push(o.key.slice("blobs/".length));
-    cursor = page.truncated ? page.cursor : undefined;
-  } while (cursor);
-
-  const result: SweepResult = {
-    libraries: libs.length,
-    stored: stored.length,
-    referenced: referenced.size,
-    orphaned: 0,
-    deleted: 0,
+  const counts = await d.refs.counts();
+  return {
+    libraries: report.libraries,
+    stored: counts.stored,
+    referenced: counts.referenced,
+    orphaned: counts.waiting,
+    deleted,
+    recount,
+    ...(held ? { held } : {}),
     attention,
-    health,
+    health: report.health,
     ...(pruned ? { pruned } : {}),
   };
-  if (failed > 0) {
-    result.skipped = `${failed} of ${libs.length} libraries did not answer`;
-    attention.push(`Blob sweep skipped: ${result.skipped}.`);
-    return result;
+}
+
+/**
+ * Starts the day's fan-out with one message: every library on a full day (the first run, then
+ * every FULL_RECOUNT_DAYS), otherwise only those uncounted or pending. Also starts, or restarts
+ * where it stalled, the one-time listing of the bucket, and on a full day the drift scan.
+ */
+async function dispatch(d: SweepDeps, attention: string[]): Promise<"all" | "open"> {
+  const stalled = (s: { updated: string } | null) =>
+    !s || Date.parse(s.updated) <= d.now.getTime() - STALLED_MS;
+  const fullAt = await d.refs.state("full_at");
+  const all = !fullAt || Date.parse(fullAt.value) <= d.now.getTime() - FULL_RECOUNT_DAYS * DAY_MS;
+  await d.queue.send({ kind: "dispatch", all, after: "" });
+  if (all) {
+    await d.refs.setState("full_at", d.now.toISOString(), d.now);
+    await d.refs.setState("full_dispatch", "", d.now);
+  } else {
+    // A full pass whose paging stopped (a message that ran out of retries) goes on from there.
+    const full = await d.refs.state("full_dispatch");
+    if (full && full.value !== "done" && stalled(full)) {
+      await d.queue.send({ kind: "dispatch", all: true, after: full.value });
+      await d.refs.setState("full_dispatch", full.value, d.now);
+      attention.push("Blob recount dispatch stalled; started again.");
+    }
   }
 
-  const known = await d.orphans.all();
-  const storedSet = new Set(stored);
-  const unreferenced = stored.filter((h) => !referenced.has(h));
-  // Referenced again (an undo, a re-upload), or already gone from R2.
-  const back = [...known.keys()].filter((h) => referenced.has(h) || !storedSet.has(h));
-  if (back.length) await d.orphans.clear(back);
-  const fresh = unreferenced.filter((h) => !known.has(h));
-  if (fresh.length) await d.orphans.mark(fresh, d.now.toISOString());
-  const cutoff = d.now.getTime() - GRACE_DAYS * DAY_MS;
-  const expired = unreferenced.filter((h) => {
-    const since = known.get(h);
-    return since !== undefined && Date.parse(since) <= cutoff;
-  });
-  for (let i = 0; i < expired.length; i += 1000) {
-    await d.bucket.delete(expired.slice(i, i + 1000).map(blobKey));
+  const listing = await d.refs.state("listing");
+  if (listing?.value !== "done" && stalled(listing)) {
+    await d.queue.send({ kind: "list", ...(listing?.value ? { cursor: listing.value } : {}) });
+    await d.refs.setState("listing", listing?.value ?? "", d.now);
+    if (listing) attention.push("Blob listing (one-time backfill) stalled; started again.");
   }
-  if (expired.length) await d.orphans.clear(expired);
-  result.orphaned = unreferenced.length - expired.length;
-  result.deleted = expired.length;
-  return result;
+  const scan = await d.refs.state("scan");
+  if (all || (scan && scan.value !== "done" && stalled(scan))) {
+    const after = all ? "" : (scan?.value ?? "");
+    await d.queue.send({ kind: "scan", after });
+    await d.refs.setState("scan", after, d.now);
+  }
+  return all ? "all" : "open";
+}
+
+/**
+ * The delete step: orphans unreferenced for GRACE_DAYS, a page at a time. Each page is claimed in
+ * D1 first (a blob uploaded or referenced again in between is not claimed), then its bytes go,
+ * then its stored rows. Held while any library is uncounted or pending.
+ */
+async function deleteExpired(
+  d: SweepDeps,
+): Promise<{ deleted: number; held?: string; more: boolean }> {
+  // Until one full pass has paged through every library, a library from before may have no
+  // count-state row at all, and may reference anything.
+  if ((await d.refs.state("ensured"))?.value !== "done") {
+    return {
+      deleted: 0,
+      held: "the first count of every library has not finished",
+      more: false,
+    };
+  }
+  const holding = await d.refs.held(5);
+  if (holding.count > 0) {
+    const more =
+      holding.count > holding.paths.length
+        ? `, and ${holding.count - holding.paths.length} more`
+        : "";
+    return {
+      deleted: 0,
+      held: `${holding.count} ${holding.count === 1 ? "library" : "libraries"} not counted yet or with a restore's recount pending (${holding.paths.join(", ")}${more})`,
+      more: false,
+    };
+  }
+  const cutoff = new Date(d.now.getTime() - GRACE_DAYS * DAY_MS).toISOString();
+  let deleted = 0;
+  for (let page = 0; page < DELETE_PAGES; page++) {
+    const due = await d.refs.expired(cutoff, DELETE_PAGE);
+    if (due.length === 0) return { deleted, more: false };
+    const claimed = await d.refs.claim(due, cutoff);
+    if (claimed.length > 0) {
+      try {
+        await d.bucket.delete(claimed.map((c) => blobKey(c.hash)));
+      } catch (e) {
+        await d.refs.unclaim(claimed);
+        throw e;
+      }
+      await d.refs.dropStored(claimed.map((c) => c.hash));
+      deleted += claimed.length;
+    }
+    if (due.length < DELETE_PAGE) return { deleted, more: false };
+  }
+  return { deleted, more: true };
+}
+
+/**
+ * The digest's per-library problems and health: one call to each library (until TEMPRA-92). A
+ * library that does not answer is reported; it no longer holds back the sweep.
+ */
+async function reportLibraries(d: SweepDeps) {
+  const libs = await d.libraries();
+  const attention: string[] = [];
+  const health: SweepResult["health"] = [];
+  for (const lib of libs) {
+    let inv: Inventory;
+    try {
+      inv = await d.inventory(lib.id);
+    } catch (e) {
+      attention.push(`${lib.path}: did not answer (${e instanceof Error ? e.message : String(e)})`);
+      continue;
+    }
+    attention.push(...libraryProblems(lib.path, inv, d.storageLimitBytes, d.now));
+    if (inv.health && openWork(inv.health.counts) > 0) {
+      health.push({ path: lib.path, counts: inv.health.counts });
+    }
+  }
+  health.sort((a, b) => openWork(b.counts) - openWork(a.counts) || (a.path < b.path ? -1 : 1));
+  return { libraries: libs.length, attention, health };
+}
+
+export interface SweepConsumerDeps {
+  refs: BlobRefs;
+  queue: SweepQueue;
+  /** The attachment hashes a library references (its DO's blobRefs()). */
+  libraryHashes(library: string): Promise<string[]>;
+  bucket: {
+    list(opts: { prefix: string; cursor?: string; limit: number }): Promise<{
+      objects: { key: string; uploaded: Date }[];
+      truncated: boolean;
+      cursor?: string;
+    }>;
+  };
+  now: () => Date;
+}
+
+/** What one message did, for the log. */
+export type SweepOutcome =
+  | { kind: "dispatch"; sent: number; next: boolean }
+  | { kind: "recount"; library: string; added: number; removed: number }
+  | { kind: "recount"; library: string; forgotten: number }
+  | { kind: "list"; stored: number; next: boolean }
+  | { kind: "scan"; marked: number; next: boolean };
+
+/** Handles one SWEEP_QUEUE message; throws to have it retried. */
+export async function handleSweepMessage(
+  m: SweepMessage,
+  d: SweepConsumerDeps,
+): Promise<SweepOutcome> {
+  switch (m.kind) {
+    case "dispatch": {
+      const page = m.all
+        ? await d.refs.libraryPage(m.after, DISPATCH_PAGE)
+        : await d.refs.openPage(m.after, DISPATCH_PAGE);
+      // Every library has a row before it is counted, so an uncounted one holds deletion.
+      if (m.all) await d.refs.ensure(page.map((r) => r.library));
+      // A pending restore's token rides along: the cron runs long after the restore's restart.
+      const recounts: SweepMessage[] = page.map((r) => ({
+        kind: "recount",
+        library: r.library,
+        ...(r.pending ? { token: r.pending } : {}),
+      }));
+      const last = page[page.length - 1]?.library;
+      const full = page.length === DISPATCH_PAGE;
+      for (let i = 0; i < recounts.length; i += 100) {
+        await d.queue.sendBatch(recounts.slice(i, i + 100));
+      }
+      const next = full && last !== undefined;
+      if (next) await d.queue.send({ kind: "dispatch", all: m.all, after: last as string });
+      if (m.all) {
+        const now = d.now();
+        await d.refs.setState("full_dispatch", next ? (last as string) : "done", now);
+        if (!next) await d.refs.setState("ensured", "done", now);
+      }
+      return { kind: "dispatch", sent: recounts.length, next };
+    }
+    case "recount": {
+      if (!(await d.refs.exists(m.library))) {
+        return {
+          kind: "recount",
+          library: m.library,
+          forgotten: await d.refs.forget(m.library, d.now()),
+        };
+      }
+      const takenAt = d.now();
+      const hashes = await d.libraryHashes(m.library);
+      const r = await d.refs.replace(m.library, hashes, takenAt, m.token);
+      return { kind: "recount", library: m.library, ...r };
+    }
+    case "list": {
+      const page = await d.bucket.list({ prefix: "blobs/", cursor: m.cursor, limit: LIST_PAGE });
+      const now = d.now();
+      await d.refs.storedFromListing(
+        page.objects.map((o) => ({
+          hash: o.key.slice("blobs/".length),
+          created: o.uploaded.toISOString(),
+        })),
+        now,
+      );
+      const next = page.truncated && page.cursor ? page.cursor : undefined;
+      await d.refs.setState("listing", next ?? "done", now);
+      if (next) await d.queue.send({ kind: "list", cursor: next });
+      return { kind: "list", stored: page.objects.length, next: next !== undefined };
+    }
+    case "scan": {
+      const now = d.now();
+      const r = await d.refs.scan(m.after, LIST_PAGE, now);
+      await d.refs.setState("scan", r.last ?? "done", now);
+      if (r.last) await d.queue.send({ kind: "scan", after: r.last });
+      return { kind: "scan", marked: r.marked, next: r.last !== null };
+    }
+  }
+}
+
+/** Something on SWEEP_QUEUE that is not a SweepMessage (acked and logged, never retried). */
+export function isSweepMessage(m: unknown): m is SweepMessage {
+  if (!m || typeof m !== "object") return false;
+  const k = (m as { kind?: unknown }).kind;
+  return k === "dispatch" || k === "recount" || k === "list" || k === "scan";
 }
 
 /** A library's export falling behind, its daily alarm not running, or its storage nearly full. */
@@ -207,7 +395,7 @@ export function digestText(r: SweepResult): string {
           "",
         ]
       : []),
-    `Libraries ${r.libraries}. Blobs stored ${r.stored}, referenced ${r.referenced}, waiting ${r.orphaned}, deleted ${r.deleted}.`,
+    `Libraries ${r.libraries}. Blobs stored ${r.stored}, referenced ${r.referenced}, waiting ${r.orphaned}, deleted ${r.deleted}${r.held ? " (deletion held)" : ""}. Recounted ${r.recount === "all" ? "every library" : "libraries not yet counted or restored"}.`,
     ...(r.pruned
       ? [
           `Pruned sessions ${r.pruned.sessions}, sign-in links ${r.pruned.sign_in_links}, invitations ${r.pruned.invitations}.`,
@@ -215,41 +403,6 @@ export function digestText(r: SweepResult): string {
       : []),
     "",
   ].join("\n");
-}
-
-/** blob_orphans in D1. */
-export function d1Orphans(db: D1Database): SweepDeps["orphans"] {
-  return {
-    async all() {
-      const r = await db.prepare("SELECT hash, since FROM blob_orphans").all<{
-        hash: string;
-        since: string;
-      }>();
-      return new Map(r.results.map((o) => [o.hash, o.since]));
-    },
-    async mark(hashes, since) {
-      for (let i = 0; i < hashes.length; i += 50) {
-        await db.batch(
-          hashes
-            .slice(i, i + 50)
-            .map((h) =>
-              db
-                .prepare("INSERT OR IGNORE INTO blob_orphans (hash, since) VALUES (?, ?)")
-                .bind(h, since),
-            ),
-        );
-      }
-    },
-    async clear(hashes) {
-      for (let i = 0; i < hashes.length; i += 50) {
-        await db.batch(
-          hashes
-            .slice(i, i + 50)
-            .map((h) => db.prepare("DELETE FROM blob_orphans WHERE hash = ?").bind(h)),
-        );
-      }
-    },
-  };
 }
 
 /** How long a sign-in link row is kept: past its expiry, it only counts toward rate limits. */

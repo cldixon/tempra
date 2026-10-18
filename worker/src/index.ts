@@ -2,7 +2,8 @@ import type { AccountFeeds } from "./account-feeds";
 import { d1Accounts } from "./accounts";
 import type { Deps } from "./app";
 import { d1Authenticate } from "./auth";
-import { makeClient, r2BlobStore } from "./client";
+import { d1BlobRefs } from "./blobrefs";
+import { makeClient, r2BlobStore, recordingBlobStore } from "./client";
 import { FEED_SOCKETS_PER_ACCOUNT } from "./feed";
 import { type Library, refuseFeed } from "./library";
 import { DEFAULT_STORAGE_MB } from "./limits";
@@ -12,7 +13,15 @@ import { devMailer, flushMail, sendDigests } from "./notify-mail";
 import { listRestores, RESTORE_ID, restoresPrefix } from "./recovery";
 import { d1Sessions } from "./session";
 import type { Mailer } from "./signin";
-import { d1Orphans, digestText, pruneAccounts, sweep } from "./sweep";
+import {
+  digestText,
+  handleSweepMessage,
+  isSweepMessage,
+  pruneAccounts,
+  type SweepMessage,
+  type SweepQueue,
+  sweep,
+} from "./sweep";
 import { createWorker } from "./worker";
 
 export { AccountFeeds } from "./account-feeds";
@@ -53,6 +62,19 @@ function mailerFor(env: Env): Mailer | null {
   };
 }
 
+/** The blob sweep's Queue (TEMPRA-81). */
+function sweepQueue(env: Env): SweepQueue {
+  const q = env.SWEEP_QUEUE as Queue<SweepMessage>;
+  return {
+    send: async (m) => {
+      await q.send(m);
+    },
+    sendBatch: async (ms) => {
+      if (ms.length) await q.sendBatch(ms.map((body) => ({ body })));
+    },
+  };
+}
+
 const storageLimitBytes = (env: Env) =>
   (Number(env.LIBRARY_STORAGE_MB) || DEFAULT_STORAGE_MB) * 1048576;
 
@@ -88,13 +110,16 @@ const depsFor = (env: Env): Deps => {
         });
       } catch {}
     },
-    blobs: r2BlobStore(env.BLOBS),
+    // Each blob put is recorded in D1 first, so the sweep never lists the bucket (TEMPRA-81).
+    blobs: recordingBlobStore(r2BlobStore(env.BLOBS), d1BlobRefs(env.DB)),
     maintain: (doId) => libraryStub(env, doId).maintain(),
     async destroyLibrary(doId) {
       // destroy() ends by restarting the object, which fails the call by design.
       await libraryStub(env, doId)
         .destroy()
         .catch(() => {});
+      // Its references go; blobs it was the last to reference start their 31 days (TEMPRA-91).
+      await d1BlobRefs(env.DB).forget(doId, new Date());
       for (const prefix of [exportsPrefix(doId), restoresPrefix(doId)]) {
         let cursor: string | undefined;
         do {
@@ -137,11 +162,22 @@ const depsFor = (env: Env): Deps => {
         } else {
           t = { to: target.to };
         }
+        // A restore can drop references (TEMPRA-91): deletion is held from before it is armed
+        // until a recount after the restart, carrying this token, has replaced the library's rows.
+        const token = crypto.randomUUID();
+        await d1BlobRefs(env.DB).pend(doId, token);
         const outcome = await stub.prepareRestore(t, actor);
         if (outcome.ok) {
           // abort() fails the call by design; the next request starts the restored library.
           await stub.restart().catch(() => {});
         }
+        // Sent either way (a refused restore changed nothing; the recount says so). If it is
+        // lost, the daily cron sends it again for the pending library.
+        await sweepQueue(env)
+          .send({ kind: "recount", library: doId, token })
+          .catch((e) =>
+            console.error(JSON.stringify({ recount_not_sent: doId, error: String(e) })),
+          );
         return outcome;
       },
       list: (doId) =>
@@ -224,6 +260,9 @@ export default {
       return null;
     });
     const result = await sweep({
+      refs: d1BlobRefs(env.DB),
+      queue: sweepQueue(env),
+      bucket: { delete: (keys) => env.BLOBS.delete(keys) },
       libraries: async () =>
         (
           await env.DB.prepare(
@@ -231,11 +270,6 @@ export default {
           ).all<{ id: string; path: string }>()
         ).results,
       inventory: (id) => libraryStub(env, id).inventory(),
-      bucket: {
-        list: (o) => env.BLOBS.list(o),
-        delete: (keys) => env.BLOBS.delete(keys),
-      },
-      orphans: d1Orphans(env.DB),
       prune: () => pruneAccounts(env.DB, new Date()),
       storageLimitBytes: storageLimitBytes(env),
       now: new Date(),
@@ -258,4 +292,36 @@ export default {
       });
     }
   },
-} satisfies ExportedHandler<Env>;
+
+  /**
+   * The blob sweep's fan-out (TEMPRA-81): dispatch pages, library recounts, the one-time bucket
+   * listing and the drift scan, each message on its own, retried on failure.
+   */
+  async queue(batch, env) {
+    const deps = {
+      refs: d1BlobRefs(env.DB),
+      queue: sweepQueue(env),
+      libraryHashes: (library: string) => libraryStub(env, library).blobRefs(),
+      bucket: {
+        list: (o: { prefix: string; cursor?: string; limit: number }) => env.BLOBS.list(o),
+      },
+      now: () => new Date(),
+    };
+    for (const msg of batch.messages) {
+      if (!isSweepMessage(msg.body)) {
+        console.error(JSON.stringify({ sweep_message_unknown: msg.body }));
+        msg.ack();
+        continue;
+      }
+      try {
+        const outcome = await handleSweepMessage(msg.body, deps);
+        // A recount that adds or removes rows outside a backfill is drift (TEMPRA-91).
+        if (outcome.kind !== "dispatch") console.log(JSON.stringify({ sweep: outcome }));
+        msg.ack();
+      } catch (e) {
+        console.error(JSON.stringify({ sweep_message: msg.body, error: String(e) }));
+        msg.retry();
+      }
+    }
+  },
+} satisfies ExportedHandler<Env, SweepMessage>;

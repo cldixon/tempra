@@ -3915,6 +3915,17 @@ export class LibraryStore {
     return (this.size ? this.size() : 0) + r2;
   }
 
+  /** Which of these attachment hashes this library already holds (TEMPRA-91: only new ones are recorded in D1). */
+  hasBlobs(hashes: string[]): Set<string> {
+    const have = new Set<string>();
+    for (const h of new Set(hashes)) {
+      if (this.sql.all("SELECT 1 FROM blobs WHERE hash = ? AND location = 'r2'", h).length > 0) {
+        have.add(h);
+      }
+    }
+    return have;
+  }
+
   /** The attachment hashes this library references in R2, for the daily blob sweep. */
   blobHashes(): string[] {
     return this.sql

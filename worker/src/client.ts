@@ -103,6 +103,38 @@ export function r2BlobStore(bucket: R2Bucket): BlobStore {
 }
 
 /**
+ * Records each blob in the blob sweep's D1 (blobrefs.ts) before its bytes go up, so the sweep
+ * knows what is stored without listing the bucket (TEMPRA-81). If the record fails, nothing is
+ * uploaded.
+ */
+export function recordingBlobStore(
+  inner: BlobStore,
+  refs: { stored(hash: string, at: Date): Promise<void> },
+): BlobStore {
+  return {
+    ...inner,
+    async put(hash, bytes, media) {
+      await refs.stored(hash, new Date());
+      await inner.put(hash, bytes, media);
+    },
+  };
+}
+
+/** The attachments a call would commit: attach ops in `apply`, blob files in `import`. */
+export function attachedBlobs(
+  method: LibraryMethod,
+  args: unknown[],
+): { path: string; blob: BlobRef }[] {
+  const refs: { path: string; blob: BlobRef }[] = [];
+  if (method === "apply") {
+    for (const op of (args[1] as WriteOp[]) ?? []) if (op.op === "attach") refs.push(op);
+  } else if (method === "import") {
+    for (const f of (args[1] as ImportFile[]) ?? []) if ("blob" in f) refs.push(f);
+  }
+  return refs;
+}
+
+/**
  * Confirms each attachment a request commits exists in blob storage with the declared size
  * (spec: Write path, step 3). Runs before the synchronous write transaction.
  */
@@ -111,14 +143,8 @@ export async function verifyBlobs(
   method: LibraryMethod,
   args: unknown[],
 ): Promise<void> {
-  const refs: { path: string; blob: BlobRef }[] = [];
-  if (method === "apply") {
-    for (const op of (args[1] as WriteOp[]) ?? []) if (op.op === "attach") refs.push(op);
-  } else if (method === "import") {
-    for (const f of (args[1] as ImportFile[]) ?? []) if ("blob" in f) refs.push(f);
-  }
   await Promise.all(
-    refs.map(async ({ path, blob }) => {
+    attachedBlobs(method, args).map(async ({ path, blob }) => {
       const head = await blobs.head(blob.hash);
       if (!head) {
         throw new OkfError(400, "blob_missing", `No uploaded bytes for ${path} (${blob.hash}).`);
@@ -151,7 +177,14 @@ export async function callStore(
   blobs: BlobStore,
   method: LibraryMethod,
   args: unknown[],
-  opts: { storageLimitBytes?: number } = {},
+  opts: {
+    storageLimitBytes?: number;
+    /**
+     * Records that the library references these blobs (the blob sweep's D1, TEMPRA-91), before
+     * the write that adds them commits; a write it cannot record is refused, never committed.
+     */
+    references?: (hashes: string[]) => Promise<void>;
+  } = {},
 ): Promise<CallResult> {
   try {
     if (!LIBRARY_METHODS.includes(method)) {
@@ -166,6 +199,23 @@ export async function callStore(
       );
     }
     await verifyBlobs(blobs, method, args);
+    // Only blobs new to this library cost a D1 call: a text write, or an attachment the library
+    // already holds (its reference is recorded already, or its first count will find it), never do.
+    const attached = opts.references ? attachedBlobs(method, args).map((a) => a.blob.hash) : [];
+    const held = attached.length > 0 ? store.hasBlobs(attached) : new Set<string>();
+    const fresh = [...new Set(attached)].filter((h) => !held.has(h));
+    if (opts.references && fresh.length > 0) {
+      try {
+        await opts.references(fresh);
+      } catch (e) {
+        console.error("blob references not recorded", e);
+        throw new OkfError(
+          503,
+          "unavailable",
+          "Could not record the attachment for this library; nothing was written. Try again.",
+        );
+      }
+    }
     const fn = store[method] as unknown as (...a: unknown[]) => unknown;
     return { ok: true, value: fn.apply(store, args) };
   } catch (e) {
