@@ -10,6 +10,50 @@ import type { SqlHandle } from "./sql";
  */
 export const SCHEMA_VERSION = 1;
 
+/**
+ * Counts over the whole ledger, kept by triggers as events are appended (TEMPRA-86), so `stats`
+ * and `contributors` never scan it: the number of events and requests, and per person and agent
+ * (the `by` in an event's meta, TEMPRA-75) their requests and first and last seq. Libraries from
+ * before get these once, filled from the ledger (`LibraryStore`'s `addLedgerCounts`).
+ */
+export const LEDGER_COUNTS = `
+CREATE TABLE IF NOT EXISTS ledger_counts (
+  id       INTEGER PRIMARY KEY CHECK (id = 1),
+  events   INTEGER NOT NULL,
+  requests INTEGER NOT NULL
+);
+INSERT OR IGNORE INTO ledger_counts (id, events, requests) VALUES (1, 0, 0);
+-- person and agent as json_extract gives them (agent may be NULL); agent_key tells NULL apart.
+CREATE TABLE IF NOT EXISTS contributors (
+  person    NOT NULL,
+  agent,
+  agent_key TEXT NOT NULL,
+  requests  INTEGER NOT NULL,
+  first_seq INTEGER NOT NULL,
+  last_seq  INTEGER NOT NULL,
+  PRIMARY KEY (person, agent_key)
+);
+CREATE INDEX IF NOT EXISTS contributors_last ON contributors(last_seq);
+CREATE TRIGGER IF NOT EXISTS events_counted AFTER INSERT ON events
+BEGIN
+  UPDATE ledger_counts SET events = events + 1,
+    requests = requests + NOT EXISTS (
+      SELECT 1 FROM events WHERE request_id = NEW.request_id AND seq <> NEW.seq)
+  WHERE id = 1;
+  INSERT INTO contributors (person, agent, agent_key, requests, first_seq, last_seq)
+  SELECT json_extract(NEW.meta, '$.by.person'), json_extract(NEW.meta, '$.by.agent'),
+         CASE WHEN json_extract(NEW.meta, '$.by.agent') IS NULL THEN 'n'
+              ELSE 's' || json_extract(NEW.meta, '$.by.agent') END,
+         1, NEW.seq, NEW.seq
+  WHERE NEW.meta IS NOT NULL AND json_extract(NEW.meta, '$.by.person') IS NOT NULL
+  ON CONFLICT (person, agent_key) DO UPDATE SET last_seq = excluded.last_seq,
+    requests = requests + NOT EXISTS (
+      SELECT 1 FROM events e WHERE e.request_id = NEW.request_id AND e.seq <> NEW.seq
+        AND json_extract(e.meta, '$.by.person') = json_extract(NEW.meta, '$.by.person')
+        AND json_extract(e.meta, '$.by.agent') IS json_extract(NEW.meta, '$.by.agent'));
+END;
+`;
+
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 
@@ -133,7 +177,7 @@ CREATE INDEX IF NOT EXISTS comments_thread ON comments(thread_id, seq);
 -- Historical snapshots look for each concept's last content event; with op in it, this index
 -- covers that query, so it never reads event rows.
 CREATE INDEX IF NOT EXISTS events_content ON events(concept_id, seq, op) WHERE op != 'comment';
-`;
+${LEDGER_COUNTS}`;
 
 /**
  * Creates the schema in a new library; a no-op when it is current. A library stored in another
