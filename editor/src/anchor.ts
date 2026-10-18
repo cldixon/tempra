@@ -71,14 +71,29 @@ function contextScore(body: string, at: number, end: number, sel: QuoteSelector)
 }
 
 /**
+ * Where the quote should start: `offset` into its block while the block lives, else `from`. A
+ * table's cells all carry the table's ID, so of a block's several textblocks the one that puts the
+ * hint nearest `from` is taken (TEMPRA-101), not the first. Text written above the table moves
+ * it from `from`; past half a cell, only the quote's context still tells identical cells apart.
+ */
+function hintOf(doc: DocText, sel: QuoteSelector): number {
+  let hint: number | null = null;
+  for (const b of doc.blocks) {
+    if (sel.block === null || b.block !== sel.block) continue;
+    const at = b.from + sel.offset;
+    if (hint === null || Math.abs(at - sel.from) < Math.abs(hint - sel.from)) hint = at;
+  }
+  return hint ?? sel.from;
+}
+
+/**
  * Where a selector's quote is in a document's text: the occurrence whose surroundings match best,
  * then the one nearest where it was (in its block, while the block lives). Null when the quote is
  * gone (the thread is outdated).
  */
 export function locate(doc: DocText, sel: QuoteSelector): Located | null {
   const body = doc.text;
-  const tb = sel.block === null ? undefined : doc.blocks.find((b) => b.block === sel.block);
-  const hint = tb ? tb.from + sel.offset : sel.from;
+  const hint = hintOf(doc, sel);
   const starts = occurrences(body, sel.quote);
   let best: Located | null = null;
   let bestScore = -1;
