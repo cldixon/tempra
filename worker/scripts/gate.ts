@@ -323,9 +323,7 @@ async function openBrowser() {
   });
   page.on("response", (r) => {
     const path = new URL(r.url()).pathname;
-    // A save that meets someone's write answers 412 on purpose (the editor then merges).
-    const expected = r.status() === 412 && r.request().method() === "PUT";
-    if (r.status() >= 400 && path !== "/favicon.ico" && !expected) {
+    if (r.status() >= 400 && path !== "/favicon.ico") {
       problems.push(`${r.status()} ${path}`);
     }
   });
@@ -440,9 +438,10 @@ async function openBrowser() {
 
 /**
  * The app in a real browser, signed in as the seeded user: the library page, every concept in the
- * Wordgard reader (read-only, not editable, with a footnote tooltip on hover) and the ledger draw
+ * reader (drawn from the stored tree, with no Edit, a footnote card on hover) and the ledger draw
  * from the API, links move within the app without reloading the page, and nothing is refused by
- * the CSP or throws. GATE_SCREENSHOTS=<dir> saves screenshots of a concept and a tooltip.
+ * the CSP or throws. GATE_SCREENSHOTS=<dir> saves screenshots of concepts (desktop and phone
+ * width), a card, a selection and a comment.
  */
 async function browserRenders(
   owner: string,
@@ -657,6 +656,11 @@ async function browserRenders(
     });
 
     const shots = process.env.GATE_SCREENSHOTS;
+    // A few concepts with tables, code, footnotes and lists, as screenshots for review.
+    const shotsOf = [
+      concepts[0] ?? "",
+      ...concepts.filter((c) => /orders|transactions|events|metrics\//.test(c)).slice(0, 3),
+    ];
     let tooltipShown = false;
     for (const concept of concepts) {
       await step(`reader on ${concept}`, async () => {
@@ -664,10 +668,27 @@ async function browserRenders(
         const body = page.locator(".body .prose");
         await body.waitFor({ timeout: 15_000 });
         await page.locator(".cluster").waitFor();
-        if ((await body.getAttribute("contenteditable")) === "true") throw new Error("editable");
+        // Read and comment only (TEMPRA-99): nothing in the page edits.
+        if ((await page.locator("[contenteditable]").count()) > 0) throw new Error("editable");
+        if ((await page.getByRole("button", { name: "Edit", exact: true }).count()) > 0) {
+          throw new Error("an Edit control is offered");
+        }
         if ((await body.innerText()).trim() === "") throw new Error("empty body");
-        if (shots && concept === concepts[0]) {
-          await page.screenshot({ path: `${shots}/concept.png`, fullPage: true });
+        // Every block carries its ID, every textblock its place in the text.
+        if ((await body.locator("[data-block]").count()) === 0) throw new Error("no block IDs");
+        if (shots && shotsOf.includes(concept)) {
+          const name = concept.replace(/\.md$/, "").replaceAll("/", "-");
+          // The page alone: no panel over it at phone width.
+          const close = page.getByRole("button", { name: "Close panel" });
+          if ((await close.count()) > 0) await close.click();
+          await page.locator(".ws-main").evaluate((el) => {
+            el.scrollTop = 0;
+          });
+          await page.screenshot({ path: `${shots}/reader-${name}.png` });
+          await page.setViewportSize({ width: 390, height: 844 });
+          await page.waitForTimeout(200);
+          await page.screenshot({ path: `${shots}/reader-${name}-phone.png` });
+          await page.setViewportSize({ width: 1280, height: 720 });
         }
         const ref = page.locator(".body .fnref a").first();
         if (!tooltipShown && (await ref.count()) > 0) {
@@ -778,6 +799,8 @@ async function browserRenders(
             const text = n.textContent ?? "";
             if (text.trim().length < 24 || n.parentElement?.closest("h1, h2, h3, a, code")) continue;
             const start = text.search(/\\S/);
+            // In view, as a person selecting it would have it: the toolbar sits beside it.
+            n.parentElement.scrollIntoView({ block: "center" });
             const range = document.createRange();
             range.setStart(n, start);
             range.setEnd(n, start + 16);
@@ -790,7 +813,26 @@ async function browserRenders(
         })()`);
         const unselect = () => page.evaluate("document.getSelection().removeAllRanges()");
         const tools = page.locator(".selection-tools");
-        const draft = page.locator(".body mark.comment-draft");
+        /** The text a highlight covers (the CSS Custom Highlight API: no element in the body). */
+        const highlighted = (name: string) =>
+          page.evaluate<string[]>(
+            `[...(CSS.highlights.get(${JSON.stringify(name)}) ?? [])].map((r) => r.toString())`,
+          );
+        /** Waits until the highlight covers some text (or none, with `gone`). */
+        const highlight = async (name: string, gone = false, ms = 10_000) => {
+          const until = Date.now() + ms;
+          for (;;) {
+            const now = await highlighted(name);
+            if (gone ? now.length === 0 : now.some((t) => t.trim() !== "")) return now;
+            if (Date.now() > until) {
+              throw new Error(`highlight ${name} ${gone ? "still drawn" : "not drawn"}: ${now}`);
+            }
+            await page.waitForTimeout(100);
+          }
+        };
+        if (!(await page.evaluate<boolean>("typeof CSS !== 'undefined' && 'highlights' in CSS"))) {
+          throw new Error("this Chrome has no CSS Custom Highlight API");
+        }
         // Selecting shows the toolbar; clicking away (the selection gone) hides it, and
         // nothing is held for a comment.
         const quote = await select();
@@ -806,7 +848,12 @@ async function browserRenders(
         // Escape drops it; a second draft is posted.
         await select();
         await tools.getByRole("button", { name: "Comment" }).click();
-        await draft.waitFor({ timeout: 5_000 });
+        const drafted = await highlight("tempra-comment-draft", false, 5_000);
+        if (drafted.join("") !== quote) {
+          throw new Error(
+            `the draft covers ${JSON.stringify(drafted)}, not ${JSON.stringify(quote)}`,
+          );
+        }
         await page.locator(".comment-form .quote").waitFor();
         if (
           !(await page
@@ -816,7 +863,7 @@ async function browserRenders(
           throw new Error("the comment box did not take the focus");
         }
         await page.keyboard.press("Escape");
-        await draft.waitFor({ state: "detached", timeout: 5_000 });
+        await highlight("tempra-comment-draft", true, 5_000);
         await select();
         await tools.getByRole("button", { name: "Comment" }).click();
         await tools.waitFor({ state: "detached", timeout: 5_000 });
@@ -827,15 +874,28 @@ async function browserRenders(
           .first()
           .getByRole("button", { name: "Comment", exact: true })
           .click();
-        await draft.waitFor({ state: "detached", timeout: 10_000 });
-        const mark = page.locator(".body mark.comment-mark");
-        await mark.first().waitFor({ timeout: 10_000 });
-        if (!(await mark.first().innerText()).includes(quote.trim().slice(0, 8))) {
-          throw new Error(`highlight: ${await mark.first().innerText()} for ${quote}`);
+        await highlight("tempra-comment-draft", true);
+        // The posted thread is the active one: solid, then dotted with the others.
+        const marked = async () => [
+          ...(await highlighted("tempra-comment")),
+          ...(await highlighted("tempra-comment-active")),
+        ];
+        const until = Date.now() + 10_000;
+        while (!(await marked()).some((t) => t.includes(quote.trim().slice(0, 8)))) {
+          if (Date.now() > until) throw new Error(`highlight: ${await marked()} for ${quote}`);
+          await page.waitForTimeout(100);
         }
         await page.locator(".thread").getByText("Gate: please check this sentence.").waitFor();
         if (shots) await page.screenshot({ path: `${shots}/comment.png` });
-        const thread = await mark.first().getAttribute("data-thread");
+        const listed = (await (
+          await fetch(`${libApi}/comments?path=${encodeURIComponent(concept)}&status=open`, {
+            headers: bearer,
+          })
+        ).json()) as { threads: { id: string; comments: { body: string }[] }[] };
+        const thread = listed.threads.find((t) =>
+          t.comments.some((c) => c.body === "Gate: please check this sentence."),
+        )?.id;
+        if (!thread) throw new Error(`the thread is not listed: ${JSON.stringify(listed)}`);
         await markStay();
         await page.waitForTimeout(300);
         // An agent writes a new paragraph above it (TEMPRA-22): the commented block keeps its
@@ -875,9 +935,12 @@ async function browserRenders(
         }
         await showNewVersion();
         await page.locator(".body").getByText(opening).waitFor({ timeout: 10_000 });
-        await mark.first().waitFor({ timeout: 10_000 });
-        if (!(await mark.first().innerText()).includes(quote.trim().slice(0, 8))) {
-          throw new Error(`highlight after the agent's write: ${await mark.first().innerText()}`);
+        const followed = Date.now() + 10_000;
+        while (!(await marked()).some((t) => t.includes(quote.trim().slice(0, 8)))) {
+          if (Date.now() > followed) {
+            throw new Error(`highlight after the agent's write: ${await marked()}`);
+          }
+          await page.waitForTimeout(100);
         }
         for (const [suffix, body] of [
           ["", { body: "Checked it; it holds." }],
@@ -891,7 +954,8 @@ async function browserRenders(
           if (!r.ok) throw new Error(`agent ${suffix || "reply"}: ${r.status} ${await r.text()}`);
         }
         await page.getByText("Resolved (1)").waitFor({ timeout: 10_000 });
-        await mark.first().waitFor({ state: "detached", timeout: 10_000 });
+        await highlight("tempra-comment", true);
+        await highlight("tempra-comment-active", true);
         if (!(await stayed())) throw new Error("the page reloaded");
         // Notifications (TEMPRA-72, TEMPRA-74): the agent's reply on the person's thread is in
         // their inbox, its count shows in the open page's header without a reload, and the
@@ -916,136 +980,21 @@ async function browserRenders(
         }
       },
     );
-    // The editor (TEMPRA-15): a person edits the body in place and saves with a note; an agent's
-    // edit on that text still matches; an edit that meets an agent's write is merged at save.
-    await step(
-      "editor: edit, save with a note, an agent edits after, a write meanwhile merges",
-      async () => {
-        await page.goto(url);
-        const body = page.locator(".body .prose");
-        await body.waitFor({ timeout: 15_000 });
-        await markStay();
-        // Markdown shows the file as stored, frontmatter first, in place of the reader.
-        const asMarkdown = page.getByRole("button", { name: "Markdown", exact: true });
-        await asMarkdown.click();
-        const stored = page.locator(".raw-markdown pre");
-        await stored.waitFor({ timeout: 10_000 });
-        const text = await stored.innerText();
-        if (!text.startsWith("---\ntype:")) throw new Error(`markdown view: ${text.slice(0, 60)}`);
-        if (await body.isVisible()) throw new Error("the reader still shows beside the markdown");
-        await asMarkdown.click();
-        await body.waitFor({ state: "visible" });
-        const edit = async () => {
-          await page.getByRole("button", { name: "Edit", exact: true }).click();
-          await page.locator(".body [contenteditable='true']").first().waitFor({ timeout: 5_000 });
-        };
-        /** Clicks into a paragraph of the body, goes to the end of that line, and types. */
-        const typeInto = async (text: string, which: "first" | "last" = "last") => {
-          // A paragraph with words in it (code blocks and tables hold none).
-          const target = body.locator("p", { hasText: /\w{4,}/ })[which]();
-          await target.click();
-          // The editor takes up the click's selection on the next selectionchange; a person
-          // never types within the same frame, so wait until the caret is in the paragraph.
-          const inside = () =>
-            target.evaluate((p) => {
-              const node = p.ownerDocument.getSelection()?.anchorNode ?? null;
-              return node !== null && p.contains(node);
-            });
-          for (let i = 0; !(await inside()) && i < 20; i++) await page.waitForTimeout(50);
-          await page.waitForTimeout(100);
-          await page.keyboard.press("End");
-          await page.keyboard.type(text);
-        };
-        const save = async (note: string) => {
-          await page.getByPlaceholder("What you changed, in one line").fill(note);
-          await page
-            .locator(".edit-bar")
-            .getByRole("button", { name: "Save", exact: true })
-            .click();
-        };
-        await edit();
-        if (shots) await page.screenshot({ path: `${shots}/editor.png` });
-        await typeInto(" Edited by a person.");
-        // The drawn caret sits on the line being typed, not above it.
-        const caret = await page.locator("wg-cursor").evaluate((c) => {
-          const range = c.ownerDocument.getSelection()?.getRangeAt(0);
-          const text = range?.getClientRects()[0] ?? range?.getBoundingClientRect();
-          return { caret: c.getBoundingClientRect().top, text: text?.top ?? Number.NaN };
-        });
-        if (!(Math.abs(caret.caret - caret.text) <= 4)) {
-          throw new Error(`the caret is drawn ${caret.text - caret.caret}px off the line`);
-        }
-        // A link made with Ctrl+K on a selected word, to another concept by its bundle path.
-        // The caret is after "person.": step over the full stop and select the word.
-        await page.keyboard.press("ArrowLeft");
-        await page.keyboard.press("Control+Shift+ArrowLeft");
-        await page.keyboard.press("Control+k");
-        const target = concepts.find((x) => x !== concept) ?? concept;
-        await page.locator(".link-dialog input[name='url']").fill(`/${target}`);
-        await page.keyboard.press("Enter");
-        await body
-          .locator(`a[href$="${enc(target)}"]`)
-          .first()
-          .waitFor({ timeout: 5_000 });
-        await save("gate: a person edits");
-        await page.getByText("Saved.").waitFor({ timeout: 10_000 });
-        await body.getByText("Edited by a person.").waitFor({ timeout: 10_000 });
-        const saved = await (
-          await fetch(`${libApi}/files/${enc(concept)}`, { headers: bearer })
-        ).text();
-        if (!saved.includes(`[person](/${target})`)) {
-          throw new Error("the link was not saved as a bundle path");
-        }
-        const ev = (await (
-          await fetch(`${libApi}/history/${enc(concept)}`, { headers: bearer })
-        ).json()) as { events: { actor: string; meta: { note?: string } | null }[] };
-        const last = ev.events.at(-1);
-        if (!last?.actor.startsWith("human:") || last.meta?.note !== "gate: a person edits") {
-          throw new Error(`ledger: ${JSON.stringify(last)}`);
-        }
-        // An agent's find-and-replace on the text the person wrote still finds it.
-        const agentEdit = await fetch(`${libApi}/files/${enc(concept)}`, {
-          method: "PATCH",
-          headers: { ...bearer, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            edits: [{ old: "Edited by a [person]", new: "Edited by an agent and a [person]" }],
-            note: "gate: an agent edits after",
-          }),
-        });
-        if (!agentEdit.ok)
-          throw new Error(`agent edit: ${agentEdit.status} ${await agentEdit.text()}`);
-        await showNewVersion();
-        await body.getByText("Edited by an agent and a").waitFor({ timeout: 10_000 });
-        // A write meanwhile: the save meets a 412 and merges, keeping both changes.
-        await edit();
-        // In the first paragraph: the agent's write lands at the end of the body, so they combine.
-        await typeInto(" A second edit.", "first");
-        // The caret is where the person clicked, not at the start of the body.
-        if ((await body.locator("p", { hasText: "A second edit." }).count()) !== 1) {
-          const where = await body
-            .locator(":scope > *", { hasText: "A second edit." })
-            .evaluateAll((els) => els.map((e) => `${e.tagName}: ${e.textContent?.slice(0, 80)}`));
-          throw new Error(`the typed text is not in the paragraph clicked: ${where.join(" | ")}`);
-        }
-        await agentAppends("An agent wrote while the person edited.");
-        await save("gate: a person edits again");
-        await page
-          .getByRole("heading", { name: "Changed while you edited" })
-          .waitFor({ timeout: 10_000 });
-        if (shots) await page.screenshot({ path: `${shots}/merge.png` });
-        // Back to editing and Save again merges again: the agent's write is never overwritten.
-        await page.getByRole("button", { name: "Back to editing" }).click();
-        await save("gate: a person edits again");
-        await page
-          .getByRole("heading", { name: "Changed while you edited" })
-          .waitFor({ timeout: 10_000 });
-        await page.getByRole("button", { name: "Save merged" }).click();
-        await page.getByText("Saved.").waitFor({ timeout: 10_000 });
-        await body.getByText("A second edit.").waitFor({ timeout: 10_000 });
-        await body.getByText("An agent wrote while the person edited.").waitFor();
-        if (!(await stayed())) throw new Error("the page reloaded");
-      },
-    );
+    // Markdown shows the file as stored, frontmatter first, in place of the reader.
+    await step("the Markdown view shows the file as stored", async () => {
+      await page.goto(url);
+      const body = page.locator(".body .prose");
+      await body.waitFor({ timeout: 15_000 });
+      const asMarkdown = page.getByRole("button", { name: "Markdown", exact: true });
+      await asMarkdown.click();
+      const stored = page.locator(".raw-markdown pre");
+      await stored.waitFor({ timeout: 10_000 });
+      const text = await stored.innerText();
+      if (!text.startsWith("---\ntype:")) throw new Error(`markdown view: ${text.slice(0, 60)}`);
+      if (await body.isVisible()) throw new Error("the reader still shows beside the markdown");
+      await asMarkdown.click();
+      await body.waitFor({ state: "visible" });
+    });
     await step("ledger, reached by a link within the app, tails live", async () => {
       await markStay();
       await page.getByRole("link", { name: /^Ledger/ }).click();
@@ -1372,7 +1321,7 @@ async function freshAccountConnects(): Promise<string[]> {
     });
 
     // Sharing in the app (tempra-dev: v2/sharing): invite from the Members tab; the invitee
-    // accepts from Invitations; as a reader there is no Edit, at write there is.
+    // accepts from Invitations; as a reader there is no Verify, at write there is.
     await step("a note to share", async () => {
       const put = await ui(
         `${base}/api/v1/libraries/newcomer/notes/files/shared.md`,
@@ -1408,14 +1357,21 @@ async function freshAccountConnects(): Promise<string[]> {
       await page.waitForURL(`${lib}/`, { timeout: 15_000 });
       asInvitee = await context.cookies();
     });
-    await step("a reader sees the note and no Edit", async () => {
+    /** Opens the Review panel of the open concept, unless it is open. */
+    const review = async () => {
+      const button = page.locator(".cluster").getByRole("button", { name: "Review", exact: true });
+      await button.waitFor({ timeout: 15_000 });
+      if ((await button.getAttribute("aria-pressed")) !== "true") await button.click();
+    };
+    await step("a reader sees the note and no Verify", async () => {
       await page.goto(`${lib}/shared.md`);
       await page.getByText("Read me.").waitFor({ timeout: 15_000 });
-      await page.getByRole("button", { name: "Markdown" }).waitFor({ timeout: 15_000 });
+      await review();
+      await page.getByText("No human has verified this concept.").waitFor({ timeout: 15_000 });
       // The role loads with the library list; give it the moment it takes.
       await page.waitForTimeout(500);
-      const edit = await page.getByRole("button", { name: "Edit" }).count();
-      if (edit !== 0) throw new Error("a read member is offered Edit");
+      const verify = await page.getByRole("button", { name: "Verify this version" }).count();
+      if (verify !== 0) throw new Error("a read member is offered Verify");
     });
     await step("the owner gives the member write access", async () => {
       await switchTo(asOwner);
@@ -1423,10 +1379,11 @@ async function freshAccountConnects(): Promise<string[]> {
       await page.getByLabel("Access for @stranger").selectOption("write");
       await page.getByText("@stranger now has write access").waitFor({ timeout: 15_000 });
     });
-    await step("a writer is offered Edit", async () => {
+    await step("a writer is offered Verify", async () => {
       await switchTo(asInvitee);
       await page.goto(`${lib}/shared.md`);
-      await page.getByRole("button", { name: "Edit" }).waitFor({ timeout: 15_000 });
+      await review();
+      await page.getByRole("button", { name: "Verify this version" }).waitFor({ timeout: 15_000 });
     });
     // Deleting the library wipes its Durable Object and ends the connection.
     await step("delete the library from its Delete tab", async () => {

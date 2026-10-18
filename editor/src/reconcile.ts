@@ -4,7 +4,7 @@
  * comments anchored to them, survive the edit. Unchanged blocks and blocks edited in place keep
  * their ID; inserts and deletes are aligned like lines in a diff.
  */
-import { lcs } from "./merge";
+import { lcs } from "./lcs";
 import { blocksOf, type Doc, type DocNode, idOf, setId, signature, walk } from "./tree";
 
 /** A short random block ID. */

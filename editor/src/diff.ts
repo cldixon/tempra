@@ -1,13 +1,15 @@
 /**
- * A word-level diff between two versions of a body, located in the newer document: what was
- * added (ranges to highlight) and what was removed (text to show where it was). DOM-free.
+ * A word-level diff between two versions of a body, over their texts ({@link docText}): what was
+ * added (text ranges of the newer version) and what was removed (text to show where it was, at an
+ * offset of the newer version). The reader draws them as `ins` and `del` (tempra-dev: app/reader).
+ * DOM-free.
  */
-import type { Leaf, Plot } from "wordgard/doc";
+import { ATOM, type DocText } from "./text";
 
 export interface WordDiff {
-  /** Document ranges of the newer version that the older one did not have. */
+  /** Text ranges of the newer version that the older one did not have. */
   added: { from: number; to: number }[];
-  /** Text the older version had, at the newer document position where it was. */
+  /** Text the older version had, at the offset of the newer version where it was. */
   removed: { pos: number; text: string }[];
 }
 
@@ -17,20 +19,19 @@ interface Token {
   to: number;
 }
 
-/** Words and the whitespace after them, with document positions; blocks end in a break. */
-function tokens(doc: Plot.Doc): Token[] {
+/** Between textblocks: a token of its own, so blocks line up, never shown as a change. */
+const BREAK = " ";
+
+/** Words and the whitespace after them, with text offsets; a break between textblocks. */
+function tokens(doc: DocText): Token[] {
   const out: Token[] = [];
-  let lastBlockEnd = -1;
-  doc.iterate((node, pos) => {
-    if (node.isPlot && (node as Plot).isTextblock) {
-      if (lastBlockEnd !== -1) out.push({ text: "\n", from: lastBlockEnd, to: lastBlockEnd });
-      lastBlockEnd = pos + node.length - 1;
-      return;
-    }
-    if (!node.isText) return;
-    const text = (node as Leaf<string>).param;
+  doc.blocks.forEach((tb, i) => {
+    // The break sits at the end of the block before, so words removed there show there.
+    const prev = doc.blocks[i - 1];
+    if (prev) out.push({ text: BREAK, from: prev.to, to: prev.to });
+    const text = doc.text.slice(tb.from, tb.to);
     for (const m of text.matchAll(/\S+\s*|\s+/g)) {
-      const from = pos + (m.index ?? 0);
+      const from = tb.from + (m.index ?? 0);
       out.push({ text: m[0], from, to: from + m[0].length });
     }
   });
@@ -83,8 +84,8 @@ function myers(a: string[], b: string[]): { keptA: boolean[]; keptB: boolean[] }
   return { keptA, keptB };
 }
 
-/** What changed from `older` to `newer`, word by word, as positions in `newer`. */
-export function wordDiff(older: Plot.Doc, newer: Plot.Doc): WordDiff {
+/** What changed from `older` to `newer`, word by word, as text offsets of `newer`. */
+export function wordDiff(older: DocText, newer: DocText): WordDiff {
   const a = tokens(older);
   const b = tokens(newer);
   const { keptA, keptB } = myers(
@@ -93,7 +94,7 @@ export function wordDiff(older: Plot.Doc, newer: Plot.Doc): WordDiff {
   );
   const added: WordDiff["added"] = [];
   b.forEach((t, i) => {
-    if (keptB[i] || t.text === "\n") return;
+    if (keptB[i] || t.text === BREAK) return;
     const last = added[added.length - 1];
     if (last && last.to === t.from) last.to = t.to;
     else added.push({ from: t.from, to: t.to });
@@ -117,8 +118,9 @@ export function wordDiff(older: Plot.Doc, newer: Plot.Doc): WordDiff {
     let j = bi;
     while (j < b.length && !keptB[j]) j++;
     const at = j < b.length ? (b[j] as Token).from : (b[b.length - 1]?.to ?? 0);
-    const clean = text.replace(/\n/g, " ").trim();
-    if (clean) removed.push({ pos: at, text: clean });
+    // Breaks and soft breaks read as spaces; atoms (a footnote marker, an image) are not text.
+    const clean = text.replaceAll(BREAK, " ").replace(/\n/g, " ").replaceAll(ATOM, "").trim();
+    if (clean) removed.push({ pos: at, text: clean.replace(/\s+/g, " ") });
   }
   return { added, removed };
 }

@@ -1,155 +1,370 @@
 /*
- * How a rendered concept reads: the markdown body of a concept, in the app now and wherever
- * concepts are shown later (the site, inline MCP Apps views). Scoped to .prose. A serif at 17px
- * with generous leading (take 2); headings in the same face.
+ * How a rendered concept reads (tempra-dev: app/reader, Reading typography): the body of a
+ * concept, in the app now and wherever concepts are shown later (the site, inline MCP Apps views).
+ * Scoped to .prose. A serif at 17px, about 66 characters to the line, spacing in em so the rhythm
+ * scales with the text. Greys, type, spacing and rules only until the palette (TEMPRA-1).
  */
 .prose {
-  max-width: var(--tempra-measure);
-  font-family: var(--tempra-font-reader);
-  font-size: var(--tempra-text-reader);
-  line-height: 1.7;
+  max-width: var(--tempra-measure-reader);
   color: var(--tempra-color-text);
-}
-
-.prose h1,
-.prose h2,
-.prose h3,
-.prose h4 {
   font-family: var(--tempra-font-reader);
-  font-weight: 500;
-  letter-spacing: -0.01em;
-  line-height: 1.3;
-}
-
-.prose h1 {
-  margin: 40px 0 12px;
-  font-size: 28px;
-}
-
-.prose h2 {
-  margin: 40px 0 12px;
-  font-size: var(--tempra-text-h2);
-}
-
-.prose h3 {
-  margin: 32px 0 10px;
-  font-size: 19px;
-}
-
-.prose h4 {
-  margin: 24px 0 8px;
   font-size: var(--tempra-text-reader);
+  line-height: 1.65;
+  font-kerning: normal;
+  font-optical-sizing: auto;
+  font-variant-ligatures: common-ligatures;
+  /* Figures that sit in running text; tables and markers switch to lining, tabular ones. */
+  font-variant-numeric: oldstyle-nums proportional-nums;
+  /* Quotes and stops hang into the margin where the browser can (Safari). */
+  hanging-punctuation: first allow-end;
+  /* A long URL or identifier wraps rather than pushing the column wider; words never break. */
+  overflow-wrap: break-word;
+  hyphens: manual;
+  text-size-adjust: 100%;
 }
 
-.prose > :first-child {
+.prose > :first-child,
+.prose > [hidden]:first-child + * {
   margin-top: 0;
 }
 
+.prose > :last-child {
+  margin-bottom: 0;
+}
+
+/* Vertical rhythm: one step between blocks, in em. */
 .prose p,
 .prose ul,
+.prose ol,
+.prose blockquote,
+.prose pre,
+.prose .table {
+  margin: 0 0 1.1em;
+}
+
+/* No line ends on a lone short word; headings are balanced across their lines. */
+.prose p,
+.prose li,
+.prose blockquote {
+  text-wrap: pretty;
+}
+
+.prose strong {
+  font-weight: 600;
+}
+
+.prose s {
+  color: var(--tempra-color-muted);
+}
+
+/* Headings: more space above than below, so each sits with what it introduces. */
+.prose h1,
+.prose h2,
+.prose h3,
+.prose h4,
+.prose h5,
+.prose h6 {
+  margin: 1.9em 0 0.5em;
+  font-family: var(--tempra-font-reader);
+  font-variant-numeric: lining-nums proportional-nums;
+  line-height: 1.25;
+  letter-spacing: -0.005em;
+  text-wrap: balance;
+  break-after: avoid;
+  /* Clear of the cluster when a contents link scrolls to it. */
+  scroll-margin-top: 72px;
+}
+
+.prose h1 {
+  font-size: 1.65em;
+  font-weight: 500;
+  letter-spacing: -0.012em;
+}
+
+.prose h2 {
+  font-size: 1.35em;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+
+.prose h3 {
+  font-size: 1.12em;
+  font-weight: 600;
+}
+
+.prose h4,
+.prose h5,
+.prose h6 {
+  margin-top: 1.6em;
+  font-size: 1em;
+  font-weight: 600;
+  font-variant-caps: all-small-caps;
+  letter-spacing: 0.04em;
+}
+
+.prose h5,
+.prose h6 {
+  color: var(--tempra-color-muted);
+}
+
+/* A heading straight after another needs less room. */
+.prose :is(h1, h2, h3, h4, h5, h6) + :is(h2, h3, h4, h5, h6) {
+  margin-top: 0.7em;
+}
+
+/* Links: text-coloured, a thin underline at partial strength that firms up on hover. */
+.prose a {
+  color: inherit;
+  text-decoration-line: underline;
+  text-decoration-thickness: 1px;
+  text-decoration-color: color-mix(in srgb, currentColor 38%, transparent);
+  text-underline-offset: 0.18em;
+  text-decoration-skip-ink: auto;
+}
+
+.prose a:hover {
+  text-decoration-color: currentColor;
+}
+
+/* A link the reader would not follow (an unsafe scheme) reads as text. */
+.prose a:not([href]) {
+  text-decoration: none;
+}
+
+.prose a.broken {
+  color: var(--tempra-color-muted);
+  text-decoration-line: line-through;
+  text-decoration-color: currentColor;
+}
+
+/* Lists: muted markers, figures that line up; tight lists close, loose ones like paragraphs. */
+.prose ul,
 .prose ol {
-  margin: 0 0 18px;
+  padding-left: 1.4em;
+}
+
+.prose li {
+  margin: 0.2em 0;
+}
+
+.prose li::marker {
+  color: var(--tempra-color-muted);
+  font-variant-numeric: lining-nums tabular-nums;
 }
 
 .prose li > p {
-  margin: 0 0 6px;
+  margin: 0;
 }
 
-.prose a {
-  text-underline-offset: 3px;
+.prose li > :is(ul, ol) {
+  margin: 0.2em 0 0;
 }
 
+.prose :is(ul, ol).loose > li {
+  margin: 0.55em 0;
+}
+
+.prose :is(ul, ol).loose > li > p + * {
+  margin-top: 0.55em;
+}
+
+.prose .tasks {
+  padding-left: 0.1em;
+  list-style: none;
+}
+
+.prose li.task {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  column-gap: 0.55em;
+  align-items: baseline;
+}
+
+.prose li.task > :not(input) {
+  grid-column: 2;
+}
+
+.prose li.task > input {
+  margin: 0;
+  accent-color: var(--tempra-color-text);
+}
+
+/* Blockquotes upright: long italic passages read slowly. */
+.prose blockquote {
+  margin-left: 0;
+  margin-right: 0;
+  padding: 0 0 0 1.1em;
+  border-left: 2px solid var(--tempra-color-border-strong);
+  color: var(--tempra-color-muted);
+}
+
+.prose blockquote > :last-child {
+  margin-bottom: 0;
+}
+
+/* Code: the mono a step down, no ligatures; inline on the code grey, blocks scroll sideways. */
 .prose code {
-  padding: 1px 6px;
+  padding: 0.1em 0.35em;
   border-radius: var(--tempra-radius);
   background: var(--tempra-color-code-bg);
-  font-size: var(--tempra-text-name);
+  font-family: var(--tempra-font-mono);
+  font-size: 0.86em;
+  font-variant-ligatures: none;
+  font-variant-numeric: normal;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
 }
 
 .prose pre {
+  position: relative;
   overflow-x: auto;
-  margin: 0 0 18px;
-  padding: 12px 16px;
+  overscroll-behavior-x: contain;
+  padding: 14px 18px;
   border-radius: var(--tempra-radius-row);
   background: var(--tempra-color-code-bg);
-  font-size: 14px;
-  line-height: 1.55;
+  font-family: var(--tempra-font-mono);
+  font-size: 0.8em;
+  font-variant-ligatures: none;
+  line-height: 1.6;
+  tab-size: 2;
+  white-space: pre;
+  overflow-wrap: normal;
 }
 
 .prose pre code {
   padding: 0;
+  border-radius: 0;
   background: none;
   font-size: inherit;
 }
 
-.prose blockquote {
-  margin: 24px 0;
-  padding: 2px 0 2px 22px;
-  border-left: 2px solid var(--tempra-color-border-strong);
+/* The fence's language, quietly above the code (generated content: not part of the text). */
+.prose pre[data-lang] {
+  padding-top: 32px;
+}
+
+.prose pre[data-lang]::before {
+  content: attr(data-lang);
+  position: absolute;
+  top: 10px;
+  left: 18px;
+  color: var(--tempra-color-faint);
+  font-family: var(--tempra-font-body);
+  font-size: var(--tempra-text-label);
+  letter-spacing: 0.04em;
+  text-transform: lowercase;
+}
+
+/* What the reader shows as its markdown (raw HTML, reference links): quieter than code. */
+.prose pre.raw,
+.prose code.raw {
   color: var(--tempra-color-muted);
-  font-style: italic;
 }
 
 /*
- * Tables are real tables, drawn from the stored tree. Wordgard's content breaks words anywhere
- * (an editor's rule); cells get the page's rule back, so columns size to whole words, and a
- * table wider than the column scrolls on its own while reading (the editor keeps table layout).
+ * Tables: real tables in their own scroll container, so a wide one scrolls sideways (on a phone
+ * too) instead of breaking words. Rules between rows, none between columns; the header is told
+ * apart by a rule in the text colour, not by weight (a first column is often bold already).
  */
+.prose .table {
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+}
+
 .prose table {
-  margin: 0 0 18px;
-  font-size: 15px;
+  border-collapse: collapse;
+  font-size: 0.88em;
+  font-variant-numeric: lining-nums tabular-nums;
   line-height: 1.5;
 }
 
-.prose:not([contenteditable="true"]) table {
-  display: block;
-  max-width: 100%;
-  overflow-x: auto;
-}
-
-/* Rules between rows, none between columns; the header is told apart by its rule, not its weight
-   (a first column is often bold in the content already). */
-.prose table th,
-.prose table td {
-  padding: 8px 16px 8px 0;
+.prose th,
+.prose td {
+  padding: 0.55em 1.25em 0.55em 0;
   border: 0;
   border-bottom: 1px solid var(--tempra-color-border);
   text-align: left;
   vertical-align: top;
   overflow-wrap: normal;
   word-break: normal;
-  white-space: normal;
+  text-wrap: pretty;
 }
 
-.prose table th:last-child,
-.prose table td:last-child {
+.prose th:last-child,
+.prose td:last-child {
   padding-right: 0;
 }
 
-.prose table th {
+.prose th {
   border-bottom-color: var(--tempra-color-text);
-  font-weight: 500;
+  font-weight: 600;
+  vertical-align: bottom;
+}
+
+.prose [data-align="center"] {
+  text-align: center;
+}
+
+.prose [data-align="right"] {
+  text-align: right;
 }
 
 .prose hr {
-  margin: 32px 0;
+  margin: 2.2em 0;
+  border: 0;
+  border-top: 1px solid var(--tempra-color-border);
 }
 
-/* Footnote markers: a source's number, never split across lines. */
-.prose sup {
-  margin-left: 2px;
+.prose img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0.6em 0;
+  border-radius: var(--tempra-radius-row);
+}
+
+.prose .image-dropped {
+  color: var(--tempra-color-faint);
+  font-style: italic;
+}
+
+/* Footnote markers: a source's number, small and muted, joined to its word. */
+.prose sup.fnref {
+  margin-left: 0.08em;
   color: var(--tempra-color-muted);
-  font-size: var(--tempra-text-label);
+  font-size: 0.68em;
+  font-variant-numeric: lining-nums tabular-nums;
   line-height: 0;
+  vertical-align: super;
   white-space: nowrap;
 }
 
-.prose sup a {
+.prose sup.fnref a {
+  padding: 0 0.12em;
   color: inherit;
   text-decoration: none;
 }
 
-.prose .footnotes {
-  font-size: 0.9em;
-  color: var(--tempra-color-muted);
+.prose sup.fnref a:hover {
+  text-decoration: underline;
+}
+
+/* Changes since human verification, over the text: lines and greys only. */
+.prose ins.diff-added {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.22em;
+}
+
+.prose del.diff-removed {
+  color: var(--tempra-color-faint);
+  text-decoration: line-through;
+}
+
+/* On a phone the column is the screen: a little less leading, the same rhythm. */
+@media (max-width: 600px) {
+  .prose {
+    line-height: 1.6;
+  }
 }

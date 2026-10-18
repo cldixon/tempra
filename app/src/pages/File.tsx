@@ -1,16 +1,13 @@
+import { type Doc, docText, type LinkTarget, type WordDiff, wordDiff } from "@tempra/editor";
 import {
-  type Doc,
-  fromTree,
-  type LinkTarget,
-  linkParam,
-  type Parsed,
-  type ParseOptions,
-  toHTML,
-  type WordDiff,
-  wordDiff,
-} from "@tempra/editor";
-import type { Hovered, Reader as ReaderHandle } from "@tempra/editor/view";
-import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+  type FormEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useAgentNames } from "../agents";
 import { ApiError, api, prefetch, useLoad } from "../api";
 import {
@@ -22,28 +19,14 @@ import {
   useThreads,
 } from "../Comments";
 import { type Glyph, Icon, Menu } from "../chrome";
-import {
-  type Base,
-  type Frontmatter as FmObject,
-  type FormState,
-  FrontmatterForm,
-  formOf,
-  frontmatterOf,
-  isConflict,
-  libraryTypes,
-  linkTarget,
-  type Merge,
-  MergeView,
-  saveConcept,
-  startMerge,
-  uploadImage,
-} from "../Editor";
 import { type FeedEvent, useFeed } from "../live";
 import { registerPrefetch } from "../prefetch";
-import { el, Reader } from "../Reader";
+import { type Hovered, Reader } from "../Reader";
+import { Note } from "../reader/Body";
+import { type BodyOptions, type Footnote, type Prepared, prepare } from "../reader/prepare";
 import { pushRecent } from "../recent";
 import { useRole } from "../role";
-import { navigate, setLeaveGuard } from "../router";
+import { navigate } from "../router";
 import {
   Ago,
   AtNotice,
@@ -254,14 +237,12 @@ export function File(props: { urls: Urls; path: string; done: string | null; act
     if (change && shown && change.seq <= shown.head) setChange(null);
   }, [change, shown]);
   const idle = useIdle(15_000);
-  // While someone edits, a new version never swaps in by itself (the merge happens at save).
-  const [editing, setEditing] = useState(false);
-  const swappable = !editing && change !== null && change.op !== "delete" && change.op !== "move";
+  const swappable = change !== null && change.op !== "delete" && change.op !== "move";
   useEffect(() => {
     if (swappable && idle) swap();
   }, [swappable, idle, swap]);
   const live: Live | null =
-    change && shown ? { change, shownSeq: shown.file.seq, onSwap: editing ? null : swap } : null;
+    change && shown ? { change, shownSeq: shown.file.seq, onSwap: swap } : null;
   const concept = loaded.state === "ready" && loaded.data.extra;
   return (
     <>
@@ -282,7 +263,6 @@ export function File(props: { urls: Urls; path: string; done: string | null; act
           live={live}
           onCommented={threads.reload}
           onVerified={loaded.reload}
-          onEditing={setEditing}
         />
       ) : (
         <article className="doc">
@@ -308,8 +288,7 @@ interface Live {
   change: FeedEvent;
   /** The sequence of the version on screen, for the diff. */
   shownSeq: number;
-  /** Null while editing: the change is merged at save instead. */
-  onSwap: (() => void) | null;
+  onSwap(): void;
 }
 
 /**
@@ -353,7 +332,7 @@ function changeLine(e: FeedEvent, by: string, since: string): string {
 
 /**
  * A newer version, in the cluster: a pulsing glyph that opens who wrote it, Show diff and Show
- * new version (while editing: the change is merged at save).
+ * new version.
  */
 function NewVersion({ urls, live }: { urls: Urls; live: Live }) {
   const e = live.change;
@@ -370,13 +349,9 @@ function NewVersion({ urls, live }: { urls: Urls; live: Live }) {
       >
         <p role="status">{changeLine(e, by, since)}</p>
         {CONTENT_OPS.has(e.op) && <a href={urls.diff(e.path, live.shownSeq, e.seq)}>Show diff</a>}
-        {live.onSwap ? (
-          <button type="button" onClick={live.onSwap}>
-            Show new version
-          </button>
-        ) : (
-          <p>Your edit will be merged with it when you save.</p>
-        )}
+        <button type="button" onClick={live.onSwap}>
+          Show new version
+        </button>
       </Menu>
     </div>
   );
@@ -404,11 +379,9 @@ function LiveNotice({ urls, live }: { urls: Urls; live: Live }) {
               <a href={urls.diff(e.path, live.shownSeq, e.seq)}>Show diff</a> ·{" "}
             </>
           )}
-          {live.onSwap && (
-            <button type="button" onClick={live.onSwap}>
-              Show new version
-            </button>
-          )}
+          <button type="button" onClick={live.onSwap}>
+            Show new version
+          </button>
         </>
       )}
     </div>
@@ -450,8 +423,8 @@ export function Derived(props: {
 }) {
   const { urls, file } = props;
   useTitle(`${file.path} · ${urls.slug}`);
-  const parsed = useMemo(
-    () => fromTree(file.doc, { path: file.path, href: bodyHref(urls), footnote: () => null }),
+  const prepared = useMemo(
+    () => prepare(file.doc, { path: file.path, href: bodyHref(urls), footnote: () => null }),
     [file, urls],
   );
   return (
@@ -461,7 +434,7 @@ export function Derived(props: {
       <p className="small muted">
         Synthesized by the server. <a href={urls.raw(file.path)}>Raw</a>
       </p>
-      <Reader parsed={parsed} tooltip={() => null} diff={null} hideFirst={false} />
+      <Reader prepared={prepared} diff={null} hideFirst={false} />
     </>
   );
 }
@@ -506,37 +479,25 @@ function ConceptView(props: {
   live: Live | null;
   onCommented(): void;
   onVerified(): void;
-  /** Editing started or ended (the page then holds new versions back). */
-  onEditing(on: boolean): void;
 }) {
-  const { urls, head, live } = props;
+  const { urls, head, live, sources, links } = props;
+  const c = props.concept;
   const panels = usePanels();
-  // While editing, the page keeps the version the edit started from (a refresh must not
-  // redraw the body under the person's hands).
   // The file as stored (frontmatter and body), shown in place of the reader.
   const [markdown, setMarkdown] = useState(false);
-  const [frozen, setFrozen] = useState<{
-    concept: Concept;
-    sources: Sources;
-    links: Links;
-  } | null>(null);
-  const c = frozen?.concept ?? props.concept;
-  const sources = frozen?.sources ?? props.sources;
-  const links = frozen?.links ?? props.links;
-  const editing = frozen !== null;
   const fm = c.frontmatter;
   const title = typeof fm.title === "string" && fm.title ? fm.title : baseName(c.path);
   useTitle(`${title} · ${urls.slug}`);
   const status = typeof fm.status === "string" ? fm.status : null;
 
   // Footnote markers are numbers: the sources in their order, then the body's other footnotes
-  // as they are met (`numbers` fills in as the body is parsed; the panel reads it after).
-  const { parseOptions, numbers } = useMemo(() => {
+  // as they are met (`numbers` fills in as the body is prepared; the panel reads it after).
+  const { options, numbers } = useMemo(() => {
     const ids = sources.sources.map((s) => s.id).filter((id) => typeof id === "string");
     const numbers = new Map<string, number>(ids.map((id, i) => [id, i + 1]));
     const sourceIds = new Set(ids);
     const broken = new Set(links.broken.map((b) => b.path));
-    const parseOptions: ParseOptions = {
+    const options: BodyOptions = {
       path: c.path,
       href: bodyHref(urls),
       exists: (path) => !broken.has(path),
@@ -547,42 +508,28 @@ function ConceptView(props: {
         return { href: `#${anchorId(prefix, label)}`, mark: String(numbers.get(label)) };
       },
     };
-    return { parseOptions, numbers };
+    return { options, numbers };
   }, [c.path, urls, sources, links]);
-  const parsed = useMemo(() => fromTree(c.doc, parseOptions), [c.doc, parseOptions]);
+  const prepared = useMemo(() => prepare(c.doc, options), [c.doc, options]);
   // A leading heading that repeats the title is not shown twice (the stored body is unchanged).
-  const first = parsed.headings[0];
+  const first = prepared.headings[0];
   const hideFirst =
-    first?.pos === 0 && first.text.trim().toLowerCase() === title.trim().toLowerCase();
-  const footnotes = useMemo(
-    () => Object.fromEntries(parsed.footnotes.map((f) => [f.label, toHTML(f.doc)])),
-    [parsed],
-  );
-  const tooltip = useTooltips(urls, sources, footnotes);
-  const changes = useVerificationDiff(urls, c, parsed, props.history, head);
-  const edit = useEditing({
-    urls,
-    concept: c,
-    start: () => {
-      changes.off();
-      setFrozen({ concept: props.concept, sources: props.sources, links: props.links });
-    },
-    end: () => setFrozen(null),
-    onSaved: props.onVerified,
-    onEditing: props.onEditing,
-    parseOptions,
-  });
+    first?.first === true && first.text.trim().toLowerCase() === title.trim().toLowerCase();
+  const hover = useHoverCards(urls, sources, prepared);
+  const changes = useVerificationDiff(urls, c, prepared, props.history, head);
 
   // Comments: each thread's quote found in the body on screen, highlighted while open.
   const writable = urls.at === undefined || urls.at >= head;
-  // Editing and verifying need write access (tempra-dev: v2/sharing); a reader still comments.
+  // Verifying needs write access (tempra-dev: v2/sharing); a reader still comments.
   const role = useRole(urls);
-  const mayChange = writable && role !== null && role !== "read";
   const [active, setActive] = useState<string | null>(null);
-  const placed = useMemo(() => placeThreads(props.threads ?? [], parsed), [props.threads, parsed]);
+  const placed = useMemo(
+    () => placeThreads(props.threads ?? [], prepared.text),
+    [props.threads, prepared],
+  );
   const openThreads = placed.filter((t) => t.status === "open").length;
   // Comment on selected text: the reader's popover starts a draft, shown in the Comments panel.
-  const draft = useDraft(parsed);
+  const draft = useDraft(prepared.text);
   const openPanel = panels?.open;
   const startDraft = useCallback(
     (range: { from: number; to: number }) => {
@@ -616,7 +563,7 @@ function ConceptView(props: {
     review: issues > 0 ? `${issues} to fix` : trustWords(c.trust_tier),
     contents: "",
     history: `seq ${c.seq}`,
-    properties: editing ? "editing" : "",
+    properties: "",
   };
   const panel = panels?.panel ?? null;
   const moved = live && (live.change.op === "move" || live.change.op === "delete");
@@ -630,31 +577,12 @@ function ConceptView(props: {
             <span className="cluster-sep" />
           </>
         )}
-        {mayChange && (
-          <button
-            type="button"
-            className="icon-button"
-            aria-label="Edit"
-            title={editing ? "Stop editing" : "Edit"}
-            aria-pressed={editing}
-            onClick={() => {
-              if (editing) edit.cancel();
-              else {
-                setMarkdown(false);
-                edit.start();
-              }
-            }}
-          >
-            <Icon name="edit" />
-          </button>
-        )}
         <button
           type="button"
           className="icon-button"
           aria-label="Markdown"
           title="Markdown: the file as stored, as an agent reads it"
-          aria-pressed={markdown && !editing}
-          disabled={editing}
+          aria-pressed={markdown}
           onClick={() => setMarkdown((m) => !m)}
         >
           <Icon name="markdown" />
@@ -679,19 +607,10 @@ function ConceptView(props: {
           </>
         )}
       </div>
-      {editing && !edit.merging && edit.bar}
       <article className="doc">
         {props.notice && <div className="notice">{props.notice}</div>}
         {moved && live && <LiveNotice urls={urls} live={live} />}
         <AtNotice urls={urls} head={head} current={urls.pinned(undefined).file(c.path)} />
-        {edit.saved && (
-          <div className="notice" role="status">
-            Saved.
-            {edit.saved.lint.length > 0 &&
-              ` Lint: ${edit.saved.lint.map((l) => l.message).join(" ")}`}
-          </div>
-        )}
-        {edit.merging && edit.bar}
         <Crumbs urls={urls} path={c.path} file>
           {c.stale && (
             <>
@@ -710,19 +629,17 @@ function ConceptView(props: {
           <h1 className="doc-title">{title}</h1>
           {typeof fm.description === "string" && <p className="doc-tagline">{fm.description}</p>}
         </header>
-        {markdown && !editing && <RawMarkdown urls={urls} path={c.path} hash={c.hash} />}
-        {/* Kept mounted under the markdown, so comments and the editor keep their reader. */}
-        <div hidden={markdown && !editing}>
+        {markdown && <RawMarkdown urls={urls} path={c.path} hash={c.hash} />}
+        {/* Kept mounted under the markdown, so comments keep their place. */}
+        <div hidden={markdown}>
           <Reader
-            key={edit.generation}
-            parsed={parsed}
-            tooltip={tooltip}
-            diff={editing ? null : changes.diff}
+            prepared={prepared}
+            diff={changes.diff}
             hideFirst={hideFirst}
+            hover={hover}
             highlights={highlights}
             onMark={onMark}
             onComment={writable ? startDraft : undefined}
-            handle={edit.reader}
           />
         </div>
       </article>
@@ -767,7 +684,6 @@ function ConceptView(props: {
                   urls={urls}
                   concept={c}
                   head={head}
-                  editing={editing}
                   changes={changes.toggle}
                   work={work}
                   onVerified={props.onVerified}
@@ -776,20 +692,15 @@ function ConceptView(props: {
               )}
               {panel === "contents" && (
                 <>
-                  <Contents parsed={parsed} skipFirst={hideFirst} />
-                  <SourcesPanel
-                    urls={urls}
-                    data={sources}
-                    footnotes={footnotes}
-                    numbers={numbers}
-                  />
+                  <Contents prepared={prepared} skipFirst={hideFirst} />
+                  <SourcesPanel urls={urls} data={sources} prepared={prepared} numbers={numbers} />
                   <LinksPanel urls={urls} links={links} head={head} />
                 </>
               )}
               {panel === "history" && (
                 <History urls={urls} concept={c} head={head} events={props.history} />
               )}
-              {panel === "properties" && (editing ? edit.form : <Frontmatter fm={fm} />)}
+              {panel === "properties" && <Frontmatter fm={fm} />}
             </div>
           </>
         )}
@@ -802,8 +713,8 @@ function ConceptView(props: {
  * A table of contents from the body's headings, when it has a few. The heading the sheet is
  * scrolled to is marked.
  */
-function Contents({ parsed, skipFirst }: { parsed: Parsed; skipFirst: boolean }) {
-  const headings = skipFirst ? parsed.headings.slice(1) : parsed.headings;
+function Contents({ prepared, skipFirst }: { prepared: Prepared; skipFirst: boolean }) {
+  const headings = skipFirst ? prepared.headings.slice(1) : prepared.headings;
   const [current, setCurrent] = useState<string | null>(null);
   const ids = headings.map((h) => h.id).join(" ");
   useEffect(() => {
@@ -852,69 +763,64 @@ function WorkCard({ w }: { w: WorkItem }) {
 }
 
 /**
- * Tooltips over the body: a footnote reference shows the source it cites (or its note), an
- * internal link the target's title, type, trust and staleness, an external link its URL.
+ * Cards over the body: a footnote marker shows the source it cites (or its note), an internal
+ * link the target's title, type, trust and staleness, an external link its URL.
  */
-function useTooltips(urls: Urls, sources: Sources, footnotes: Record<string, string>) {
+function useHoverCards(urls: Urls, sources: Sources, prepared: Prepared) {
   const targets = useRef(new Map<string, Promise<FileJson | null>>());
-  return (h: Hovered): HTMLElement | null | Promise<HTMLElement | null> => {
+  return (h: Hovered): ReactNode | Promise<ReactNode> | null => {
     if (h.kind === "footnote") {
-      const label = h.footnote.label;
-      const s = sources.sources.find((x) => x.id === label);
+      const s = sources.sources.find((x) => x.id === h.label);
       if (!s) {
-        const note = footnotes[label];
+        const note = prepared.footnotes.find((f) => f.label === h.label);
         if (!note) return null;
-        const box = el("div", { class: "small" });
-        box.innerHTML = note; // Escaped by Wordgard (toHTML), as in the sources panel.
-        return el("div", {}, box);
+        return (
+          <div className="small">
+            <Note prepared={prepared} nodes={note.node.children} />
+          </div>
+        );
       }
       const internal = (s.internal ?? null) as JsonObject | null;
-      return el(
-        "div",
-        {},
-        el("strong", {}, typeof s.title === "string" ? s.title : label),
-        typeof s.resource === "string" && el("div", { class: "small muted" }, s.resource),
-        internal?.broken ? el("div", { class: "small" }, "Missing") : false,
-        internal && typeof internal.trust_tier === "string"
-          ? el(
-              "div",
-              { class: "small" },
-              `${internal.trust_tier}${internal.stale ? " · stale" : ""}`,
-            )
-          : false,
+      return (
+        <div>
+          <strong>{typeof s.title === "string" ? s.title : h.label}</strong>
+          {typeof s.resource === "string" && <div className="small muted">{s.resource}</div>}
+          {internal?.broken ? <div className="small">Missing</div> : null}
+          {internal && typeof internal.trust_tier === "string" && (
+            <div className="small">
+              {internal.trust_tier}
+              {internal.stale ? " · stale" : ""}
+            </div>
+          )}
+        </div>
       );
     }
-    const link = h.link;
-    if (link.path === null) {
-      return link.href ? el("div", { class: "small" }, link.href) : null;
-    }
-    if (link.broken) return el("div", { class: "small" }, `Missing: nothing at ${link.path}`);
-    const path = link.path;
+    if (h.path === null) return h.href ? <div className="small">{h.href}</div> : null;
+    if (h.broken) return <div className="small">Missing: nothing at {h.path}</div>;
+    const path = h.path;
     let target = targets.current.get(path);
     if (!target) {
       target = api<FileJson>(urls.api(`files/${enc(path)}`)).catch(() => null);
       targets.current.set(path, target);
     }
     return target.then((t) => {
-      if (!t) return el("div", { class: "small" }, path);
-      if (t.kind !== "concept") return el("div", { class: "small" }, `${t.path} · ${t.kind}`);
+      if (!t) return <div className="small">{path}</div>;
+      if (t.kind !== "concept") return <div className="small">{`${t.path} · ${t.kind}`}</div>;
       const tfm = t.frontmatter;
-      return el(
-        "div",
-        {},
-        el("strong", {}, typeof tfm.title === "string" ? tfm.title : baseName(t.path)),
-        el(
-          "div",
-          { class: "small muted" },
-          [
-            typeof tfm.type === "string" ? tfm.type : "no type",
-            t.trust_tier,
-            t.stale ? "stale" : "",
-          ]
-            .filter(Boolean)
-            .join(" · "),
-        ),
-        typeof tfm.description === "string" && el("div", { class: "small" }, tfm.description),
+      return (
+        <div>
+          <strong>{typeof tfm.title === "string" ? tfm.title : baseName(t.path)}</strong>
+          <div className="small muted">
+            {[
+              typeof tfm.type === "string" ? tfm.type : "no type",
+              t.trust_tier,
+              t.stale ? "stale" : "",
+            ]
+              .filter(Boolean)
+              .join(" · ")}
+          </div>
+          {typeof tfm.description === "string" && <div className="small">{tfm.description}</div>}
+        </div>
       );
     });
   };
@@ -927,10 +833,10 @@ function useTooltips(urls: Urls, sources: Sources, footnotes: Record<string, str
 function useVerificationDiff(
   urls: Urls,
   c: Concept,
-  parsed: Parsed,
+  prepared: Prepared,
   events: HistoryEvent[],
   head: number,
-): { toggle: React.ReactNode; diff: WordDiff | null; off(): void } {
+): { toggle: ReactNode; diff: WordDiff | null } {
   const [on, setOn] = useState(false);
   const [diff, setDiff] = useState<WordDiff | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -947,18 +853,16 @@ function useVerificationDiff(
       (old) => {
         if (!live) return;
         if (old.kind !== "concept") return setError("That version is not a concept.");
-        setDiff(wordDiff(fromTree(old.doc).doc, parsed.doc));
+        setDiff(wordDiff(docText(old.doc), prepared.text));
       },
       (e: unknown) => live && setError(e instanceof ApiError ? e.message : String(e)),
     );
     return () => {
       live = false;
     };
-  }, [on, verified, urls, c.path, parsed]);
-  const off = () => setOn(false);
-  if (!changed || !current || !verified) return { toggle: null, diff: null, off };
+  }, [on, verified, urls, c.path, prepared]);
+  if (!changed || !current || !verified) return { toggle: null, diff: null };
   return {
-    off,
     toggle: (
       <p className="small">
         <label>
@@ -1031,7 +935,7 @@ function FmValue({ k, v }: { k: string; v: Json }) {
   return <Scalar v={v} />;
 }
 
-/** The frontmatter, read-only: the Properties panel while reading. */
+/** The frontmatter, read-only: the Properties panel. */
 function Frontmatter({ fm }: { fm: JsonObject }) {
   return (
     <dl className="facts">
@@ -1047,25 +951,29 @@ function Frontmatter({ fm }: { fm: JsonObject }) {
   );
 }
 
-/** The text of a little HTML (a footnote definition), for comparing. */
-function plain(html: string): string {
-  return (new DOMParser().parseFromString(html, "text/html").body.textContent ?? "").trim();
+/** A footnote definition's text, for comparing with a source's title. */
+function plain(f: Footnote): string {
+  return docText({ type: "root", children: f.node.children }).text.trim();
 }
 
-/** Footnote definitions as HTML from Wordgard (`toHTML`), which escapes every text and attribute. */
-function FootnoteHtml({ html }: { html: string }) {
-  // biome-ignore lint/security/noDangerouslySetInnerHtml: Wordgard escapes every text and attribute.
-  return <div className="small" dangerouslySetInnerHTML={{ __html: html }} />;
+/** A footnote definition, drawn as the body draws it. */
+function FootnoteNote({ prepared, f }: { prepared: Prepared; f: Footnote }) {
+  return (
+    <div className="small note">
+      <Note prepared={prepared} nodes={f.node.children} />
+    </div>
+  );
 }
 
 function SourcesPanel(props: {
   urls: Urls;
   data: Sources;
-  footnotes: Record<string, string>;
+  prepared: Prepared;
   /** Each footnote label's number, as the body's markers show it. */
   numbers: Map<string, number>;
 }) {
-  const { urls, data, footnotes } = props;
+  const { urls, data, prepared } = props;
+  const footnotes = prepared.footnotes;
   const used = new Set<string>();
   const items = data.sources.map((s, i) => {
     const id = typeof s.id === "string" ? s.id : null;
@@ -1094,8 +1002,8 @@ function SourcesPanel(props: {
     } else if (resource) meta.push(resource);
     if (id) meta.push(cited > 0 ? `cited ${cited}×` : "not cited");
     // The footnote's own text, unless it only repeats the source's title.
-    const html = id ? footnotes[id] : undefined;
-    const def = html && plain(html) !== name.trim() ? html : undefined;
+    const note = id ? footnotes.find((f) => f.label === id) : undefined;
+    const def = note && plain(note) !== name.trim() ? note : undefined;
     return (
       <li key={id ?? i} id={id ? anchorId("src", id) : undefined}>
         <span className="num">{i + 1}</span>
@@ -1104,14 +1012,14 @@ function SourcesPanel(props: {
           <span className="meta">{meta.join(" · ")}</span>
           {def && (
             <span className="meta">
-              <FootnoteHtml html={def} />
+              <FootnoteNote prepared={prepared} f={def} />
             </span>
           )}
         </span>
       </li>
     );
   });
-  const others = Object.entries(footnotes).filter(([label]) => !used.has(label));
+  const others = footnotes.filter((f) => !used.has(f.label));
   if (items.length === 0 && others.length === 0 && data.unmatched_footnotes.length === 0) {
     return null;
   }
@@ -1123,10 +1031,10 @@ function SourcesPanel(props: {
         <>
           <h3 className="label">Other footnotes</h3>
           <ul className="sources">
-            {others.map(([label, html]) => (
-              <li key={label} id={anchorId("fn", label)}>
-                <span className="num">{props.numbers.get(label) ?? label}</span>
-                <FootnoteHtml html={html} />
+            {others.map((f) => (
+              <li key={f.label} id={anchorId("fn", f.label)}>
+                <span className="num">{props.numbers.get(f.label) ?? f.label}</span>
+                <FootnoteNote prepared={prepared} f={f} />
               </li>
             ))}
           </ul>
@@ -1213,8 +1121,7 @@ function ReviewPanel(props: {
   urls: Urls;
   concept: Concept;
   head: number;
-  editing: boolean;
-  changes: React.ReactNode;
+  changes: ReactNode;
   work: WorkItem[];
   onVerified(): void;
   /** Read members do not verify. */
@@ -1248,8 +1155,8 @@ function ReviewPanel(props: {
       <section>
         <VerifiedLine c={c} />
         {error && <div className="notice">{error}</div>}
-        {/* Verifying is for the saved current version, not one being edited or from the past. */}
-        {props.mayVerify && current && !props.editing && c.trust_tier !== "human-reviewed" && (
+        {/* Verifying is for the current version, not one from the past. */}
+        {props.mayVerify && current && c.trust_tier !== "human-reviewed" && (
           <form className="verify-form" onSubmit={submit}>
             <input type="text" name="note" placeholder="Note (optional)" aria-label="Note" />
             <button className="primary" type="submit" disabled={busy}>
@@ -1378,228 +1285,6 @@ function History(props: { urls: Urls; concept: Concept; head: number; events: Hi
       </p>
     </>
   );
-}
-
-/**
- * Editing a concept (tempra-dev: app/editor): the reader made editable in place, the frontmatter
- * as a form, a required note, save with If-Match, and a merge when someone saved meanwhile.
- */
-function useEditing(o: {
-  urls: Urls;
-  concept: Concept;
-  /** Freezes the page on the version being edited. */
-  start(): void;
-  /** Lets the page follow the library again. */
-  end(): void;
-  onSaved(): void;
-  onEditing(on: boolean): void;
-  /** How the body's links are drawn: a link made in the editor is drawn the same way. */
-  parseOptions: ParseOptions;
-}) {
-  const { urls } = o;
-  const reader = useRef<ReaderHandle | null>(null);
-  const [active, setActive] = useState(false);
-  const [generation, setGeneration] = useState(0);
-  const [form, setForm] = useState<FormState | null>(null);
-  const [note, setNote] = useState("");
-  const [types, setTypes] = useState<string[]>([]);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [merge, setMerge] = useState<Merge | null>(null);
-  const [saved, setSaved] = useState<{ lint: { code: string; message: string }[] } | null>(null);
-  /** Images on their way: a save waits for them, so none is left out of the body. */
-  const [uploading, setUploading] = useState(0);
-  const dirty = useRef(false);
-  /** The version the edit started from. */
-  const base = useRef<Base | null>(null);
-
-  // The reader turns editable once it is (re)mounted for the frozen version.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: on each start, and on a remount.
-  useEffect(() => {
-    if (!active) return;
-    const path = o.concept.path;
-    let outline: Promise<string[]> | null = null;
-    reader.current?.setEditable(true, {
-      paths: () => {
-        outline ??= api<{ files: { path: string; kind: string }[] }>(urls.api("outline")).then(
-          (r) => r.files.filter((f) => f.kind === "concept").map((f) => f.path),
-          () => [],
-        );
-        return outline;
-      },
-      // Drawn as the body's own links are; a target a browser must not follow is refused.
-      link: (raw) => {
-        const param = linkParam(o.parseOptions, linkTarget(urls, raw));
-        return param.href === null ? null : param;
-      },
-      upload: (file) => uploadImage(urls, path, file),
-      onUploads: setUploading,
-      onError: setError,
-      onChange: () => {
-        dirty.current = true;
-      },
-    });
-  }, [active, generation]);
-
-  // Leaving with unsaved edits asks first: links and back in the app, and the tab itself.
-  useEffect(() => {
-    if (!active) return;
-    const unguard = setLeaveGuard(
-      () => !dirty.current || confirm("Leave this page? Your edits are not saved."),
-    );
-    const unload = (e: BeforeUnloadEvent) => {
-      if (dirty.current) e.preventDefault();
-    };
-    window.addEventListener("beforeunload", unload);
-    return () => {
-      unguard();
-      window.removeEventListener("beforeunload", unload);
-    };
-  }, [active]);
-
-  const begin = () => {
-    const c = o.concept;
-    base.current = { path: c.path, hash: c.hash, doc: c.doc, frontmatter: c.frontmatter };
-    dirty.current = false;
-    setSaved(null);
-    setError(null);
-    setMerge(null);
-    setNote("");
-    setForm(formOf(c.frontmatter));
-    o.start();
-    setActive(true);
-    o.onEditing(true);
-    libraryTypes(urls).then(setTypes, () => {});
-  };
-
-  const stop = () => {
-    dirty.current = false;
-    reader.current?.setEditable(false);
-    setActive(false);
-    setMerge(null);
-    o.onEditing(false);
-    o.end();
-    // A fresh reader for whatever the page shows next.
-    setGeneration((g) => g + 1);
-  };
-
-  const cancel = () => {
-    if (dirty.current && !confirm("Drop your edits?")) return;
-    stop();
-  };
-
-  /** Saves `doc` and `fm` as an edit of `from`; a 412 merges them with the version there now. */
-  const write = async (from: Base, doc: Doc, fm: FmObject) => {
-    setBusy(true);
-    setError(null);
-    try {
-      const r = await saveConcept(urls, o.concept.path, from.hash, fm, doc, note.trim());
-      setSaved({ lint: r.lint });
-      stop();
-      o.onSaved();
-    } catch (err) {
-      if (isConflict(err)) {
-        // Someone saved meanwhile: merge with the version there now.
-        const now: FileJson | null | { failed: string } = await api<FileJson>(
-          urls.api(`files/${enc(o.concept.path)}`),
-        ).catch((e: unknown) =>
-          e instanceof ApiError && e.status === 404
-            ? null
-            : { failed: e instanceof Error ? e.message : String(e) },
-        );
-        if (now !== null && "failed" in now) {
-          setError(`Someone saved meanwhile, and their version could not be loaded: ${now.failed}`);
-        } else if (now === null) {
-          setError("This concept was deleted or moved meanwhile; copy your text before leaving.");
-        } else if (now.kind !== "concept") {
-          setError("The file is no longer a concept; copy your text and reload.");
-        } else {
-          const theirs: Base = {
-            path: now.path,
-            hash: now.hash,
-            doc: now.doc,
-            frontmatter: now.frontmatter as FmObject,
-          };
-          // The edit itself keeps its base: saving it again (after "Back to editing") meets
-          // the 412 again and merges again, never overwriting what was written meanwhile.
-          setMerge(startMerge(from, doc, fm, theirs));
-        }
-      } else setError(err instanceof Error ? err.message : String(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const save = (e: FormEvent) => {
-    e.preventDefault();
-    if (uploading > 0) return setError("Wait for the images to finish uploading.");
-    if (!note.trim()) return setError("Say what you changed in a one-line note.");
-    if (!form?.type.trim()) return setError("A concept needs a type.");
-    const b = base.current;
-    if (!b || !reader.current) return;
-    void write(b, reader.current.tree(), frontmatterOf(b.frontmatter, form));
-  };
-
-  const stamped: FmObject = Object.fromEntries(
-    Object.entries(o.concept.frontmatter).filter(([k]) => k === "generated" || k === "verified"),
-  ) as FmObject;
-
-  // While merging, the merge view takes the bar's place (in the sheet, above the body).
-  const bar = merge ? (
-    <MergeView
-      // A new merge (after another write meanwhile) starts with nothing picked.
-      key={merge.theirs.hash}
-      merge={merge}
-      busy={busy}
-      error={error}
-      onSave={(doc, fm) => void write(merge.theirs, doc, fm)}
-      onCancel={() => setMerge(null)}
-    />
-  ) : (
-    <form className="edit-bar" onSubmit={save}>
-      <label className="visually-hidden" htmlFor="edit-note">
-        Note
-      </label>
-      <input
-        id="edit-note"
-        value={note}
-        onChange={(e) => setNote(e.currentTarget.value)}
-        placeholder="What you changed, in one line"
-        required
-      />
-      <button className="primary" type="submit" disabled={busy || uploading > 0}>
-        {uploading > 0 ? "Uploading…" : "Save"}
-      </button>
-      <button type="button" className="ghost" onClick={cancel} disabled={busy}>
-        Cancel
-      </button>
-      {error && <div className="notice">{error}</div>}
-    </form>
-  );
-
-  // The frontmatter as a form, in the Properties panel while editing.
-  const formView = form && (
-    <FrontmatterForm
-      form={form}
-      types={types}
-      stamped={stamped}
-      onChange={(f) => {
-        setForm(f);
-        dirty.current = true;
-      }}
-    />
-  );
-
-  return {
-    start: begin,
-    cancel,
-    bar,
-    form: formView,
-    merging: merge !== null,
-    reader,
-    generation,
-    saved,
-  };
 }
 
 /** The file as stored: what agents read and write, frontmatter and all. */

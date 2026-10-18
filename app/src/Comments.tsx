@@ -3,12 +3,12 @@
  * their quotes highlighted in the reader, and a comment on the selected text. Threads live in the
  * ledger; this loads them with `GET …/comments?path=` and reloads when the feed says one changed.
  */
-import { documentPos, locate, type Parsed, type QuoteSelector, textOffset } from "@tempra/editor";
-import type { Highlight } from "@tempra/editor/view";
+import { type DocText, locate, type QuoteSelector } from "@tempra/editor";
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { type ActedBy, useAgentNames } from "./agents";
 import { api, useAction, useLoad } from "./api";
 import { MentionArea, useMentionable } from "./Mentions";
+import { type Highlight, revealOffset } from "./Reader";
 import { Ago, Chip, who } from "./ui";
 import type { Urls } from "./urls";
 
@@ -44,9 +44,9 @@ export interface Thread {
   }[];
 }
 
-/** Where a thread's quote is in the body on screen: text offsets and document positions. */
+/** Where a thread's quote is in the body on screen, as text offsets. */
 export interface Placed extends Thread {
-  at: { from: number; to: number; pos: number; end: number } | null;
+  at: { from: number; to: number } | null;
 }
 
 /** A concept's threads, open and resolved (a concept rarely has more than a page of them). */
@@ -59,14 +59,8 @@ export function useThreads(urls: Urls, path: string | null) {
 }
 
 /** Each thread's quote found in the version on screen, as the server would find it. */
-export function placeThreads(threads: Thread[], parsed: Parsed): Placed[] {
-  return threads.map((t) => {
-    const found = t.anchor ? locate(parsed.text, t.anchor) : null;
-    if (!found) return { ...t, at: null };
-    const pos = documentPos(parsed, found.from);
-    const end = documentPos(parsed, found.to);
-    return { ...t, at: { ...found, pos, end: Math.max(end, pos) } };
-  });
+export function placeThreads(threads: Thread[], text: DocText): Placed[] {
+  return threads.map((t) => ({ ...t, at: t.anchor ? locate(text, t.anchor) : null }));
 }
 
 /** The highlights for the reader: open threads whose quote is on screen, and the draft. */
@@ -76,59 +70,46 @@ export function highlightsOf(
   draft: Draft | null,
 ): Highlight[] {
   const marks: Highlight[] = placed
-    .filter((t) => t.status === "open" && t.at && t.at.pos >= 0 && t.at.end > t.at.pos)
+    .filter((t) => t.status === "open" && t.at && t.at.to > t.at.from)
     .map((t) => ({
       id: t.id,
-      from: t.at?.pos ?? 0,
-      to: t.at?.end ?? 0,
+      from: t.at?.from ?? 0,
+      to: t.at?.to ?? 0,
       active: t.id === active,
     }));
-  if (draft) marks.push({ id: "draft", from: draft.pos, to: draft.end, draft: true });
+  if (draft) marks.push({ id: "draft", from: draft.from, to: draft.to, draft: true });
   return marks;
 }
 
-/** A comment being written on a quote: the text quoted, and where it is in the document. */
+/** A comment being written on a quote: the text quoted, and where it is in the document's text. */
 export interface Draft {
   quote: string;
-  /** Where the quote starts in the document's text. */
   from: number;
-  /** Document positions, for the draft highlight. */
-  pos: number;
-  end: number;
+  to: number;
 }
 
 /**
  * The draft comment's quote: started from the reader's selection toolbar, kept (highlighted)
  * while the comment is written, until it is posted or dropped.
  */
-export function useDraft(parsed: Parsed) {
+export function useDraft(text: DocText) {
   const [draft, setDraft] = useState<Draft | null>(null);
   // A new version of the body: the old offsets no longer apply.
   // biome-ignore lint/correctness/useExhaustiveDependencies: reset when the body changes.
-  useEffect(() => setDraft(null), [parsed]);
+  useEffect(() => setDraft(null), [text]);
   const start = useCallback(
-    (range: { from: number; to: number }) => {
-      const from = textOffset(parsed, range.from);
-      const to = textOffset(parsed, range.to);
+    ({ from, to }: { from: number; to: number }) => {
       if (from < 0 || to <= from) return;
-      const quote = parsed.text.text.slice(from, to);
-      if (quote.trim()) setDraft({ quote, from, pos: range.from, end: range.to });
+      const quote = text.text.slice(from, to);
+      if (quote.trim()) setDraft({ quote, from, to });
     },
-    [parsed],
+    [text],
   );
   const clear = useCallback(() => setDraft(null), []);
   return { draft, start, clear };
 }
 
 const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
-
-/** Scrolls the reader to a thread's highlight (smoothly, unless motion is reduced). */
-function showMark(id: string) {
-  const still = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  document
-    .querySelector(`mark.comment-mark[data-thread="${CSS.escape(id)}"]`)
-    ?.scrollIntoView({ block: "center", behavior: still ? "auto" : "smooth" });
-}
 
 export function CommentsPanel(props: {
   urls: Urls;
@@ -351,7 +332,7 @@ function ThreadView(props: {
               onClick={(e) => {
                 e.preventDefault();
                 props.onActive(t.id);
-                showMark(t.id);
+                if (t.at) revealOffset(t.at.from);
               }}
             >
               {clip(t.anchor.quote, 300)}

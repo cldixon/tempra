@@ -42,7 +42,8 @@
   --tempra-font-mono: ui-monospace, "SF Mono", Menlo, monospace;
   --tempra-font-size: 14px;
   --tempra-line-height: 1.5;
-  --tempra-measure: 680px;
+  --tempra-measure: 680px; /* the reader's column, with its padding */
+  --tempra-measure-reader: 34em; /* concept text: about 66 characters of the reader's serif */
 
   /* Type scale */
   --tempra-text-label: 11px; /* uppercase labels, marks */

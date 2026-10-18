@@ -71,17 +71,16 @@ describe("the app's pages (TEMPRA-9)", () => {
       expect(r.html).toContain('<div id="root"></div>');
       const csp = r.headers.get("Content-Security-Policy") ?? "";
       expect(csp).toContain("script-src 'self';");
-      expect(csp).toMatch(/style-src 'self' 'nonce-[A-Za-z0-9+/=]+';/);
+      // Styles from this origin only: no nonce, no inline styles (TEMPRA-99).
+      expect(csp).toContain("style-src 'self';");
+      expect(csp).not.toContain("nonce");
       expect(csp).toContain("connect-src 'self'");
       expect(r.headers.get("Cache-Control")).toBe("no-store");
     }
-    // No inline scripts, and a fresh nonce on every response.
+    // No inline scripts or styles.
     const one = await page(s, "/");
     expect(one.html).not.toMatch(/<script(?![^>]*\bsrc=)/);
-    const two = await page(s, "/");
-    expect(one.headers.get("Content-Security-Policy")).not.toBe(
-      two.headers.get("Content-Security-Policy"),
-    );
+    expect(one.html).not.toMatch(/<style|\sstyle=/);
   });
 
   test("the bundle is served at its hashed path, immutable; any other name is a 404", async () => {
