@@ -1,7 +1,7 @@
 /**
  * Rich blocks (tempra-dev: app/reader, The registry): a fence's language, or a block's node type,
- * mapped to a React component that draws it in place of the default. Diagrams (TEMPRA-98) are
- * meant to be the first entry, e.g. `code.mermaid = Diagram`; raw HTML could be `node.html`.
+ * mapped to a React component that draws it in place of the default. Diagrams are the first entry
+ * (`code.mermaid`, Diagram.tsx: Pele, TEMPRA-98); raw HTML could be `node.html`.
  *
  * A component receives the node, its block ID and, for a textblock, its offset in the document's
  * text, plus `text`: the node's text drawn by the reader's rules (with the verification diff in
@@ -11,6 +11,7 @@
  */
 import type { Code, RootContent } from "mdast";
 import type { ReactNode } from "react";
+import { Diagram } from "./Diagram";
 
 export interface BlockProps<N> {
   node: N;
@@ -25,7 +26,7 @@ export interface BlockProps<N> {
 export type BlockComponent<N> = (props: BlockProps<N>) => ReactNode;
 
 /** Code fences by language (as written after the fence, lowercased). */
-export const code: Record<string, BlockComponent<Code>> = {};
+export const code: Record<string, BlockComponent<Code>> = { mermaid: Diagram };
 
 /** Blocks by node type, ahead of the default rendering (e.g. `html` for raw HTML blocks). */
 export const node: Record<string, BlockComponent<RootContent>> = {};

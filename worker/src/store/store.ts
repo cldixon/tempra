@@ -25,6 +25,7 @@ import {
   sourceCandidates,
 } from "../okf/concept";
 import { type LogRequest, renderIndex, renderLog } from "../okf/derived";
+import { diagramLint } from "../okf/diagrams";
 import { unifiedDiff } from "../okf/diff";
 import { sha256Hex } from "../okf/hash";
 import { lintFields } from "../okf/lint";
@@ -2117,9 +2118,13 @@ export class LibraryStore {
     if (r.raw_fm !== null) {
       return [
         { code: "unparseable_frontmatter", message: "Frontmatter could not be parsed as YAML." },
+        ...diagramLint(r.doc),
       ];
     }
-    return lintFields(r.fm, r.generated, verified, scanDoc(r.doc, path), { strict });
+    return [
+      ...lintFields(r.fm, r.generated, verified, scanDoc(r.doc, path), { strict }),
+      ...diagramLint(r.doc),
+    ];
   }
 
   /** Lint of a past version: its field lint and its links that were broken as of the snapshot. */

@@ -701,6 +701,55 @@ async function browserRenders(
     }
     if (!tooltipShown) problems.push("no footnote reference showed a tooltip");
 
+    // Diagrams (TEMPRA-98): a mermaid fence drawn by Pele, loaded on demand, within the CSP (a
+    // violation is a console error, which fails the gate); a broken one as its source with a
+    // notice, and as lint in the write result.
+    await step("diagrams: drawn, and a broken one shown as its source", async () => {
+      const put = await fetch(`${libApi}/files/gate-diagram.md`, {
+        method: "PUT",
+        headers: { ...bearer, "Content-Type": "text/markdown", "X-Note": "gate: diagrams" },
+        body: [
+          "---\ntype: Note\ntitle: Gate diagram\ndescription: A diagram and a broken one.\n---",
+          "Before.\n",
+          "```mermaid\nflowchart LR\n  A[Agent writes] --> B{Parses?}\n  B -->|yes| C[Drawn]\n  B -->|no| D[Source and lint]\n```\n",
+          "```mermaid\nsequenceDiagram\n  Alice->>: hi\n```\n",
+          "After.\n",
+        ].join("\n"),
+      });
+      if (!put.ok) throw new Error(`write: ${put.status} ${await put.text()}`);
+      const lint =
+        ((await put.json()) as { lint?: { code: string; message: string }[] }).lint ?? [];
+      const bad = lint.filter((l) => l.code === "diagram_invalid");
+      if (bad.length !== 1 || !/line 2, column \d+/.test(bad[0]?.message ?? "")) {
+        throw new Error(`diagram lint: ${JSON.stringify(lint)}`);
+      }
+      await page.goto(`${base}/${owner}/${slug}/gate-diagram.md`);
+      const svg = page.locator(".body figure.diagram[data-opaque] .diagram-svg svg");
+      await svg.waitFor({ timeout: 15_000 });
+      if (!(await svg.locator("text", { hasText: "Agent writes" }).count())) {
+        throw new Error("the diagram's labels are missing");
+      }
+      const notice = page.locator(".body figure.diagram.failed .diagram-notice");
+      await notice.waitFor({ timeout: 10_000 });
+      const source = await page.locator(".body figure.diagram.failed pre[data-text]").innerText();
+      if (!source.startsWith("sequenceDiagram")) throw new Error(`broken diagram: ${source}`);
+      await page.getByText("After.", { exact: true }).waitFor();
+      // At phone width it fits the column: the page does not scroll sideways.
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.waitForTimeout(300);
+      const wide = await page.locator("html").evaluate((el) => el.scrollWidth > el.clientWidth);
+      if (shots) {
+        await page.screenshot({ path: `${shots}/diagram-phone.png` });
+        await page.emulateMedia({ colorScheme: "dark" });
+        await page.screenshot({ path: `${shots}/diagram-phone-dark.png` });
+        await page.emulateMedia({ colorScheme: "light" });
+      }
+      await page.setViewportSize({ width: 1280, height: 720 });
+      if (shots) await page.screenshot({ path: `${shots}/diagram.png` });
+      if (wide) throw new Error("the diagram makes the page scroll sideways at phone width");
+      await fetch(`${libApi}/files/gate-diagram.md`, { method: "DELETE", headers: bearer });
+    });
+
     // Verify a concept as a person, let an agent change it, and see the change over the text.
     const concept = concepts[0] ?? "";
     const url = `${base}/${owner}/${slug}/${enc(concept)}`;

@@ -13,6 +13,7 @@
       "dependencies": {
         "@tempra/editor": "workspace:*",
         "lucide-react": "^1.52.0",
+        "pele": "1.6.0",
         "react": "^19.3.0",
         "react-dom": "^19.3.0",
       },
@@ -57,6 +58,7 @@
         "@tempra/design": "workspace:*",
         "@tempra/editor": "workspace:*",
         "hono": "^4.13.9",
+        "pele": "1.6.0",
         "yaml": "^2.9.1",
         "zod": "^4.6.5",
       },
@@ -629,6 +631,8 @@
     "path-to-regexp": ["path-to-regexp@6.3.0", "", {}, "sha512-Yhpw4T9C6hPpgPeA28us07OJeqZ5EzQTkbfwuhsUg0c237RomFoETJgmp2sa3F/41gfLE6G5cqcYwznmeEeOlQ=="],
 
     "pathe": ["pathe@2.0.3", "", {}, "sha512-WUjGcAqP1gQacoQe+OBJsFA7Ld4DyXuUIjZ5cc75cLHvJ7dtNsTugphxIADwspS+AraAUePCKrSVtPLFj/F88w=="],
+
+    "pele": ["pele@1.6.0", "", {}, "sha512-VfAiVItsOGlGhvnBfphdT28VCG7mXMZxQNOwAGsCtxI2ztbUsT39MraEOYjsapLxVETkdUZscm0DdotYDQMLdw=="],
 
     "picocolors": ["picocolors@1.1.1", "", {}, "sha512-xceH2snhtb5M9liqDsmEw56le376mTZkEX/jEb/RxNFyegNul7eNslCXP9FDj/Lcu0X8KEyMceP2ntpaHrDEVA=="],
 

@@ -91,6 +91,15 @@ describe("the app's pages (TEMPRA-9)", () => {
     expect(r.headers.get("Cache-Control")).toContain("immutable");
     expect(await r.text()).toBe(app.js);
     expect((await s.anon.request("/_app/app.000000000000.js")).status).toBe(404);
+    // The chunks it imports on demand (Pele, for diagrams) sit beside it, immutable too.
+    const [name, js] = Object.entries(app.chunks).find(([n]) => n.startsWith("pele-")) ?? [];
+    expect(app.js).toContain(`./${name}`);
+    const c = await s.anon.request(`/_app/${name}`);
+    expect(c.status).toBe(200);
+    expect(c.headers.get("Cache-Control")).toContain("immutable");
+    expect(await c.text()).toBe(js ?? "");
+    expect((await s.anon.request("/_app/toString")).status).toBe(404);
+    expect((await s.anon.request("/_app/pele-000000.js")).status).toBe(404);
   });
 
   test("pages require sign-in, and a library the person cannot open is a 404", async () => {

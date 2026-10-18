@@ -14,6 +14,7 @@
   "dependencies": {
     "@tempra/editor": "workspace:*",
     "lucide-react": "^1.52.0",
+    "pele": "1.6.0",
     "react": "^19.3.0",
     "react-dom": "^19.3.0"
   },

@@ -1007,6 +1007,59 @@ details > summary {
 }
 
 /*
+ * Diagrams (tempra-dev: app/diagrams): Pele's SVG themed through its custom properties, greys only
+ * until the palette (TEMPRA-1), so dark mode follows the tokens. Colours an author sets in the
+ * diagram are content and stay. It scrolls sideways when it cannot shrink to the column.
+ */
+.prose figure.diagram {
+  margin: 1.4em 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  --pele-bg: var(--tempra-color-bg);
+  --pele-fg: var(--tempra-color-text);
+  --pele-muted: var(--tempra-color-muted);
+  --pele-line: var(--tempra-color-muted);
+  --pele-surface: var(--tempra-color-ground);
+  --pele-surface-alt: var(--tempra-color-hover);
+  --pele-border: var(--tempra-color-border-strong);
+  --pele-accent: var(--tempra-color-text);
+  --pele-font: var(--tempra-font-body);
+  --pele-font-mono: var(--tempra-font-mono);
+  --pele-radius: var(--tempra-radius-row);
+  --pele-series-1: var(--tempra-color-text);
+  --pele-series-2: var(--tempra-color-muted);
+  --pele-series-3: var(--tempra-color-faint);
+  --pele-series-4: var(--tempra-color-border-strong);
+  --pele-series-5: var(--tempra-color-selection);
+  --pele-series-6: var(--tempra-color-selected);
+  --pele-series-7: var(--tempra-color-hover);
+  --pele-series-8: var(--tempra-color-ground);
+}
+
+.prose .diagram-svg {
+  font-family: var(--tempra-font-body);
+  font-size: var(--tempra-text-ui);
+}
+
+.prose .diagram-svg svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
+}
+
+.prose figure.diagram.failed pre {
+  margin: 0;
+}
+
+.prose .diagram-notice {
+  margin-top: 6px;
+  color: var(--tempra-color-muted);
+  font-family: var(--tempra-font-body);
+  font-size: var(--tempra-text-meta);
+}
+
+/*
  * The app's frame (TEMPRA-19, take 2 in TEMPRA-53). A soft ground; on it the header, the sidebar
  * (no box) and the open file as a floating sheet; the concept's context as one panel at a time,
  * a card beside the sheet, opened from a control cluster that hovers over the sheet's top right.

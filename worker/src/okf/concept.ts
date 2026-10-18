@@ -18,6 +18,7 @@ import {
   YAMLMap,
   type YAMLSeq,
 } from "yaml";
+import { diagramLint } from "./diagrams";
 import { lintFields } from "./lint";
 import { scanDoc, takeSection, targets } from "./markdown";
 import {
@@ -270,6 +271,7 @@ export function buildRecord(parsed: ParsedConcept, opts: BuildOptions): BuiltCon
   if (parsed.rawFm === null) {
     lint.push(...lintFields(entries, generated, verified, scan, { strict: opts.mode === "write" }));
   }
+  lint.push(...diagramLint(doc));
   const record: ConceptRecord = {
     fm: entries,
     raw_fm: parsed.rawFm,
