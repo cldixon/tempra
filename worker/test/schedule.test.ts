@@ -6,7 +6,6 @@ import {
   MAX_SLEEP_DAYS,
   MaintenanceSchedule,
   nextMaintenance,
-  nextRun,
   runMaintenance,
   slotAtOrAfter,
 } from "../src/maintain";
@@ -94,13 +93,6 @@ describe("maintenance schedule (TEMPRA-82)", () => {
       expect(n).toBeGreaterThan(850);
       expect(n).toBeLessThan(1150);
     }
-    // The old schedule put every library in one hour.
-    const old = new Set(
-      Array.from({ length: 100 }, (_, i) =>
-        nextRun(new Date("2026-10-01T05:00:00Z"), `lib-${i}`).getUTCHours(),
-      ),
-    );
-    expect([...old]).toEqual([3]);
   });
 
   test("a slot is the library's time of day, at or after the moment asked", () => {
@@ -238,7 +230,8 @@ describe("maintenance schedule (TEMPRA-82)", () => {
   test("an alarm the old schedule set at 03:MM still runs, then moves to the library's slot", async () => {
     const lib = await library("lib-old", "2026-10-01T12:00:00Z");
     await lib.write("a.md", "A\n");
-    const old = nextRun(new Date(lib.clock.t), "lib-old").getTime();
+    // What the schedule before TEMPRA-82 set: 03:00 UTC plus a few minutes, the next day.
+    const old = Date.parse("2026-10-02T03:17:00Z");
     lib.alarm.at = old;
     await lib.until(old + 1);
     expect(lib.passes).toEqual([old]);

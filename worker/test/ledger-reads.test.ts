@@ -175,7 +175,7 @@ describe("ledger counts kept by triggers (TEMPRA-86)", () => {
 
 describe("log.md (TEMPRA-86)", () => {
   /** log.md the way it was built before: every event read and grouped in memory. */
-  function oldLog(store: LibraryStore, at: number, prefixIn = ""): string {
+  function oldLog(store: LibraryStore, at: number, prefixIn = "", limit?: number): string {
     const prefix = normalizeDir(prefixIn);
     const all: EventRow[] = [];
     for (let since = 0; ; ) {
@@ -193,7 +193,11 @@ describe("log.md (TEMPRA-86)", () => {
     const last = new Map<string, EventRow>();
     for (const e of all) if (e.seq <= at && e.op !== "comment") last.set(e.concept_id, e);
     const now = new Map([...last].map(([id, e]) => [id, e.hash === null ? null : e.path]));
-    const out: LogRequest[] = [...byReq.values()].map((evs) => {
+    const reqs = [...byReq.values()];
+    const shown = limit === undefined ? reqs : reqs.slice(0, limit);
+    // Events are newest first here: the oldest shown request's first seq is the cursor.
+    const before = shown.length < reqs.length ? (shown.at(-1)?.at(-1)?.seq ?? null) : null;
+    const out: LogRequest[] = shown.map((evs) => {
       evs.reverse();
       const first = evs[0] as EventRow;
       return {
@@ -209,7 +213,7 @@ describe("log.md (TEMPRA-86)", () => {
         })),
       };
     });
-    return renderLog(out, prefix ? `Log: ${prefix}` : "Library log");
+    return renderLog(out, prefix ? `Log: ${prefix}` : "Library log", { before, prefix });
   }
 
   test("reads the same as before: whole library, a directory, an earlier seq", () => {
@@ -218,13 +222,63 @@ describe("log.md (TEMPRA-86)", () => {
     for (const _ of changes(lib)) seqs.push(lib.store.headSeq());
     for (const at of seqs) {
       for (const prefix of ["", "a", "b", "d"]) {
-        expect({ at, prefix, log: lib.store.log({ at, prefix }) }).toEqual({
+        expect({ at, prefix, log: lib.store.log({ at, prefix, limit: null }) }).toEqual({
           at,
           prefix,
           log: oldLog(lib.store, at, prefix),
         });
+        for (const limit of [1, 2, 5]) {
+          expect({ at, prefix, limit, log: lib.store.log({ at, prefix, limit }) }).toEqual({
+            at,
+            prefix,
+            limit,
+            log: oldLog(lib.store, at, prefix, limit),
+          });
+        }
       }
     }
     expect(lib.store.log()).toContain("Move");
+  });
+
+  test("shows the latest 200 requests, then where the rest are; exports keep them all", () => {
+    const store = new LibraryStore(bunSqlHandle(new Database(":memory:")));
+    const ctx = (i: number): RequestContext => ({
+      actor: "agent/x",
+      request_id: `r${i}`,
+      note: `change ${i}`,
+    });
+    // Three files a request, so the log walks the ledger across more than one page of events.
+    for (let i = 0; i < 450; i++) {
+      store.apply(
+        ctx(i),
+        [0, 1, 2].map((k) => {
+          const view = i > 0 ? store.read(`d/f${k}.md`) : null;
+          return {
+            op: "write" as const,
+            path: `d/f${k}.md`,
+            content: md(`F${k}`, `Revision ${i}.`),
+            if_match: view?.kind === "concept" ? view.hash : undefined,
+          };
+        }),
+      );
+      if (i % 50 === 0) store.comment(ctx(1000 + i), { kind: "open", path: "d/f0.md", body: "Q" });
+    }
+    const log = store.read("log.md");
+    const text = log.kind === "derived" ? log.markdown : "";
+    const notes = [...text.matchAll(/change (\d+)/g)].map((m) => Number(m[1]));
+    expect(notes).toEqual(Array.from({ length: 200 }, (_, i) => 449 - i));
+    const cursor = Number(/before=(\d+)/.exec(text)?.[1]);
+    expect(text).toContain(
+      `*The latest 200 requests. Older ones: the MCP \`log\` tool with \`before: ${cursor}\`, or \`GET …/requests?before=${cursor}\`.*`,
+    );
+    // The cursor picks up where the file stops.
+    expect(store.requests({ before: cursor, limit: 1 }).requests[0]?.note).toBe("change 249");
+    expect(store.log({ prefix: "d" })).toContain(`requests?before=${cursor}&prefix=d`);
+    // A short log has no pointer; the export lists every request.
+    expect(store.log({ at: 30 })).not.toContain("Older ones");
+    const exported = store.exportBundle().files.find((f) => f.path === "log.md");
+    const all = [...(exported?.text ?? "").matchAll(/change (\d+)/g)];
+    expect(all.length).toBe(450);
+    expect(exported?.text).not.toContain("Older ones");
   });
 });

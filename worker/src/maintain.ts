@@ -170,21 +170,6 @@ async function pruneExports(
   return { deleted: old, kept: folders.filter((f) => !old.includes(f)) };
 }
 
-/**
- * The schedule before TEMPRA-82: 03:00 UTC plus a few minutes per library, strictly after `now`.
- * No longer used to set alarms (see `nextMaintenance`); alarms it set still fire and reschedule.
- * @deprecated
- */
-export function nextRun(now: Date, libraryId: string): Date {
-  let spread = 0;
-  for (const ch of libraryId) spread = (spread * 31 + ch.charCodeAt(0)) % 60;
-  const next = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), 3, spread),
-  );
-  if (next.getTime() <= now.getTime()) next.setUTCDate(next.getUTCDate() + 1);
-  return next;
-}
-
 /** The longest an idle library sleeps between two passes (TEMPRA-82). */
 export const MAX_SLEEP_DAYS = 7;
 
