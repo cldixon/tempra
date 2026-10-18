@@ -348,8 +348,7 @@ export const READ_FLUSH = 100;
 
 /**
  * Requests log.md shows before pointing to the rest: one full page of `GET …/requests` (its
- * largest `limit`), so the next page picks up exactly where the file stops; weeks of an active
- * library's history, read in a few milliseconds.
+ * largest `limit`), so the next page picks up exactly where the file stops.
  */
 export const LOG_REQUESTS = 200;
 
