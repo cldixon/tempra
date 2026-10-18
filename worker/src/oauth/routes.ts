@@ -56,6 +56,7 @@ function defaultForm(
     prefix: "",
     actor: defaultActor(details),
     tiers: "all",
+    create: wantsWrite,
   };
 }
 
@@ -72,6 +73,8 @@ function readForm(form: FormData): ConsentForm {
     prefix: s("prefix"),
     actor: s("actor").toLowerCase(),
     tiers: s("tiers") === "files" ? "files" : "all",
+    // A checkbox: absent when unticked.
+    create: s("create_libraries") === "on",
   };
 }
 
@@ -212,6 +215,10 @@ export function registerAppRoutes<E extends AppEnv>(
               ...(created ? [created.id] : []),
             ];
       const prefix = normalizeDir(form.prefix) || null;
+      // Only a read-and-write connection with all tools keeps "Create libraries" (tenancy.ts
+      // cannotCreate checks the same on every call).
+      const create = form.create && form.access === "write" && form.tiers === "all";
+      const grantId = crypto.randomUUID();
       // Who is connecting, as far as can be told (agents.ts): its sign-in domain is the
       // strongest signal; its name is a claim. Recorded as the person's agent on that platform.
       const described = await oauth.describeConsent(approved.request).catch(() => null);
@@ -228,7 +235,7 @@ export function registerAppRoutes<E extends AppEnv>(
       await accounts.recordAgent(user.id, connectionAgent(client));
       const props: GrantProps = {
         grant: {
-          id: crypto.randomUUID(),
+          id: grantId,
           userId: user.id,
           actor: form.actor,
           scope: form.access,
@@ -236,13 +243,17 @@ export function registerAppRoutes<E extends AppEnv>(
           tiers: form.tiers,
           libraries,
           client,
+          create,
         },
       };
       const { redirectTo } = await oauth.completeAuthorization({
         request: approved.request,
         userId: user.id,
         metadata: {
+          // The props' grant id, so /apps and deleting a library can find what it created.
+          grant: grantId,
           libraries,
+          create,
           actor: form.actor,
           access: form.access,
           prefix,

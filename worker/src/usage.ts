@@ -33,6 +33,7 @@ export const WRITE_TOOLS = new Set([
   "revert",
   "verify",
   "comment",
+  "create_library",
 ]);
 
 /** Who a request counts against: a per-token (or per-connection) key and the account. */

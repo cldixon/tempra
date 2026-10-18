@@ -30,6 +30,16 @@ export interface ConsentForm {
   prefix: string;
   actor: string;
   tiers: "all" | "files";
+  /**
+   * "Create libraries" (TEMPRA-100): the app may create libraries that the person owns. Kept
+   * only with read and write and all tools.
+   */
+  create: boolean;
+}
+
+/** Whether consent offers "Create libraries": not when the app asked for read access only. */
+export function offersCreate(details: Pick<ConsentDescription, "scope">): boolean {
+  return details.scope.length === 0 || details.scope.includes("okf:write");
 }
 
 /**
@@ -85,6 +95,7 @@ ${opts.error ? `<p class="notice">${esc(opts.error)}</p>` : ""}
     <legend>Access</legend>
     ${radio("access", "read", form.access, "Read only", "")}
     ${radio("access", "write", form.access, "Read and write", "")}
+    ${offersCreate(details) ? `<label class="choice"><input type="checkbox" name="create_libraries" value="on"${form.create ? " checked" : ""}> Create libraries <span class="faint">owned by you; with read and write and all tools</span></label>` : ""}
     <label class="field">Only this directory in each library <span class="faint">(optional)</span>
     <input type="text" id="prefix" name="prefix" value="${esc(form.prefix)}" placeholder="notes"></label>
   </fieldset>

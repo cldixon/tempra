@@ -347,6 +347,8 @@ interface AppGrant {
   access: "read" | "write";
   prefix: string | null;
   tiers: "all" | "files";
+  /** May create libraries owned by the person (TEMPRA-100). */
+  create_libraries?: boolean;
   created: string;
 }
 
@@ -401,6 +403,9 @@ export function Apps() {
                       <td>
                         {a.access === "write" ? "Read and write" : "Read only"}
                         {a.tiers === "files" && <div className="small muted">file tools only</div>}
+                        {a.create_libraries && (
+                          <div className="small muted">can create libraries</div>
+                        )}
                       </td>
                       <td className="small muted">{a.created.slice(0, 10)}</td>
                       <td>

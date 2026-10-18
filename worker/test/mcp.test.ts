@@ -3,6 +3,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { readTar } from "../src/util/tar";
 import { setup } from "./harness";
+import { approve, connectApp } from "./oauth-flow";
 
 type Text = { type: "text"; text: string };
 
@@ -34,6 +35,7 @@ describe("MCP server", () => {
       "attach",
       "batch",
       "browse",
+      "create_library",
       "delete",
       "edit",
       "grep",
@@ -234,5 +236,113 @@ describe("MCP server", () => {
     const { app } = setup();
     const r = await app.request("/mcp", { method: "POST", body: "{}" });
     expect(r.status).toBe(401);
+  });
+
+  describe("create_library (TEMPRA-100)", () => {
+    /** A read-and-write connection to all libraries that may create them. */
+    const creator = { ...approve, libraries: "all", library: "", create_libraries: "on" };
+
+    test("creates a library the person owns, then writes in it as their agent", async () => {
+      const s = setup();
+      const { call } = await connectApp(s.app, creator);
+      const made = await call("create_library", {
+        slug: "recipes",
+        title: "Recipes",
+        description: "What we cook.",
+      });
+      expect(made.isError).toBe(false);
+      expect(made.text).toContain("Created library owner/recipes, owned by @owner");
+      // It answers like start for the new library.
+      expect(made.text).toContain("# Library owner/recipes (seq 0)");
+      expect(made.text).toContain("Title: Recipes");
+      expect(made.text).toContain("Description: What we cook.");
+      expect(made.text).toContain("The library is empty");
+      expect((await s.accounts.library("owner", "recipes"))?.ownerId).toBe("user_1");
+
+      const w = await call("write", {
+        library: "owner/recipes",
+        path: "soup.md",
+        content: doc("Soup", "Hot.\n"),
+        note: "First recipe",
+      });
+      expect(w.isError).toBe(false);
+      expect((await call("start", { library: "owner/recipes" })).text).toContain("Title: Recipes");
+      // The ledger's first event is the person's agent, as with any other write.
+      const log = (await (
+        await s.app.request("/api/v1/libraries/owner/recipes/requests")
+      ).json()) as { requests: { actor: string; by: { person: string; agent?: string } }[] };
+      expect(log.requests).toHaveLength(1);
+      expect(log.requests[0]?.actor).toBe("claude-ai/connector");
+      expect(log.requests[0]?.by.person).toBe("user_1");
+      expect(log.requests[0]?.by.agent).toMatch(/^agt_/);
+      const agents = (await (
+        await s.app.request("/api/v1/libraries/owner/recipes/agents")
+      ).json()) as { contributors: { person: string; agent: { name: string } }[] };
+      expect(agents.contributors.map((c) => `${c.agent.name} for ${c.person}`)).toEqual([
+        "Claude for owner",
+      ]);
+      // Counted as a write against the person's account, like any write.
+      expect(s.usage.filter((e) => e.kind === "write").map((e) => e.account)).toEqual([
+        "owner",
+        "owner",
+      ]);
+      // The app lists it, with what the agent said it is for.
+      const list = (await (await s.app.request("/api/v1/libraries")).json()) as {
+        libraries: { slug: string; role: string }[];
+      };
+      expect(list.libraries.find((l) => l.slug === "recipes")?.role).toBe("owner");
+    });
+
+    test("refused for a read connection, without the choice, and for a bearer token", async () => {
+      const s = setup();
+      const read = await connectApp(s.app, { ...creator, access: "read" }, { scope: "okf:read" });
+      expect(read.flow.html).not.toContain("create_libraries");
+      const r1 = await read.call("create_library", { slug: "x" });
+      expect(r1.isError).toBe(true);
+      expect(r1.text).toContain("create_not_allowed");
+      expect(r1.text).toContain("read access");
+
+      const { create_libraries: _, ...without } = creator;
+      const plain = await connectApp(s.app, without);
+      const r2 = await plain.call("create_library", { slug: "x" });
+      expect(r2.text).toContain("create_not_allowed");
+      expect(r2.text).toContain("reconnect");
+
+      const files = await connectApp(s.app, { ...creator, tiers: "files" });
+      expect((await files.call("create_library", { slug: "x" })).text).toContain(
+        "create_not_allowed",
+      );
+
+      const token = await connect(s.app, "writer");
+      const r3 = await token.call("create_library", { slug: "x" });
+      expect(r3.text).toContain("create_not_allowed");
+      expect(r3.text).toContain("reaches one library");
+      expect(await s.accounts.library("owner", "x")).toBeNull();
+    });
+
+    test("the library limit, a taken slug and bad slugs are refused", async () => {
+      const s = setup();
+      s.db.run(`UPDATE users SET limits = '{"libraries": 2}' WHERE id = 'user_1'`);
+      const { call } = await connectApp(s.app, creator);
+      const taken = await call("create_library", { slug: "demo" });
+      expect(taken.text).toContain("Error 409 slug_taken");
+      for (const slug of ["Bad Slug", "owner/x", "stranger/x", "../x", "-x", "x/", ""]) {
+        const bad = await call("create_library", { slug });
+        expect(bad.isError).toBe(true);
+        expect(bad.text).toContain("bad_slug");
+      }
+      const line = await call("create_library", { slug: "ok", title: "One\n## Two" });
+      expect(line.text).toContain("bad_title");
+      const long = await call("create_library", { slug: "ok", description: "x".repeat(301) });
+      expect(long.text).toContain("bad_description");
+      expect((await call("create_library", { slug: "second" })).isError).toBe(false);
+      const over = await call("create_library", { slug: "third" });
+      expect(over.text).toContain("Error 403 library_limit");
+      expect(over.text).toContain("limit of 2 libraries");
+      expect((await s.accounts.libraries("user_1")).map((l) => l.slug).sort()).toEqual([
+        "demo",
+        "second",
+      ]);
+    });
   });
 });

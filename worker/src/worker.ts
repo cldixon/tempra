@@ -5,7 +5,7 @@ import { handleMcp, type McpContext } from "./mcp/server";
 import { postComment } from "./notify";
 import { type GrantProps, SCOPES } from "./oauth/routes";
 import { OkfError } from "./store/errors";
-import { grantLibraries } from "./tenancy";
+import { createLibraryForGrant, grantAgent, grantLibraries } from "./tenancy";
 import { type Admission, admit, mcpWrites, tokenAdmission } from "./usage";
 
 const HOUR = 3600;
@@ -68,7 +68,10 @@ export function createWorker(deps: (env: Cloudflare.Env) => Deps): {
           // An app connection reaches the account's libraries as of now; a bearer token (or a
           // connection approved before account-level access) reaches its one library.
           let who: Admission;
-          let caller: Pick<McpContext, "actor" | "scope" | "tiers" | "libraries" | "by">;
+          let caller: Pick<
+            McpContext,
+            "actor" | "scope" | "tiers" | "libraries" | "by" | "createLibrary"
+          >;
           /** The agent behind the connection, as the person's agent on its platform. */
           let agent: { userId: string; key: AgentKey } | null = null;
           if (props.grant) {
@@ -83,7 +86,13 @@ export function createWorker(deps: (env: Cloudflare.Env) => Deps): {
               scope: g.scope,
               tiers: g.tiers,
               libraries: reach.libraries,
-              by: reach.libraries[0] ? actedBy(reach.libraries[0]) : { person: reach.user.id },
+              // The person and their agent, even before the connection reaches any library.
+              by: { person: reach.user.id, agent: grantAgent(g, reach.user.id) },
+              // Refused in createLibraryForGrant unless the grant allows it (TEMPRA-100).
+              createLibrary: async (input) => {
+                const made = await createLibraryForGrant(d.accounts, g, input);
+                return { token: made.token, title: made.title, description: made.description };
+              },
             };
             agent = { userId: reach.user.id, key: connectionAgent(g.client ?? {}) };
           } else if (props.token) {
@@ -129,6 +138,7 @@ export function createWorker(deps: (env: Cloudflare.Env) => Deps): {
             ...caller,
             open: (t) => d.library(t),
             comment: (t, req, action) => postComment(d, t, d.library(t), req, action),
+            about: (id) => d.accounts.about(id),
             agentNames: async (ids) =>
               new Map((await d.accounts.agents(ids)).map((a) => [a.id, agentName(a)])),
             blobs: d.blobs,

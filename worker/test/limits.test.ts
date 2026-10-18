@@ -40,7 +40,7 @@ describe("limits (v2 spec: Limits, abuse and metering)", () => {
       body: JSON.stringify({ slug: "lib-6" }),
     });
     expect(rest.status).toBe(403);
-    expect(((await rest.json()) as { code: string }).code).toBe("limit_reached");
+    expect(((await rest.json()) as { code: string }).code).toBe("library_limit");
 
     // An override raises it; the account page shows both.
     s.db.run(`UPDATE users SET limits = '{"libraries": 6}' WHERE id = 'user_1'`);

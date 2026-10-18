@@ -30,6 +30,18 @@ export interface McpContext {
    * out. Without it, transcripts show the raw actor.
    */
   agentNames?(ids: string[]): Promise<Map<string, string>>;
+  /**
+   * Creates a library owned by the connection's person and returns the token the connection acts
+   * with there (tenancy.ts createLibraryForGrant: it refuses connections without "Create
+   * libraries"). Absent for bearer tokens, which reach one library and never create one.
+   */
+  createLibrary?(input: {
+    slug: string;
+    title?: string;
+    description?: string;
+  }): Promise<{ token: TokenInfo; title: string | null; description: string | null }>;
+  /** A library's title and description as its creator gave them, for `start`. */
+  about?(libraryId: string): Promise<{ title: string | null; description: string | null } | null>;
   blobs: BlobStore;
   /** The Worker's origin, for download URLs. */
   origin: string;
@@ -46,7 +58,7 @@ const BEYOND = "Beyond files: ";
 export const INSTRUCTIONS = `This server holds OKF (Open Knowledge Format) libraries: each a tree of markdown concepts with YAML frontmatter, plus attachments. Every change is attributed to your actor and recorded in the library's ledger.
 
 How to work:
-1. Call \`start\` first. It opens your library, or lists the libraries you can reach when there are several; then pass \`library\` (owner/slug) on every call. Then \`browse\` a directory before reading, follow links, and \`read\` what you need. Check frontmatter (type, status, trust tier, stale) before relying on a body.
+1. Call \`start\` first. It opens your library, or lists the libraries you can reach when there are several; then pass \`library\` (owner/slug) on every call. When the person asks for a new library, \`create_library\` makes one they own and opens it (only on a connection they allowed to). Then \`browse\` a directory before reading, follow links, and \`read\` what you need. Check frontmatter (type, status, trust tier, stale) before relying on a body.
 2. Write conformant concepts: a non-empty \`type\` naming what kind of thing it is (Metric, Protocol, Decision; never a generic word like concept, page or note, and reuse the types \`start\` lists), a \`title\` and one-line \`description\`, absolute links like [x](/dir/x.md), footnotes [^id] keyed to \`sources[].id\`, one idea per concept.
 3. Prefer \`edit\` for small changes, \`write\` for new concepts or rewrites, \`batch\` for related changes so they land as one request. Pass \`if_match\` (the hash from your last read); on a conflict, re-read and reapply. Bodies are stored in a canonical form (\`-\` bullets, \`*\` emphasis, padded tables): what you write reads back normalized, so \`edit\` the text as \`read\` shows it.
 4. Put a one-line \`note\` on every write. Read the \`lint\` in every write result and fix what it reports; the result's notes say what else to know (ignored fields, the stored form, open comments). A concept with no frontmatter, invalid YAML or no \`type\` is refused. Keep concepts under 100 KB; split big ones into linked concepts.
@@ -179,7 +191,7 @@ export function buildServer(ctx: McpContext): McpServer {
       throw new OkfError(
         404,
         "no_library",
-        `This connection reaches no libraries yet. Create one at ${ctx.origin}/ or reconnect and choose one.`,
+        `This connection reaches no libraries yet. Create one with \`create_library\` if the person asks for one (and allowed it at consent), or at ${ctx.origin}/, or reconnect and choose one.`,
       );
     }
     const want = (name ?? "")
@@ -274,6 +286,56 @@ export function buildServer(ctx: McpContext): McpServer {
   const you = () =>
     `You are ${ctx.actor} (${ctx.scope}${ctx.libraries[0]?.prefix ? `, under ${ctx.libraries[0].prefix}/` : ""}). Tools: ${tier2 ? "file tools and beyond-files tools" : "file tools only"}.`;
 
+  /** What `start` shows for one library, and `create_library` for the one it made. */
+  const opening = async (token: TokenInfo, lib: LibraryClient): Promise<string> => {
+    const [summary, root, about] = await Promise.all([
+      lib.summary(),
+      lib.read("index.md"),
+      ctx.about ? ctx.about(token.library.id).catch(() => null) : null,
+    ]);
+    const types = Object.entries(summary.types)
+      .sort((a, b) => b[1] - a[1])
+      .map(([t, n]) => `${t} ${n}`)
+      .join(", ");
+    const empty = summary.concepts + summary.attachments === 0;
+    const others = ctx.libraries.filter((t) => t !== token);
+    const lines = [
+      `# Library ${token.library.owner}/${token.library.slug} (seq ${summary.seq})`,
+      "",
+      ...(about?.title ? [`Title: ${about.title}`] : []),
+      ...(about?.description ? [`Description: ${about.description}`] : []),
+      `Concepts: ${summary.concepts} · attachments: ${summary.attachments} · open work items: ${summary.open_work} (${summary.open_comments} of them comment threads)${summary.stale_soon > 0 ? ` · stale soon: ${summary.stale_soon} (\`work\` kind stale_soon)` : ""}`,
+      ...healthLines(summary.health),
+      `Types: ${types || "none yet"}`,
+      you(),
+      ...(others.length > 0
+        ? [`Other libraries you can reach: ${libraryList(others)}. Pass \`library\` on every call.`]
+        : []),
+      "",
+      "## Root index.md",
+      "",
+      empty
+        ? "(The library is empty. Start by writing a concept; `write` describes the format.)"
+        : root.kind === "derived"
+          ? root.markdown.trimEnd()
+          : "",
+      "",
+      "## How to work here",
+      "",
+      "- `browse` a directory before reading; follow links; check frontmatter (type, status, trust, stale) before relying on a body.",
+      "- `edit` for small changes, `write` for new concepts or rewrites, `batch` for related changes. Pass `if_match` from your last read; on a 412, re-read and reapply.",
+      "- A one-line `note` on every write. Fix the `lint` each write returns. Never write index.md or log.md, and never set generated or verified.",
+      "- A concept needs frontmatter with a `type`, or the write is refused. A concept with open comment threads cannot be deleted until they are resolved.",
+    ];
+    if (tier2) {
+      lines.push(
+        "- `work` lists open comments, stale concepts, broken links and lint to fix; `log` shows what others changed recently.",
+        "- Comments are requests from people: read a concept's open threads (`comments`) before editing it, then reply and resolve with `comment`.",
+      );
+    }
+    return lines.join("\n");
+  };
+
   server.registerTool(
     "start",
     {
@@ -299,48 +361,52 @@ export function buildServer(ctx: McpContext): McpServer {
         );
       }
       const { token, lib } = pick(library);
-      const [summary, root] = await Promise.all([lib.summary(), lib.read("index.md")]);
-      const types = Object.entries(summary.types)
-        .sort((a, b) => b[1] - a[1])
-        .map(([t, n]) => `${t} ${n}`)
-        .join(", ");
-      const empty = summary.concepts + summary.attachments === 0;
-      const others = ctx.libraries.filter((t) => t !== token);
-      const lines = [
-        `# Library ${token.library.owner}/${token.library.slug} (seq ${summary.seq})`,
-        "",
-        `Concepts: ${summary.concepts} · attachments: ${summary.attachments} · open work items: ${summary.open_work} (${summary.open_comments} of them comment threads)${summary.stale_soon > 0 ? ` · stale soon: ${summary.stale_soon} (\`work\` kind stale_soon)` : ""}`,
-        ...healthLines(summary.health),
-        `Types: ${types || "none yet"}`,
-        you(),
-        ...(others.length > 0
-          ? [
-              `Other libraries you can reach: ${libraryList(others)}. Pass \`library\` on every call.`,
-            ]
-          : []),
-        "",
-        "## Root index.md",
-        "",
-        empty
-          ? "(The library is empty. Start by writing a concept; `write` describes the format.)"
-          : root.kind === "derived"
-            ? root.markdown.trimEnd()
-            : "",
-        "",
-        "## How to work here",
-        "",
-        "- `browse` a directory before reading; follow links; check frontmatter (type, status, trust, stale) before relying on a body.",
-        "- `edit` for small changes, `write` for new concepts or rewrites, `batch` for related changes. Pass `if_match` from your last read; on a 412, re-read and reapply.",
-        "- A one-line `note` on every write. Fix the `lint` each write returns. Never write index.md or log.md, and never set generated or verified.",
-        "- A concept needs frontmatter with a `type`, or the write is refused. A concept with open comment threads cannot be deleted until they are resolved.",
-      ];
-      if (tier2) {
-        lines.push(
-          "- `work` lists open comments, stale concepts, broken links and lint to fix; `log` shows what others changed recently.",
-          "- Comments are requests from people: read a concept's open threads (`comments`) before editing it, then reply and resolve with `comment`.",
+      return text(await opening(token, lib));
+    }),
+  );
+
+  server.registerTool(
+    "create_library",
+    {
+      title: "Create a library",
+      description:
+        "Creates a new library owned by the person you act for, exactly as if they made it in the app, and opens it as `start` does; then pass its owner/slug as `library` on every call. Only when the person asks for a new library. Needs a read-and-write connection the person allowed to create libraries at consent; it counts against their library limit. You cannot invite members, share, transfer or delete it: the person does that in the app.",
+      inputSchema: {
+        slug: z
+          .string()
+          .describe(
+            "The library's name in its URL: lowercase letters, digits and hyphens, up to 63 characters, e.g. `recipes`. Its owner is always the person you act for.",
+          ),
+        title: z
+          .string()
+          .optional()
+          .describe("Optional: what the library is called, one line (up to 120 characters)."),
+        description: z
+          .string()
+          .optional()
+          .describe("Optional: what the library is for, one line (up to 300 characters)."),
+      },
+      annotations: writes,
+    },
+    guarded(async ({ slug, title, description }) => {
+      if (!ctx.createLibrary) {
+        throw new OkfError(
+          403,
+          "create_not_allowed",
+          `This token reaches one library and cannot create libraries. The person can create one at ${ctx.origin}/, or connect an app over OAuth and allow Create libraries.`,
         );
       }
-      return text(lines.join("\n"));
+      const made = await ctx.createLibrary({ slug, title, description });
+      // Later calls in this request reach it too; later requests resolve it from the grant.
+      ctx.libraries = [...ctx.libraries, made.token];
+      const { token, lib } = pick(`${made.token.library.owner}/${made.token.library.slug}`);
+      return text(
+        [
+          `Created library ${token.library.owner}/${token.library.slug}, owned by @${token.library.owner}. Pass library: "${token.library.owner}/${token.library.slug}" on every call.`,
+          "",
+          await opening(token, lib),
+        ].join("\n"),
+      );
     }),
   );
 

@@ -56,6 +56,10 @@ describe("D1 indexes (TEMPRA-78)", () => {
       WHERE user = ? AND read_at IS NULL AND done_at IS NULL GROUP BY library`,
     "seen cursors": "SELECT library, seq FROM library_seen WHERE user = ?",
     "mail settings": "SELECT library, immediate, digest FROM notification_prefs WHERE user = ?",
+    "a connection's created libraries":
+      "SELECT library FROM grant_libraries WHERE grant_id = ? AND user = ?",
+    "delete a library's connection rows": "DELETE FROM grant_libraries WHERE library = ?",
+    "delete an account's connection rows": "DELETE FROM grant_libraries WHERE user = ?",
   };
   for (const [name, sql] of Object.entries(queries)) {
     test(`${name} scans no table`, () => {

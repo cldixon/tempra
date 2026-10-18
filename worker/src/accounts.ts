@@ -24,7 +24,12 @@ export type Role = "owner" | "write" | "read";
 export type MemberRole = Exclude<Role, "owner">;
 
 /** A library the account reaches, as its owner or as a member. */
-export type ReachableLibrary = LibraryRef & { role: Role };
+/** A library the user reaches, with their role and what its creator said it is for. */
+export type ReachableLibrary = LibraryRef & {
+  role: Role;
+  title?: string | null;
+  description?: string | null;
+};
 
 /** A member of a library, as its owner sees the list. */
 export interface Member {
@@ -184,7 +189,24 @@ export interface Accounts {
   revokeInvitation(id: string, libraryId: string): Promise<boolean>;
   /** A library by its path, with its owner's users row id; null when there is none. */
   library(owner: string, slug: string): Promise<(LibraryRef & { ownerId: string }) | null>;
-  createLibrary(slug: string, owner: Pick<User, "id" | "handle">): Promise<LibraryRef>;
+  /**
+   * Creates a library owned by `owner`, within their library limit. With `grant`, a "selected"
+   * app connection's id (AccountGrant.id), the connection that made it also reaches it
+   * (grant_libraries), in the same transaction. Refuses `bad_slug`, `slug_taken` (409) and
+   * `library_limit` (403).
+   */
+  createLibrary(
+    slug: string,
+    owner: Pick<User, "id" | "handle">,
+    opts?: { title?: string | null; description?: string | null; grant?: string },
+  ): Promise<LibraryRef & { title: string | null; description: string | null }>;
+  /**
+   * The libraries a "selected" connection created (TEMPRA-100), by id: only rows written by that
+   * connection's own grant id for that same person.
+   */
+  grantLibraries(grantId: string, userId: string): Promise<string[]>;
+  /** A library's title and description as its creator gave them; null when there is no such library. */
+  about(libraryId: string): Promise<{ title: string | null; description: string | null } | null>;
   /**
    * Tokens on the user's libraries and those they minted on libraries shared with them, newest
    * first, with the library (its slug, or owner/slug when shared) and the minter's email.
@@ -299,6 +321,28 @@ export function checkSlug(slug: string): string {
       "bad_slug",
       "A library name uses lowercase letters, digits and hyphens, up to 63 characters.",
     );
+  }
+  return s;
+}
+
+/**
+ * An optional one-line text a person or agent gives a library (its title, its description):
+ * trimmed, at most `max` characters, no line breaks or control characters, so it cannot pose as
+ * more lines of `start` or of a page. Empty is null.
+ */
+export function checkLine(
+  value: string | null | undefined,
+  what: string,
+  max: number,
+): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string")
+    throw new OkfError(400, `bad_${what}`, `The ${what} must be text.`);
+  const s = value.trim();
+  if (s === "") return null;
+  // biome-ignore lint/suspicious/noControlCharactersInRegex: refusing control characters
+  if (/[\u0000-\u001f\u007f\u2028\u2029]/.test(s) || s.length > max) {
+    throw new OkfError(400, `bad_${what}`, `The ${what} is one line of at most ${max} characters.`);
   }
   return s;
 }
@@ -452,10 +496,12 @@ export function d1Accounts(db: D1Database): Accounts {
     async reachable(userId) {
       const r = await db
         .prepare(
-          `SELECT l.id, l.slug, l.do_id, u.handle AS owner, 'owner' AS role, 0 AS shared
+          `SELECT l.id, l.slug, l.do_id, u.handle AS owner, 'owner' AS role, 0 AS shared,
+                  l.title, l.description
            FROM libraries l JOIN users u ON u.id = l.owner WHERE l.owner = ?1
            UNION ALL
-           SELECT l.id, l.slug, l.do_id, u.handle AS owner, m.role, 1 AS shared
+           SELECT l.id, l.slug, l.do_id, u.handle AS owner, m.role, 1 AS shared,
+                  l.title, l.description
            FROM library_members m JOIN libraries l ON l.id = m.library
            JOIN users u ON u.id = l.owner
            WHERE m.user = ?1 AND u.suspended IS NULL
@@ -699,30 +745,57 @@ export function d1Accounts(db: D1Database): Accounts {
         .bind(owner, slug)
         .first<LibraryRef & { ownerId: string }>();
     },
-    async createLibrary(slugInput, owner) {
+    async createLibrary(slugInput, owner, opts = {}) {
       const slug = checkSlug(slugInput);
+      const title = checkLine(opts.title, "title", 120);
+      const description = checkLine(opts.description, "description", 300);
       const { libraries: max } = await limitsOf(owner.id);
       const id = `lib_${crypto.randomUUID()}`;
+      const now = new Date().toISOString();
       // The count is checked in the same statement, so two creates cannot both slip under it.
-      const r = await db
+      const insert = db
         .prepare(
-          `INSERT OR IGNORE INTO libraries (id, slug, owner, visibility, created, do_id)
-           SELECT ?1, ?2, ?3, 'private', ?4, ?1
+          `INSERT OR IGNORE INTO libraries (id, slug, owner, visibility, created, do_id, title, description)
+           SELECT ?1, ?2, ?3, 'private', ?4, ?1, ?6, ?7
            WHERE (SELECT COUNT(*) FROM libraries WHERE owner = ?3) < ?5`,
         )
-        .bind(id, slug, owner.id, new Date().toISOString(), max)
-        .run();
-      if (!r.meta.changes) {
+        .bind(id, slug, owner.id, now, max, title, description);
+      const [r] = opts.grant
+        ? await db.batch([
+            insert,
+            // Only if the library above went in, and only for the person who owns it.
+            db
+              .prepare(
+                `INSERT INTO grant_libraries (grant_id, user, library, created)
+                 SELECT ?1, ?2, ?3, ?4 WHERE EXISTS (SELECT 1 FROM libraries WHERE id = ?3 AND owner = ?2)`,
+              )
+              .bind(opts.grant, owner.id, id, now),
+          ])
+        : [await insert.run()];
+      if (!r?.meta.changes) {
         const exists = await db
           .prepare("SELECT 1 AS x FROM libraries WHERE owner = ? AND slug = ?")
           .bind(owner.id, slug)
           .first();
         if (exists) {
-          throw new OkfError(409, "library_exists", `You already have a library named ${slug}.`);
+          throw new OkfError(409, "slug_taken", `You already have a library named ${slug}.`);
         }
-        throw overLimit("libraries", max);
+        throw overLimit("libraries", max, "library_limit");
       }
-      return { id, slug, do_id: id, owner: owner.handle };
+      return { id, slug, do_id: id, owner: owner.handle, title, description };
+    },
+    async about(libraryId) {
+      return db
+        .prepare("SELECT title, description FROM libraries WHERE id = ?")
+        .bind(libraryId)
+        .first<{ title: string | null; description: string | null }>();
+    },
+    async grantLibraries(grantId, userId) {
+      const r = await db
+        .prepare("SELECT library FROM grant_libraries WHERE grant_id = ? AND user = ?")
+        .bind(grantId, userId)
+        .all<{ library: string }>();
+      return r.results.map((row) => row.library);
     },
     async tokens(userId) {
       // A union, not `l.owner = ?1 OR t.created_by = ?1`: an OR across two tables scans tokens.
@@ -871,6 +944,7 @@ export function d1Accounts(db: D1Database): Accounts {
         db.prepare("DELETE FROM notifications WHERE library = ?").bind(libraryId),
         db.prepare("DELETE FROM library_seen WHERE library = ?").bind(libraryId),
         db.prepare("DELETE FROM notification_prefs WHERE library = ?").bind(libraryId),
+        db.prepare("DELETE FROM grant_libraries WHERE library = ?").bind(libraryId),
         db.prepare("DELETE FROM libraries WHERE id = ?").bind(libraryId),
       ]);
     },
@@ -890,6 +964,7 @@ export function d1Accounts(db: D1Database): Accounts {
         db.prepare("DELETE FROM notifications WHERE user = ?").bind(user.id),
         db.prepare("DELETE FROM library_seen WHERE user = ?").bind(user.id),
         db.prepare("DELETE FROM notification_prefs WHERE user = ?").bind(user.id),
+        db.prepare("DELETE FROM grant_libraries WHERE user = ?").bind(user.id),
         db.prepare("DELETE FROM users WHERE id = ?").bind(user.id),
         db
           .prepare("INSERT OR REPLACE INTO handle_holds (handle, user, released) VALUES (?, ?, ?)")
