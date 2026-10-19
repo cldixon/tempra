@@ -126,7 +126,7 @@ describe("Needs you: waiting on your reply", () => {
 });
 
 describe("Needs you: to verify", () => {
-  test("never verified, and verified then changed; the current verified are not listed", () => {
+  test("verified then changed; the never verified are counted, the current verified left out", () => {
     const s = newStore();
     write(s, agent(), "a.md");
     write(s, agent(), "b.md");
@@ -136,11 +136,11 @@ describe("Needs you: to verify", () => {
     write(s, agent(), "b.md", doc("b.md", "", "Revenue minus cost, monthly."));
     write(s, anasAgent(), "b.md", doc("b.md", "", "Revenue minus cost, quarterly."));
 
-    const { verify, count, replies, stale } = s.needs(ME);
-    expect(verify.total).toBe(2);
+    const { verify, unverified, count, replies, stale } = s.needs(ME);
+    expect(verify.total).toBe(1);
     expect(verify.next_offset).toBeNull();
-    expect(verify.items.map((i) => i.path)).toEqual(["b.md", "a.md"]);
-    const [b, a] = verify.items;
+    expect(verify.items.map((i) => i.path)).toEqual(["b.md"]);
+    const [b] = verify.items;
     expect(b).toMatchObject({
       title: "b.md",
       actor: "claude-code/ana",
@@ -148,11 +148,12 @@ describe("Needs you: to verify", () => {
       verified: { actor: "human:ana" },
       changes: 2,
     });
-    expect(b?.verified?.seq).toBeLessThan(b?.seq ?? 0);
-    expect(a).toMatchObject({ verified: null, changes: 1, actor: "claude-code/bob" });
+    expect(b?.verified.seq).toBeLessThan(b?.seq ?? 0);
+    // Never verified (TEMPRA-111): a standing, not a request; counted, and not in the sidebar's.
+    expect(unverified).toEqual({ total: 1 });
     expect(count).toBe(replies.length + verify.total + stale.length);
-    // The same definition as the health summary's.
-    expect(s.health().unverified.total).toBe(verify.total);
+    // Together, the health summary's (which counts any verification).
+    expect(s.health().unverified.total).toBe(verify.total + unverified.total);
   });
 
   test("a move is not a change, and only a person's verification counts", () => {
@@ -164,14 +165,21 @@ describe("Needs you: to verify", () => {
     s.apply(agent(), [{ op: "move", path: "m/a.md", to: "n/a.md" }]);
     // A process vouching for a concept is not a person verifying it.
     s.verify(ctx("process:recheck"), "p.md");
-    expect(s.needs(ME).verify.items.map((i) => i.path)).toEqual(["p.md"]);
+    expect(s.needs(ME).verify.items).toEqual([]);
+    expect(s.needs(ME).unverified.total).toBe(1);
     // The health summary counts any verification, a process's too.
     expect(s.health().unverified.total).toBe(0);
   });
 
   test("paged newest first by offset", () => {
     const s = newStore();
-    for (const p of ["a.md", "b.md", "c.md", "d.md", "e.md"]) write(s, agent(), p);
+    for (const p of ["a.md", "b.md", "c.md", "d.md", "e.md"]) {
+      write(s, agent(), p);
+      s.verify(ana(), p);
+    }
+    for (const p of ["a.md", "b.md", "c.md", "d.md", "e.md"]) {
+      write(s, agent(), p, doc(p, "", `Changed after ${p} was verified.`));
+    }
     const first = s.needs(ME, { limit: 2 }).verify;
     expect(first.total).toBe(5);
     expect(first.items.map((i) => i.path)).toEqual(["e.md", "d.md"]);
@@ -203,7 +211,9 @@ describe("Needs you: going stale, and the agents' housekeeping", () => {
       broken_link: 1,
       total: (work.lint ?? 0) + (work.structure ?? 0) + 1,
     });
-    expect(needs.count).toBe(needs.verify.total + 2);
+    expect(needs.verify.total).toBe(0);
+    expect(needs.unverified.total).toBe(4);
+    expect(needs.count).toBe(2);
   });
 });
 
@@ -229,9 +239,11 @@ describe("GET /needs", () => {
     const before = (await (await call(s.app, "/needs")).json()) as {
       replies: unknown[];
       verify: { total: number; items: { path: string }[] };
+      unverified: { total: number };
     };
     expect(before.replies).toEqual([]);
-    expect(before.verify.items.map((i) => i.path)).toEqual(["metrics/margin.md"]);
+    expect(before.verify.items).toEqual([]);
+    expect(before.unverified.total).toBe(1);
 
     const answered = await s.req(`/comments/${thread.id}`, {
       method: "POST",
@@ -247,7 +259,7 @@ describe("GET /needs", () => {
     expect(after.replies).toMatchObject([
       { thread: thread.id, last: { actor: "claude-code/test", body: "Yes." } },
     ]);
-    expect(after.count).toBe(2);
+    expect(after.count).toBe(1);
     // The owner's human: token is the same person.
     const human = (await (await s.req("/needs", { token: "human" })).json()) as {
       replies: { thread: string }[];

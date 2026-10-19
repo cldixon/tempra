@@ -29,6 +29,7 @@ const needs = (over: Partial<Needs> = {}): Needs => ({
   seq: 40,
   replies: [],
   verify: { total: 0, items: [], next_offset: null },
+  unverified: { total: 0 },
   stale: [],
   housekeeping: { lint: 0, structure: 0, broken_link: 0, total: 0 },
   count: 0,
@@ -85,7 +86,7 @@ describe("Needs you (take 3)", () => {
               ts: hour(2),
               actor: "claude-code/dev",
               by: null,
-              verified: null,
+              verified: { actor: "human:ann", seq: 12, ts: "2026-10-06T12:00:00Z" },
               changes: 1,
             },
           ],
@@ -98,6 +99,7 @@ describe("Needs you (take 3)", () => {
             stale: "stale_soon",
           },
         ],
+        unverified: { total: 48 },
         housekeeping: { lint: 1, structure: 21, broken_link: 0, total: 22 },
       }),
     );
@@ -109,7 +111,10 @@ describe("Needs you (take 3)", () => {
     expect(html).toContain('To verify <span class="needs-count">· 21</span>');
     // A moment, shown on the reader's own calendar.
     expect(html).toContain(`2 changes since you verified on ${day("2026-10-05T12:00:00Z")}`);
-    expect(html).toContain("Never verified");
+    expect(html).toContain(`1 change since @ann verified on ${day("2026-10-06T12:00:00Z")}`);
+    // Never verified (TEMPRA-111): one counted line, not rows.
+    expect(html).toContain("Not yet verified · 48 concepts.");
+    expect(html).not.toContain("Never verified");
     expect(html).toContain(">app/diagrams.md<");
     expect(html).toContain(`href="${urls.review("app/reader.md")}"`);
     expect(html).toContain(">More<");
