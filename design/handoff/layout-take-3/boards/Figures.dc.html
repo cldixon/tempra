@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Figures in the reader</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:#1a1a1b;text-decoration:none}a:hover{color:#6f6f73}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; box-sizing: border-box; background: #f4f4f2; color: #1a1a1b; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, 'Segoe UI', Helvetica, sans-serif; font-size: 14px; line-height: 1.5; display: flex; padding: 8px">
+
+<main style="flex: 1; min-width: 0; background: #ffffff; border-radius: 14px; box-shadow: 0 0 0 1px rgb(0 0 0 / .04), 0 4px 20px rgb(0 0 0 / .03); overflow: hidden; position: relative; display: flex; justify-content: center">
+
+<div style="position: absolute; top: 14px; left: 14px; right: 16px; display: flex; align-items: center; gap: 8px; font-size: 12px; color: #8a8a8e">
+<button type="button" aria-label="Show sidebar" style="width: 32px; height: 32px; border: 0; border-radius: 8px; background: transparent; display: grid; place-items: center; color: #6f6f73; cursor: pointer"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M9 4v16"/></svg></button>
+<span>tempra-dev</span><span aria-hidden="true">/</span><span>The app</span><span aria-hidden="true">/</span><span style="color: #3a3a3c">Diagrams</span>
+<div role="toolbar" aria-label="Concept" style="margin-left: auto; display: flex; gap: 2px; align-items: center">
+<button type="button" aria-pressed="false" aria-label="Show comments, none open" style="height: 32px; padding: 0 10px; border: 0; border-radius: 8px; background: transparent; display: flex; align-items: center; gap: 6px; color: #6f6f73; font: inherit; font-size: 12px; cursor: pointer"><svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>0</button>
+<button type="button" aria-label="More: Markdown, properties, raw file" style="width: 32px; height: 32px; border: 0; border-radius: 8px; background: transparent; display: grid; place-items: center; color: #6f6f73; cursor: pointer"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg></button>
+</div>
+</div>
+
+<article style="width: 100%; max-width: 760px; padding: 72px 40px 40px; display: flex; flex-direction: column">
+<h1 style="margin: 0 0 8px; font-family: 'Iowan Old Style', 'Palatino Linotype', Charter, Georgia, serif; font-size: 36px; font-weight: 500; letter-spacing: -.01em; line-height: 1.15">Diagrams</h1>
+<div style="display: flex; align-items: center; gap: 10px; padding: 6px 0 14px; border-bottom: 1px solid #efefec; font-size: 13px; color: #6f6f73">
+<span aria-hidden="true" style="width: 22px; height: 22px; border-radius: 999px; background: #1a1a1b; display: grid; place-items: center; font-size: 9px; color: #ffffff">C</span>
+<span><b style="font-weight: 500; color: #1a1a1b">Claude Code</b> · 2 hours ago ·</span>
+<button type="button" aria-expanded="false" style="padding: 2px 8px; margin-left: -6px; border: 0; border-radius: 6px; background: transparent; font: inherit; color: #6f6f73; text-decoration: underline; text-decoration-color: #d2d2ce; text-underline-offset: 3px; cursor: pointer">3 versions</button>
+<span style="margin-left: auto; display: flex; align-items: center; gap: 6px"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 999px; border: 1.5px solid #6f6f73; box-sizing: border-box"></span>Not yet verified</span>
+</div>
+
+<div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 28px; padding-top: 26px">
+
+<figure style="margin: 0; display: flex; flex-direction: column; gap: 8px; grid-column: span 2">
+<div style="position: relative; border: 1px solid #efefec; border-radius: 12px; padding: 26px 20px; display: flex; justify-content: center; align-items: center; gap: 0">
+<span style="padding: 9px 16px; border: 1px solid #d2d2ce; border-radius: 8px; background: #fafaf8; font-size: 14px">Agent</span>
+<span aria-hidden="true" style="width: 70px; height: 1px; background: #8a8a8e; position: relative"><span style="position: absolute; top: -18px; left: 14px; font-size: 11px; color: #6f6f73">write</span></span>
+<span style="padding: 9px 16px; border: 1px solid #d2d2ce; border-radius: 8px; background: #fafaf8; font-size: 14px">Ledger</span>
+<span aria-hidden="true" style="width: 70px; height: 1px; background: #8a8a8e"></span>
+<span style="padding: 9px 16px; border: 1px solid #d2d2ce; border-radius: 8px; background: #fafaf8; font-size: 14px">Reader</span>
+<div style="position: absolute; top: 8px; right: 8px; display: flex; gap: 2px">
+<button type="button" style="padding: 3px 10px; border: 0; border-radius: 999px; background: #f4f4f2; font: inherit; font-size: 11px; color: #6f6f73; cursor: pointer">Source</button>
+<button type="button" aria-label="Enlarge" style="width: 24px; height: 24px; border: 0; border-radius: 999px; background: #f4f4f2; display: grid; place-items: center; color: #6f6f73; cursor: pointer"><svg aria-hidden="true" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg></button>
+</div>
+</div>
+<figcaption style="font-size: 12px; color: #8a8a8e"><b style="font-weight: 500; color: #6f6f73">Figure 1.</b> A write goes through the ledger before anyone reads it. Mermaid, drawn by Pele.</figcaption>
+</figure>
+
+<figure style="margin: 0; display: flex; flex-direction: column; gap: 8px">
+<a href="Lightbox.dc.html" aria-label="Enlarge the photo" style="display: block; position: relative">
+<img src="/_blob/09db543a1872e50d507423a2f56527e7" alt="A grey residential tower with the sunset reflected in its windows" style="width: 100%; height: 210px; object-fit: cover; border-radius: 12px; display: block">
+</a>
+<figcaption style="font-size: 12px; color: #8a8a8e"><b style="font-weight: 500; color: #6f6f73">Figure 2.</b> A photo from <span style="text-decoration: underline; text-decoration-color: #d2d2ce; text-underline-offset: 3px">assets/miami.webp</span>. The caption is the image's title, else its alt text.</figcaption>
+</figure>
+
+<figure style="margin: 0; display: flex; flex-direction: column; gap: 8px">
+<div role="img" aria-label="Image could not be shown" style="height: 210px; border: 1px dashed #d2d2ce; border-radius: 12px; background: #fafaf8; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; text-align: center; padding: 0 24px">
+<svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#8a8a8e" stroke-width="1.5"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m3 16 5-5 4 4 3-3 6 6M3 3l18 18"/></svg>
+<span style="font-size: 13px; color: #3a3a3c">This image can't be shown</span>
+<span style="font-size: 12px; color: #8a8a8e">assets/attach-test.png is damaged. Its alt text: "Attachment test".</span>
+<a href="#" style="font-size: 12px; text-decoration: underline; text-decoration-color: #d2d2ce; text-underline-offset: 3px">Ask an agent to replace it</a>
+</div>
+<figcaption style="font-size: 12px; color: #8a8a8e"><b style="font-weight: 500; color: #6f6f73">Figure 3.</b> The broken-image state: the box keeps its place, says why, and offers the fix.</figcaption>
+</figure>
+
+<div style="grid-column: span 2; display: flex; flex-direction: column; gap: 8px">
+<div style="border: 1px solid #efefec; border-radius: 12px; overflow: hidden">
+<table style="width: 100%; border-collapse: collapse; font-size: 14px">
+<thead><tr style="background: #fafaf8; text-align: left"><th style="padding: 9px 14px; font-weight: 500; border-bottom: 1px solid #efefec">Fence</th><th style="padding: 9px 14px; font-weight: 500; border-bottom: 1px solid #efefec">Drawn as</th><th style="padding: 9px 14px; font-weight: 500; border-bottom: 1px solid #efefec">Checked on write</th></tr></thead>
+<tbody>
+<tr><td style="padding: 9px 14px; border-bottom: 1px solid #f4f4f2; font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 13px">mermaid</td><td style="padding: 9px 14px; border-bottom: 1px solid #f4f4f2">a diagram, by Pele</td><td style="padding: 9px 14px; border-bottom: 1px solid #f4f4f2">yes, diagram_invalid lint</td></tr>
+<tr><td style="padding: 9px 14px; font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 13px">anything else</td><td style="padding: 9px 14px">a code block</td><td style="padding: 9px 14px">no</td></tr>
+</tbody>
+</table>
+</div>
+<div style="font-size: 12px; color: #8a8a8e">Tables fill the column, with a quiet header row; wide ones scroll inside their box.</div>
+</div>
+</div>
+</article>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

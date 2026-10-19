@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Comments on a phone</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:#1a1a1b;text-decoration:none}a:hover{color:#6f6f73}
+</style>
+</helmet>
+<div style="width: 390px; height: 844px; box-sizing: border-box; background: #ffffff; color: #1a1a1b; font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, 'Segoe UI', Helvetica, sans-serif; font-size: 15px; line-height: 1.45; position: relative; overflow: hidden">
+
+<div aria-hidden="true" style="padding: 10px 8px 0; display: flex; align-items: center; gap: 4px; opacity: .5">
+<span style="width: 44px; height: 44px; display: grid; place-items: center"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m15 6-6 6 6 6"/></svg></span>
+<span style="font-size: 13px; color: #8a8a8e">The app</span>
+</div>
+<div aria-hidden="true" style="padding: 8px 20px; opacity: .45; font-family: 'Iowan Old Style', 'Palatino Linotype', Charter, Georgia, serif">
+<div style="font-size: 30px; font-weight: 500; line-height: 1.15; margin-bottom: 14px">Reader</div>
+<p style="margin: 0; font-size: 17px; line-height: 1.6"><span style="background: #ececea; border-bottom: 1.5px solid #3a3a3c">Hover or focus a footnote marker and a card shows its source</span>, numbered as the Contents panel numbers it.</p>
+</div>
+
+<div style="position: absolute; inset: 0; background: rgb(0 0 0 / .12)"></div>
+
+<section role="dialog" aria-label="Comments" style="position: absolute; left: 0; right: 0; bottom: 0; height: 600px; background: #ffffff; border-radius: 18px 18px 0 0; box-shadow: 0 -8px 30px rgb(0 0 0 / .12); display: flex; flex-direction: column">
+<div style="display: flex; align-items: center; gap: 8px; padding: 10px 8px 6px 16px">
+<h2 style="margin: 0; font-size: 16px; font-weight: 600">Comments</h2>
+<span style="font-size: 13px; color: #8a8a8e">2 open</span>
+<button type="button" aria-label="Close comments" style="margin-left: auto; width: 44px; height: 44px; border: 0; background: transparent; border-radius: 999px; display: grid; place-items: center; color: #6f6f73; cursor: pointer"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
+</div>
+
+<div style="flex: 1; min-height: 0; overflow: hidden; padding: 0 16px; display: flex; flex-direction: column; gap: 14px">
+<blockquote style="margin: 0; padding-left: 10px; border-left: 2px solid #3a3a3c; font-family: 'Iowan Old Style', Georgia, serif; font-size: 14px; color: #6f6f73">Hover or focus a footnote marker and a card shows its source</blockquote>
+<div style="display: flex; gap: 10px">
+<span aria-hidden="true" style="width: 28px; height: 28px; flex: none; border-radius: 999px; background: #e1e1dd; display: grid; place-items: center; font-size: 10px; font-weight: 600">CD</span>
+<div style="display: flex; flex-direction: column; gap: 2px; font-size: 14px"><span><b style="font-weight: 600">You</b> <span style="color: #a3a3a7">· 1 h</span></span><span>@Claude Code the card shows "[^issue]" instead of the number. Can it show 1, 2, like the panel?</span></div>
+</div>
+<div style="display: flex; gap: 10px">
+<span aria-hidden="true" style="width: 28px; height: 28px; flex: none; border-radius: 999px; background: #1a1a1b; display: grid; place-items: center; font-size: 10px; color: #ffffff">C</span>
+<div style="display: flex; flex-direction: column; gap: 8px; font-size: 14px"><span><b style="font-weight: 600">Claude Code</b> <span style="color: #a3a3a7">· 14 min</span></span><span>Done: cards now show the source's number. Resolve if that's what you meant.</span>
+<a href="#" style="align-self: flex-start; display: flex; align-items: center; min-height: 36px; padding: 0 12px; border-radius: 999px; background: #f4f4f2; font-size: 13px; color: #3a3a3c">See the change · version 7</a></div>
+</div>
+<button type="button" style="align-self: flex-start; min-height: 44px; padding: 0 18px; border: 0; border-radius: 999px; background: #1a1a1b; color: #ffffff; font: inherit; font-size: 14px; font-weight: 500; cursor: pointer">Resolve</button>
+<a href="#" style="display: flex; align-items: center; gap: 8px; min-height: 44px; padding: 0 2px; border-top: 1px solid #efefec; font-size: 14px; color: #6f6f73">1 more open thread<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" style="margin-left: auto"><path d="m9 6 6 6-6 6"/></svg></a>
+</div>
+
+<div style="padding: 10px 16px 28px; border-top: 1px solid #f0f0ee">
+<label style="display: flex; align-items: center; min-height: 44px; padding: 0 14px; border-radius: 999px; background: #f4f4f2">
+<span style="position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0)">Reply</span>
+<input placeholder="Reply, or @ an agent…" style="flex: 1; border: 0; background: transparent; font: inherit; font-size: 15px">
+</label>
+</div>
+</section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>
