@@ -6,7 +6,9 @@ The aim is the human half of Tempra: a legible, low-friction place to read what 
 
 ## How to read this
 
-- **The boards** are in `boards/` (`.dc.html`, open them in a browser; `support.js` is their runtime) and, more legibly, on the design canvas: https://claude.ai/artifact/H4rEdkvVCyK2AHQaosbaih (private to the owner's account; a Claude session on that account can read it with the Artifact tool, `action: "read"`). Images on the boards point at the canvas's own uploads, so they are blank when a board is opened from disk.
+- **Look at `screenshots/`** first: one PNG per board (desktop 1440×900, phone 390×844 at 2×), rendered from `boards/`.
+- **The boards' source** is in `boards/` (`.dc.html`): HTML with inline styles, readable as a spec of structure, spacing and wording. To open one in a browser, `support.js` (their runtime) loads React and Babel from unpkg.com, so it needs that host reachable; images on the boards point at the canvas's own uploads and are blank from disk.
+- **The design canvas** has the same boards, plus the audit and the colour explorations: https://claude.ai/artifact/H4rEdkvVCyK2AHQaosbaih. It is private to the owner's account; a Claude session on that account can read it with the Artifact tool (`action: "read"`). Everything needed to implement is in this folder, so the canvas is optional.
 - **They are mockups, not code.** Recreate them with the app's existing components, `@tempra/design` tokens and CSS (the UI rule in CLAUDE.md: nothing styled inline, every visual decision in the package). Treat structure, hierarchy, wording and behaviour as decided; treat exact pixel values as intent. Where a board and this file disagree, this file wins.
 - **The content on the boards is illustrative.** Names, threads, counts and times are made up to show shape.
 - The same canvas holds the audit that motivated this round ("Fundamentals audit") and colour explorations that are not part of it.
