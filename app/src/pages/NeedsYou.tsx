@@ -86,6 +86,7 @@ export function NeedsBody(props: {
           </ul>
         </Section>
       )}
+      {needs.unverified.total > 0 && <NotYetVerified total={needs.unverified.total} />}
       {needs.housekeeping.total > 0 && <Housekeeping urls={urls} counts={needs.housekeeping} />}
     </>
   );
@@ -183,7 +184,7 @@ function ToVerify(props: { urls: Urls; needs: Needs; view: View; me: string | nu
       id="needs-verify"
       title="To verify"
       count={needs.verify.total}
-      note="changed by agents since a person last checked"
+      note="changed since a person verified them"
     >
       <ul className="needs-box">
         {items.map((v) => (
@@ -212,9 +213,8 @@ function ToVerify(props: { urls: Urls; needs: Needs; view: View; me: string | nu
   );
 }
 
-/** "2 changes since you verified on Oct 5", or "Never verified". */
+/** "2 changes since you verified on Oct 5". */
 function sinceVerified(item: Needs["verify"]["items"][number], me: string | null): string {
-  if (!item.verified) return "Never verified";
   const by = item.verified.actor === me ? "you" : `@${who(item.verified.actor)}`;
   return `${plural(item.changes, "change")} since ${by} verified on ${day(item.verified.ts)}`;
 }
@@ -296,6 +296,21 @@ function StaleRow(props: { urls: Urls; item: Needs["stale"][number]; onAsked(): 
   );
 }
 
+/**
+ * Concepts no person has verified (TEMPRA-111): a standing, not a request. A library an agent has
+ * just built is all of them, so they are counted on one collapsed line, outside the sidebar's count.
+ */
+function NotYetVerified({ total }: { total: number }) {
+  return (
+    <details className="needs-counted needs-unverified">
+      <summary>
+        Not yet verified · {plural(total, "concept")}. Verify them as you come to rely on them.
+      </summary>
+      <p>Each folder shows which of its concepts a person has verified.</p>
+    </details>
+  );
+}
+
 /** The agents' share of the work queue: counted, collapsed, nothing for the person to do. */
 function Housekeeping(props: { urls: Urls; counts: Needs["housekeeping"] }) {
   const c = props.counts;
@@ -307,7 +322,7 @@ function Housekeeping(props: { urls: Urls; counts: Needs["housekeeping"] }) {
     .filter(Boolean)
     .join(", ");
   return (
-    <details className="needs-housekeeping">
+    <details className="needs-counted needs-housekeeping">
       <summary>
         Agents' housekeeping · {plural(c.total, "item")} ({kinds}). You don't need to act.
       </summary>

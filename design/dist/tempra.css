@@ -3817,8 +3817,8 @@ a.verification:hover {
   font-weight: var(--tempra-weight-medium);
 }
 
-/* The agents' share: one quiet, collapsed line. */
-.needs-housekeeping {
+/* What is counted, not listed (never verified, the agents' share): one quiet, collapsed line. */
+.needs-counted {
   padding: 12px 14px;
   border-radius: var(--tempra-radius-box);
   background: var(--tempra-color-ground);
@@ -3826,7 +3826,7 @@ a.verification:hover {
   font-size: var(--tempra-text-ui);
 }
 
-.needs-housekeeping p {
+.needs-counted p {
   margin: var(--tempra-space-2) 0 0;
 }
 

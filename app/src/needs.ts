@@ -6,7 +6,8 @@ import type { Urls } from "./urls";
 
 /**
  * What only a person can do in a library (take 3, TEMPRA-106): `GET …/needs`, shared by the
- * sidebar's count, the library's home and the Needs you page. Agents' housekeeping is a count.
+ * sidebar's count, the library's home and the Needs you page. Concepts never verified and the
+ * agents' housekeeping are counts.
  */
 export interface Needs {
   seq: number;
@@ -18,7 +19,7 @@ export interface Needs {
     quote: string | null;
     last: { actor: string; by: ActedBy | null; body: string; ts: string; seq: number };
   }[];
-  /** Concepts changed since a person last verified them, or never verified. */
+  /** Concepts a person verified that changed since. */
   verify: {
     total: number;
     items: {
@@ -28,11 +29,13 @@ export interface Needs {
       ts: string;
       actor: string;
       by: ActedBy | null;
-      verified: { actor: string; seq: number; ts: string } | null;
+      verified: { actor: string; seq: number; ts: string };
       changes: number;
     }[];
     next_offset: number | null;
   };
+  /** Concepts no person has verified (TEMPRA-111): their standing, counted, never in `count`. */
+  unverified: { total: number };
   /** Stale, or going stale within 14 days; soonest first. */
   stale: {
     path: string;
