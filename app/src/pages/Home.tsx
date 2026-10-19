@@ -167,7 +167,8 @@ function NeedsSection({ urls, me }: { urls: Urls; me: string | null }) {
         href: urls.thread(r.path, r.thread),
         line: (
           <>
-            <b className="entry-who">{by.name}</b> replied on{" "}
+            {/* The thread may be theirs or a reply to the person's: "commented" fits both. */}
+            <b className="entry-who">{by.name}</b> commented on{" "}
             <b className="entry-who">{r.title ?? r.path}</b>
           </>
         ),
