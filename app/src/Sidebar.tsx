@@ -6,7 +6,7 @@ import { libraryName, useLibraries, useRole } from "./role";
 import { type OutlineFile, Tree } from "./Tree";
 import { type Me, switcherKey } from "./ui";
 import { Urls } from "./urls";
-import type { Place } from "./Workspace";
+import { type Place, placeName, useFrame } from "./Workspace";
 
 /**
  * The workspace's sidebar (take 3, tempra-dev: app/workspace): the library switcher, search, the
@@ -18,18 +18,13 @@ export function Sidebar(props: {
   place: Place;
   me: Me | null;
   changes: Map<string, AgentChange>;
-  latest: AgentChange | undefined;
   now: number;
   onSearch(): void;
   onHide(): void;
   onIndex(files: OutlineFile[], seq: number): void;
 }) {
   const { urls, place } = props;
-  const needs = useNeeds(urls);
   const unread = useUnread();
-  const count = needs.state === "ready" ? needs.data.count : 0;
-  const recent = warmth(props.latest, props.now);
-  const view = place.view;
   return (
     <>
       <div className="sidebar-head">
@@ -49,39 +44,7 @@ export function Sidebar(props: {
         <span>Search</span>
         <kbd>{switcherKey()}</kbd>
       </button>
-      <nav className="nav" aria-label="Views">
-        <a
-          className="nav-row"
-          href={urls.tree("")}
-          aria-current={view === "home" ? "page" : undefined}
-        >
-          <Icon name="home" />
-          <span className="nav-label">Home</span>
-        </a>
-        <a
-          className="nav-row"
-          href={urls.needs()}
-          aria-current={view === "needs" ? "page" : view === "work" ? "location" : undefined}
-        >
-          <Icon name="needs" />
-          <span className="nav-label">Needs you</span>
-          {count > 0 && <span className="nav-count">{count}</span>}
-        </a>
-        <a
-          className="nav-row"
-          href={urls.activity()}
-          aria-current={view === "activity" ? "page" : view === "ledger" ? "location" : undefined}
-        >
-          <Icon name="activity" />
-          <span className="nav-label">Activity</span>
-          {recent && (
-            <span className="nav-count" title="An agent changed something lately">
-              <span className={`change-dot ${recent}`} aria-hidden="true" />
-              <span className="visually-hidden">An agent changed something lately</span>
-            </span>
-          )}
-        </a>
-      </nav>
+      <ViewNav urls={urls} view={place.view} home />
       <div className="sidebar-label" id="sidebar-files">
         Library
       </div>
@@ -112,6 +75,65 @@ export function Sidebar(props: {
 }
 
 /**
+ * The person's views of a library as rows: Home (in the sidebar), Needs you with its count, and
+ * Activity with a dot after an agent's recent change. The sidebar shows them, and so does the
+ * library's home when the sidebar is not beside the sheet (TEMPRA-107, tempra-dev: app/workspace).
+ */
+export function ViewNav(props: { urls: Urls; view: Place["view"]; home?: boolean }) {
+  const { urls, view } = props;
+  const needs = useNeeds(urls);
+  const { latest, now } = useFrame();
+  const count = needs.state === "ready" ? needs.data.count : 0;
+  const recent = warmth(latest, now);
+  return (
+    <nav className="nav" aria-label="Views">
+      {props.home && (
+        <a
+          className="nav-row"
+          href={urls.tree("")}
+          aria-current={view === "home" ? "page" : undefined}
+        >
+          <Icon name="home" />
+          <span className="nav-label">Home</span>
+        </a>
+      )}
+      <a
+        className="nav-row"
+        href={urls.needs()}
+        aria-current={view === "needs" ? "page" : view === "work" ? "location" : undefined}
+      >
+        <Icon name="needs" />
+        <span className="nav-label">Needs you</span>
+        {count > 0 && <span className="nav-count">{count}</span>}
+      </a>
+      <a
+        className="nav-row"
+        href={urls.activity()}
+        aria-current={view === "activity" ? "page" : view === "ledger" ? "location" : undefined}
+      >
+        <Icon name="activity" />
+        <span className="nav-label">Activity</span>
+        {recent && (
+          <span className="nav-count" title="An agent changed something lately">
+            <span className={`change-dot ${recent}`} aria-hidden="true" />
+            <span className="visually-hidden">An agent changed something lately</span>
+          </span>
+        )}
+      </a>
+    </nav>
+  );
+}
+
+/** The library's tile: its initial on a dark square. */
+function LibraryTile({ urls }: { urls: Urls }) {
+  return (
+    <span className="lib-tile" aria-hidden="true">
+      {(urls.slug[0] ?? "?").toUpperCase()}
+    </span>
+  );
+}
+
+/**
  * The library's name and owner as a menu: the person's other libraries, then this library's
  * settings by role (Recovery and Delete are the owner's; tempra-dev: v2/sharing).
  */
@@ -135,9 +157,7 @@ export function LibrarySwitcher({ urls, place }: { urls: Urls; place: Place }) {
       buttonClass="lib-switch"
       label={
         <>
-          <span className="lib-tile" aria-hidden="true">
-            {(urls.slug[0] ?? "?").toUpperCase()}
-          </span>
+          <LibraryTile urls={urls} />
           <span className="lib-names">
             <span className="lib-name">{urls.slug}</span>
             <span className="lib-owner">{urls.owner}</span>
@@ -168,14 +188,21 @@ export function LibrarySwitcher({ urls, place }: { urls: Urls; place: Place }) {
   );
 }
 
-/** The phone's top bar: the drawer's button, the library, search and the person. */
+/**
+ * The phone's top bar (TEMPRA-107): the drawer's button on the left, then where the person is
+ * (the library's tile and name, a link to its home, with the page beneath it), then search and the
+ * person on the right.
+ */
 export function TopBar(props: {
   urls: Urls;
+  place: Place;
   me: Me | null;
   drawer: boolean;
   onDrawer(): void;
   onSearch(): void;
 }) {
+  const { urls } = props;
+  const here = placeName(props.place);
   return (
     <header className="ws-topbar">
       <button
@@ -187,8 +214,12 @@ export function TopBar(props: {
       >
         <Icon name="menu" />
       </button>
-      <a className="ws-topbar-name" href={props.urls.tree("")}>
-        {props.urls.slug}
+      <a className="ws-topbar-place" href={urls.tree("")}>
+        <LibraryTile urls={urls} />
+        <span className="lib-names">
+          <span className="lib-name">{urls.slug}</span>
+          {here && <span className="ws-topbar-here">{here}</span>}
+        </span>
       </a>
       <button
         type="button"
