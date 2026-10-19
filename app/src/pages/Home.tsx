@@ -15,7 +15,7 @@ import { api, useLoad } from "../api";
 import { Avatar, type Glyph, Icon } from "../chrome";
 import { useFeed, useLastSeen, useTrailing } from "../live";
 import { type Needs, useNeeds } from "../needs";
-import { clip, day, plural, Status, useMe, useTitle } from "../ui";
+import { calendarDay, clip, plural, Status, useMe, useTitle } from "../ui";
 import type { Urls } from "../urls";
 import { SheetPage } from "../Workspace";
 
@@ -197,7 +197,7 @@ function NeedsSection({ urls, me }: { urls: Urls; me: string | null }) {
         href: urls.file(s.path),
         line: `${s.title ?? s.path} ${staleWords(s.stale_after, now)}`,
         detail: "Ask an agent to review it.",
-        when: day(s.stale_after),
+        when: calendarDay(s.stale_after),
       });
     }
     return out.slice(0, 3);

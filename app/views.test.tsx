@@ -4,6 +4,7 @@ import { actorView } from "./src/agents";
 import type { Needs } from "./src/needs";
 import { FolderBody, type FolderView } from "./src/pages/Folder";
 import { NeedsBody } from "./src/pages/NeedsYou";
+import { day } from "./src/ui";
 import { Urls } from "./src/urls";
 
 const urls = new Urls("cl_dixon", "tempra-dev");
@@ -71,7 +72,7 @@ describe("Needs you (take 3)", () => {
               ts: hour(1),
               actor: "claude-code/dev",
               by: { person: "cl_dixon", agent: "a1" },
-              verified: { actor: me, seq: 10, ts: "2026-10-05T09:00:00Z" },
+              verified: { actor: me, seq: 10, ts: "2026-10-05T12:00:00Z" },
               changes: 2,
             },
             {
@@ -103,7 +104,8 @@ describe("Needs you (take 3)", () => {
     expect(html).toContain(" for @cl_dixon");
     expect(html).toContain("Resolve if that&#x27;s what you meant.");
     expect(html).toContain('To verify <span class="needs-count">· 21</span>');
-    expect(html).toContain("2 changes since you verified on Oct 5");
+    // A moment, shown on the reader's own calendar.
+    expect(html).toContain(`2 changes since you verified on ${day("2026-10-05T12:00:00Z")}`);
     expect(html).toContain("Never verified");
     expect(html).toContain(">app/diagrams.md<");
     expect(html).toContain(`href="${urls.review("app/reader.md")}"`);

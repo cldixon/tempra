@@ -155,6 +155,20 @@ describe("Needs you: to verify", () => {
     expect(s.health().unverified.total).toBe(verify.total);
   });
 
+  test("a move is not a change, and only a person's verification counts", () => {
+    const s = newStore();
+    write(s, agent(), "m/a.md");
+    write(s, agent(), "p.md");
+    s.verify(ana(), "m/a.md");
+    // Moved after it was verified: still the version a person verified.
+    s.apply(agent(), [{ op: "move", path: "m/a.md", to: "n/a.md" }]);
+    // A process vouching for a concept is not a person verifying it.
+    s.verify(ctx("process:recheck"), "p.md");
+    expect(s.needs(ME).verify.items.map((i) => i.path)).toEqual(["p.md"]);
+    // The health summary counts any verification, a process's too.
+    expect(s.health().unverified.total).toBe(0);
+  });
+
   test("paged newest first by offset", () => {
     const s = newStore();
     for (const p of ["a.md", "b.md", "c.md", "d.md", "e.md"]) write(s, agent(), p);

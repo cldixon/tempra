@@ -130,6 +130,9 @@ export function CommentsMargin(props: {
     }
     // Tops are in the slots' own box, which starts level with the concept's header.
     const origin = box.getBoundingClientRect().top;
+    // The body is not drawn (the Markdown view is on): nothing to sit beside, so the threads
+    // stack in order from the top.
+    const drawn = prose.getClientRects().length > 0;
     const wants = new Map<string, number>();
     const list = box.querySelectorAll<HTMLElement>("[data-slot]");
     const order: { id: string; want: number; height: number }[] = [];
@@ -137,7 +140,7 @@ export function CommentsMargin(props: {
       const id = el.dataset.slot ?? "";
       const from = el.dataset.from === undefined ? null : Number(el.dataset.from);
       const to = el.dataset.to === undefined ? null : Number(el.dataset.to);
-      const range = from !== null && to !== null ? rangeOf(prose, from, to) : null;
+      const range = drawn && from !== null && to !== null ? rangeOf(prose, from, to) : null;
       const want = range ? range.getBoundingClientRect().top - origin : 0;
       wants.set(id, want);
       order.push({ id, want, height: el.offsetHeight });
@@ -153,7 +156,7 @@ export function CommentsMargin(props: {
     box.style.setProperty("--margin-height", `${Math.ceil(bottom)}px`);
     // The hairline from the active thread's quote to the thread.
     const want = active ? wants.get(active) : undefined;
-    const hasQuote = placed.some((t) => t.id === active && t.at);
+    const hasQuote = drawn && placed.some((t) => t.id === active && t.at);
     if (line.current) {
       line.current.hidden = !(hasQuote && want !== undefined);
       if (want !== undefined) line.current.style.setProperty("--line-y", `${Math.round(want)}px`);
@@ -182,10 +185,16 @@ export function CommentsMargin(props: {
     };
   });
 
-  // The active thread comes into view (from a highlight clicked in the text, or a link).
+  // The active thread comes into view (from a highlight clicked in the text, or a link), once
+  // its slot is there: a link may name a thread before the threads have loaded.
+  const shownActive = useRef<string | null>(null);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `ids` changes as slots appear.
   useEffect(() => {
-    if (active) slots.current.get(active)?.scrollIntoView({ block: "nearest" });
-  }, [active]);
+    const slot = active ? slots.current.get(active) : undefined;
+    if (!active || !slot || shownActive.current === active) return;
+    shownActive.current = active;
+    slot.scrollIntoView({ block: "nearest" });
+  }, [active, ids]);
 
   const count = open.length;
   return (

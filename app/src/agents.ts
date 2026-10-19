@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { api, useLoad } from "./api";
 import { who } from "./ui";
 import type { Urls } from "./urls";
@@ -81,7 +81,9 @@ export function actorView(
     const you = me !== null && actor === me;
     return { name: you ? "You" : who(actor), for: null, agent: false, you };
   }
-  const person = c?.person ?? by?.person ?? null;
+  // An agent the list does not know yet is named by its actor; `by.person` is an id, never
+  // shown as a handle.
+  const person = c?.person ?? null;
   return {
     name: c?.agent?.name ?? actor,
     for: person ? `@${person}` : null,
@@ -90,13 +92,33 @@ export function actorView(
   };
 }
 
-/** The library's contributors, loaded once per library and shared (see useAgentNames). */
+/**
+ * The library's contributors (`GET …/agents`), loaded once per library and shared by every page
+ * that names people and agents. An agent seen on screen that the list does not know yet (its
+ * first write, arriving live) loads it again, once per agent.
+ */
 function useContributors(urls: Urls) {
-  return useLoad(`agents ${urls.base}`, () =>
-    api<{ contributors: Contributor[] }>(urls.api("agents")).then((r) =>
-      agentNames(r.contributors),
-    ),
+  const loaded = useLoad(`contributors ${urls.base}`, () =>
+    api<{ contributors: Contributor[] }>(urls.api("agents")).then((r) => r.contributors),
   );
+  const list = loaded.state === "ready" ? loaded.data : null;
+  const byId = useMemo(() => agentsById(list ?? []), [list]);
+  // Ids met while drawing that the list lacks; asked for after the render, each once.
+  const missing = useRef(new Set<string>());
+  const asked = useRef(new Set<string>());
+  const note = useCallback(
+    (id: string | undefined) => {
+      if (id && list && !(id in byId) && !asked.current.has(id)) missing.current.add(id);
+    },
+    [list, byId],
+  );
+  useEffect(() => {
+    if (missing.current.size === 0) return;
+    for (const id of missing.current) asked.current.add(id);
+    missing.current.clear();
+    loaded.reload();
+  });
+  return { list, byId, note };
 }
 
 /**
@@ -104,40 +126,32 @@ function useContributors(urls: Urls) {
  * Activity, Needs you). `me` is the signed-in person's actor (`human:handle`).
  */
 export function useActors(urls: Urls, me: string | null) {
-  const loaded = useLoad(`contributors ${urls.base}`, () =>
-    api<{ contributors: Contributor[] }>(urls.api("agents")).then((r) => r.contributors),
-  );
-  const list = loaded.state === "ready" ? loaded.data : null;
-  return useMemo(() => {
-    const byId = agentsById(list ?? []);
-    return {
-      view: (actor: string, by?: ActedBy | null) => actorView(actor, by, byId, me),
+  const { list, byId, note } = useContributors(urls);
+  return useMemo(
+    () => ({
+      view: (actor: string, by?: ActedBy | null) => {
+        note(by?.agent);
+        return actorView(actor, by, byId, me);
+      },
       /** Everyone who has worked here: people and agents. */
       contributors: list ?? [],
-      reload: loaded.reload,
-    };
-  }, [list, me, loaded.reload]);
+    }),
+    [list, byId, note, me],
+  );
 }
 
 /**
- * The library's agent names, loaded once per library and kept like any page's data. `seen` are
- * the agent ids on screen: one the list does not know yet (an agent's first write) loads it again.
+ * The library's agent names as one string each ("Claude for @ann"), for the tree's marks, the
+ * new-version notice and the ledger.
  */
 export function useAgentNames(urls: Urls, seen: readonly (string | undefined)[] = []) {
-  const loaded = useContributors(urls);
-  const names = loaded.state === "ready" ? loaded.data : null;
-  const asked = useRef(new Set<string>());
-  const missing = names ? seen.filter((id): id is string => !!id && !(id in names)) : [];
-  const key = missing.join(" ");
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `key` names the missing ids.
-  useEffect(() => {
-    const fresh = missing.filter((id) => !asked.current.has(id));
-    if (fresh.length === 0) return;
-    for (const id of fresh) asked.current.add(id);
-    loaded.reload();
-  }, [key, loaded.reload]);
+  const { list, note } = useContributors(urls);
+  for (const id of seen) note(id);
   return useMemo(() => {
-    const known = names ?? {};
-    return (actor: string, by?: ActedBy | null) => actorLabel(actor, by, known);
-  }, [names]);
+    const known = agentNames(list ?? []);
+    return (actor: string, by?: ActedBy | null) => {
+      note(by?.agent);
+      return actorLabel(actor, by, known);
+    };
+  }, [list, note]);
 }

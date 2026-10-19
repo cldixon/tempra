@@ -172,6 +172,8 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
     const onKey = (e: KeyboardEvent) => {
       const t = e.target instanceof Element ? e.target : null;
       if (e.key === "Escape" && !e.defaultPrevented && drawer && !t?.closest("dialog, .menu")) {
+        // Handled: a comment sheet under the drawer stays open for the next Escape.
+        e.preventDefault();
         setDrawer(false);
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();

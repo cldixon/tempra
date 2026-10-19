@@ -3,7 +3,7 @@ import { type ActorView, useActors } from "../agents";
 import { api, useAction, useLoad } from "../api";
 import { Avatar } from "../chrome";
 import { type Needs, useNeeds } from "../needs";
-import { Ago, ago, clip, day, plural, Status, useMe, useTitle, who } from "../ui";
+import { Ago, ago, calendarDay, clip, day, plural, Status, useMe, useTitle, who } from "../ui";
 import type { Urls } from "../urls";
 import { SheetPage } from "../Workspace";
 
@@ -166,7 +166,10 @@ function ToVerify(props: { urls: Urls; needs: Needs; view: View; me: string | nu
     seq.current = needs.seq;
     if (pages > 0) more.reload();
   }, [needs.seq, pages, more.reload]);
-  const extra = more.state === "ready" && more.data ? more.data.verify : null;
+  // What the last page load showed stays while the next, longer one loads (no rows vanish).
+  const shown = useRef<Needs["verify"] | null>(null);
+  if (more.state === "ready") shown.current = more.data?.verify ?? null;
+  const extra = shown.current;
   // Pages are read at different moments: a concept that moved up is shown once.
   const byPath = new Map<string, Needs["verify"]["items"][number]>();
   for (const v of [...needs.verify.items, ...(extra?.items ?? [])]) {
@@ -256,7 +259,7 @@ function StaleRow(props: { urls: Urls; item: Needs["stale"][number]; onAsked(): 
   const key = `${urls.base}${item.path}`;
   const [done, setDone] = useState(asked.has(key));
   const action = useAction();
-  const date = day(item.stale_after);
+  const date = calendarDay(item.stale_after);
   const ask = () =>
     action.run(async () => {
       const body =

@@ -181,6 +181,7 @@ function HistoryMenu(props: {
 
 /** "14 min" within a day, else the day. */
 function When({ ts }: { ts: string }) {
-  const ago = useAgo(ts);
-  return <time dateTime={ts}>{Date.now() - Date.parse(ts) < 86_400_000 ? ago : day(ts)}</time>;
+  // Kept current: useAgo re-renders this as time passes.
+  useAgo(ts);
+  return <time dateTime={ts}>{recently(ts, Date.now())}</time>;
 }

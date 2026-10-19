@@ -53,9 +53,10 @@ function storeComments(on: boolean) {
 /**
  * How the comments are shown at the sheet's width: the stylesheet decides (container queries on
  * the sheet set `--comments-mode` on the page), and this reads its answer as the sheet resizes.
+ * Null until the page has been measured once.
  */
-function useCommentsMode(page: RefObject<HTMLElement | null>): CommentsMode {
-  const [mode, setMode] = useState<CommentsMode>("margin");
+function useCommentsMode(page: RefObject<HTMLElement | null>): CommentsMode | null {
+  const [mode, setMode] = useState<CommentsMode | null>(null);
   useLayoutEffect(() => {
     const el = page.current;
     if (!el) return;
@@ -69,6 +70,30 @@ function useCommentsMode(page: RefObject<HTMLElement | null>): CommentsMode {
     return () => watch.disconnect();
   }, [page]);
   return mode;
+}
+
+/**
+ * Whether the comments show, and how. In the margin they show as the person last chose (kept on
+ * this browser); a sheet (where there is no room for a margin) shows only when the person opens
+ * it, never by itself.
+ */
+function useCommentsShown(page: RefObject<HTMLElement | null>) {
+  const measured = useCommentsMode(page);
+  const mode = measured ?? "margin";
+  const [kept, setKept] = useState(storedComments);
+  const [opened, setOpened] = useState(false);
+  /** Shows or hides them; `remember` keeps the choice (a link opening them does not). */
+  const set = useCallback(
+    (on: boolean, remember = true) => {
+      if (mode !== "margin") setOpened(on);
+      else {
+        setKept(on);
+        if (remember) storeComments(on);
+      }
+    },
+    [mode],
+  );
+  return { mode, measured: measured !== null, shown: mode === "margin" ? kept : opened, set };
 }
 
 /** The thread a link names (`#thread-<id>`), if any. */
@@ -111,8 +136,9 @@ export function ConceptPage(props: {
   const [markdown, setMarkdown] = useState(false);
 
   // Footnote markers are numbers: the sources in their order, then the body's other footnotes
-  // as they are met (`numbers` fills in as the body is prepared; the sources section reads it).
-  const { options, numbers } = useMemo(() => {
+  // as they are met (`numbers` fills in as the body is prepared, afresh for each body; the
+  // sources section reads it).
+  const { prepared, numbers } = useMemo(() => {
     const ids = sources.sources.map((s) => s.id).filter((id) => typeof id === "string");
     const numbers = new Map<string, number>(ids.map((id, i) => [id, i + 1]));
     const sourceIds = new Set(ids);
@@ -128,9 +154,8 @@ export function ConceptPage(props: {
         return { href: `#${anchorId(prefix, label)}`, mark: String(numbers.get(label)) };
       },
     };
-    return { options, numbers };
-  }, [c.path, urls, sources, links]);
-  const prepared = useMemo(() => prepare(c.doc, options), [c.doc, options]);
+    return { prepared: prepare(c.doc, options), numbers };
+  }, [c.path, c.doc, urls, sources, links]);
   // A leading heading that repeats the title is not shown twice (the stored body is unchanged).
   const first = prepared.headings[0];
   const hideFirst =
@@ -154,21 +179,14 @@ export function ConceptPage(props: {
   // margin beside it. Shown or not as the person last chose; a sheet (where there is no room for
   // a margin) never opens by itself.
   const page = useRef<HTMLDivElement>(null);
-  const mode = useCommentsMode(page);
-  const [shown, setShown] = useState(() => storedComments());
-  const [opened, setOpened] = useState(false);
-  const showComments = mode === "margin" ? shown : opened;
-  const showCommentsAs = useCallback(
-    (on: boolean) => {
-      if (mode === "margin") {
-        setShown(on);
-        storeComments(on);
-      } else {
-        setOpened(on);
-      }
-    },
-    [mode],
-  );
+  const toggle = useRef<HTMLButtonElement>(null);
+  const comments = useCommentsShown(page);
+  const { mode, shown: showComments, set: showCommentsAs } = comments;
+  /** Closes a comment sheet (or the margin) and gives the focus back to the toggle. */
+  const closeComments = useCallback(() => {
+    showCommentsAs(false);
+    toggle.current?.focus();
+  }, [showCommentsAs]);
   const [active, setActive] = useState<string | null>(threadInHash);
   const placed = useMemo(
     () => placeThreads(props.threads ?? [], prepared.text),
@@ -194,29 +212,35 @@ export function ConceptPage(props: {
     () => highlightsOf(placed, active, draft.draft),
     [placed, active, draft.draft],
   );
-  // A link to a thread (Needs you, the inbox, the ledger) or to the comments opens them.
+  // A link to a thread (Needs you, the inbox, the ledger) or to the comments opens them, once
+  // the page knows how it shows them, and again when the #fragment changes; not on a resize.
+  const show = useRef(showCommentsAs);
+  show.current = showCommentsAs;
   useEffect(() => {
+    if (!comments.measured) return;
     const follow = () => {
       const id = threadInHash();
       if (id) setActive(id);
-      if (id || location.hash === "#comments") showCommentsAs(true);
+      if (id || location.hash === "#comments") show.current(true, false);
     };
     follow();
     window.addEventListener("hashchange", follow);
     return () => window.removeEventListener("hashchange", follow);
-  }, [showCommentsAs]);
-  // Escape closes a comment sheet (the margin stays: it is part of the page).
+  }, [comments.measured]);
+  // Escape closes a comment sheet (the margin stays: it is part of the page). One Escape, one
+  // thing closed: the event is marked handled for the drawer and the rest.
   useEffect(() => {
-    if (mode === "margin" || !opened) return;
+    if (mode === "margin" || !showComments) return;
     const onKey = (e: KeyboardEvent) => {
       const t = e.target instanceof Element ? e.target : null;
       if (e.key === "Escape" && !e.defaultPrevented && !t?.closest("dialog, .menu, form")) {
-        setOpened(false);
+        e.preventDefault();
+        closeComments();
       }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [mode, opened]);
+  }, [mode, showComments, closeComments]);
 
   // Recent files, for the quick switcher.
   useEffect(() => {
@@ -240,6 +264,7 @@ export function ConceptPage(props: {
           <>
             {live && !moved && <NewVersion urls={urls} live={live} />}
             <button
+              ref={toggle}
               type="button"
               className="icon-button with-count"
               aria-label={openCount > 0 ? `Comments, ${openCount} open` : "Comments"}
@@ -332,7 +357,7 @@ export function ConceptPage(props: {
             active={active}
             onActive={setActive}
             onChanged={props.onCommented}
-            onClose={() => showCommentsAs(false)}
+            onClose={closeComments}
             prose={prose}
             drawn={`${changes.diff ? "diff" : ""} ${markdown} ${c.hash}`}
           />

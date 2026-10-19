@@ -146,17 +146,28 @@ export function when(iso: string): string {
     .replace(/Z$/, "");
 }
 
-/** A day as people say it: "Oct 9", with the year when it is not this one. */
-export function day(iso: string): string {
+/**
+ * A day as people say it: "Oct 9", with the year when it is not this one; in the reader's time
+ * zone, or in `timeZone` (see calendarDay).
+ */
+export function day(iso: string, timeZone?: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  const thisYear = d.getFullYear() === new Date().getFullYear();
+  const year = (x: Date) => (timeZone === "UTC" ? x.getUTCFullYear() : x.getFullYear());
+  const thisYear = year(d) === year(new Date());
   return d.toLocaleDateString("en", {
     month: "short",
     day: "numeric",
+    ...(timeZone ? { timeZone } : {}),
     ...(thisYear ? {} : { year: "numeric" }),
   });
 }
+
+/**
+ * A date kept as a moment at midnight UTC (a concept's `stale_after`): its calendar day, the
+ * same wherever the reader is.
+ */
+export const calendarDay = (iso: string) => day(iso, "UTC");
 
 /** When, as a row says it: "14 min" within a day, else the day ("Oct 9"). */
 export function recently(ts: string, now: number): string {

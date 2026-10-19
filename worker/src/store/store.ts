@@ -423,15 +423,26 @@ function refuseInvalid(path: string, parsed: ParsedConcept, lint: LintWarning[])
 }
 
 /** Search snippet markers: control characters, which concept text never holds. */
-/**
- * Concepts whose latest change came after their latest verification, or that have none: the
- * health summary's `unverified` and Needs you's "To verify" (`p` the path, `e` its latest event).
- */
-const UNVERIFIED = `FROM paths p JOIN events e ON e.seq = p.last_seq
-  WHERE p.kind = 'concept' AND e.op <> 'verify'`;
-
 /** Events that change a file's content (a write, import, revert or delete), on `events`. */
 const CONTENT_EVENT = "op NOT IN ('move', 'verify', 'comment')";
+
+/**
+ * Concepts whose content changed after their latest verification, or that have none (`p` the
+ * path, `e` its latest content event; a move or a comment is not a change). With `person`, only
+ * a person's verification counts: Needs you's "To verify"; otherwise any (a process's too): the
+ * health summary's `unverified`.
+ */
+function unverified(person: boolean): string {
+  return `FROM paths p
+  JOIN events e ON e.seq = (
+    SELECT MAX(seq) FROM events WHERE concept_id = p.concept_id AND ${CONTENT_EVENT})
+  WHERE p.kind = 'concept' AND NOT EXISTS (
+    SELECT 1 FROM verifications v WHERE v.concept_id = p.concept_id AND v.seq > e.seq
+    ${person ? "AND v.by LIKE 'human:%'" : ""})`;
+}
+
+const UNVERIFIED = unverified(false);
+const UNVERIFIED_BY_PEOPLE = unverified(true);
 
 const MARK_OPEN = "\u0002";
 const MARK_CLOSE = "\u0003";
@@ -3824,7 +3835,7 @@ export class LibraryStore {
     const work = this.workCounts();
     const n = (k: string) => work.counts[k] ?? 0;
     const rows = this.sql.all<{ path: string; seq: number; ts: string; actor: string }>(
-      `SELECT p.path, p.last_seq AS seq, e.ts, e.actor ${UNVERIFIED} ORDER BY p.last_seq DESC LIMIT ?`,
+      `SELECT p.path, e.seq, e.ts, e.actor ${UNVERIFIED} ORDER BY e.seq DESC LIMIT ?`,
       HEALTH_NEWEST,
     );
     return {
@@ -4216,8 +4227,9 @@ export class LibraryStore {
 
     const limit = Math.min(Math.max(opts.limit ?? 20, 1), 200);
     const offset = Math.max(opts.offset ?? 0, 0);
-    const total = this.sql.all<{ n: number }>(`SELECT COUNT(*) AS n ${UNVERIFIED}`)[0]?.n ?? 0;
-    const unverified = this.sql.all<{
+    const total =
+      this.sql.all<{ n: number }>(`SELECT COUNT(*) AS n ${UNVERIFIED_BY_PEOPLE}`)[0]?.n ?? 0;
+    const toVerify = this.sql.all<{
       path: string;
       concept_id: string;
       title: string | null;
@@ -4227,17 +4239,19 @@ export class LibraryStore {
       by_person: string | null;
       by_agent: string | null;
     }>(
-      `SELECT p.path, p.concept_id, p.last_seq AS seq, e.ts, e.actor,
+      `SELECT p.path, p.concept_id, e.seq, e.ts, e.actor,
               (SELECT title FROM concepts c WHERE c.concept_id = p.concept_id) AS title,
               json_extract(e.meta, '$.by.person') AS by_person,
               json_extract(e.meta, '$.by.agent') AS by_agent
-       ${UNVERIFIED} ORDER BY p.last_seq DESC LIMIT ? OFFSET ?`,
+       ${UNVERIFIED_BY_PEOPLE} ORDER BY e.seq DESC LIMIT ? OFFSET ?`,
       limit,
       offset,
     );
-    const items = unverified.map((r) => {
+    const items = toVerify.map((r) => {
+      // The person's latest verification, which the changes are counted from.
       const v = this.sql.all<{ by: string; at: string; seq: number }>(
-        "SELECT by, at, seq FROM verifications WHERE concept_id = ? ORDER BY seq DESC LIMIT 1",
+        `SELECT by, at, seq FROM verifications WHERE concept_id = ? AND by LIKE 'human:%'
+         ORDER BY seq DESC LIMIT 1`,
         r.concept_id,
       )[0];
       // Content changes since that verification, or since the concept was made.

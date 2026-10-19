@@ -20,7 +20,8 @@ export function AllVersions(props: {
   const { urls, concept: c, head, name } = props;
   // Comments are in the margin; history is the concept's versions and what happened to them.
   const events = props.events.filter((e) => e.op !== "comment");
-  const numbers = new Map(standing(events, head).versions.map((v) => [v.event.seq, v.n]));
+  const s = standing(events, c.seq);
+  const numbers = new Map(s.versions.map((v) => [v.event.seq, v.n]));
   const shown = [...events].reverse().slice(0, 100);
   const pinnedOld = urls.at !== undefined && urls.at < head;
   const [now] = useState(() => Date.now());
@@ -33,7 +34,9 @@ export function AllVersions(props: {
           const n = numbers.get(e.seq);
           const what =
             e.op === "verify" ? "verified" : e.op === "move" ? "moved" : n ? `version ${n}` : e.op;
-          const classes = [e.seq === c.seq ? "current" : "", e.op === "verify" ? "verify" : ""];
+          // The version on screen (its last event may be a move or a verification).
+          const current = e.seq === s.current?.event.seq;
+          const classes = [current ? "current" : "", e.op === "verify" ? "verify" : ""];
           return (
             <li key={e.seq} className={classes.filter(Boolean).join(" ") || undefined}>
               <span className="history-what">
