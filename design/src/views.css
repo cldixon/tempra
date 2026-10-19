@@ -244,6 +244,32 @@
   white-space: nowrap;
 }
 
+/* The library's ways in, when the sidebar is not beside the sheet (TEMPRA-107): the sidebar's own
+   rows, their hover fill hanging into the gutter so their text lines up with the page's. */
+.home-ways {
+  margin: var(--tempra-space-3) -10px 0;
+}
+
+.home-ways-label {
+  margin: var(--tempra-space-3) 10px var(--tempra-space-1);
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-label);
+  font-weight: var(--tempra-weight-regular);
+}
+
+.home-ways .view-empty {
+  padding: 0 10px;
+}
+
+.home-files {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 .home-entries {
   display: flex;
   flex-direction: column;

@@ -90,6 +90,23 @@ function buildDirs(files: Entry[]): Record<string, Entry[]> {
   return out;
 }
 
+/** A file as the tree names it: a concept by its title, anything else by its file name. */
+export function fileLabel(e: OutlineFile): string {
+  return e.kind === "concept" && e.title ? e.title : baseName(e.path);
+}
+
+/**
+ * The library's top level, as the tree lists it (folders first, then files, by name), each
+ * folder with its count of concepts at any depth: the home's way into the files (TEMPRA-107).
+ */
+export function topLevel(files: OutlineFile[]): { entry: OutlineFile; count: number }[] {
+  const counts = countConcepts(files);
+  return (buildDirs(files)[""] ?? []).map((entry) => ({
+    entry,
+    count: counts.get(entry.path) ?? 0,
+  }));
+}
+
 /**
  * The library's file tree (tempra-dev: app/workspace). The whole index (paths, titles,
  * sequences; no bodies) arrives in one small request when the workspace opens, so opening a
@@ -270,7 +287,6 @@ export function Tree(props: {
     }
     return null;
   };
-  const label = (e: Entry) => (e.kind === "concept" && e.title ? e.title : baseName(e.path));
 
   const rows = (dir: string): React.ReactNode => {
     if (dirs === null && failed) {
@@ -321,7 +337,7 @@ export function Tree(props: {
               aria-current={props.file === e.path ? "page" : undefined}
               ref={props.file === e.path ? setCurrentRow : undefined}
             >
-              {label(e)}
+              {fileLabel(e)}
             </a>
             {mark(e)}
           </div>

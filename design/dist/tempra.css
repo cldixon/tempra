@@ -2207,13 +2207,34 @@ button.tree-row[aria-current="page"] {
     min-width: 0;
   }
 
-  .ws-topbar-name {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
+  /* The way to everything else, in ink so it reads as the bar's first control. */
+  .ws-menu {
     color: var(--tempra-color-text);
-    font-weight: var(--tempra-weight-strong);
+  }
+
+  /* Where the person is: the library's tile and name, the page beneath it, as the switcher draws
+     the library's name over its owner. */
+  .ws-topbar-place {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    min-height: var(--tempra-touch);
+    padding: 0 8px;
+    border-radius: var(--tempra-radius-row);
+    color: var(--tempra-color-text);
     text-decoration: none;
+  }
+
+  .ws-topbar-place:visited {
+    color: var(--tempra-color-text);
+  }
+
+  .ws-topbar-here {
+    overflow: hidden;
+    color: var(--tempra-color-muted);
+    font-size: var(--tempra-text-meta);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -3603,6 +3624,32 @@ a.verification:hover {
   color: var(--tempra-color-faint);
   font-size: var(--tempra-text-meta);
   white-space: nowrap;
+}
+
+/* The library's ways in, when the sidebar is not beside the sheet (TEMPRA-107): the sidebar's own
+   rows, their hover fill hanging into the gutter so their text lines up with the page's. */
+.home-ways {
+  margin: var(--tempra-space-3) -10px 0;
+}
+
+.home-ways-label {
+  margin: var(--tempra-space-3) 10px var(--tempra-space-1);
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-label);
+  font-weight: var(--tempra-weight-regular);
+}
+
+.home-ways .view-empty {
+  padding: 0 10px;
+}
+
+.home-files {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .home-entries {

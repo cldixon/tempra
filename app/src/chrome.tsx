@@ -12,6 +12,7 @@ import {
   Download,
   Ellipsis,
   ExternalLink,
+  FileText,
   Folder as FolderGlyph,
   History,
   Home,
@@ -71,6 +72,7 @@ const ICONS = {
   download: Download,
   open: ExternalLink,
   folder: FolderGlyph,
+  file: FileText,
   broken: ImageOff,
 } as const;
 
