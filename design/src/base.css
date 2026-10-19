@@ -23,20 +23,20 @@ body {
 h1 {
   margin: 0 0 var(--tempra-space-3);
   font-size: var(--tempra-text-page);
-  font-weight: 500;
-  line-height: 1.2;
+  font-weight: var(--tempra-weight-medium);
+  line-height: var(--tempra-leading-tight);
   letter-spacing: -0.02em;
 }
 
 h2 {
   margin: var(--tempra-space-4) 0 var(--tempra-space-2);
   font-size: var(--tempra-font-size);
-  font-weight: 600;
+  font-weight: var(--tempra-weight-strong);
 }
 
 h3 {
   font-size: var(--tempra-text-ui);
-  font-weight: 600;
+  font-weight: var(--tempra-weight-strong);
 }
 
 a {
@@ -143,7 +143,7 @@ a.button.primary {
   border-color: var(--tempra-color-text);
   background: var(--tempra-color-text);
   color: var(--tempra-color-bg);
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 button.primary:hover:not(:disabled),
@@ -171,7 +171,7 @@ textarea {
 }
 
 textarea {
-  line-height: 1.5;
+  line-height: var(--tempra-line-height);
 }
 
 fieldset {
@@ -189,7 +189,7 @@ form.stack fieldset {
 form.stack legend {
   margin-bottom: 6px;
   padding: 0;
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 .field {
@@ -260,7 +260,7 @@ details > summary {
 }
 
 .warn {
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 /* An uppercase label over a group (SOURCES, LINKED FROM). */
@@ -268,7 +268,7 @@ details > summary {
   margin: 0 0 var(--tempra-space-2);
   color: var(--tempra-color-faint);
   font-size: var(--tempra-text-label);
-  font-weight: 400;
+  font-weight: var(--tempra-weight-regular);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }

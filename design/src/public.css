@@ -13,7 +13,7 @@
   gap: 10px;
   color: var(--tempra-color-text);
   font-size: var(--tempra-text-name);
-  font-weight: 600;
+  font-weight: var(--tempra-weight-strong);
   text-decoration: none;
 }
 
@@ -115,7 +115,7 @@
   margin: 12px 0 24px;
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-reader);
-  line-height: 1.5;
+  line-height: var(--tempra-line-height);
 }
 
 .public-actions {
@@ -143,14 +143,14 @@
 .features h3 {
   margin: 0 0 4px;
   font-size: var(--tempra-text-ui);
-  font-weight: 600;
+  font-weight: var(--tempra-weight-strong);
 }
 
 .features p {
   margin: 0;
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-ui);
-  line-height: 1.5;
+  line-height: var(--tempra-line-height);
 }
 
 /* Steps: numbered in the faint grey, one to a line. */

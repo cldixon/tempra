@@ -23,7 +23,7 @@
 .comments-head h2 {
   margin: 0;
   font-size: var(--tempra-text-ui);
-  font-weight: 600;
+  font-weight: var(--tempra-weight-strong);
 }
 
 .comments-head .count {
@@ -105,13 +105,13 @@
 .thread.collapsed .avatar-mark {
   width: var(--tempra-avatar-small);
   height: var(--tempra-avatar-small);
-  font-size: 8px;
+  font-size: var(--tempra-text-initial);
 }
 
 .thread.collapsed strong {
   flex: none;
   color: var(--tempra-color-text);
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 .thread-words {
@@ -156,7 +156,7 @@
 }
 
 .said-by strong {
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 .said-by time,
@@ -172,7 +172,7 @@
 .comment {
   margin: 4px 0 0 calc(var(--tempra-avatar) + 8px);
   font-size: var(--tempra-text-ui);
-  line-height: 1.45;
+  line-height: var(--tempra-line-height);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -184,7 +184,7 @@
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
   font-style: italic;
-  line-height: 1.45;
+  line-height: var(--tempra-line-height);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }

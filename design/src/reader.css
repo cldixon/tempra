@@ -30,7 +30,7 @@
   color: var(--tempra-color-text);
   font-family: var(--tempra-font-body);
   font-size: var(--tempra-text-ui);
-  line-height: 1.45;
+  line-height: var(--tempra-line-height);
   text-wrap: pretty;
 }
 
@@ -85,7 +85,7 @@
   background: var(--tempra-color-text);
   color: var(--tempra-color-bg);
   font-size: var(--tempra-text-meta);
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 .selection-tools button:hover:not(:disabled) {
@@ -242,7 +242,7 @@
   color: var(--tempra-color-text);
   font-family: var(--tempra-font-body);
   font-size: var(--tempra-text-ui);
-  line-height: 1.5;
+  line-height: var(--tempra-line-height);
   overflow: hidden;
 }
 
@@ -392,7 +392,6 @@
 .lightbox-caption {
   max-width: var(--tempra-measure);
   margin: 0;
-  font-family: var(--tempra-font-reader);
   font-size: var(--tempra-text-name);
   text-wrap: pretty;
 }
