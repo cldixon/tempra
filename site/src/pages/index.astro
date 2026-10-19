@@ -40,30 +40,35 @@ const steps = [
 >
   <section aria-labelledby="hero">
     <h1 id="hero">A knowledge base your agents can write.</h1>
-    <p>
+    <p class="lede">
       Tempra keeps what you know as plain markdown that you and your AI agents read and write
       together, with every change recorded.
     </p>
-    <p><a href={`${APP}/sign-in`}>Get started</a></p>
+    <p class="public-actions">
+      <a class="button primary" href={`${APP}/sign-in`}>Get started</a>
+      <a class="button" href="#concepts">How it works</a>
+    </p>
   </section>
 
   <section aria-labelledby="concepts">
     <h2 id="concepts">How it works</h2>
-    {
-      concepts.map((c) => (
-        <article>
-          <h3>{c.title}</h3>
-          <p>{c.body}</p>
-        </article>
-      ))
-    }
+    <ul class="features">
+      {
+        concepts.map((c) => (
+          <li>
+            <h3>{c.title}</h3>
+            <p>{c.body}</p>
+          </li>
+        ))
+      }
+    </ul>
   </section>
 
   <section aria-labelledby="start">
     <h2 id="start">Start in three steps</h2>
-    <ol>
+    <ol class="steps">
       {steps.map((s) => <li>{s}</li>)}
     </ol>
-    <p><a href={`${APP}/sign-in`}>Sign up</a></p>
+    <p><a class="button primary" href={`${APP}/sign-in`}>Sign up</a></p>
   </section>
 </Base>

@@ -3,33 +3,34 @@ import Base from "../layouts/Base.astro";
 ---
 
 <Base title="Privacy · Tempra" description="What Tempra stores, where, and what it does not do.">
-  <h1>Privacy</h1>
-  <h2>What we store</h2>
-  <ul>
-    <li>Your email address and handle.</li>
-    <li>Your libraries: concepts, attachments, and the ledger of every change, with who made it.</li>
-    <li>Tokens and connected apps (only hashes of secrets).</li>
-    <li>Sessions: when, and your browser's user agent.</li>
-    <li>Usage counts (requests, writes, emails) for limits.</li>
-    <li>If you join the waitlist: your email, when you asked, and your IP address.</li>
-  </ul>
-  <h2>Where</h2>
-  <p>
-    On Cloudflare (Workers, Durable Objects, D1, R2, KV), encrypted at rest by Cloudflare. The
-    operator can read stored data.
-  </p>
-  <h2>What we do not do</h2>
-  <p>No models read your content. No ads, no selling data, no tracking scripts.</p>
-  <h2>Export and deletion</h2>
-  <p>
-    Export any library at any time. Deleting a library or your account removes it at once. Backups
-    and attachment files can last up to 31 more days, then are gone. A hash of a deleted account's
-    email is kept to handle abuse.
-  </p>
-  <h2>Email</h2>
-  <p>
-    We email you only sign-in links, notices about your account, and, if you joined the waitlist,
-    one email when you are approved.
-  </p>
-  <p><a href="/terms">Terms</a></p>
+  <div class="legal">
+    <h1>Privacy</h1>
+    <h2>What we store</h2>
+    <ul>
+      <li>Your email address and handle.</li>
+      <li>Your libraries: concepts, attachments, and the ledger of every change, with who made it.</li>
+      <li>Tokens and connected apps (only hashes of secrets).</li>
+      <li>Sessions: when, and your browser's user agent.</li>
+      <li>Usage counts (requests, writes, emails) for limits.</li>
+      <li>If you join the waitlist: your email, when you asked, and your IP address.</li>
+    </ul>
+    <h2>Where</h2>
+    <p>
+      On Cloudflare (Workers, Durable Objects, D1, R2, KV), encrypted at rest by Cloudflare. The
+      operator can read stored data.
+    </p>
+    <h2>What we do not do</h2>
+    <p>No models read your content. No ads, no selling data, no tracking scripts.</p>
+    <h2>Export and deletion</h2>
+    <p>
+      Export any library at any time. Deleting a library or your account removes it at once. Backups
+      and attachment files can last up to 31 more days, then are gone. A hash of a deleted account's
+      email is kept to handle abuse.
+    </p>
+    <h2>Email</h2>
+    <p>
+      We email you only sign-in links, notices about your account, and, if you joined the waitlist,
+      one email when you are approved.
+    </p>
+  </div>
 </Base>

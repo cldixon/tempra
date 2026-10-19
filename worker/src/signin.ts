@@ -1,7 +1,6 @@
 import type { Context, Hono } from "hono";
 import { type SignupMode, signupMode, type User } from "./accounts";
 import type { Deps } from "./app";
-import { LEGAL } from "./legal";
 import { esc, messagePage, page } from "./oauth/pages";
 import { fromThisSite } from "./origin";
 import {
@@ -161,8 +160,7 @@ ${err}<form method="post" action="/sign-in" class="stack">
 <input type="hidden" name="next" value="${esc(next)}">
 <label class="field">Email
 <input id="email" name="email" type="text" inputmode="email" autocomplete="email" required autofocus value="${esc(opts.email ?? "")}"></label>
-<p><button class="primary" type="submit">Email me a link</button></p></form>
-<p class="small faint"><a href="${LEGAL}/terms">Terms</a> · <a href="${LEGAL}/privacy">Privacy</a></p>`;
+<p><button class="primary" type="submit">Email me a link</button></p></form>`;
 }
 
 export function registerSignInRoutes<E extends AppEnv>(

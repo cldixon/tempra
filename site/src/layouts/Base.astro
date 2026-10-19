@@ -1,10 +1,10 @@
 ---
 /**
- * Every page: the top bar (sign in / sign up go to the app), the page, and the footer.
- * Styled by the shared design package (TEMPRA-8), plain until the design pass (TEMPRA-1).
+ * Every page: the wordmark and the way into the app, the page as one sheet, and the footer. The
+ * look is the app's (take 3, TEMPRA-110), all of it from the shared design package's public pages
+ * (`public.css`); the site adds no styles of its own.
  */
 import "@tempra/design/tempra.css";
-import "../styles/site.css";
 
 interface Props {
   title: string;
@@ -26,25 +26,21 @@ const APP = "https://app.tempra.dev";
     <meta name="description" content={description} />
     {noindex ? <meta name="robots" content="noindex" /> : <link rel="canonical" href={new URL(Astro.url.pathname, Astro.site)} />}
   </head>
-  <body>
-    <header>
-      <nav aria-label="Main">
-        <a href="/"><strong>Tempra</strong></a>
-        <span>
-          <a href={`${APP}/sign-in`}>Sign in</a>
-          <a href={`${APP}/sign-in`}>Sign up</a>
-        </span>
+  <body class="ground public">
+    <header class="public-head">
+      <a class="wordmark" href="/"><span class="wordmark-tile" aria-hidden="true">T</span>Tempra</a>
+      <nav class="public-nav" aria-label="Main">
+        <a href={`${APP}/sign-in`}>Sign in</a>
+        <a class="button primary" href={`${APP}/sign-in`}>Get started</a>
       </nav>
     </header>
-    <main>
+    <main class="public-sheet">
       <slot />
     </main>
-    <footer>
-      <p>
-        <a href="/terms">Terms</a> ·
-        <a href="/privacy">Privacy</a> ·
-        <a href="https://github.com/cldixon/tempra">GitHub</a>
-      </p>
+    <footer class="public-foot">
+      <a href="/terms">Terms</a>
+      <a href="/privacy">Privacy</a>
+      <a href="https://github.com/cldixon/tempra">GitHub</a>
     </footer>
   </body>
 </html>

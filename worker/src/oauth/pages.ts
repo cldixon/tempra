@@ -1,13 +1,15 @@
 import type { ConsentDescription } from "@cloudflare/workers-oauth-provider";
 import { href as designHref } from "@tempra/design";
 import type { ReachableLibrary } from "../accounts";
+import { LEGAL } from "../legal";
 
 /** Escapes text for HTML; every client-supplied string passes through here. */
 export const esc = (value: string) => value.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 
 /**
- * The server pages' shell (sign-in, consent, errors, the email-change link): the same ground,
- * wordmark and centred column as the app's account pages, from the design stylesheet alone.
+ * The server pages' shell (sign-in, consent, errors, the email-change link): the public pages'
+ * frame (take 3, TEMPRA-110), as the landing page has it: the ground, the wordmark, the page as a
+ * sheet, and terms and privacy at the foot. From the design stylesheet alone, with no script.
  */
 export function page(title: string, body: string): string {
   return `<!doctype html>
@@ -16,8 +18,9 @@ export function page(title: string, body: string): string {
 <title>${esc(title)} · Tempra</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="${designHref}"></head>
-<body class="ground"><header class="app-header"><a class="brand" href="/">Tempra</a></header>
-<main class="page">${body}</main></body></html>`;
+<body class="ground public narrow"><header class="public-head"><a class="wordmark" href="/"><span class="wordmark-tile" aria-hidden="true">T</span>Tempra</a></header>
+<main class="public-sheet">${body}</main>
+<footer class="public-foot"><a href="${LEGAL}/terms">Terms</a><a href="${LEGAL}/privacy">Privacy</a></footer></body></html>`;
 }
 
 export interface ConsentForm {
