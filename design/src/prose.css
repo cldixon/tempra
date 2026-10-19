@@ -9,7 +9,7 @@
   color: var(--tempra-color-text);
   font-family: var(--tempra-font-reader);
   font-size: var(--tempra-text-reader);
-  line-height: 1.65;
+  line-height: var(--tempra-leading-reader);
   font-kerning: normal;
   font-optical-sizing: auto;
   font-variant-ligatures: common-ligatures;
@@ -50,7 +50,7 @@
 }
 
 .prose strong {
-  font-weight: 600;
+  font-weight: var(--tempra-weight-strong);
 }
 
 .prose s {
@@ -67,7 +67,7 @@
   margin: 1.9em 0 0.5em;
   font-family: var(--tempra-font-reader);
   font-variant-numeric: lining-nums proportional-nums;
-  line-height: 1.25;
+  line-height: var(--tempra-leading-tight);
   letter-spacing: -0.005em;
   text-wrap: balance;
   break-after: avoid;
@@ -77,19 +77,19 @@
 
 .prose h1 {
   font-size: 1.65em;
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
   letter-spacing: -0.012em;
 }
 
 .prose h2 {
   font-size: 1.35em;
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
   letter-spacing: -0.01em;
 }
 
 .prose h3 {
   font-size: 1.12em;
-  font-weight: 600;
+  font-weight: var(--tempra-weight-strong);
 }
 
 .prose h4,
@@ -97,7 +97,7 @@
 .prose h6 {
   margin-top: 1.6em;
   font-size: 1em;
-  font-weight: 600;
+  font-weight: var(--tempra-weight-strong);
   font-variant-caps: all-small-caps;
   letter-spacing: 0.04em;
 }
@@ -225,7 +225,7 @@
   font-family: var(--tempra-font-mono);
   font-size: 0.8em;
   font-variant-ligatures: none;
-  line-height: 1.6;
+  line-height: var(--tempra-line-height);
   tab-size: 2;
   white-space: pre;
   overflow-wrap: normal;
@@ -280,7 +280,7 @@
   font-family: var(--tempra-font-body);
   font-size: 0.82em;
   font-variant-numeric: lining-nums tabular-nums;
-  line-height: 1.5;
+  line-height: var(--tempra-line-height);
 }
 
 .prose th,
@@ -301,7 +301,7 @@
 
 .prose th {
   background: var(--tempra-color-ground);
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
   vertical-align: bottom;
 }
 
@@ -392,14 +392,14 @@
   color: var(--tempra-color-muted);
   font-family: var(--tempra-font-body);
   font-size: var(--tempra-text-meta);
-  line-height: 1.5;
+  line-height: var(--tempra-line-height);
   text-wrap: pretty;
   user-select: none;
 }
 
 .prose .figure-number {
   color: var(--tempra-color-text);
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 /* An image that can't be shown: a dashed box where it would be, saying so, its path and alt. */
@@ -418,7 +418,7 @@
   font-family: var(--tempra-font-body);
   font-size: var(--tempra-text-meta);
   font-style: normal;
-  line-height: 1.45;
+  line-height: var(--tempra-line-height);
   text-align: center;
   overflow-wrap: anywhere;
 }
@@ -464,11 +464,4 @@
 .prose del.diff-removed {
   color: var(--tempra-color-faint);
   text-decoration: line-through;
-}
-
-/* On a phone the column is the screen: a little less leading, the same rhythm. */
-@media (max-width: 600px) {
-  .prose {
-    line-height: 1.6;
-  }
 }
