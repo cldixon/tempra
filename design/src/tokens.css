@@ -1,9 +1,10 @@
 /*
  * Tempra design tokens: the one place values live (TEMPRA-8). Take 2 of the design (TEMPRA-53,
  * design/handoff/layout-take-2) set structure and type: neutral greys, a serif for concept bodies,
- * a type scale, radii and one soft shadow. No colour on purpose; the palette (TEMPRA-1) changes
- * values here and both the app and the site follow. Light and dark come from the system through
- * light-dark().
+ * a type scale, radii and one soft shadow. Take 3 (TEMPRA-106, design/handoff/layout-take-3) set
+ * the frame's sizes, squarer corners and the one colour allowed before the palette: a small warm
+ * dot for an agent's recent change. The palette (TEMPRA-1) changes values here and both the app
+ * and the site follow. Light and dark come from the system through light-dark().
  */
 :root {
   color-scheme: light dark;
@@ -23,6 +24,13 @@
   /* Color: lines */
   --tempra-color-border: light-dark(#e8e8e4, #2a2a2d);
   --tempra-color-border-strong: light-dark(#d2d2ce, #3c3c40);
+
+  /* Color: an agent's recent change (the only colour before the palette), cooling to grey */
+  --tempra-color-agent: light-dark(#e8722a, #f0884a);
+  --tempra-color-agent-cool: var(--tempra-color-faint);
+
+  /* Color: a dimmed page behind a sheet or a full-screen view */
+  --tempra-color-scrim: light-dark(rgb(20 20 22 / 0.2), rgb(0 0 0 / 0.5));
 
   /* Color: links are text, underlined in running text (no colour until the palette) */
   --tempra-color-link: var(--tempra-color-text);
@@ -60,13 +68,31 @@
   --tempra-space-2: 0.5rem;
   --tempra-space-3: 1rem;
   --tempra-space-4: 2rem;
-  --tempra-gutter: 10px; /* the frame's gutter */
+  --tempra-gutter: 8px; /* the frame's gutter */
+  --tempra-sheet-pad: 40px; /* a page's side padding in the sheet */
 
-  /* Shape */
+  /* The frame (take 3) */
+  --tempra-sidebar: 248px; /* the sidebar's width, and the phone drawer's */
+  --tempra-bar: 52px; /* the sheet's top bar, and the phone's */
+  --tempra-row: 30px; /* a sidebar row */
+  --tempra-touch: 44px; /* the least touch target on a phone */
+  --tempra-avatar: 22px;
+  --tempra-avatar-small: 20px;
+  --tempra-dot: 6px; /* an agent's change, a reader's unverified state */
+
+  /* A concept's columns: contents on the left, the text, comments on the right */
+  --tempra-column-text: 620px;
+  --tempra-margin-contents: 180px;
+  --tempra-margin-comments: 290px;
+  --tempra-margin-gap: 48px;
+  --tempra-page-width: 760px; /* home, Needs you, Activity, a folder */
+
+  /* Shape: squarer than take 2 */
   --tempra-radius: 5px; /* code */
   --tempra-radius-mark: 3px;
-  --tempra-radius-row: 8px; /* tree rows, inputs */
-  --tempra-radius-box: 12px; /* cards, list rows */
-  --tempra-radius-card: 16px; /* the sheet, panels */
+  --tempra-radius-row: 7px; /* sidebar rows, inputs */
+  --tempra-radius-box: 10px; /* cards, list boxes, threads */
+  --tempra-radius-card: 10px; /* the sheet, dialogs */
+  --tempra-radius-tile: 6px; /* the library's initial */
   --tempra-radius-pill: 999px;
 }

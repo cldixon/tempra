@@ -71,6 +71,7 @@ import type {
   TrustTier,
   Verification,
 } from "../okf/types";
+import { wordChange } from "../okf/words";
 import {
   type ActionBy,
   type CommentAction,
@@ -422,6 +423,27 @@ function refuseInvalid(path: string, parsed: ParsedConcept, lint: LintWarning[])
 }
 
 /** Search snippet markers: control characters, which concept text never holds. */
+/** Events that change a file's content (a write, import, revert or delete), on `events`. */
+const CONTENT_EVENT = "op NOT IN ('move', 'verify', 'comment')";
+
+/**
+ * Concepts whose content changed after their latest verification, or that have none (`p` the
+ * path, `e` its latest content event; a move or a comment is not a change). With `person`, only
+ * a person's verification counts: Needs you's "To verify"; otherwise any (a process's too): the
+ * health summary's `unverified`.
+ */
+function unverified(person: boolean): string {
+  return `FROM paths p
+  JOIN events e ON e.seq = (
+    SELECT MAX(seq) FROM events WHERE concept_id = p.concept_id AND ${CONTENT_EVENT})
+  WHERE p.kind = 'concept' AND NOT EXISTS (
+    SELECT 1 FROM verifications v WHERE v.concept_id = p.concept_id AND v.seq > e.seq
+    ${person ? "AND v.by LIKE 'human:%'" : ""})`;
+}
+
+const UNVERIFIED = unverified(false);
+const UNVERIFIED_BY_PEOPLE = unverified(true);
+
 const MARK_OPEN = "\u0002";
 const MARK_CLOSE = "\u0003";
 /** A match's end, white space, and the next match's start: one highlight. */
@@ -1272,13 +1294,16 @@ export class LibraryStore {
     const conceptId = cur?.concept_id ?? w.pending.get(path) ?? crypto.randomUUID();
     let seq = cur?.seq ?? 0;
     if (!cur || cur.hash !== hash) {
+      const meta: JsonObject = w.source ? { source: w.source } : {};
+      // A new version of a concept says how much of its text changed (Activity's word counts).
+      if (prev) meta.words = wordChange(docText(prev.doc).text, docText(built.record.doc).text);
       seq = this.appendEvent(w.ctx, w.now, {
         op: w.mode === "import" ? "import" : "put",
         path,
         prev_hash: cur?.hash ?? null,
         hash,
         concept_id: conceptId,
-        meta: w.source ? { source: w.source } : undefined,
+        meta,
       });
       this.setPath(path, conceptId, hash, "concept", seq, cur?.created_seq ?? seq);
       this.indexConcept(conceptId, path, built.record, built.lint, seq);
@@ -1753,21 +1778,29 @@ export class LibraryStore {
       throw new OkfError(409, "path_occupied", `Cannot restore ${path}: another file is there.`);
     }
     if (hash === null && cur) this.refuseOpenThreads(cur, "reverting it away");
+    const kind: Kind | null =
+      hash === null ? null : this.blobInfo(hash).location === "r2" ? "attachment" : "concept";
+    const meta: JsonObject = { reverted_seq: revertedSeq };
+    // Back to an earlier version of a concept: how much of its text changed, as for a write.
+    if (hash !== null && kind === "concept" && cur?.kind === "concept") {
+      meta.words = wordChange(
+        docText(this.record(cur.hash).doc).text,
+        docText(this.record(hash).doc).text,
+      );
+    }
     const seq = this.appendEvent(w.ctx, w.now, {
       op: "revert",
       path,
       prev_hash: cur?.hash ?? null,
       hash,
       concept_id: conceptId,
-      meta: { reverted_seq: revertedSeq },
+      meta,
     });
-    if (hash === null) {
+    if (hash === null || kind === null) {
       if (!cur) return { op: "revert", path, hash, seq, lint: [] };
       this.dropPath(w, cur);
       return { op: "revert", path, hash, seq, lint: [], ...this.brokenBy(cur) };
     }
-    const info = this.blobInfo(hash);
-    const kind: Kind = info.location === "r2" ? "attachment" : "concept";
     const created = this.sql.all<{ s: number }>(
       "SELECT MIN(seq) AS s FROM events WHERE concept_id = ?",
       conceptId,
@@ -2950,7 +2983,7 @@ export class LibraryStore {
     let from = opts.from;
     if (from === undefined) {
       const last = this.sql.all<{ seq: number }>(
-        "SELECT seq FROM events WHERE concept_id = ? AND seq <= ? AND op NOT IN ('move', 'verify', 'comment') ORDER BY seq DESC LIMIT 1",
+        `SELECT seq FROM events WHERE concept_id = ? AND seq <= ? AND ${CONTENT_EVENT} ORDER BY seq DESC LIMIT 1`,
         id,
         to,
       )[0];
@@ -3801,10 +3834,8 @@ export class LibraryStore {
   private computeHealth(): LibraryHealth {
     const work = this.workCounts();
     const n = (k: string) => work.counts[k] ?? 0;
-    const unverified = `FROM paths p JOIN events e ON e.seq = p.last_seq
-       WHERE p.kind = 'concept' AND e.op <> 'verify'`;
     const rows = this.sql.all<{ path: string; seq: number; ts: string; actor: string }>(
-      `SELECT p.path, p.last_seq AS seq, e.ts, e.actor ${unverified} ORDER BY p.last_seq DESC LIMIT ?`,
+      `SELECT p.path, e.seq, e.ts, e.actor ${UNVERIFIED} ORDER BY e.seq DESC LIMIT ?`,
       HEALTH_NEWEST,
     );
     return {
@@ -3819,7 +3850,7 @@ export class LibraryStore {
         comment: n("comment"),
       },
       unverified: {
-        total: this.sql.all<{ n: number }>(`SELECT COUNT(*) AS n ${unverified}`)[0]?.n ?? 0,
+        total: this.sql.all<{ n: number }>(`SELECT COUNT(*) AS n ${UNVERIFIED}`)[0]?.n ?? 0,
         newest: rows,
       },
     };
@@ -4121,6 +4152,255 @@ export class LibraryStore {
     };
   }
 
+  // ---------------------------------------------------------------- the app's person views
+
+  /**
+   * GET /needs (Needs you, layout take 3): what only a person can do in this library, for `me`,
+   * the person asking (their users id and human: actor), at head. Threads waiting on their reply:
+   * open, the last comment not theirs in person (their agents' replies are news to them, as in
+   * notify.ts), and they took part (wrote in it, themselves or through an agent) or were
+   * mentioned in it. Concepts to verify, as the health summary counts them, paged by offset.
+   * Concepts stale or going stale, soonest first. The agents' housekeeping, counted only.
+   */
+  needs(
+    me: { person: string | null; actor: string | null },
+    opts: { offset?: number; limit?: number } = {},
+  ): Needs {
+    // Who wrote an event: its `by` (TEMPRA-75), or its actor for events from before `by` was
+    // kept. In person: no agent. Nobody to compare with (a NULL) is never a match.
+    const inPerson = (e: string) =>
+      `IFNULL(CASE WHEN json_extract(${e}.meta, '$.by.person') IS NULL THEN ${e}.actor = ?
+         ELSE json_extract(${e}.meta, '$.by.person') = ? AND json_extract(${e}.meta, '$.by.agent') IS NULL
+       END, 0)`;
+    const byThem = (e: string) =>
+      `IFNULL(CASE WHEN json_extract(${e}.meta, '$.by.person') IS NULL THEN ${e}.actor = ?
+         ELSE json_extract(${e}.meta, '$.by.person') = ? END, 0)`;
+    const threads = this.sql.all<{
+      id: string;
+      anchor: string | null;
+      path: string;
+      title: string | null;
+      actor: string;
+      body: string;
+      ts: string;
+      seq: number;
+      by_person: string | null;
+      by_agent: string | null;
+    }>(
+      `SELECT t.id, t.anchor, p.path, c.title, m.actor, m.body, m.ts, m.seq,
+              json_extract(e.meta, '$.by.person') AS by_person,
+              json_extract(e.meta, '$.by.agent') AS by_agent
+       FROM threads t JOIN paths p ON p.concept_id = t.concept_id
+       LEFT JOIN concepts c ON c.concept_id = t.concept_id
+       JOIN comments m ON m.id = (
+         SELECT id FROM comments WHERE thread_id = t.id ORDER BY seq DESC LIMIT 1)
+       JOIN events e ON e.seq = m.seq
+       WHERE t.status = 'open' AND NOT ${inPerson("e")}
+         AND EXISTS (
+           SELECT 1 FROM events x
+           WHERE x.concept_id = t.concept_id AND x.op = 'comment'
+             AND json_extract(x.meta, '$.comment.thread') = t.id
+             AND ((json_extract(x.meta, '$.comment.body') IS NOT NULL AND ${byThem("x")})
+               OR EXISTS (SELECT 1 FROM json_each(x.meta, '$.comment.mentions') n
+                          WHERE json_extract(n.value, '$.user') = ?)))
+       ORDER BY t.last_seq DESC LIMIT ?`,
+      me.actor,
+      me.person,
+      me.actor,
+      me.person,
+      me.person,
+      NEEDS_REPLIES,
+    );
+    const replies = threads.map((t) => ({
+      thread: t.id,
+      path: t.path,
+      title: t.title,
+      quote: t.anchor ? (JSON.parse(t.anchor) as StoredAnchor).quote : null,
+      last: {
+        actor: t.actor,
+        by: byOf(t.by_person, t.by_agent),
+        body: t.body,
+        ts: t.ts,
+        seq: t.seq,
+      },
+    }));
+
+    const limit = Math.min(Math.max(opts.limit ?? 20, 1), 200);
+    const offset = Math.max(opts.offset ?? 0, 0);
+    const total =
+      this.sql.all<{ n: number }>(`SELECT COUNT(*) AS n ${UNVERIFIED_BY_PEOPLE}`)[0]?.n ?? 0;
+    const toVerify = this.sql.all<{
+      path: string;
+      concept_id: string;
+      title: string | null;
+      seq: number;
+      ts: string;
+      actor: string;
+      by_person: string | null;
+      by_agent: string | null;
+    }>(
+      `SELECT p.path, p.concept_id, e.seq, e.ts, e.actor,
+              (SELECT title FROM concepts c WHERE c.concept_id = p.concept_id) AS title,
+              json_extract(e.meta, '$.by.person') AS by_person,
+              json_extract(e.meta, '$.by.agent') AS by_agent
+       ${UNVERIFIED_BY_PEOPLE} ORDER BY e.seq DESC LIMIT ? OFFSET ?`,
+      limit,
+      offset,
+    );
+    const items = toVerify.map((r) => {
+      // The person's latest verification, which the changes are counted from.
+      const v = this.sql.all<{ by: string; at: string; seq: number }>(
+        `SELECT by, at, seq FROM verifications WHERE concept_id = ? AND by LIKE 'human:%'
+         ORDER BY seq DESC LIMIT 1`,
+        r.concept_id,
+      )[0];
+      // Content changes since that verification, or since the concept was made.
+      const changes =
+        this.sql.all<{ n: number }>(
+          `SELECT COUNT(*) AS n FROM events WHERE concept_id = ? AND seq > ? AND ${CONTENT_EVENT}`,
+          r.concept_id,
+          v?.seq ?? 0,
+        )[0]?.n ?? 0;
+      return {
+        path: r.path,
+        title: r.title,
+        seq: r.seq,
+        ts: r.ts,
+        actor: r.actor,
+        by: byOf(r.by_person, r.by_agent),
+        verified: v ? { actor: v.by, seq: v.seq, ts: v.at } : null,
+        changes,
+      };
+    });
+
+    const now = this.clock().getTime();
+    const stale = this.sql
+      .all<{ path: string; title: string | null; stale_after: string; stale_ms: number }>(
+        `SELECT DISTINCT p.path, c.title, c.stale_after, c.stale_ms FROM flags f
+         JOIN concepts c ON c.concept_id = f.concept_id
+         JOIN paths p ON p.concept_id = f.concept_id AND p.kind = 'concept'
+         WHERE f.kind IN ('stale', 'stale_soon') AND c.stale_ms IS NOT NULL
+         ORDER BY c.stale_ms, p.path`,
+      )
+      .map((r) => ({
+        path: r.path,
+        title: r.title,
+        stale_after: r.stale_after,
+        stale: (r.stale_ms <= now ? "stale" : "stale_soon") as Staleness,
+      }));
+
+    const work = this.workCounts().counts;
+    const housekeeping = {
+      lint: work.lint ?? 0,
+      structure: work.structure ?? 0,
+      broken_link: work.broken_link ?? 0,
+      total: 0,
+    };
+    housekeeping.total = housekeeping.lint + housekeeping.structure + housekeeping.broken_link;
+    return {
+      seq: this.headSeq(),
+      replies,
+      verify: {
+        total,
+        items,
+        next_offset: offset + limit < total ? offset + limit : null,
+      },
+      stale,
+      housekeeping,
+      count: replies.length + total + stale.length,
+    };
+  }
+
+  /**
+   * GET /folder (the folder view, layout take 3): a directory at head in one call. Its immediate
+   * subfolders, with how many concepts are under each and their newest change; the concepts
+   * directly in it, each with who wrote the version on screen (its latest content event), whether
+   * a person has verified that version, its open threads and staleness; and counts over those.
+   * Attachments are not concepts: they only make a folder exist. "" is the root, even when empty.
+   */
+  folder(dirInput: string): FolderView {
+    const dir = dirInput.replace(/^\/+|\/+$/g, "") === "" ? "" : normalizePath(dirInput);
+    const files =
+      dir === null
+        ? []
+        : this.sql.all<{
+            path: string;
+            kind: Kind;
+            concept_id: string;
+            hash: string;
+            seq: number;
+            title: string | null;
+            description: string | null;
+            ts: string | null;
+            actor: string | null;
+            by_person: string | null;
+            by_agent: string | null;
+          }>(
+            `SELECT p.path, p.kind, p.concept_id, p.hash, p.last_seq AS seq, c.title, c.description,
+                    e.ts, e.actor, json_extract(e.meta, '$.by.person') AS by_person,
+                    json_extract(e.meta, '$.by.agent') AS by_agent
+             FROM paths p LEFT JOIN concepts c ON c.concept_id = p.concept_id
+             LEFT JOIN events e ON e.seq = (
+               SELECT MAX(seq) FROM events WHERE concept_id = p.concept_id AND ${CONTENT_EVENT})
+             WHERE ? = '' OR p.path LIKE ? ESCAPE '\\'
+             ORDER BY p.path`,
+            dir,
+            `${escapeLike(dir)}/%`,
+          );
+    if (dir === null || (dir !== "" && files.length === 0)) {
+      throw new OkfError(404, "not_found", `No folder at ${dirInput}.`);
+    }
+    const head = this.headSeq();
+    const open = this.openThreadCounts();
+    const stale = this.staleFlags();
+    const folders = new Map<string, FolderView["folders"][number]>();
+    const concepts: FolderView["concepts"] = [];
+    for (const f of files) {
+      const rest = dir === "" ? f.path : f.path.slice(dir.length + 1);
+      const slash = rest.indexOf("/");
+      if (slash !== -1) {
+        const path = dir === "" ? rest.slice(0, slash) : `${dir}/${rest.slice(0, slash)}`;
+        const sub = folders.get(path) ?? { path, concepts: 0, newest_ts: null };
+        if (f.kind === "concept") {
+          sub.concepts++;
+          if (f.ts && (sub.newest_ts === null || f.ts > sub.newest_ts)) sub.newest_ts = f.ts;
+        }
+        folders.set(path, sub);
+        continue;
+      }
+      if (f.kind !== "concept") continue;
+      const tier = trustTier(this.record(f.hash).generated, this.verifiedAt(f.concept_id, head));
+      const flag = stale.get(f.concept_id);
+      concepts.push({
+        path: f.path,
+        title: f.title,
+        description: f.description,
+        seq: f.seq,
+        ts: f.ts ?? "",
+        actor: f.actor ?? "",
+        by: byOf(f.by_person, f.by_agent),
+        verified: tier === "human-reviewed",
+        comments: open.get(f.concept_id) ?? 0,
+        ...(flag ? { stale: flag } : {}),
+      });
+    }
+    let newest: { path: string; ts: string } | null = null;
+    for (const c of concepts) {
+      if (c.ts && (newest === null || c.ts > newest.ts)) newest = { path: c.path, ts: c.ts };
+    }
+    return {
+      seq: head,
+      dir,
+      folders: [...folders.values()],
+      concepts,
+      counts: {
+        concepts: concepts.length,
+        unverified: concepts.filter((c) => !c.verified).length,
+        newest,
+      },
+    };
+  }
+
   // ---------------------------------------------------------------- signed download URLs
 
   /** A per-library HMAC key, created on first use; it never leaves the object. */
@@ -4211,6 +4491,72 @@ export interface LibraryHealth {
   };
 }
 
+/** How many threads waiting on the person's reply Needs you lists. */
+export const NEEDS_REPLIES = 50;
+
+/** Needs you (layout take 3): what only a person can do in a library, for one person. */
+export interface Needs {
+  seq: number;
+  /** Open threads waiting on their reply, the latest activity first. */
+  replies: {
+    thread: string;
+    path: string;
+    title: string | null;
+    quote: string | null;
+    /** The thread's latest comment. */
+    last: { actor: string; by: ActionBy | null; body: string; ts: string; seq: number };
+  }[];
+  /** Concepts changed since they were last verified, or never verified; newest first. */
+  verify: {
+    total: number;
+    items: {
+      path: string;
+      title: string | null;
+      /** The concept's latest event (as in the health summary), and who made it. */
+      seq: number;
+      ts: string;
+      actor: string;
+      by: ActionBy | null;
+      /** Its latest verification, if any. */
+      verified: { actor: string; seq: number; ts: string } | null;
+      /** Content events since that verification, or since the concept was made. */
+      changes: number;
+    }[];
+    next_offset: number | null;
+  };
+  /** Concepts stale or going stale within the stale-soon window, the soonest first. */
+  stale: { path: string; title: string | null; stale_after: string; stale: Staleness }[];
+  /** The agents' share of the work queue, counted only. */
+  housekeeping: { lint: number; structure: number; broken_link: number; total: number };
+  /** replies + verify.total + stale: the sidebar's number. */
+  count: number;
+}
+
+/** One folder for the app's folder view (layout take 3). */
+export interface FolderView {
+  seq: number;
+  dir: string;
+  /** Immediate subfolders: concepts under each (at any depth) and their newest change. */
+  folders: { path: string; concepts: number; newest_ts: string | null }[];
+  /** The concepts directly in the folder. */
+  concepts: {
+    path: string;
+    title: string | null;
+    description: string | null;
+    seq: number;
+    /** The version on screen: when, by whom (its latest content event). */
+    ts: string;
+    actor: string;
+    by: ActionBy | null;
+    /** A person verified the current version (trust tier human-reviewed). */
+    verified: boolean;
+    /** Open comment threads. */
+    comments: number;
+    stale?: Staleness;
+  }[];
+  counts: { concepts: number; unverified: number; newest: { path: string; ts: string } | null };
+}
+
 /** What one run of the staleness process found: counts now, and paths that changed state. */
 export interface StalenessRun {
   stale: number;
@@ -4227,6 +4573,12 @@ export interface WorkItem {
   inbound_links: number;
   /** For a `comment` item: the thread to answer. */
   thread?: string;
+}
+
+/** The person and agent behind an event, from its meta's `by` (TEMPRA-75); null before it. */
+function byOf(person: string | null, agent: string | null): ActionBy | null {
+  if (typeof person !== "string") return null;
+  return typeof agent === "string" ? { person, agent } : { person };
 }
 
 /** A comment's mentions for its event's meta: only when there are some. */

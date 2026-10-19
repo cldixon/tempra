@@ -43,8 +43,9 @@
 }
 
 /*
- * Comments (TEMPRA-13). A thread's quote is underlined in the body (dotted; solid when its thread
- * is the one in focus); a comment being written fills its text with the selection grey. Drawn as
+ * Comments (TEMPRA-13). A thread's quote is underlined in the body (dotted); the one whose thread
+ * is open in the margin is filled grey and underlined solid (take 3); a comment being written
+ * fills its text with the selection grey. Drawn as
  * highlights, so the body's DOM never changes for them.
  */
 ::highlight(tempra-comment) {
@@ -55,9 +56,10 @@
 }
 
 ::highlight(tempra-comment-active) {
+  background-color: var(--tempra-color-hover);
   text-decoration-line: underline;
   text-decoration-style: solid;
-  text-decoration-thickness: 2px;
+  text-decoration-thickness: 1px;
   text-underline-offset: 0.22em;
 }
 
@@ -91,7 +93,7 @@
   opacity: 0.85;
 }
 
-/* A footnote's own text in the Contents & sources panel. */
+/* A footnote's own text in the Sources section and a marker's card. */
 .note > p {
   margin: 0;
 }
@@ -100,171 +102,15 @@
   margin-top: 0.4em;
 }
 
-/* Threads, in the Comments panel. */
-.threads {
-  display: flex;
-  flex-direction: column;
-  gap: var(--tempra-space-3);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.thread {
-  padding: 4px 2px;
-  border-radius: var(--tempra-radius-row);
-}
-
-.thread.active {
-  outline: 1px solid var(--tempra-color-border-strong);
-  outline-offset: 4px;
-}
-
-.thread-by {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  font-size: var(--tempra-text-meta);
-}
-
-.thread-by strong {
-  font-weight: 500;
-}
-
-.thread-by time,
-.thread-by .faint {
-  color: var(--tempra-color-faint);
-}
-
-/* A reply sits a step in from the thread's first comment. */
-.thread .reply {
-  padding-left: 12px;
-}
-
-.quote {
-  margin: 0 0 10px;
-  padding-left: 10px;
-  border-left: 2px solid var(--tempra-color-border-strong);
-  color: var(--tempra-color-muted);
-  font-size: var(--tempra-text-meta);
-  font-style: italic;
-  line-height: 1.45;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.quote a {
-  color: inherit;
-  text-decoration: none;
-}
-
-.comment {
-  margin: 2px 0 10px;
-  font-size: var(--tempra-text-ui);
-  line-height: 1.45;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-/* The composer: a pill until it is used, then a card with the quote, the text and the actions. */
-.comment-form textarea,
-.reply-form textarea {
-  display: block;
-  width: 100%;
-  min-height: 2.25rem;
-  border: 0;
-  border-radius: var(--tempra-radius-box);
-  background: var(--tempra-color-ground);
-  resize: vertical;
-}
-
-.comment-form {
-  padding: 12px 14px;
-  border-radius: var(--tempra-radius-box);
-  background: var(--tempra-color-ground);
-}
-
-.comment-form textarea {
-  min-height: 4rem;
-  padding: 0;
-  border-radius: 0;
-  background: transparent;
-}
-
-.comment-form textarea:focus-visible {
-  outline: none;
-}
-
-.comment-form.idle {
-  padding: 0;
-  background: none;
-}
-
-.comment-form.idle textarea {
-  min-height: 0;
-  height: 2.25rem;
-  padding: 8px 14px;
-  border-radius: var(--tempra-radius-pill);
-  background: var(--tempra-color-ground);
-  resize: none;
-}
-
-.comment-form .actions,
-.reply-form .actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.reply-form textarea {
-  min-height: 0;
-  height: 2rem;
-  padding: 5px 12px;
-  border-radius: var(--tempra-radius-pill);
-  font-size: var(--tempra-text-meta);
-  resize: none;
-}
-
-.reply-form textarea:focus,
-.reply-form textarea:not(:placeholder-shown) {
-  height: 4rem;
-  border-radius: var(--tempra-radius-box);
-}
-
-.comment-form button,
-.reply-form button {
-  padding: 4px 12px;
-  font-size: var(--tempra-text-meta);
-}
-
-/* The concept as stored (the Markdown view): the file's own text, exactly as an agent reads it. */
-.raw-markdown pre {
-  margin: 0 0 var(--tempra-space-2);
-  padding: 16px 18px;
-  border-radius: var(--tempra-radius-box);
-  background: var(--tempra-color-ground);
-  font-size: var(--tempra-text-ui);
-  line-height: 1.6;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.comments {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
 /*
  * Diagrams (tempra-dev: app/diagrams): Pele's SVG themed through its custom properties, greys only
  * until the palette (TEMPRA-1), so dark mode follows the tokens. Colours an author sets in the
- * diagram are content and stay. It scrolls sideways when it cannot shrink to the column.
+ * diagram are content and stay. In the body it sits in a quiet frame (take 3, Figures) with Source
+ * and Enlarge in its corner, and scrolls sideways when it cannot shrink to the column; the
+ * full-screen view draws it again with the same theme.
  */
-.prose figure.diagram {
-  margin: 1.4em 0;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
+.prose figure.diagram,
+.lightbox {
   --pele-bg: var(--tempra-color-bg);
   --pele-fg: var(--tempra-color-text);
   --pele-muted: var(--tempra-color-muted);
@@ -286,7 +132,20 @@
   --pele-series-8: var(--tempra-color-ground);
 }
 
+.prose figure.diagram {
+  margin: 1.6em 0;
+}
+
+.prose .diagram-frame {
+  position: relative;
+  padding: 40px 20px 20px;
+  border: 1px solid var(--tempra-color-border);
+  border-radius: var(--tempra-radius-box);
+}
+
 .prose .diagram-svg {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
   font-family: var(--tempra-font-body);
   font-size: var(--tempra-text-ui);
 }
@@ -298,13 +157,288 @@
   margin: 0 auto;
 }
 
+.prose .diagram-frame pre.diagram-source {
+  margin: 0;
+}
+
+/* Source and Enlarge: small grey pills in the frame's corner. */
+.prose .figure-tools {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 2px;
+  font-family: var(--tempra-font-body);
+}
+
+.prose .figure-tools button {
+  display: inline-grid;
+  place-items: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 10px;
+  border: 0;
+  background: var(--tempra-color-ground);
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-label);
+  line-height: 1;
+}
+
+.prose .figure-tools button:hover:not(:disabled),
+.prose .figure-tools button[aria-pressed="true"] {
+  background: var(--tempra-color-hover);
+  color: var(--tempra-color-text);
+}
+
+.prose .figure-tools .figure-enlarge {
+  padding: 0;
+}
+
 .prose figure.diagram.failed pre {
   margin: 0;
 }
 
 .prose .diagram-notice {
-  margin-top: 6px;
+  margin: 6px 0 0;
   color: var(--tempra-color-muted);
   font-family: var(--tempra-font-body);
   font-size: var(--tempra-text-meta);
+}
+
+/* On a touch screen the corner controls are full-size targets. */
+@media (pointer: coarse) {
+  .prose .diagram-frame {
+    padding-top: 60px;
+  }
+
+  .prose .figure-tools {
+    top: 6px;
+    right: 6px;
+  }
+
+  .prose .figure-tools button {
+    min-width: var(--tempra-touch);
+    height: var(--tempra-touch);
+    font-size: var(--tempra-text-meta);
+  }
+}
+
+/*
+ * The full-screen view of a figure (take 3, Lightbox): a modal dialog over the app on the ground
+ * colour. A header (where, "Figure n of m", Open original and Download as pills, close), the
+ * figure as large as fits between previous and next, and beneath it the caption and a quiet line.
+ */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: var(--tempra-color-ground);
+  color: var(--tempra-color-text);
+  font-family: var(--tempra-font-body);
+  font-size: var(--tempra-text-ui);
+  line-height: 1.5;
+  overflow: hidden;
+}
+
+.lightbox[open] {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.lightbox::backdrop {
+  background: var(--tempra-color-ground);
+}
+
+.lightbox-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 16px 20px;
+}
+
+.lightbox-where {
+  color: var(--tempra-color-muted);
+}
+
+.lightbox-where::after {
+  content: "·";
+  margin-left: 12px;
+  color: var(--tempra-color-faint);
+}
+
+.lightbox-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.lightbox-actions a {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 14px;
+  border: 1px solid var(--tempra-color-border);
+  border-radius: var(--tempra-radius-pill);
+  background: var(--tempra-color-bg);
+  color: var(--tempra-color-text);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.lightbox-actions a:hover {
+  background: var(--tempra-color-hover);
+}
+
+.lightbox-round {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--tempra-color-border);
+  background: var(--tempra-color-bg);
+}
+
+.lightbox-stage {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  min-height: 0;
+  padding: 0 20px;
+}
+
+.lightbox-stage .lightbox-prev,
+.lightbox-stage .lightbox-next {
+  width: var(--tempra-touch);
+  height: var(--tempra-touch);
+}
+
+.lightbox-prev {
+  grid-column: 1;
+}
+
+.lightbox-figure {
+  display: grid;
+  grid-column: 2;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.lightbox-next {
+  grid-column: 3;
+}
+
+.lightbox-figure > img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: var(--tempra-radius-card);
+  box-shadow: var(--tempra-shadow);
+}
+
+.lightbox-figure > .figure-broken {
+  width: min(100%, 32rem);
+}
+
+.lightbox-diagram {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  padding: 24px;
+  border-radius: var(--tempra-radius-card);
+  background: var(--tempra-color-bg);
+  box-shadow: var(--tempra-shadow);
+  font-size: var(--tempra-text-ui);
+}
+
+.lightbox-diagram svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.lightbox-source {
+  max-width: 100%;
+  max-height: 100%;
+  margin: 0;
+  padding: 16px 18px;
+  overflow: auto;
+  border-radius: var(--tempra-radius-box);
+  background: var(--tempra-color-bg);
+  font-family: var(--tempra-font-mono);
+  font-size: var(--tempra-text-ui);
+}
+
+.lightbox-foot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 18px 20px 26px;
+  text-align: center;
+}
+
+.lightbox-caption {
+  max-width: var(--tempra-measure);
+  margin: 0;
+  font-family: var(--tempra-font-reader);
+  font-size: var(--tempra-text-name);
+  text-wrap: pretty;
+}
+
+.lightbox-facts {
+  max-width: var(--tempra-measure);
+  margin: 0;
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-meta);
+  overflow-wrap: anywhere;
+}
+
+.lightbox-facts > span + span::before {
+  content: " · ";
+}
+
+/* A phone: smaller gutters, 44px targets, no keyboard hint. */
+@media (max-width: 600px) {
+  .lightbox-head {
+    padding: 8px 12px;
+  }
+
+  .lightbox-where {
+    display: none;
+  }
+
+  .lightbox-actions a {
+    min-height: var(--tempra-touch);
+    padding: 0 14px;
+  }
+
+  .lightbox-round {
+    width: var(--tempra-touch);
+    height: var(--tempra-touch);
+  }
+
+  .lightbox-stage {
+    gap: 4px;
+    padding: 0 4px;
+  }
+
+  .lightbox-foot {
+    padding: 12px 16px 20px;
+  }
+
+  .lightbox-hint {
+    display: none;
+  }
 }

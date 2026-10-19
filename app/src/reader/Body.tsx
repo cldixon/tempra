@@ -4,13 +4,16 @@
  * textblock its offset in the document's text as `data-text`, and inline content draws exactly the
  * text `docText` reads: a text node counts its characters, an atom (footnote marker, image, raw
  * markdown, hard break) is one element marked `data-atom` that counts one, and what the diff
- * inserts is marked `data-skip` and counts nothing. dom.ts counts the same way.
+ * inserts is marked `data-skip` and counts nothing. dom.ts counts the same way. A paragraph that
+ * is one image is a figure (Figure.tsx): the paragraph keeps its `data-text` element holding the
+ * image's atom, and its caption is drawn beside it, outside the text, marked `data-skip`.
  */
 import { type DocNode, idOf, toMarkdown, type WordDiff } from "@tempra/editor";
 import type { PhrasingContent, RootContent, TableCell } from "mdast";
 import type { ReactNode } from "react";
+import { Caption, FigureImage, InlineImage } from "./Figure";
 import { imageSrc, linkInfo, type Prepared } from "./prepare";
-import { CodeBlock, code as codeBlocks, node as nodeBlocks } from "./registry";
+import { type BlockProps, CodeBlock, code as codeBlocks, node as nodeBlocks } from "./registry";
 
 /** What draws one body: the prepared tree, the diff over it, whether text offsets are drawn. */
 interface Ctx {
@@ -161,22 +164,18 @@ function inline(ctx: Ctx, r: Run, nodes: readonly PhrasingContent[]): ReactNode[
         break;
       }
       case "image": {
+        const figure = ctx.offsets ? ctx.p.figureOf.get(n) : undefined;
         const src = imageSrc(ctx.p.options, n.url);
         r.atom(
           out,
-          src === null ? (
+          figure?.kind === "image" ? (
+            <FigureImage key={k} figure={figure} />
+          ) : src === null ? (
             <span key={k} className="image-dropped" data-atom="">
               {n.alt ?? ""}
             </span>
           ) : (
-            <img
-              key={k}
-              data-atom=""
-              src={src}
-              alt={n.alt ?? ""}
-              title={n.title ?? undefined}
-              loading="lazy"
-            />
+            <InlineImage key={k} src={src} alt={n.alt ?? ""} title={n.title ?? null} />
           ),
         );
         break;
@@ -241,12 +240,22 @@ function block(ctx: Ctx, n: RootContent, hidden = false): ReactNode {
     return <Custom key={key} as={custom} node={n} id={id} offset={offset} text={text} />;
   }
   switch (n.type) {
-    case "paragraph":
+    case "paragraph": {
+      const figure = ctx.offsets ? ctx.p.figureOf.get(n) : undefined;
+      if (figure) {
+        return (
+          <figure key={key} className="figure" data-block={id}>
+            <p data-text={offsetOf(ctx, n)}>{textblock(ctx, n, n.children)}</p>
+            <Caption figure={figure} />
+          </figure>
+        );
+      }
       return (
         <p key={key} data-block={id} data-text={offsetOf(ctx, n)}>
           {textblock(ctx, n, n.children)}
         </p>
       );
+    }
     case "heading": {
       const H = `h${n.depth}` as "h1";
       return (
@@ -304,7 +313,15 @@ function block(ctx: Ctx, n: RootContent, hidden = false): ReactNode {
       r.end(out);
       const Component = (n.lang && codeBlocks[n.lang.toLowerCase()]) || CodeBlock;
       return (
-        <Custom key={key} as={Component} node={n} id={id} offset={offsetOf(ctx, n)} text={out} />
+        <Custom
+          key={key}
+          as={Component}
+          node={n}
+          id={id}
+          offset={offsetOf(ctx, n)}
+          text={out}
+          figure={ctx.offsets ? ctx.p.figureOf.get(n) : undefined}
+        />
       );
     }
     case "thematicBreak":
@@ -353,18 +370,7 @@ function block(ctx: Ctx, n: RootContent, hidden = false): ReactNode {
 }
 
 /** A registry component, called as a component so it may use hooks. */
-function Custom<N>(props: {
-  as: (p: {
-    node: N;
-    id: string | undefined;
-    offset: number | undefined;
-    text: ReactNode;
-  }) => ReactNode;
-  node: N;
-  id: string | undefined;
-  offset: number | undefined;
-  text: ReactNode;
-}) {
+function Custom<N>(props: BlockProps<N> & { as: (p: BlockProps<N>) => ReactNode }) {
   const { as: C, ...rest } = props;
   return <C {...rest} />;
 }

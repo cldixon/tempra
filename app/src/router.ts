@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { LedgerFilters } from "./urls";
+import type { ActivityFilters, LedgerFilters } from "./urls";
 
 /** The pages the app draws itself; every other URL is a server page, loaded in full. */
 export type Route =
@@ -13,6 +13,8 @@ export type Route =
   | { page: "inbox"; all: boolean }
   | { page: "members"; owner: string; slug: string }
   | { page: "work"; owner: string; slug: string; kind?: string }
+  | { page: "needs"; owner: string; slug: string }
+  | { page: "activity"; owner: string; slug: string; filters: ActivityFilters }
   | { page: "transfer"; owner: string; slug: string }
   | { page: "recovery"; owner: string; slug: string }
   | { page: "library-connect"; owner: string; slug: string }
@@ -20,9 +22,20 @@ export type Route =
   | { page: "revert"; owner: string; slug: string; request: string }
   | { page: "restore"; owner: string; slug: string; path: string; to?: number }
   | { page: "directory"; owner: string; slug: string; dir: string; at?: number }
-  | { page: "file"; owner: string; slug: string; path: string; at?: number }
+  | {
+      page: "file";
+      owner: string;
+      slug: string;
+      path: string;
+      at?: number;
+      /** A concept's page compares: in review mode, or against a version (`?since=`). */
+      compare?: Compare;
+    }
   | { page: "ledger"; owner: string; slug: string; filters: LedgerFilters; done: Done }
   | { page: "diff"; owner: string; slug: string; path: string; from?: number; to?: number };
+
+/** What a concept's page draws its body against: the last verification, or a chosen version. */
+export type Compare = { kind: "review" } | { kind: "since"; seq: number };
 
 /** A confirmation from a server form that redirected back here (`?done=`). */
 export type Done = { kind: string; n?: number } | null;
@@ -88,7 +101,7 @@ export function match(url: URL): Route | null {
       case "tree":
         return { page: "directory", owner, slug, dir: decodePath(tail), at };
       case "files":
-        return { page: "file", owner, slug, path: decodePath(tail), at };
+        return { page: "file", owner, slug, path: decodePath(tail), at, compare: compareOf(q) };
       case "ledger": {
         if (tail !== "") return null;
         const s = (k: string) => q.get(k)?.trim() || undefined;
@@ -118,6 +131,21 @@ export function match(url: URL): Route | null {
         };
       case "work":
         return tail === "" ? { page: "work", owner, slug, kind: q.get("kind") || undefined } : null;
+      case "activity": {
+        if (tail !== "") return null;
+        const who = q.get("who");
+        return {
+          page: "activity",
+          owner,
+          slug,
+          filters: {
+            who: who === "agents" || who === "people" ? who : "everyone",
+            prefix: q.get("prefix")?.trim() || undefined,
+            hideComments: q.get("comments") === "hide",
+          },
+        };
+      }
+      case "needs":
       case "transfer":
       case "recovery":
       case "delete":
@@ -136,7 +164,13 @@ export function match(url: URL): Route | null {
     }
   }
   if (rest.endsWith("/")) return { page: "directory", owner, slug, dir: decodePath(rest), at };
-  return { page: "file", owner, slug, path: decodePath(rest), at };
+  return { page: "file", owner, slug, path: decodePath(rest), at, compare: compareOf(q) };
+}
+
+function compareOf(q: URLSearchParams): Compare | undefined {
+  if (q.get("review") === "1") return { kind: "review" };
+  const since = int(q.get("since"));
+  return since === undefined ? undefined : { kind: "since", seq: since };
 }
 
 const NAVIGATE = "tempra:navigate";

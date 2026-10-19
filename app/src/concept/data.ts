@@ -1,0 +1,209 @@
+import type { Doc, LinkTarget } from "@tempra/editor";
+import type { ActedBy } from "../agents";
+import { api, prefetch } from "../api";
+import { registerPrefetch } from "../prefetch";
+import { baseName, dirOf, enc, type Urls } from "../urls";
+
+/**
+ * What a file's page loads (tempra-dev: app/reader): the file and, for a concept, everything its
+ * page shows around the body: sources, links, versions and its own work items, in one round.
+ */
+
+export type Json = string | number | boolean | null | Json[] | { [k: string]: Json };
+export type JsonObject = { [k: string]: Json };
+
+export interface Source extends JsonObject {}
+
+export interface Sources {
+  sources: Source[];
+  unmatched_footnotes: string[];
+}
+
+/** GET …/files/{path} as JSON: what each kind of file is. */
+export type FileJson =
+  | {
+      kind: "concept";
+      path: string;
+      seq: number;
+      hash: string;
+      /** The body as stored: a tree, links at their targets' current paths. */
+      doc: Doc;
+      frontmatter: JsonObject;
+      lint: { code: string; message: string }[];
+      trust_tier: string;
+      stale: boolean;
+      /** Within 14 days of stale_after. */
+      stale_soon?: boolean;
+    }
+  | { kind: "derived"; path: string; seq: number; doc: Doc }
+  | {
+      kind: "attachment";
+      path: string;
+      seq: number;
+      size: number;
+      media: string | null;
+      hash: string;
+    };
+
+export type Concept = Extract<FileJson, { kind: "concept" }>;
+
+export interface Links {
+  inbound: { path: string; raw: string; kind: string }[];
+  broken: { raw: string; path: string; kind: string }[];
+}
+
+export interface HistoryEvent {
+  seq: number;
+  ts: string;
+  actor: string;
+  op: string;
+  path: string;
+  hash: string | null;
+  meta: JsonObject | null;
+}
+
+/** The person and agent behind an event, as its meta keeps them (TEMPRA-75), if it does. */
+export function actedBy(e: Pick<HistoryEvent, "meta">): ActedBy | null {
+  const by = e.meta?.by;
+  if (!by || typeof by !== "object" || Array.isArray(by) || typeof by.person !== "string") {
+    return null;
+  }
+  return typeof by.agent === "string"
+    ? { person: by.person, agent: by.agent }
+    : { person: by.person };
+}
+
+export interface WorkItem {
+  kind: string;
+  path: string;
+  since: string;
+  detail: string;
+  suggested_action: string;
+}
+
+/** What a concept's page shows around its body. */
+export interface ConceptData {
+  concept: Concept;
+  sources: Sources;
+  links: Links;
+  history: HistoryEvent[];
+  work: WorkItem[];
+}
+
+/** What a file's page shows: the file, the head, and for a concept its context. */
+export interface FileData {
+  file: FileJson;
+  head: number;
+  extra: ConceptData | null;
+}
+
+/** Ops that change a file's content (or remove it), and so have a diff. */
+export const CONTENT_OPS = new Set(["put", "import", "revert", "delete", "attach"]);
+
+/** Whether a path can be a concept: markdown, and not a synthesized index.md or log.md. */
+export const isConceptPath = (path: string) =>
+  path.endsWith(".md") && !/(^|\/)(index|log)\.md$/.test(path);
+
+/** The cache key of a file's page (see useLoad). */
+export const fileKey = (urls: Urls, path: string) => `file ${urls.file(path)}`;
+
+/** Where links and images in a body point in the app, as the server's plain pages did. */
+export function bodyHref(urls: Urls) {
+  return (t: LinkTarget | null, _raw: string, kind: "link" | "image"): string | null => {
+    if (!t) return null;
+    if (t.kind !== "internal") return t.href;
+    if (t.dir || t.path === "") return urls.tree(t.path) + (t.anchor ?? "");
+    if (baseName(t.path) === "index.md") return urls.tree(dirOf(t.path)) + (t.anchor ?? "");
+    return kind === "image" ? urls.download(t.path) : urls.file(t.path, t.anchor);
+  };
+}
+
+/**
+ * Everything a file's page shows, in one round of requests: the file and, for a concept, its
+ * sources, links, history and own work items (asked for in parallel; a file that is not a
+ * concept answers those with errors, which are then ignored).
+ */
+export async function loadFile(urls: Urls, path: string): Promise<FileData> {
+  const p = enc(path);
+  const extra = <T>(r: Promise<T>) =>
+    r.then(
+      (v) => ({ v }),
+      (e: unknown) => ({ e }),
+    );
+  const skip = Promise.resolve({ e: null });
+  // Only a concept has sources, links and history; the name says which files can be one.
+  const concept = isConceptPath(path);
+  const [file, stats, sources, links, history, work] = await Promise.all([
+    api<FileJson>(urls.api(`files/${p}`, { at: urls.at })),
+    api<{ seq: number }>(urls.api("stats")),
+    concept ? extra(api<Sources>(urls.api(`sources/${p}`, { at: urls.at }))) : skip,
+    concept ? extra(api<Links>(urls.api(`links/${p}`, { at: urls.at }))) : skip,
+    concept ? extra(api<{ events: HistoryEvent[] }>(urls.api(`history/${p}`))) : skip,
+    concept && urls.at === undefined
+      ? extra(api<{ items: WorkItem[] }>(urls.api("work", { path, limit: 500 })))
+      : Promise.resolve({ v: { items: [] as WorkItem[] } }),
+  ]);
+  const head = stats.seq;
+  if (file.kind !== "concept") return { file, head, extra: null };
+  // A concept reached by another spelling of its path: ask again by its own.
+  if (!concept) return loadFile(urls, file.path);
+  for (const r of [sources, links, history, work]) if ("e" in r) throw r.e;
+  const got = <T>(r: { v: T } | { e: unknown }) => (r as { v: T }).v;
+  return {
+    file,
+    head,
+    extra: {
+      concept: file,
+      sources: got(sources),
+      links: got(links),
+      history: got(history).events,
+      work: got(work).items,
+    },
+  };
+}
+
+// Hovering a file in the tree, or picking it in the switcher, starts loading its page.
+registerPrefetch((urls, path) => prefetch(fileKey(urls, path), () => loadFile(urls, path)));
+
+/** A concept's title: its frontmatter's, else its file name. */
+export function titleOf(c: Concept): string {
+  const t = c.frontmatter.title;
+  return typeof t === "string" && t ? t : baseName(c.path);
+}
+
+/** A version of the concept: a content event in its history, numbered from the first. */
+export interface Version {
+  n: number;
+  event: HistoryEvent;
+}
+
+/**
+ * The concept's versions and where it stands with people (tempra-dev: app/reader, The byline):
+ * every content event numbered in order, the latest human verification, and how many versions
+ * came after it.
+ */
+export interface Standing {
+  versions: Version[];
+  /** The version on screen (the latest, or the pinned one). */
+  current: Version | null;
+  /** The latest verification by a person, and the version it verified. */
+  verified: { event: HistoryEvent; version: Version | null } | null;
+  /** Versions written since that verification (0 when the verified version is current). */
+  since: number;
+}
+
+export function standing(events: HistoryEvent[], seq: number): Standing {
+  const versions: Version[] = [];
+  for (const e of events) {
+    if (CONTENT_OPS.has(e.op) && e.op !== "delete")
+      versions.push({ n: versions.length + 1, event: e });
+  }
+  const current = [...versions].reverse().find((v) => v.event.seq <= seq) ?? null;
+  const human = [...events]
+    .reverse()
+    .find((e) => e.op === "verify" && e.actor.startsWith("human:") && e.seq <= seq);
+  if (!human) return { versions, current, verified: null, since: 0 };
+  const version = [...versions].reverse().find((v) => v.event.seq <= human.seq) ?? null;
+  const since = versions.filter((v) => v.event.seq > human.seq && v.event.seq <= seq).length;
+  return { versions, current, verified: { event: human, version }, since };
+}

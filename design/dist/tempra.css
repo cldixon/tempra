@@ -1,9 +1,10 @@
 /*
  * Tempra design tokens: the one place values live (TEMPRA-8). Take 2 of the design (TEMPRA-53,
  * design/handoff/layout-take-2) set structure and type: neutral greys, a serif for concept bodies,
- * a type scale, radii and one soft shadow. No colour on purpose; the palette (TEMPRA-1) changes
- * values here and both the app and the site follow. Light and dark come from the system through
- * light-dark().
+ * a type scale, radii and one soft shadow. Take 3 (TEMPRA-106, design/handoff/layout-take-3) set
+ * the frame's sizes, squarer corners and the one colour allowed before the palette: a small warm
+ * dot for an agent's recent change. The palette (TEMPRA-1) changes values here and both the app
+ * and the site follow. Light and dark come from the system through light-dark().
  */
 :root {
   color-scheme: light dark;
@@ -23,6 +24,13 @@
   /* Color: lines */
   --tempra-color-border: light-dark(#e8e8e4, #2a2a2d);
   --tempra-color-border-strong: light-dark(#d2d2ce, #3c3c40);
+
+  /* Color: an agent's recent change (the only colour before the palette), cooling to grey */
+  --tempra-color-agent: light-dark(#e8722a, #f0884a);
+  --tempra-color-agent-cool: var(--tempra-color-faint);
+
+  /* Color: a dimmed page behind a sheet or a full-screen view */
+  --tempra-color-scrim: light-dark(rgb(20 20 22 / 0.2), rgb(0 0 0 / 0.5));
 
   /* Color: links are text, underlined in running text (no colour until the palette) */
   --tempra-color-link: var(--tempra-color-text);
@@ -60,14 +68,32 @@
   --tempra-space-2: 0.5rem;
   --tempra-space-3: 1rem;
   --tempra-space-4: 2rem;
-  --tempra-gutter: 10px; /* the frame's gutter */
+  --tempra-gutter: 8px; /* the frame's gutter */
+  --tempra-sheet-pad: 40px; /* a page's side padding in the sheet */
 
-  /* Shape */
+  /* The frame (take 3) */
+  --tempra-sidebar: 248px; /* the sidebar's width, and the phone drawer's */
+  --tempra-bar: 52px; /* the sheet's top bar, and the phone's */
+  --tempra-row: 30px; /* a sidebar row */
+  --tempra-touch: 44px; /* the least touch target on a phone */
+  --tempra-avatar: 22px;
+  --tempra-avatar-small: 20px;
+  --tempra-dot: 6px; /* an agent's change, a reader's unverified state */
+
+  /* A concept's columns: contents on the left, the text, comments on the right */
+  --tempra-column-text: 620px;
+  --tempra-margin-contents: 180px;
+  --tempra-margin-comments: 290px;
+  --tempra-margin-gap: 48px;
+  --tempra-page-width: 760px; /* home, Needs you, Activity, a folder */
+
+  /* Shape: squarer than take 2 */
   --tempra-radius: 5px; /* code */
   --tempra-radius-mark: 3px;
-  --tempra-radius-row: 8px; /* tree rows, inputs */
-  --tempra-radius-box: 12px; /* cards, list rows */
-  --tempra-radius-card: 16px; /* the sheet, panels */
+  --tempra-radius-row: 7px; /* sidebar rows, inputs */
+  --tempra-radius-box: 10px; /* cards, list boxes, threads */
+  --tempra-radius-card: 10px; /* the sheet, dialogs */
+  --tempra-radius-tile: 6px; /* the library's initial */
   --tempra-radius-pill: 999px;
 }
 
@@ -172,7 +198,8 @@ hr {
   border-top: 1px solid var(--tempra-color-border);
 }
 
-/* Controls: pills. A plain button is a ghost; .primary is the one solid action. */
+/* Controls: pills. A plain button is outlined; .primary is the one solid action; .ghost is text.
+   A link that acts as a button (Review, Back to current) takes .button and looks the same. */
 button,
 input,
 select,
@@ -181,7 +208,8 @@ textarea {
   color: inherit;
 }
 
-button {
+button,
+a.button {
   padding: 5px 12px;
   border: 1px solid var(--tempra-color-border);
   border-radius: var(--tempra-radius-pill);
@@ -191,8 +219,17 @@ button {
   cursor: pointer;
 }
 
-button:hover:not(:disabled) {
+a.button {
+  display: inline-block;
+  color: var(--tempra-color-text);
+  line-height: var(--tempra-line-height);
+  text-decoration: none;
+}
+
+button:hover:not(:disabled),
+a.button:hover {
   background: var(--tempra-color-hover);
+  color: var(--tempra-color-text);
 }
 
 button:disabled {
@@ -200,14 +237,16 @@ button:disabled {
   opacity: 0.5;
 }
 
-button.primary {
+button.primary,
+a.button.primary {
   border-color: var(--tempra-color-text);
   background: var(--tempra-color-text);
   color: var(--tempra-color-bg);
   font-weight: 500;
 }
 
-button.primary:hover:not(:disabled) {
+button.primary:hover:not(:disabled),
+a.button.primary:hover {
   background: var(--tempra-color-text);
   opacity: 0.85;
 }
@@ -642,25 +681,29 @@ details > summary {
 
 /*
  * Tables: real tables in their own scroll container, so a wide one scrolls sideways (on a phone
- * too) instead of breaking words. Rules between rows, none between columns; the header is told
- * apart by a rule in the text colour, not by weight (a first column is often bold already).
+ * too) instead of breaking words. A table fills the column in a hairline box, with a light header
+ * row on the ground grey and rules between rows, none between columns (take 3, Figures).
  */
 .prose .table {
   max-width: 100%;
   overflow-x: auto;
   overscroll-behavior-x: contain;
+  border: 1px solid var(--tempra-color-border);
+  border-radius: var(--tempra-radius-box);
 }
 
 .prose table {
+  width: 100%;
   border-collapse: collapse;
-  font-size: 0.88em;
+  font-family: var(--tempra-font-body);
+  font-size: 0.82em;
   font-variant-numeric: lining-nums tabular-nums;
   line-height: 1.5;
 }
 
 .prose th,
 .prose td {
-  padding: 0.55em 1.25em 0.55em 0;
+  padding: 0.6em 0.9em;
   border: 0;
   border-bottom: 1px solid var(--tempra-color-border);
   text-align: left;
@@ -670,15 +713,20 @@ details > summary {
   text-wrap: pretty;
 }
 
-.prose th:last-child,
-.prose td:last-child {
-  padding-right: 0;
+.prose tbody tr:last-child td {
+  border-bottom: 0;
 }
 
 .prose th {
-  border-bottom-color: var(--tempra-color-text);
-  font-weight: 600;
+  background: var(--tempra-color-ground);
+  font-weight: 500;
   vertical-align: bottom;
+}
+
+.prose td code,
+.prose th code {
+  background: none;
+  padding: 0;
 }
 
 .prose [data-align="center"] {
@@ -695,17 +743,112 @@ details > summary {
   border-top: 1px solid var(--tempra-color-border);
 }
 
+/* An image in running text stays in the line, no taller than the column is wide. */
 .prose img {
+  max-width: 100%;
+  height: auto;
+  vertical-align: middle;
+}
+
+.prose .image-dropped,
+.prose .image-broken {
+  color: var(--tempra-color-faint);
+  font-style: italic;
+}
+
+.prose .image-broken {
+  padding: 0 0.3em;
+  border: 1px dashed var(--tempra-color-border-strong);
+  border-radius: var(--tempra-radius);
+}
+
+/*
+ * Figures (take 3, Figures): an image alone in its paragraph, or a diagram, with a caption
+ * beneath: "Figure n." a step darker, then the image's title or alt text, in the UI face.
+ */
+.prose figure {
+  margin: 1.6em 0;
+}
+
+.prose figure.figure > p {
+  margin: 0;
+}
+
+.prose .figure-media {
+  display: block;
+}
+
+.prose .figure-media img {
   display: block;
   max-width: 100%;
   height: auto;
-  margin: 0.6em 0;
-  border-radius: var(--tempra-radius-row);
+  border-radius: var(--tempra-radius-box);
 }
 
-.prose .image-dropped {
+/* The image is the button that enlarges it: no button look, a focus ring when reached by keys. */
+.prose .figure-open {
+  display: block;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--tempra-radius-box);
+  background: none;
+  cursor: zoom-in;
+}
+
+.prose .figure-open:hover:not(:disabled) {
+  background: none;
+}
+
+.prose .figure-open:focus-visible {
+  outline: 2px solid var(--tempra-color-text);
+  outline-offset: 3px;
+}
+
+.prose figcaption {
+  margin-top: 8px;
+  color: var(--tempra-color-muted);
+  font-family: var(--tempra-font-body);
+  font-size: var(--tempra-text-meta);
+  line-height: 1.5;
+  text-wrap: pretty;
+  user-select: none;
+}
+
+.prose .figure-number {
+  color: var(--tempra-color-text);
+  font-weight: 500;
+}
+
+/* An image that can't be shown: a dashed box where it would be, saying so, its path and alt. */
+.figure-broken {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 12rem;
+  padding: 24px;
+  border: 1px dashed var(--tempra-color-border-strong);
+  border-radius: var(--tempra-radius-box);
+  background: var(--tempra-color-ground);
+  color: var(--tempra-color-muted);
+  font-family: var(--tempra-font-body);
+  font-size: var(--tempra-text-meta);
+  font-style: normal;
+  line-height: 1.45;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.figure-broken svg {
+  margin-bottom: 4px;
   color: var(--tempra-color-faint);
-  font-style: italic;
+}
+
+.figure-broken .figure-broken-title {
+  color: var(--tempra-color-text);
+  font-size: var(--tempra-text-ui);
 }
 
 /* Footnote markers: a source's number, small and muted, joined to its word. */
@@ -793,8 +936,9 @@ details > summary {
 }
 
 /*
- * Comments (TEMPRA-13). A thread's quote is underlined in the body (dotted; solid when its thread
- * is the one in focus); a comment being written fills its text with the selection grey. Drawn as
+ * Comments (TEMPRA-13). A thread's quote is underlined in the body (dotted); the one whose thread
+ * is open in the margin is filled grey and underlined solid (take 3); a comment being written
+ * fills its text with the selection grey. Drawn as
  * highlights, so the body's DOM never changes for them.
  */
 ::highlight(tempra-comment) {
@@ -805,9 +949,10 @@ details > summary {
 }
 
 ::highlight(tempra-comment-active) {
+  background-color: var(--tempra-color-hover);
   text-decoration-line: underline;
   text-decoration-style: solid;
-  text-decoration-thickness: 2px;
+  text-decoration-thickness: 1px;
   text-underline-offset: 0.22em;
 }
 
@@ -841,7 +986,7 @@ details > summary {
   opacity: 0.85;
 }
 
-/* A footnote's own text in the Contents & sources panel. */
+/* A footnote's own text in the Sources section and a marker's card. */
 .note > p {
   margin: 0;
 }
@@ -850,171 +995,15 @@ details > summary {
   margin-top: 0.4em;
 }
 
-/* Threads, in the Comments panel. */
-.threads {
-  display: flex;
-  flex-direction: column;
-  gap: var(--tempra-space-3);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.thread {
-  padding: 4px 2px;
-  border-radius: var(--tempra-radius-row);
-}
-
-.thread.active {
-  outline: 1px solid var(--tempra-color-border-strong);
-  outline-offset: 4px;
-}
-
-.thread-by {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
-  font-size: var(--tempra-text-meta);
-}
-
-.thread-by strong {
-  font-weight: 500;
-}
-
-.thread-by time,
-.thread-by .faint {
-  color: var(--tempra-color-faint);
-}
-
-/* A reply sits a step in from the thread's first comment. */
-.thread .reply {
-  padding-left: 12px;
-}
-
-.quote {
-  margin: 0 0 10px;
-  padding-left: 10px;
-  border-left: 2px solid var(--tempra-color-border-strong);
-  color: var(--tempra-color-muted);
-  font-size: var(--tempra-text-meta);
-  font-style: italic;
-  line-height: 1.45;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.quote a {
-  color: inherit;
-  text-decoration: none;
-}
-
-.comment {
-  margin: 2px 0 10px;
-  font-size: var(--tempra-text-ui);
-  line-height: 1.45;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-/* The composer: a pill until it is used, then a card with the quote, the text and the actions. */
-.comment-form textarea,
-.reply-form textarea {
-  display: block;
-  width: 100%;
-  min-height: 2.25rem;
-  border: 0;
-  border-radius: var(--tempra-radius-box);
-  background: var(--tempra-color-ground);
-  resize: vertical;
-}
-
-.comment-form {
-  padding: 12px 14px;
-  border-radius: var(--tempra-radius-box);
-  background: var(--tempra-color-ground);
-}
-
-.comment-form textarea {
-  min-height: 4rem;
-  padding: 0;
-  border-radius: 0;
-  background: transparent;
-}
-
-.comment-form textarea:focus-visible {
-  outline: none;
-}
-
-.comment-form.idle {
-  padding: 0;
-  background: none;
-}
-
-.comment-form.idle textarea {
-  min-height: 0;
-  height: 2.25rem;
-  padding: 8px 14px;
-  border-radius: var(--tempra-radius-pill);
-  background: var(--tempra-color-ground);
-  resize: none;
-}
-
-.comment-form .actions,
-.reply-form .actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.reply-form textarea {
-  min-height: 0;
-  height: 2rem;
-  padding: 5px 12px;
-  border-radius: var(--tempra-radius-pill);
-  font-size: var(--tempra-text-meta);
-  resize: none;
-}
-
-.reply-form textarea:focus,
-.reply-form textarea:not(:placeholder-shown) {
-  height: 4rem;
-  border-radius: var(--tempra-radius-box);
-}
-
-.comment-form button,
-.reply-form button {
-  padding: 4px 12px;
-  font-size: var(--tempra-text-meta);
-}
-
-/* The concept as stored (the Markdown view): the file's own text, exactly as an agent reads it. */
-.raw-markdown pre {
-  margin: 0 0 var(--tempra-space-2);
-  padding: 16px 18px;
-  border-radius: var(--tempra-radius-box);
-  background: var(--tempra-color-ground);
-  font-size: var(--tempra-text-ui);
-  line-height: 1.6;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.comments {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
 /*
  * Diagrams (tempra-dev: app/diagrams): Pele's SVG themed through its custom properties, greys only
  * until the palette (TEMPRA-1), so dark mode follows the tokens. Colours an author sets in the
- * diagram are content and stay. It scrolls sideways when it cannot shrink to the column.
+ * diagram are content and stay. In the body it sits in a quiet frame (take 3, Figures) with Source
+ * and Enlarge in its corner, and scrolls sideways when it cannot shrink to the column; the
+ * full-screen view draws it again with the same theme.
  */
-.prose figure.diagram {
-  margin: 1.4em 0;
-  overflow-x: auto;
-  overscroll-behavior-x: contain;
+.prose figure.diagram,
+.lightbox {
   --pele-bg: var(--tempra-color-bg);
   --pele-fg: var(--tempra-color-text);
   --pele-muted: var(--tempra-color-muted);
@@ -1036,7 +1025,20 @@ details > summary {
   --pele-series-8: var(--tempra-color-ground);
 }
 
+.prose figure.diagram {
+  margin: 1.6em 0;
+}
+
+.prose .diagram-frame {
+  position: relative;
+  padding: 40px 20px 20px;
+  border: 1px solid var(--tempra-color-border);
+  border-radius: var(--tempra-radius-box);
+}
+
 .prose .diagram-svg {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
   font-family: var(--tempra-font-body);
   font-size: var(--tempra-text-ui);
 }
@@ -1048,23 +1050,298 @@ details > summary {
   margin: 0 auto;
 }
 
+.prose .diagram-frame pre.diagram-source {
+  margin: 0;
+}
+
+/* Source and Enlarge: small grey pills in the frame's corner. */
+.prose .figure-tools {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 2px;
+  font-family: var(--tempra-font-body);
+}
+
+.prose .figure-tools button {
+  display: inline-grid;
+  place-items: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 10px;
+  border: 0;
+  background: var(--tempra-color-ground);
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-label);
+  line-height: 1;
+}
+
+.prose .figure-tools button:hover:not(:disabled),
+.prose .figure-tools button[aria-pressed="true"] {
+  background: var(--tempra-color-hover);
+  color: var(--tempra-color-text);
+}
+
+.prose .figure-tools .figure-enlarge {
+  padding: 0;
+}
+
 .prose figure.diagram.failed pre {
   margin: 0;
 }
 
 .prose .diagram-notice {
-  margin-top: 6px;
+  margin: 6px 0 0;
   color: var(--tempra-color-muted);
   font-family: var(--tempra-font-body);
   font-size: var(--tempra-text-meta);
 }
 
+/* On a touch screen the corner controls are full-size targets. */
+@media (pointer: coarse) {
+  .prose .diagram-frame {
+    padding-top: 60px;
+  }
+
+  .prose .figure-tools {
+    top: 6px;
+    right: 6px;
+  }
+
+  .prose .figure-tools button {
+    min-width: var(--tempra-touch);
+    height: var(--tempra-touch);
+    font-size: var(--tempra-text-meta);
+  }
+}
+
 /*
- * The app's frame (TEMPRA-19, take 2 in TEMPRA-53). A soft ground; on it the header, the sidebar
- * (no box) and the open file as a floating sheet; the concept's context as one panel at a time,
- * a card beside the sheet, opened from a control cluster that hovers over the sheet's top right.
- * Account pages sit on the same ground in a centred column. Under 1100px the panel overlays the
- * sheet; under 900px the sidebar becomes a drawer.
+ * The full-screen view of a figure (take 3, Lightbox): a modal dialog over the app on the ground
+ * colour. A header (where, "Figure n of m", Open original and Download as pills, close), the
+ * figure as large as fits between previous and next, and beneath it the caption and a quiet line.
+ */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  max-width: none;
+  height: 100%;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: var(--tempra-color-ground);
+  color: var(--tempra-color-text);
+  font-family: var(--tempra-font-body);
+  font-size: var(--tempra-text-ui);
+  line-height: 1.5;
+  overflow: hidden;
+}
+
+.lightbox[open] {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.lightbox::backdrop {
+  background: var(--tempra-color-ground);
+}
+
+.lightbox-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 16px 20px;
+}
+
+.lightbox-where {
+  color: var(--tempra-color-muted);
+}
+
+.lightbox-where::after {
+  content: "·";
+  margin-left: 12px;
+  color: var(--tempra-color-faint);
+}
+
+.lightbox-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.lightbox-actions a {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 14px;
+  border: 1px solid var(--tempra-color-border);
+  border-radius: var(--tempra-radius-pill);
+  background: var(--tempra-color-bg);
+  color: var(--tempra-color-text);
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.lightbox-actions a:hover {
+  background: var(--tempra-color-hover);
+}
+
+.lightbox-round {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--tempra-color-border);
+  background: var(--tempra-color-bg);
+}
+
+.lightbox-stage {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  min-height: 0;
+  padding: 0 20px;
+}
+
+.lightbox-stage .lightbox-prev,
+.lightbox-stage .lightbox-next {
+  width: var(--tempra-touch);
+  height: var(--tempra-touch);
+}
+
+.lightbox-prev {
+  grid-column: 1;
+}
+
+.lightbox-figure {
+  display: grid;
+  grid-column: 2;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.lightbox-next {
+  grid-column: 3;
+}
+
+.lightbox-figure > img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: var(--tempra-radius-card);
+  box-shadow: var(--tempra-shadow);
+}
+
+.lightbox-figure > .figure-broken {
+  width: min(100%, 32rem);
+}
+
+.lightbox-diagram {
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  padding: 24px;
+  border-radius: var(--tempra-radius-card);
+  background: var(--tempra-color-bg);
+  box-shadow: var(--tempra-shadow);
+  font-size: var(--tempra-text-ui);
+}
+
+.lightbox-diagram svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.lightbox-source {
+  max-width: 100%;
+  max-height: 100%;
+  margin: 0;
+  padding: 16px 18px;
+  overflow: auto;
+  border-radius: var(--tempra-radius-box);
+  background: var(--tempra-color-bg);
+  font-family: var(--tempra-font-mono);
+  font-size: var(--tempra-text-ui);
+}
+
+.lightbox-foot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 18px 20px 26px;
+  text-align: center;
+}
+
+.lightbox-caption {
+  max-width: var(--tempra-measure);
+  margin: 0;
+  font-family: var(--tempra-font-reader);
+  font-size: var(--tempra-text-name);
+  text-wrap: pretty;
+}
+
+.lightbox-facts {
+  max-width: var(--tempra-measure);
+  margin: 0;
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-meta);
+  overflow-wrap: anywhere;
+}
+
+.lightbox-facts > span + span::before {
+  content: " · ";
+}
+
+/* A phone: smaller gutters, 44px targets, no keyboard hint. */
+@media (max-width: 600px) {
+  .lightbox-head {
+    padding: 8px 12px;
+  }
+
+  .lightbox-where {
+    display: none;
+  }
+
+  .lightbox-actions a {
+    min-height: var(--tempra-touch);
+    padding: 0 14px;
+  }
+
+  .lightbox-round {
+    width: var(--tempra-touch);
+    height: var(--tempra-touch);
+  }
+
+  .lightbox-stage {
+    gap: 4px;
+    padding: 0 4px;
+  }
+
+  .lightbox-foot {
+    padding: 12px 16px 20px;
+  }
+
+  .lightbox-hint {
+    display: none;
+  }
+}
+
+/*
+ * The app's frame (TEMPRA-19; take 2 in TEMPRA-53, take 3 in TEMPRA-106). A soft ground and on it
+ * two things: the sidebar (no box) and the open page as a full-height sheet with a hairline edge.
+ * The sidebar can be hidden; under 900px it is a drawer behind a top bar. Account pages sit on
+ * the same ground in a centred column under a header. A concept's own layout (its margins) is in
+ * concept.css; the person's views (home, Needs you, Activity, a folder) in views.css.
  */
 body:has(> #root),
 body.ground {
@@ -1135,6 +1412,12 @@ body.ground {
 
 .menu-list.end {
   right: 0;
+}
+
+/* A menu at the foot of the sidebar opens upwards. */
+.menu-list.up {
+  top: auto;
+  bottom: calc(100% + 6px);
 }
 
 .menu-list a,
@@ -1217,16 +1500,113 @@ body.ground {
   display: block;
 }
 
-/* A dot on a glyph: open comments exist. */
-.icon-button .dot {
-  position: absolute;
-  top: 5px;
-  right: 5px;
-  width: 7px;
-  height: 7px;
-  border: 1.5px solid var(--tempra-color-bg);
+.icon-button:hover:not(:disabled) {
+  color: var(--tempra-color-text);
+}
+
+/* A button with a glyph and a short word or count beside it (the comments toggle). */
+.icon-button.with-count {
+  gap: 6px;
+  width: auto;
+  padding: 0 10px;
+  border-radius: var(--tempra-radius-row);
+  font-size: var(--tempra-text-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.icon-button.with-count[aria-pressed="true"],
+.icon-button.with-count[aria-pressed="true"]:hover:not(:disabled) {
+  background: var(--tempra-color-selected);
+  color: var(--tempra-color-text);
+}
+
+/* An agent's change: a small dot, warm while fresh, grey once it cools (the one colour). */
+.change-dot {
+  display: inline-block;
+  width: var(--tempra-dot);
+  height: var(--tempra-dot);
   border-radius: 50%;
-  background: currentcolor;
+  background: var(--tempra-color-agent-cool);
+  vertical-align: middle;
+}
+
+.change-dot.warm {
+  background: var(--tempra-color-agent);
+}
+
+/* Someone's initials in a small round mark: a person on a light fill, an agent on ink. */
+.avatar-mark {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: var(--tempra-avatar);
+  height: var(--tempra-avatar);
+  border-radius: 50%;
+  background: var(--tempra-color-selected);
+  color: var(--tempra-color-text);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.avatar-mark.agent {
+  background: var(--tempra-color-text);
+  color: var(--tempra-color-bg);
+}
+
+/* A dialog (a concept's properties, its agent notes, all its versions): a card in the top layer. */
+.dialog {
+  width: min(32rem, calc(100vw - 32px));
+  max-height: min(80dvh, 44rem);
+  padding: 0;
+  border: 1px solid var(--tempra-color-border);
+  border-radius: var(--tempra-radius-card);
+  background: var(--tempra-color-bg);
+  box-shadow: var(--tempra-shadow);
+  color: var(--tempra-color-text);
+}
+
+.dialog.wide {
+  width: min(40rem, calc(100vw - 32px));
+}
+
+.dialog::backdrop {
+  background: var(--tempra-color-scrim);
+}
+
+.dialog-head {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 10px 6px 18px;
+  background: var(--tempra-color-bg);
+}
+
+.dialog-head h2 {
+  margin: 0;
+  font-size: var(--tempra-text-name);
+  font-weight: 600;
+}
+
+.dialog-body {
+  padding: 4px 18px 18px;
+  font-size: var(--tempra-text-ui);
+}
+
+.dialog-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 12px 0 0;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+}
+
+.dialog-foot a {
+  color: inherit;
 }
 
 /* ---------- Account pages: the ground, a header, a centred column ---------- */
@@ -1240,8 +1620,7 @@ body.ground {
   padding: 0 20px;
 }
 
-.app-header .spacer,
-.ws-header .spacer {
+.app-header .spacer {
   flex: 1;
 }
 
@@ -1320,59 +1699,130 @@ body.ground {
   color: inherit;
 }
 
-/* ---------- The workspace ---------- */
+/* ---------- The workspace: the sidebar and the sheet on the ground ---------- */
 
 .workspace {
   display: grid;
-  grid-template-columns: 232px minmax(0, 1fr);
-  grid-template-rows: 48px minmax(0, 1fr);
-  grid-template-areas:
-    "header header"
-    "sidebar main";
+  grid-template-columns: var(--tempra-sidebar) minmax(0, 1fr);
+  grid-template-areas: "sidebar sheet";
   column-gap: var(--tempra-gutter);
   height: 100dvh;
-  padding: 0 var(--tempra-gutter) var(--tempra-gutter);
+  padding: var(--tempra-gutter);
 }
 
-.workspace.has-panel {
-  grid-template-columns: 232px minmax(0, 1fr) 320px;
-  grid-template-areas:
-    "header header header"
-    "sidebar main panel";
+.workspace.sidebar-hidden {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "sheet";
 }
 
-.ws-header {
-  grid-area: header;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  padding: 0 6px 0 10px;
-}
-
-.ws-files {
+/* The phone's top bar: only under 900px. */
+.ws-topbar {
   display: none;
 }
 
-/* The sidebar sits on the ground: the search pill, the tree (which scrolls), the views. */
+/* The sidebar sits on the ground: the library, search, the views, the files (which scroll), and
+   the inbox and the person at its foot. */
 .ws-sidebar {
   grid-area: sidebar;
   display: flex;
   flex-direction: column;
+  gap: 2px;
   min-width: 0;
   min-height: 0;
-  padding: 8px 4px 0;
+  padding: 8px 6px;
+  font-size: var(--tempra-text-ui);
+}
+
+.ws-sidebar[hidden] {
+  display: none;
+}
+
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.sidebar-head .menu {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The library switcher: its initial, its name over its owner, a chevron. */
+.lib-switch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--tempra-radius-row);
+  background: transparent;
+  color: var(--tempra-color-text);
+  text-align: left;
+}
+
+.lib-switch:hover:not(:disabled) {
+  background: var(--tempra-color-hover);
+}
+
+.lib-switch svg {
+  flex: none;
+  margin-left: auto;
+  color: var(--tempra-color-faint);
+}
+
+.lib-tile {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--tempra-radius-tile);
+  background: var(--tempra-color-text);
+  color: var(--tempra-color-bg);
+  font-family: var(--tempra-font-reader);
+  font-size: var(--tempra-text-name);
+}
+
+.lib-names {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.lib-name {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lib-owner {
+  overflow: hidden;
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-label);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Hiding the sidebar: a quiet glyph beside the switcher, plain until hovered. */
+.sidebar-hide {
+  flex: none;
+  color: var(--tempra-color-faint);
 }
 
 .search-pill {
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
-  margin-bottom: 10px;
-  padding: 6px 8px 6px 12px;
-  box-shadow: var(--tempra-shadow);
+  margin: 10px 2px 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--tempra-color-border);
+  background: var(--tempra-color-bg);
   color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-ui);
   text-align: left;
 }
 
@@ -1383,30 +1833,113 @@ body.ground {
 
 .search-pill span {
   flex: 1;
+}
+
+.search-pill kbd {
+  border: 0;
+  background: none;
+  color: inherit;
+  font-family: inherit;
+  font-size: var(--tempra-text-label);
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* A row in the sidebar: a glyph, a name, a count or mark at the end. */
+.nav-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: var(--tempra-row);
+  padding: 4px 10px;
+  border: 0;
+  border-radius: var(--tempra-radius-row);
+  background: transparent;
+  color: var(--tempra-color-text);
+  font-size: var(--tempra-text-ui);
+  text-align: left;
+  text-decoration: none;
+}
+
+.nav-row:visited {
+  color: var(--tempra-color-text);
+}
+
+.nav-row:hover,
+.nav-row:hover:not(:disabled) {
+  background: var(--tempra-color-hover);
+  color: var(--tempra-color-text);
+}
+
+.nav-row[aria-current="page"],
+.nav-row[aria-current="location"] {
+  background: var(--tempra-color-selected);
+  font-weight: 500;
+}
+
+.nav-row svg {
+  flex: none;
+}
+
+.nav-label {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.ws-scroll {
+.nav-count {
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.nav-row.person {
+  padding-left: 8px;
+}
+
+.nav-row.person .avatar-mark {
+  margin-right: 0;
+}
+
+.sidebar-label {
+  margin: 18px 10px 4px;
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-label);
+}
+
+.sidebar-scroll {
   flex: 1;
   min-height: 0;
   overflow: auto;
   padding-bottom: 16px;
 }
 
-/* The tree: nested lists, one 30px row per folder or file, indented 14px a level. A folder's row
-   is a button that opens and closes it (a chevron turns); a file's row is a link. */
+.sidebar-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 8px;
+}
+
+/* The tree: nested lists, one row per folder or file, indented a step a level. A folder's row is
+   a button that opens and closes it (a chevron turns) with its count of concepts; a file's row is
+   a link. */
 .tree,
-.tree ul,
-.ws-views {
+.tree ul {
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
 .tree ul {
-  padding-left: 14px;
+  padding-left: 12px;
 }
 
 .tree li {
@@ -1417,8 +1950,8 @@ body.ground {
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 30px;
-  margin-bottom: 2px;
+  min-height: var(--tempra-row);
+  margin-bottom: 1px;
   padding: 0 10px 0 4px;
   border-radius: var(--tempra-radius-row);
   font-size: var(--tempra-text-ui);
@@ -1436,7 +1969,6 @@ button.tree-row {
   color: var(--tempra-color-text);
   font: inherit;
   font-size: var(--tempra-text-ui);
-  font-weight: 500;
   text-align: left;
 }
 
@@ -1456,6 +1988,11 @@ button.tree-row[aria-current="page"] {
   transition: transform 0.15s ease;
 }
 
+.tree-chevron svg {
+  width: 12px;
+  height: 12px;
+}
+
 .tree-row[aria-expanded="true"] .tree-chevron {
   transform: rotate(90deg);
 }
@@ -1471,6 +2008,13 @@ button.tree-row[aria-current="page"] {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.tree-count {
+  flex: none;
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-label);
+  font-variant-numeric: tabular-nums;
 }
 
 .tree-row > a {
@@ -1496,10 +2040,12 @@ button.tree-row[aria-current="page"] {
   width: 16px;
 }
 
-/* Marks: ● an agent's change in the last minutes, ∗ changed since the last visit, open comments,
-   a clock (stale) or an hourglass (stale soon). */
+/* Marks: an agent's change (a dot), open comments (a count), a clock (stale) or an hourglass
+   (stale soon). */
 .tree-mark {
+  display: inline-flex;
   flex: none;
+  align-items: center;
   color: var(--tempra-color-faint);
   font-size: var(--tempra-text-label);
   font-variant-numeric: tabular-nums;
@@ -1511,77 +2057,78 @@ button.tree-row[aria-current="page"] {
   font-size: var(--tempra-text-meta);
 }
 
-.ws-views {
-  margin-top: 20px;
-}
-
-.ws-views a {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 30px;
-  margin-bottom: 2px;
-  padding: 0 10px 0 28px;
-  border-radius: var(--tempra-radius-row);
-  color: var(--tempra-color-muted);
-  font-size: var(--tempra-text-ui);
-  text-decoration: none;
-}
-
-.ws-views a:hover {
-  background: var(--tempra-color-hover);
-}
-
-.ws-views a[aria-current="page"] {
-  background: var(--tempra-color-selected);
-  color: var(--tempra-color-text);
-  font-weight: 500;
-}
-
-.ws-views .count {
-  color: var(--tempra-color-faint);
-  font-size: var(--tempra-text-label);
-  font-weight: 400;
-  font-variant-numeric: tabular-nums;
-}
-
-/* The sheet: the open file on its own card, scrolling inside. */
-.ws-main {
-  grid-area: main;
+/* The sheet: the open page, full height, a hairline edge; the page scrolls inside it. Its width,
+   not the window's, decides a concept's columns (container queries in concept.css), so hiding the
+   sidebar widens the reading layout. */
+.ws-sheet {
+  grid-area: sheet;
   position: relative;
   min-width: 0;
-  overflow: hidden auto;
+  min-height: 0;
+  overflow: hidden;
   border: 1px solid var(--tempra-color-border);
   border-radius: var(--tempra-radius-card);
   background: var(--tempra-color-bg);
-  box-shadow: var(--tempra-shadow);
 }
 
-/* A library view or folder in the sheet: a wider column than a concept's. */
-.sheet-page {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 48px clamp(16px, 5%, 40px) 96px;
+.ws-main {
+  height: 100%;
+  overflow: hidden auto;
+  container: sheet / inline-size;
 }
 
-/* The library's root: no document open, the sheet blank. */
-.empty {
-  min-height: 50vh;
+/* Showing the hidden sidebar: a glyph at the sheet's top left, over its bar. */
+.sheet-toggle {
+  position: absolute;
+  top: 11px;
+  left: 12px;
+  z-index: 4;
 }
 
-/* A concept in the sheet: the reader's column. */
-.doc {
-  max-width: var(--tempra-measure);
-  margin: 0 auto;
-  padding: 56px clamp(16px, 5%, 40px) 140px;
+/* The sheet's bar: where the page is on the left, the page's few controls on the right. It stays
+   in view while the page scrolls. */
+.sheet-bar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: var(--tempra-bar);
+  padding: 0 14px 0 20px;
+  background: var(--tempra-color-bg);
+}
+
+.sidebar-hidden .sheet-bar {
+  padding-left: 52px;
+}
+
+.sheet-bar-start {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.sheet-bar-end {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+
+/* On a phone the bar goes back a step instead of naming the whole path. */
+.sheet-back {
+  display: none;
 }
 
 .crumbs {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-bottom: 24px;
-  color: var(--tempra-color-faint);
+  min-width: 0;
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
 }
 
@@ -1595,369 +2142,18 @@ button.tree-row[aria-current="page"] {
 }
 
 .crumbs .here {
-  color: var(--tempra-color-muted);
-}
-
-.doc-head {
-  margin-bottom: 32px;
-}
-
-.doc-title {
-  margin: 0 0 12px;
-  font-family: var(--tempra-font-reader);
-  font-size: var(--tempra-text-title);
-  font-weight: 500;
-  line-height: 1.15;
-  letter-spacing: -0.01em;
-}
-
-.doc-tagline {
-  margin: 0;
-  color: var(--tempra-color-muted);
-  font-family: var(--tempra-font-reader);
-  font-size: var(--tempra-text-reader);
-  line-height: 1.5;
-}
-
-/* The control cluster: a pill that hovers at the sheet's top right while it scrolls. */
-.cluster {
-  position: sticky;
-  top: 12px;
-  z-index: 3;
-  display: flex;
-  gap: 2px;
-  width: max-content;
-  margin: 12px 12px -50px auto;
-  padding: 3px;
-  border: 1px solid var(--tempra-color-border);
-  border-radius: var(--tempra-radius-pill);
-  background: var(--tempra-color-bg);
-  box-shadow: var(--tempra-shadow);
-}
-
-.cluster-sep {
-  align-self: center;
-  width: 1px;
-  height: 18px;
-  margin: 0 3px;
-  background: var(--tempra-color-border);
-}
-
-/* A newer version exists: the glyph pulses until it is opened. */
-@keyframes tempra-pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-
-  50% {
-    opacity: 0.35;
-  }
-}
-
-.new-version {
-  position: relative;
-}
-
-.new-version .icon-button {
   color: var(--tempra-color-text);
 }
 
-.new-version .icon-button svg {
-  animation: tempra-pulse 1.6s ease-in-out infinite;
+/* A page's column in the sheet: a library view, a folder, settings. */
+.sheet-page {
+  max-width: var(--tempra-page-width);
+  margin: 0 auto;
+  padding: 72px var(--tempra-sheet-pad) 96px;
 }
 
-.new-version .icon-button[aria-expanded="true"] svg {
-  animation: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .new-version .icon-button svg {
-    animation: none;
-  }
-}
-
-/* A short note inside a menu (the new version's who and why). */
-.menu-list p {
-  margin: 4px 10px 6px;
-  color: var(--tempra-color-muted);
-  font-size: var(--tempra-text-meta);
-  line-height: 1.45;
-}
-
-/* The panel: one card beside the sheet, its own scroll. */
-.ws-panel {
-  grid-area: panel;
-  min-height: 0;
-  overflow: auto;
-  border: 1px solid var(--tempra-color-border);
-  border-radius: var(--tempra-radius-card);
-  background: var(--tempra-color-bg);
-  box-shadow: var(--tempra-shadow);
-  font-size: var(--tempra-text-ui);
-}
-
-.ws-panel:focus {
-  outline: none;
-}
-
-.panel-head {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 14px 16px 10px;
-  background: var(--tempra-color-bg);
-}
-
-.panel-head h2 {
-  margin: 0;
-  font-size: var(--tempra-text-ui);
-  font-weight: 500;
-}
-
-.panel-head .count {
-  color: var(--tempra-color-faint);
-  font-size: var(--tempra-text-meta);
-  font-variant-numeric: tabular-nums;
-}
-
-.panel-head .spacer {
-  flex: 1;
-}
-
-.panel-close {
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--tempra-color-faint);
-  font-size: 14px;
-  line-height: 1;
-}
-
-.panel-close:hover:not(:disabled) {
-  color: var(--tempra-color-text);
-}
-
-.panel-body {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  padding: 0 16px 16px;
-}
-
-.panel-body section > :last-child {
-  margin-bottom: 0;
-}
-
-.panel-body ul,
-.panel-body ol {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.panel-foot {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  color: var(--tempra-color-faint);
-  font-size: var(--tempra-text-meta);
-}
-
-.panel-foot a {
-  color: inherit;
-}
-
-/* A one-line state with a dot (verified, unverified). */
-.state-line {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  font-size: var(--tempra-text-meta);
-  color: var(--tempra-color-muted);
-}
-
-.state-line::before {
-  content: "";
-  flex: none;
-  width: 7px;
-  height: 7px;
-  border: 1px solid var(--tempra-color-text);
-  border-radius: 50%;
-  transform: translateY(-1px);
-}
-
-.state-line.on::before {
-  background: var(--tempra-color-text);
-}
-
-/* Name and value pairs (the Review panel's facts, the Properties panel). */
-.facts {
-  display: grid;
-  grid-template-columns: 6.5rem minmax(0, 1fr);
-  gap: 6px 10px;
-  margin: 0;
-  font-size: var(--tempra-text-meta);
-}
-
-.facts > div {
-  display: contents;
-}
-
-.facts dt {
-  color: var(--tempra-color-faint);
-  font-family: var(--tempra-font-mono);
-  font-size: var(--tempra-text-label);
-  line-height: 1.6;
-}
-
-.facts dd {
-  margin: 0;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.facts pre {
-  margin: 0;
-  white-space: pre-wrap;
-}
-
-/* A card in a panel (a work item, the verify form). */
-.inset {
-  padding: 10px 12px;
-  border-radius: var(--tempra-radius-box);
-  background: var(--tempra-color-ground);
-  font-size: var(--tempra-text-meta);
-  line-height: 1.45;
-}
-
-.inset .chip {
-  background: var(--tempra-color-bg);
-}
-
-.inset-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.verify-form {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.verify-form input {
-  flex: 1 1 8rem;
-  min-width: 0;
-}
-
-/* Contents: a rule down the left, the section in view marked. */
-.toc a {
-  display: block;
-  padding: 4px 0 4px 10px;
-  border-left: 2px solid var(--tempra-color-border);
-  color: var(--tempra-color-muted);
-  text-decoration: none;
-}
-
-.toc a:hover {
-  color: var(--tempra-color-text);
-}
-
-.toc a[aria-current="location"] {
-  border-left-color: var(--tempra-color-text);
-  color: var(--tempra-color-text);
-}
-
-.toc .depth-1 a {
-  padding-left: 22px;
-}
-
-.toc .depth-2 a {
-  padding-left: 34px;
-}
-
-.sources li {
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
-  gap: 6px;
-  margin-bottom: 10px;
-  font-size: var(--tempra-text-meta);
-  line-height: 1.45;
-}
-
-.sources .num {
-  color: var(--tempra-color-faint);
-}
-
-.sources .meta {
-  display: block;
-  color: var(--tempra-color-faint);
-}
-
-.sources a {
-  color: var(--tempra-color-text);
-}
-
-.linked li {
-  margin-bottom: 4px;
-  font-size: var(--tempra-text-meta);
-}
-
-/* History rows: seq, what and who, when. */
-.history li {
-  display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) auto;
-  gap: 8px;
-  padding: 7px 2px;
-  border-top: 1px solid var(--tempra-color-border);
-  font-size: var(--tempra-text-meta);
-  line-height: 1.4;
-}
-
-.history li > span {
-  min-width: 0;
-}
-
-.history .seq {
-  color: var(--tempra-color-muted);
-  font-variant-numeric: tabular-nums;
-  text-decoration: none;
-}
-
-.history .verify .seq {
-  font-weight: 600;
-}
-
-.history li.current {
-  background: var(--tempra-color-ground);
-}
-
-.history .who {
-  color: var(--tempra-color-muted);
-}
-
-.history .note {
-  display: block;
-  overflow: hidden;
-  color: var(--tempra-color-faint);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.history .when {
-  color: var(--tempra-color-faint);
-  white-space: nowrap;
-}
-
-.history .when a {
-  color: inherit;
+.sheet-page.wide {
+  max-width: 960px;
 }
 
 /* ---------- The quick switcher ---------- */
@@ -1973,7 +2169,7 @@ button.tree-row[aria-current="page"] {
 }
 
 .switcher::backdrop {
-  background: light-dark(rgb(20 20 22 / 0.2), rgb(0 0 0 / 0.5));
+  background: var(--tempra-color-scrim);
 }
 
 .switcher-head input {
@@ -1995,49 +2191,46 @@ button.tree-row[aria-current="page"] {
   background: var(--tempra-color-selected);
 }
 
-/* ---------- Narrow screens ---------- */
+/* ---------- Narrow screens: a top bar, the sidebar as a drawer ---------- */
 
-/* Under 1100px the panel overlays the sheet, below the cluster so the cluster stays in reach. */
-@media (max-width: 1100px) {
-  .workspace.has-panel {
-    grid-template-columns: 232px minmax(0, 1fr);
-    grid-template-areas:
-      "header header"
-      "sidebar main";
-  }
-
-  .ws-panel {
-    position: fixed;
-    top: 112px;
-    right: var(--tempra-gutter);
-    bottom: var(--tempra-gutter);
-    z-index: 5;
-    width: min(320px, calc(100vw - 20px));
-  }
-}
-
-/* Under 900px the sidebar is a drawer behind the Files button. */
 @media (max-width: 900px) {
   .workspace,
-  .workspace.has-panel {
+  .workspace.sidebar-hidden {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: var(--tempra-bar) minmax(0, 1fr);
     grid-template-areas:
-      "header"
-      "main";
+      "topbar"
+      "sheet";
+    padding-top: 0;
   }
 
-  .ws-files {
-    display: inline-flex;
+  .ws-topbar {
+    grid-area: topbar;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .ws-topbar-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--tempra-color-text);
+    font-weight: 600;
+    text-decoration: none;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .ws-sidebar {
     position: fixed;
-    top: 48px;
+    top: var(--tempra-bar);
     bottom: var(--tempra-gutter);
     left: var(--tempra-gutter);
     z-index: 6;
     display: none;
-    width: min(280px, calc(100vw - 20px));
+    width: min(var(--tempra-sidebar), calc(100vw - 2 * var(--tempra-gutter)));
     padding: 8px;
     border: 1px solid var(--tempra-color-border);
     border-radius: var(--tempra-radius-card);
@@ -2051,6 +2244,45 @@ button.tree-row[aria-current="page"] {
 
   .ws-sidebar:focus {
     outline: none;
+  }
+
+  .sidebar-hide,
+  .sheet-toggle {
+    display: none;
+  }
+
+  /* Touch targets: every row and control at least 44px tall. */
+  .nav-row,
+  .tree-row,
+  .lib-switch {
+    min-height: var(--tempra-touch);
+  }
+
+  .icon-button.touch,
+  .sheet-bar .icon-button {
+    width: var(--tempra-touch);
+    height: var(--tempra-touch);
+  }
+
+  .sheet-bar .icon-button.with-count {
+    width: auto;
+  }
+
+  .sheet-bar,
+  .sidebar-hidden .sheet-bar {
+    padding: 0 6px;
+  }
+
+  .sheet-back {
+    display: inline-flex;
+  }
+
+  .sheet-bar .crumbs {
+    display: none;
+  }
+
+  .sheet-page {
+    padding: 32px 16px 72px;
   }
 
   .page {
@@ -2333,4 +2565,1539 @@ ul.events {
 
 .mention-list [aria-selected="true"] {
   background: var(--tempra-color-hover);
+}
+
+/*
+ * A concept's page (take 3, TEMPRA-106; tempra-dev: app/reader): the sheet's bar, a slim review
+ * bar while the text shows changes, then three columns: the contents in the left margin, the text
+ * (title, description, byline, body, sources), the comments in the right margin. The sheet's width
+ * decides what fits (container queries on `sheet`, the sheet's scroller), and it tells the app how
+ * comments are shown through `--comments-mode`: in the margin, a sheet over the right side, or a
+ * sheet from the bottom.
+ */
+
+.concept {
+  --comments-mode: margin;
+}
+
+.concept-grid {
+  display: grid;
+  grid-template-columns:
+    [contents] minmax(0, 1fr)
+    [text] minmax(0, var(--tempra-column-text))
+    [rest] minmax(0, 1fr);
+  column-gap: var(--tempra-margin-gap);
+  padding: 0 var(--tempra-sheet-pad) 140px;
+}
+
+/* Comments on: the text moves left to make room for the margin beside it. */
+.concept.comments-on .concept-grid {
+  grid-template-columns:
+    [contents] minmax(0, 1fr)
+    [text] minmax(0, var(--tempra-column-text))
+    [comments] var(--tempra-margin-comments)
+    [rest] minmax(0, 0.5fr);
+}
+
+.concept .doc {
+  grid-row: 1;
+  grid-column: text;
+  min-width: 0;
+  padding-top: 40px;
+}
+
+/* The contents: a short list of headings in small grey type beside the text, kept in view. */
+.concept-contents {
+  position: sticky;
+  top: calc(var(--tempra-bar) + 48px);
+  grid-row: 1;
+  grid-column: contents;
+  justify-self: end;
+  align-self: start;
+  width: min(100%, var(--tempra-margin-contents));
+  margin-top: 220px;
+}
+
+.toc {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--tempra-text-meta);
+  line-height: 1.4;
+}
+
+.toc a {
+  display: block;
+  padding: 4px 0;
+  color: var(--tempra-color-faint);
+  text-decoration: none;
+}
+
+.toc .sub a {
+  padding-left: 12px;
+}
+
+.toc a:hover,
+.toc a[aria-current="location"] {
+  color: var(--tempra-color-text);
+}
+
+/* The Contents item in "…" is for when the margin cannot show them. */
+.concept.has-contents .more-contents {
+  display: none;
+}
+
+/* Where a crumb notes what is exceptional (stale, a status that is not stable). */
+.crumb-flag {
+  color: var(--tempra-color-muted);
+}
+
+.crumb-flag::before {
+  content: "·";
+  margin-right: 6px;
+}
+
+.doc-head {
+  margin-bottom: 32px;
+}
+
+.doc-title {
+  margin: 0 0 12px;
+  font-family: var(--tempra-font-reader);
+  font-size: var(--tempra-text-title);
+  font-weight: 500;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+}
+
+.doc-tagline {
+  margin: 0;
+  color: var(--tempra-color-muted);
+  font-family: var(--tempra-font-reader);
+  font-size: var(--tempra-text-reader);
+  line-height: 1.5;
+}
+
+/* ---------- The byline: who wrote this version, its versions, where it stands ---------- */
+
+.byline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px 16px;
+  margin-top: 24px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--tempra-color-border);
+  font-size: var(--tempra-text-ui);
+}
+
+.byline-who,
+.byline-state {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* Where it stands with the reader keeps to the right, also when the byline wraps. */
+.byline-state {
+  margin-left: auto;
+}
+
+.byline-name strong {
+  font-weight: 500;
+}
+
+.byline-sep {
+  color: var(--tempra-color-faint);
+}
+
+/* "6 versions": a quiet grey pill that opens the history menu. */
+.byline-versions {
+  padding: 2px 8px;
+  border: 0;
+  border-radius: var(--tempra-radius-mark);
+  background: var(--tempra-color-ground);
+  color: var(--tempra-color-text);
+  font-size: var(--tempra-text-ui);
+}
+
+.byline-versions:hover:not(:disabled),
+.byline-versions[aria-expanded="true"] {
+  background: var(--tempra-color-selected);
+}
+
+.verification {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--tempra-color-muted);
+  text-decoration: none;
+}
+
+a.verification:hover {
+  color: var(--tempra-color-text);
+}
+
+/* Verified: a filled mark in ink; anything else: a hollow one. Never a colour. */
+.state-mark {
+  flex: none;
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid currentcolor;
+  border-radius: 50%;
+}
+
+.state-mark.verified {
+  border-color: var(--tempra-color-text);
+  background: var(--tempra-color-text);
+}
+
+.byline-state .button {
+  padding: 3px 12px;
+  font-size: var(--tempra-text-ui);
+}
+
+/* The history menu under the byline: the last verification, the latest versions, all of them. */
+.byline .menu-list {
+  min-width: 22rem;
+  max-width: min(26rem, calc(100vw - 32px));
+}
+
+.history-head {
+  padding: 6px 10px 8px;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+}
+
+.menu-list a.history-row {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+}
+
+.menu-list a.history-row.current {
+  background: var(--tempra-color-ground);
+}
+
+.history-n {
+  color: var(--tempra-color-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.history-what {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.history-who {
+  font-weight: 500;
+}
+
+.history-note {
+  overflow: hidden;
+  color: var(--tempra-color-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-when {
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-meta);
+  white-space: nowrap;
+}
+
+.menu-list .history-all {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+}
+
+/* All versions, in a dialog: one row per event. */
+.history {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.history li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 4px;
+  border-top: 1px solid var(--tempra-color-border);
+  font-size: var(--tempra-text-ui);
+}
+
+.history li.current {
+  background: var(--tempra-color-ground);
+}
+
+.history li.verify .history-what > a,
+.history li.verify .history-what {
+  font-weight: 500;
+}
+
+.history .history-what {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 0 8px;
+}
+
+.history .history-note {
+  flex-basis: 100%;
+  white-space: normal;
+}
+
+.history .history-when a {
+  color: inherit;
+}
+
+/* ---------- Review mode, and the changes since a chosen version ---------- */
+
+.review-bar {
+  position: sticky;
+  top: var(--tempra-bar);
+  z-index: 2;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin: 0 14px;
+  padding: 8px 14px;
+  border-radius: var(--tempra-radius-box);
+  background: var(--tempra-color-ground);
+  font-size: var(--tempra-text-ui);
+}
+
+.review-what {
+  flex: 1 1 16rem;
+  min-width: 0;
+}
+
+.review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+
+.verify-form {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.verify-form input {
+  flex: 1 1 10rem;
+  min-width: 0;
+}
+
+/* ---------- The end of the body: sources, the Markdown view ---------- */
+
+.doc-sources {
+  max-width: var(--tempra-measure-reader);
+  margin-top: 56px;
+  padding-top: 20px;
+  border-top: 1px solid var(--tempra-color-border);
+}
+
+.doc-sources h2 {
+  margin: 0 0 12px;
+  font-size: var(--tempra-text-ui);
+  font-weight: 600;
+}
+
+.doc-sources h3 {
+  margin: 20px 0 8px;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+  font-weight: 500;
+}
+
+.sources {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.sources li {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 6px;
+  margin-bottom: 10px;
+  font-size: var(--tempra-text-ui);
+  line-height: 1.45;
+}
+
+.sources li:target {
+  background: var(--tempra-color-ground);
+}
+
+.sources .num {
+  color: var(--tempra-color-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.sources .meta {
+  display: block;
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-meta);
+}
+
+.sources a {
+  color: var(--tempra-color-text);
+}
+
+.raw-markdown pre {
+  margin: 0 0 var(--tempra-space-2);
+  padding: 16px 18px;
+  border-radius: var(--tempra-radius-box);
+  background: var(--tempra-color-ground);
+  font-size: var(--tempra-text-ui);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* ---------- Properties and agent notes (dialogs from "…") ---------- */
+
+.facts {
+  display: grid;
+  grid-template-columns: 7rem minmax(0, 1fr);
+  gap: 6px 12px;
+  margin: 0 0 var(--tempra-space-3);
+  font-size: var(--tempra-text-meta);
+}
+
+.facts > div {
+  display: contents;
+}
+
+.facts dt {
+  color: var(--tempra-color-faint);
+  font-family: var(--tempra-font-mono);
+  font-size: var(--tempra-text-label);
+  line-height: 1.6;
+}
+
+.facts dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.facts pre {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.linked li,
+.notes-list li {
+  margin-bottom: 8px;
+  font-size: var(--tempra-text-meta);
+}
+
+.notes-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* ---------- What fits: the sheet's width decides ---------- */
+
+/* No room for the contents beside the text and the comments: they move into "…". */
+@container sheet (width < 1280px) {
+  .concept.comments-on .concept-contents {
+    display: none;
+  }
+
+  .concept.comments-on .more-contents {
+    display: block;
+  }
+}
+
+@container sheet (width < 1100px) {
+  .concept-contents {
+    display: none;
+  }
+
+  .concept.has-contents .more-contents {
+    display: block;
+  }
+}
+
+/* No room for a margin: the comments open as a sheet over the right side of the page, and the
+   text keeps its column. */
+@container sheet (width < 980px) {
+  .concept {
+    --comments-mode: side;
+  }
+
+  .concept.comments-on .concept-grid {
+    grid-template-columns:
+      [contents] minmax(0, 1fr)
+      [text] minmax(0, var(--tempra-column-text))
+      [rest] minmax(0, 1fr);
+  }
+}
+
+/* A phone: one column with a 16px gutter, and comments in a sheet from the bottom. */
+@container sheet (width < 640px) {
+  .concept {
+    --comments-mode: bottom;
+  }
+
+  .concept-grid,
+  .concept.comments-on .concept-grid {
+    grid-template-columns: [text] minmax(0, 1fr);
+    padding: 0 16px 96px;
+  }
+
+  .concept .doc {
+    padding-top: 16px;
+  }
+
+  .doc-title {
+    font-size: var(--tempra-text-page);
+  }
+
+  .review-bar {
+    margin: 0 6px;
+  }
+}
+
+/*
+ * Comments on a concept (take 3, TEMPRA-106; tempra-dev: app/comments). In the margin, each
+ * thread sits beside the line its quote is on (the app sets `--slot-y` on each slot, measured and
+ * pushed down past the one before); the active one is a card joined to its quote by a hairline,
+ * the others one line each. Where there is no margin, the same list is a sheet over the right side
+ * of the page, or on a phone a sheet from the bottom. Lines and greys only: no colour.
+ */
+
+.concept-comments {
+  grid-row: 1;
+  grid-column: comments;
+  min-width: 0;
+  padding-top: 40px;
+  font-size: var(--tempra-text-ui);
+}
+
+.comments-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.comments-head h2 {
+  margin: 0;
+  font-size: var(--tempra-text-ui);
+  font-weight: 600;
+}
+
+.comments-head .count {
+  flex: 1;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+}
+
+.comments-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.new-thread,
+.show-resolved {
+  align-self: flex-start;
+  padding-left: 8px;
+  font-size: var(--tempra-text-meta);
+}
+
+/* In the margin, slots are placed by the app; in a sheet they stack. */
+.comments-slots {
+  position: relative;
+  min-height: var(--margin-height, 0);
+}
+
+.concept-comments.margin .slot {
+  position: absolute;
+  top: var(--slot-y, 0);
+  right: 0;
+  left: 0;
+}
+
+.concept-comments:not(.margin) .comments-slots {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* The hairline from the active thread's quote to the thread, across the gap. */
+.thread-line {
+  position: absolute;
+  top: calc(var(--line-y, 0) + 0.8em);
+  left: calc(-1 * var(--tempra-margin-gap));
+  width: calc(var(--tempra-margin-gap) - 8px);
+  border-top: 1px solid var(--tempra-color-border-strong);
+}
+
+.concept-comments:not(.margin) .thread-line {
+  display: none;
+}
+
+/* A thread's quote is beside it in the margin; in a sheet it is shown with the thread. */
+.concept-comments.margin .thread-quote {
+  display: none;
+}
+
+/* A collapsed thread: one line, who, the first words, when. */
+.thread.collapsed {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: var(--tempra-row);
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--tempra-radius-row);
+  background: transparent;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+  text-align: left;
+}
+
+.thread.collapsed:hover:not(:disabled) {
+  background: var(--tempra-color-hover);
+}
+
+.thread.collapsed .avatar-mark {
+  width: var(--tempra-avatar-small);
+  height: var(--tempra-avatar-small);
+  font-size: 8px;
+}
+
+.thread.collapsed strong {
+  flex: none;
+  color: var(--tempra-color-text);
+  font-weight: 500;
+}
+
+.thread-words {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread-replies {
+  flex: none;
+  color: var(--tempra-color-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.thread.collapsed time {
+  flex: none;
+  color: var(--tempra-color-faint);
+}
+
+.thread.resolved {
+  opacity: 0.7;
+}
+
+/* The active thread (and a new comment): a card with the comments, a reply, Resolve. */
+.thread.open {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--tempra-color-border);
+  border-radius: var(--tempra-radius-box);
+  background: var(--tempra-color-bg);
+}
+
+.said-by {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--tempra-text-meta);
+}
+
+.said-by strong {
+  font-weight: 500;
+}
+
+.said-by time,
+.said-change {
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-meta);
+}
+
+.said-change {
+  margin: 0;
+}
+
+.comment {
+  margin: 4px 0 0 calc(var(--tempra-avatar) + 8px);
+  font-size: var(--tempra-text-ui);
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.quote {
+  margin: 0;
+  padding-left: 10px;
+  border-left: 2px solid var(--tempra-color-border-strong);
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+  font-style: italic;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.quote a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* The reply field, a pill until it has words; the composer's field, a box. */
+.reply-form,
+.comment-form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.reply-form textarea,
+.comment-form textarea {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: var(--tempra-color-ground);
+  font-size: var(--tempra-text-meta);
+}
+
+.reply-form textarea {
+  height: 2rem;
+  min-height: 0;
+  padding: 5px 12px;
+  border-radius: var(--tempra-radius-pill);
+  resize: none;
+}
+
+.reply-form textarea:focus,
+.reply-form textarea:not(:placeholder-shown) {
+  height: 4rem;
+  border-radius: var(--tempra-radius-box);
+}
+
+.comment-form textarea {
+  min-height: 4rem;
+  padding: 8px 10px;
+  border-radius: var(--tempra-radius-row);
+  resize: vertical;
+}
+
+.reply-form .actions,
+.comment-form .actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+  margin: 0;
+}
+
+.reply-form button,
+.comment-form button {
+  padding: 4px 12px;
+  font-size: var(--tempra-text-meta);
+}
+
+/* No margin: a sheet over the right side of the page, under the sheet's bar. */
+.concept-comments.side,
+.concept-comments.bottom {
+  position: fixed;
+  z-index: 5;
+  overflow: auto;
+  padding: 12px 14px 20px;
+  border: 1px solid var(--tempra-color-border);
+  background: var(--tempra-color-bg);
+  box-shadow: var(--tempra-shadow);
+}
+
+.concept-comments.side {
+  top: calc(var(--tempra-gutter) + var(--tempra-bar));
+  right: calc(var(--tempra-gutter) + 1px);
+  bottom: calc(var(--tempra-gutter) + 1px);
+  width: min(340px, calc(100vw - 4 * var(--tempra-gutter)));
+  border-radius: var(--tempra-radius-card);
+}
+
+/* A phone: a sheet from the bottom of the screen. */
+.concept-comments.bottom {
+  right: 0;
+  bottom: 0;
+  left: 0;
+  max-height: 75dvh;
+  border-bottom: 0;
+  border-radius: var(--tempra-radius-card) var(--tempra-radius-card) 0 0;
+}
+
+.concept-comments.bottom .comments-head {
+  position: sticky;
+  top: -12px;
+  margin: -12px -14px 4px;
+  padding: 4px 6px 4px 14px;
+  background: var(--tempra-color-bg);
+}
+
+.concept-comments.bottom .thread.collapsed {
+  min-height: var(--tempra-touch);
+}
+
+/*
+ * The person's views of a library (take 3, TEMPRA-106; tempra-dev: app/home, app/needs-you,
+ * app/activity, app/workspace): the library's home, Needs you, Activity and a folder. Quiet pages
+ * in one column: a header, then sections of rows with hairlines between them.
+ */
+
+/* ---------- Shared: a page's header and its sections ---------- */
+
+/* The header: the title (a concept title's look) and a quiet line, a link at the right. */
+.view-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--tempra-space-2) var(--tempra-space-3);
+  margin-bottom: var(--tempra-space-4);
+}
+
+.view-head-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--tempra-space-1);
+  min-width: 0;
+}
+
+.view-title {
+  margin: 0;
+  font-family: var(--tempra-font-reader);
+  font-size: var(--tempra-text-title);
+  font-weight: 500;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+
+.view-meta {
+  margin: 0;
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-meta);
+}
+
+/* "Live": a small ink dot before the line. */
+.view-live {
+  display: flex;
+  align-items: center;
+  gap: var(--tempra-space-2);
+}
+
+.view-live::before {
+  content: "";
+  flex: none;
+  width: var(--tempra-dot);
+  height: var(--tempra-dot);
+  border-radius: 50%;
+  background: var(--tempra-color-text);
+}
+
+/* A link beside a header or a section's heading: "The full ledger", "All 5", "Activity". */
+.view-aside {
+  margin-left: auto;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+  white-space: nowrap;
+}
+
+.view-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--tempra-space-1) var(--tempra-space-2);
+  margin-bottom: var(--tempra-space-2);
+}
+
+.view-section-title {
+  margin: 0;
+  font-size: var(--tempra-text-ui);
+  font-weight: 600;
+}
+
+.view-empty {
+  margin: 0;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-ui);
+}
+
+.view-more {
+  margin: var(--tempra-space-3) 0 0;
+}
+
+/* Filters: pills in a row that wraps. */
+.view-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--tempra-space-2);
+  margin-bottom: var(--tempra-space-4);
+  font-size: var(--tempra-text-meta);
+}
+
+.view-filters button,
+.view-filters select {
+  font-size: var(--tempra-text-meta);
+}
+
+/* A segmented control: buttons in one grey pill, the chosen one white. */
+.segmented {
+  display: flex;
+  gap: 2px;
+  min-width: 0;
+  margin: 0;
+  padding: 2px;
+  border: 0;
+  border-radius: var(--tempra-radius-pill);
+  background: var(--tempra-color-ground);
+}
+
+.segmented button {
+  border-color: transparent;
+  background: transparent;
+  color: var(--tempra-color-muted);
+}
+
+.segmented button[aria-pressed="true"],
+.segmented button[aria-pressed="true"]:hover:not(:disabled) {
+  border-color: var(--tempra-color-border);
+  background: var(--tempra-color-bg);
+  color: var(--tempra-color-text);
+}
+
+/* A choice as an outlined pill (a native select, so it works by keyboard and on a phone). */
+.pill-select {
+  border-color: var(--tempra-color-border);
+  border-radius: var(--tempra-radius-pill);
+  color: var(--tempra-color-muted);
+  cursor: pointer;
+}
+
+/* An outlined pill that stays pressed: ink edge and a grey fill when on. */
+.pill-toggle {
+  color: var(--tempra-color-muted);
+}
+
+.pill-toggle[aria-pressed="true"],
+.pill-toggle[aria-pressed="true"]:hover:not(:disabled) {
+  border-color: var(--tempra-color-text);
+  background: var(--tempra-color-selected);
+  color: var(--tempra-color-text);
+}
+
+@media (max-width: 900px) {
+  .view-title {
+    font-size: var(--tempra-text-page);
+  }
+
+  .view-filters button,
+  .view-filters select {
+    min-height: var(--tempra-touch);
+  }
+
+  .segmented button {
+    min-height: calc(var(--tempra-touch) - 4px);
+  }
+}
+
+/* ---------- Home ---------- */
+
+.home-section {
+  margin-top: var(--tempra-space-4);
+}
+
+/* Who works here: their marks overlapping, each ringed in the sheet's white. */
+.home-who {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--tempra-space-2);
+  margin-top: var(--tempra-space-1);
+}
+
+.face-stack {
+  display: flex;
+}
+
+.face-stack .avatar-mark {
+  box-sizing: content-box;
+  width: var(--tempra-avatar-small);
+  height: var(--tempra-avatar-small);
+  border: 2px solid var(--tempra-color-bg);
+  font-size: 8px;
+}
+
+.face-stack .avatar-mark + .avatar-mark {
+  margin-left: -6px;
+}
+
+/* Needs you: rows between hairlines, each one link. */
+.need-rows {
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--tempra-color-border);
+  list-style: none;
+}
+
+.need-rows > li {
+  border-bottom: 1px solid var(--tempra-color-border);
+}
+
+.need-row {
+  display: grid;
+  grid-template-columns: var(--tempra-avatar) minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  min-height: var(--tempra-touch);
+  padding: 12px 4px;
+  color: var(--tempra-color-text);
+  text-decoration: none;
+}
+
+.need-row:hover {
+  background: var(--tempra-color-hover);
+}
+
+.need-row svg {
+  margin-top: 3px;
+}
+
+.need-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.need-detail {
+  overflow: hidden;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.need-when {
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-meta);
+  white-space: nowrap;
+}
+
+.home-entries {
+  display: flex;
+  flex-direction: column;
+  gap: var(--tempra-space-1);
+}
+
+/* A phone: no glyphs beside the needs, as on the board; the time stays at the right. */
+@media (max-width: 900px) {
+  .need-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: 12px 0;
+  }
+
+  .need-row svg {
+    display: none;
+  }
+}
+
+/* ---------- Needs you ---------- */
+
+/* One column: the header, then a section per kind of need. */
+.needs {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+}
+
+.needs-empty {
+  margin: 0;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-ui);
+}
+
+.needs-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--tempra-space-2);
+}
+
+.needs-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+}
+
+.needs-section-head h2 {
+  margin: 0;
+  font-size: var(--tempra-text-ui);
+}
+
+.needs-count {
+  color: var(--tempra-color-faint);
+  font-weight: 400;
+}
+
+.needs-note {
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-meta);
+}
+
+/* A section's rows: one box, hairlines between them. */
+.needs-box {
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--tempra-color-border);
+  border-radius: var(--tempra-radius-box);
+  list-style: none;
+  overflow: hidden;
+}
+
+.needs-box > li + li {
+  border-top: 1px solid var(--tempra-color-border);
+}
+
+.needs-row {
+  display: grid;
+  align-items: center;
+  gap: 16px;
+  padding: 11px 14px;
+}
+
+/* A thread waiting on a reply: the whole row is the link to it. */
+.needs-reply {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  color: var(--tempra-color-text);
+  text-decoration: none;
+}
+
+.needs-reply:hover {
+  background: var(--tempra-color-hover);
+}
+
+.needs-reply b {
+  font-weight: 500;
+}
+
+.needs-verify {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 160px) auto;
+}
+
+.needs-stale {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.needs-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.needs-title {
+  color: var(--tempra-color-text);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.needs-title:hover {
+  text-decoration: underline;
+}
+
+.needs-meta {
+  overflow: hidden;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.needs-for,
+.needs-by,
+.needs-asked {
+  color: var(--tempra-color-muted);
+}
+
+.needs-by,
+.needs-when,
+.needs-asked {
+  font-size: var(--tempra-text-meta);
+  white-space: nowrap;
+}
+
+.needs-when {
+  color: var(--tempra-color-faint);
+}
+
+.needs-by {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Review (a link) and Ask an agent (a button): the same outlined pill. */
+.needs-more {
+  align-self: flex-start;
+}
+
+.needs-error {
+  margin: 0;
+  font-size: var(--tempra-text-meta);
+  font-weight: 500;
+}
+
+/* The agents' share: one quiet, collapsed line. */
+.needs-housekeeping {
+  padding: 12px 14px;
+  border-radius: var(--tempra-radius-box);
+  background: var(--tempra-color-ground);
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-ui);
+}
+
+.needs-housekeeping p {
+  margin: var(--tempra-space-2) 0 0;
+}
+
+/* A phone: who and the action go under the title; pills are touch targets. */
+@media (max-width: 900px) {
+  .needs-verify,
+  .needs-stale {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 12px;
+  }
+
+  .needs-verify .needs-main,
+  .needs-stale .needs-main {
+    grid-column: 1 / -1;
+  }
+
+  .needs-stale .button,
+  .needs-stale button,
+  .needs-stale .needs-asked {
+    grid-column: 2;
+  }
+
+  .needs-reply {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .needs-reply .needs-when {
+    grid-column: 2;
+  }
+
+  .needs-row .button,
+  .needs-row button,
+  .needs-more {
+    min-height: var(--tempra-touch);
+  }
+}
+
+/* ---------- Activity ---------- */
+
+.activity-day {
+  display: flex;
+  flex-direction: column;
+  gap: var(--tempra-space-1);
+  margin-bottom: var(--tempra-space-4);
+}
+
+/* An entry: who, what they did, when; new ones on a faint fill with a dot at the right. */
+.entry {
+  display: grid;
+  grid-template-columns: var(--tempra-avatar) minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 12px 10px;
+  border-radius: var(--tempra-radius-box);
+  font-size: var(--tempra-text-ui);
+}
+
+.entry.new {
+  background: var(--tempra-color-ground);
+}
+
+.entry > .avatar-mark {
+  margin-top: 1px;
+}
+
+.entry-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--tempra-space-1);
+  min-width: 0;
+}
+
+.entry-line {
+  margin: 0;
+  font-size: var(--tempra-font-size);
+  overflow-wrap: anywhere;
+}
+
+.entry-who {
+  font-weight: 500;
+}
+
+.entry-for,
+.entry-words,
+.entry-more {
+  color: var(--tempra-color-faint);
+}
+
+.entry-words {
+  font-size: var(--tempra-text-meta);
+}
+
+/* The request's note, quoted in the reader's serif. */
+.entry-note {
+  color: var(--tempra-color-muted);
+  font-family: var(--tempra-font-reader);
+  font-size: var(--tempra-font-size);
+  overflow-wrap: anywhere;
+}
+
+.entry-titles {
+  margin: 0;
+  overflow: hidden;
+  color: var(--tempra-color-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The concepts it touched: what happened, the title, the words changed. */
+.entry-touched {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: var(--tempra-space-1) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.entry-touched li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 10px;
+  min-width: 0;
+}
+
+.entry-what {
+  flex: none;
+  width: 52px;
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-label);
+}
+
+.entry-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--tempra-space-2);
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-meta);
+  white-space: nowrap;
+}
+
+/* On the home: smaller marks, no fill, the note in the body's face. */
+.entry.compact {
+  padding: 6px 0;
+  background: none;
+}
+
+.entry.compact > .avatar-mark {
+  width: var(--tempra-avatar-small);
+  height: var(--tempra-avatar-small);
+  font-size: 8px;
+}
+
+.entry.compact .entry-line {
+  font-size: var(--tempra-text-ui);
+}
+
+.entry.compact .entry-note {
+  font-family: inherit;
+  font-size: var(--tempra-text-ui);
+}
+
+@media (max-width: 900px) {
+  .entry {
+    gap: 10px;
+    padding: 12px 8px;
+  }
+
+  .entry.compact .entry-note,
+  .entry.compact .entry-titles {
+    display: none;
+  }
+}
+
+/* ---------- A folder ---------- */
+
+.folder {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.folder-legend,
+.folder-empty {
+  margin: 0;
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-meta);
+}
+
+/* Rows between hairlines: subfolders first, then concepts. */
+.folder-list {
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--tempra-color-border);
+  list-style: none;
+}
+
+.folder-list > li {
+  border-bottom: 1px solid var(--tempra-color-border);
+}
+
+.folder-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 170px) 56px;
+  align-items: center;
+  gap: 20px;
+  padding: 13px 6px;
+  color: var(--tempra-color-text);
+  text-decoration: none;
+}
+
+.folder-row:hover {
+  background: var(--tempra-color-hover);
+}
+
+.folder-sub {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.folder-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.folder-title,
+.folder-desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-title {
+  font-weight: 500;
+}
+
+.folder-sub .folder-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.folder-sub .folder-title svg {
+  flex: none;
+  color: var(--tempra-color-muted);
+}
+
+.folder-desc {
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-ui);
+}
+
+.folder-by {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-meta);
+  white-space: nowrap;
+}
+
+.folder-by .avatar-mark {
+  width: var(--tempra-avatar-small);
+  height: var(--tempra-avatar-small);
+  font-size: 8px;
+}
+
+.folder-marks {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.folder-threads {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* Trust as a dot: filled in ink when a person verified the current version, hollow when not. */
+.folder-dot {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--tempra-color-muted);
+  border-radius: 50%;
+  vertical-align: middle;
+}
+
+.folder-dot.verified {
+  background: var(--tempra-color-muted);
+}
+
+/* A phone: who and the marks go on a second line; the controls are touch targets. */
+@media (max-width: 900px) {
+  .folder-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 12px;
+  }
+
+  .folder-row .folder-main {
+    grid-column: 1 / -1;
+  }
+
+  .folder-sub .folder-main {
+    grid-column: auto;
+  }
 }

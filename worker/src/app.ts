@@ -2,7 +2,7 @@ import * as design from "@tempra/design";
 import { type Doc, parseMarkdown } from "@tempra/editor/doc";
 import { type Context, Hono } from "hono";
 import { registerAccountApi } from "./account-api";
-import { type Accounts, checkNewToken, type MemberRole, type User } from "./accounts";
+import { type Accounts, checkNewToken, humanActor, type MemberRole, type User } from "./accounts";
 import { tokenAgent } from "./agents";
 import type { Authenticate, TokenInfo } from "./auth";
 import {
@@ -669,6 +669,23 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
 
   // The daily health summary (TEMPRA-66): open work by kind and the newest unverified changes.
   app.get(`${BASE}/health`, async (c) => c.json(await c.var.lib.health()));
+
+  // Needs you (layout take 3): what only the person asking can do here (replies waiting on
+  // them, concepts to verify, concepts going stale), with the agents' housekeeping counted.
+  app.get(`${BASE}/needs`, async (c) => {
+    const t = c.var.token;
+    // The person behind the caller, and the human: actor they write with in person.
+    const actor = t.actor.startsWith("human:") ? t.actor : t.person ? humanActor(t.person) : null;
+    return c.json(
+      await c.var.lib.needs(
+        { person: t.created_by ?? null, actor },
+        { offset: num(c, "offset"), limit: num(c, "limit") },
+      ),
+    );
+  });
+
+  // One folder for the app's folder view: its subfolders, its concepts' rows and counts.
+  app.get(`${BASE}/folder`, async (c) => c.json(await c.var.lib.folder(c.req.query("dir") ?? "")));
 
   app.get(`${BASE}/work`, async (c) =>
     c.json(

@@ -5,75 +5,61 @@ import {
   useContext,
   useEffect,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
 } from "react";
-import { createPortal } from "react-dom";
-import { api, useLoad } from "./api";
-import { AccountMenu, Icon, InboxLink, Menu } from "./chrome";
+import { useAgentChanges } from "./changes";
+import { Icon } from "./chrome";
 import { inboxChanged } from "./inbox";
-import { SEEN_EVENT, useFeed, useTrailing } from "./live";
-import { libraryName, useLibraries, useRole } from "./role";
+import { useFeed } from "./live";
 import { lastNavigation } from "./router";
+import { Sidebar, TopBar } from "./Sidebar";
 import { Switcher } from "./Switcher";
-import { type OutlineFile, Tree } from "./Tree";
-import { type Me, switcherKey } from "./ui";
-import { Urls } from "./urls";
+import type { OutlineFile } from "./Tree";
+import type { Me } from "./ui";
+import type { Urls } from "./urls";
 
 /** Where the open page is in its library: a file, a folder, or one of the library's views. */
 export interface Place {
   file: string | null;
   dir: string | null;
-  view: "ledger" | "work" | "transfer" | "recovery" | "connect" | "delete" | "members" | null;
+  view:
+    | "home"
+    | "needs"
+    | "activity"
+    | "ledger"
+    | "work"
+    | "transfer"
+    | "recovery"
+    | "connect"
+    | "delete"
+    | "members"
+    | null;
 }
 
-/** The concept page's panels, one open at a time (tempra-dev: app/workspace, The panels). */
-export type PanelId = "comments" | "review" | "contents" | "history" | "properties";
+/** Under this width the sidebar is a drawer behind the top bar (the phone layout). */
+export const NARROW = "(max-width: 900px)";
 
-const PANELS: readonly PanelId[] = ["comments", "review", "contents", "history", "properties"];
-
-interface Panels {
-  /** The open panel, or null. */
-  panel: PanelId | null;
-  /** Opens a panel; the open one again closes it. */
-  toggle(id: PanelId): void;
-  open(id: PanelId): void;
-  close(): void;
-  /** Where the page draws the open panel (the workspace's right column). */
-  el: HTMLElement | null;
-  /** A page with panels is shown (it registers while mounted). */
-  register(): () => void;
+/** What a page in the workspace may ask of the frame. */
+interface Frame {
+  /** The sidebar is beside the sheet (not hidden, not a drawer). */
+  sidebar: boolean;
+  /** The phone layout: a top bar, the sidebar as a drawer. */
+  narrow: boolean;
 }
 
-const PanelContext = createContext<Panels | null>(null);
+const FrameContext = createContext<Frame>({ sidebar: true, narrow: false });
 
-/** The workspace's panels; null outside a workspace. */
-export function usePanels(): Panels | null {
-  return useContext(PanelContext);
+/** The workspace's frame, for pages that lay themselves out by it. */
+export function useFrame(): Frame {
+  return useContext(FrameContext);
 }
 
-/**
- * The page's panel, drawn in the workspace's right column while a panel is open. A page that has
- * panels renders this whenever it is shown (even while loading, so the column keeps its place).
- */
-export function PanelHost({ children }: { children: ReactNode }) {
-  const panels = usePanels();
-  useEffect(() => panels?.register(), [panels?.register]);
-  if (!panels) return <aside>{children}</aside>;
-  return panels.el && panels.panel ? createPortal(children, panels.el) : null;
-}
-
-const PANEL_KEY = "tempra:panel";
-const NARROW = "(max-width: 900px)";
-/** Where the panel overlays the sheet instead of taking a column. */
-const OVERLAY = "(max-width: 1100px)";
-
-/** Where the main pane was scrolled on each page, for back and forward. */
+/** Where the sheet was scrolled on each page, for back and forward. */
 const scrolls = new Map<string, number>();
 
 /** Whether a media query matches, following resizes. */
-function useMedia(query: string): boolean {
+export function useMedia(query: string): boolean {
   const [on, setOn] = useState(() => window.matchMedia(query).matches);
   useEffect(() => {
     const m = window.matchMedia(query);
@@ -84,68 +70,50 @@ function useMedia(query: string): boolean {
   return on;
 }
 
-/** The panel last open on this browser; Comments on a first visit, none where it would cover. */
-function storedPanel(): PanelId | null {
+const hiddenKey = (urls: Urls) => `tempra:sidebar:${urls.owner}/${urls.slug}`;
+
+/** Whether the person hid the sidebar in this library (a reading mode, remembered per library). */
+function loadHidden(urls: Urls): boolean {
   try {
-    const v = localStorage.getItem(PANEL_KEY);
-    if (v === "none") return null;
-    if (v && (PANELS as readonly string[]).includes(v)) return v as PanelId;
+    return localStorage.getItem(hiddenKey(urls)) === "hidden";
   } catch {
-    // Storage off: the default below.
+    return false;
   }
-  return window.matchMedia(OVERLAY).matches ? null : "comments";
 }
 
-function storePanel(p: PanelId | null) {
+function saveHidden(urls: Urls, hidden: boolean) {
   try {
-    localStorage.setItem(PANEL_KEY, p ?? "none");
+    if (hidden) localStorage.setItem(hiddenKey(urls), "hidden");
+    else localStorage.removeItem(hiddenKey(urls));
   } catch {
     // Storage off: the choice lasts for this page load.
   }
 }
 
 /**
- * The workspace (tempra-dev: app/workspace): one frame for a library's pages. A header, the
- * sidebar on the ground, the open page as a floating sheet, and the concept's panel beside it. It
- * stays mounted while the person moves between the library's files and views, so the tree keeps
- * its state and scroll; only the sheet and the panel change.
+ * The workspace (take 3, tempra-dev: app/workspace): one frame for a library's pages. No header:
+ * the ground holds the sidebar and the open page as a full-height sheet. The sidebar can be
+ * hidden; on a phone it is a drawer behind a top bar. The frame stays mounted while the person
+ * moves between the library's files and views, so the tree keeps its state and scroll; only the
+ * sheet changes.
  */
-export function Workspace(props: {
-  urls: Urls;
-  place: Place;
-  me: Me | null;
-  /** The page draws its own sheet content (a concept: its cluster and column). */
-  bare: boolean;
-  children: ReactNode;
-}) {
+export function Workspace(props: { urls: Urls; place: Place; me: Me | null; children: ReactNode }) {
   const { urls, place } = props;
-  const [panelEl, setPanelEl] = useState<HTMLElement | null>(null);
-  const [hosts, setHosts] = useState(0);
-  const [panel, setPanel] = useState<PanelId | null>(storedPanel);
   const [drawer, setDrawer] = useState(false);
+  const [hidden, setHidden] = useState(() => loadHidden(urls));
   const [switching, setSwitching] = useState(false);
   const narrow = useMedia(NARROW);
   const [index, setIndex] = useState<OutlineFile[]>([]);
+  const [indexSeq, setIndexSeq] = useState<number | null>(null);
   const sidebar = useRef<HTMLElement>(null);
+  const agents = useAgentChanges(urls, indexSeq);
 
-  const register = useCallback(() => {
-    setHosts((n) => n + 1);
-    return () => setHosts((n) => n - 1);
-  }, []);
-  const choose = useCallback((p: PanelId | null) => {
-    setPanel(p);
-    storePanel(p);
-  }, []);
-  const panels = useMemo<Panels>(
-    () => ({
-      panel,
-      toggle: (id) => choose(panel === id ? null : id),
-      open: (id) => choose(id),
-      close: () => choose(null),
-      el: panelEl,
-      register,
-    }),
-    [panel, panelEl, register, choose],
+  const hide = useCallback(
+    (h: boolean) => {
+      setHidden(h);
+      saveHidden(urls, h);
+    },
+    [urls],
   );
 
   // The sheet scrolls on its own: a new page starts at the top (or its #fragment), and back or
@@ -192,212 +160,137 @@ export function Workspace(props: {
     if (!sidebar.current?.contains(document.activeElement)) sidebar.current?.focus();
     const away = (e: PointerEvent) => {
       const t = e.target instanceof Element ? e.target : null;
-      if (!sidebar.current?.contains(t) && !t?.closest(".ws-files")) setDrawer(false);
+      if (!sidebar.current?.contains(t) && !t?.closest(".ws-menu")) setDrawer(false);
     };
     document.addEventListener("pointerdown", away);
     return () => document.removeEventListener("pointerdown", away);
   }, [drawer]);
 
-  // Escape closes the drawer, else the panel. Not from inside a dialog (the switcher) or a menu,
-  // which handle their own Escape.
-  const hasPanel = hosts > 0 && panel !== null;
+  // Keys: Escape closes the drawer (not from inside a dialog or a menu, which handle their own);
+  // Ctrl or Cmd+K opens the quick switcher, and again closes it; Ctrl or Cmd+\ hides the sidebar.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key !== "Escape" || e.defaultPrevented) return;
       const t = e.target instanceof Element ? e.target : null;
-      if (t?.closest("dialog, .menu")) return;
-      if (drawer) setDrawer(false);
-      else if (hasPanel) choose(null);
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [drawer, hasPanel, choose]);
-
-  // Ctrl or Cmd+K opens the quick switcher, from anywhere in the workspace.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+      if (e.key === "Escape" && !e.defaultPrevented && drawer && !t?.closest("dialog, .menu")) {
+        // Handled: a comment sheet under the drawer stays open for the next Escape.
         e.preventDefault();
-        // The same keys close it again.
+        setDrawer(false);
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
         setSwitching((on) => !on);
+      } else if ((e.ctrlKey || e.metaKey) && e.key === "\\" && !narrow) {
+        e.preventDefault();
+        hide(!hidden);
       }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, []);
+  }, [drawer, narrow, hidden, hide]);
 
-  // A link to a page's comments (#comments, from the ledger or the work queue) opens them.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: on each page, once it has panels.
-  useEffect(() => {
-    if (hosts > 0 && location.hash === "#comments") choose("comments");
-  }, [hosts > 0, href]);
-
-  // The sidebar's count of open work, refreshed with the tree.
-  const stats = useLoad(`stats ${urls.owner}/${urls.slug}`, () =>
-    api<{ seq: number; open_work: number }>(urls.api("stats")),
-  );
-  const reloadStats = stats.reload;
-  // The first index arrives with the first stats; later ones follow writes.
-  const indexed = useRef(false);
-  const onIndex = useCallback(
-    (files: OutlineFile[]) => {
-      setIndex(files);
-      if (indexed.current) reloadStats();
-      indexed.current = true;
-    },
-    [reloadStats],
-  );
-  const counts = stats.state === "ready" ? stats.data : null;
-
-  // What changed since the person last looked (TEMPRA-72): the Ledger row's count, which the
-  // ledger clears. It follows the feed; a comment may be for the person, so the inbox reloads.
-  const tally = useLoad(`tally ${urls.owner}/${urls.slug}`, () =>
-    api<{ changes: number; for_you: number }>(urls.api("tally")),
-  );
-  const reloadTally = useTrailing(tally.reload, 1500);
+  // A comment may be for the person: the inbox's count reloads a moment after one (the item is
+  // written just after the comment commits).
   useFeed(
     urls,
-    null,
+    indexSeq,
     (events) => {
-      reloadTally();
-      // The inbox item is written just after the comment commits: ask a moment later.
       if (events.some((e) => e.op === "comment")) setTimeout(inboxChanged, 1500);
     },
-    reloadTally,
+    () => {},
   );
-  useEffect(() => {
-    window.addEventListener(SEEN_EVENT, tally.reload);
-    return () => window.removeEventListener(SEEN_EVENT, tally.reload);
-  }, [tally.reload]);
-  const fresh = tally.state === "ready" ? tally.data.changes : 0;
 
-  const classes = ["workspace", hasPanel ? "has-panel" : ""].filter(Boolean);
+  const onIndex = useCallback((files: OutlineFile[], seq: number) => {
+    setIndex(files);
+    setIndexSeq((s) => s ?? seq);
+  }, []);
+
+  const showSidebar = !hidden || narrow;
+  const classes = ["workspace", showSidebar ? "" : "sidebar-hidden"].filter(Boolean);
   return (
-    <div className={classes.join(" ")}>
-      <header className="ws-header">
-        <button
-          type="button"
-          className="icon-button ws-files"
-          aria-label="Files"
-          aria-expanded={drawer}
-          onClick={() => setDrawer((d) => !d)}
+    <FrameContext.Provider value={{ sidebar: showSidebar && !narrow, narrow }}>
+      <div className={classes.join(" ")}>
+        <TopBar
+          urls={urls}
+          me={props.me}
+          drawer={drawer}
+          onDrawer={() => setDrawer((d) => !d)}
+          onSearch={() => setSwitching(true)}
+        />
+        <section
+          ref={sidebar}
+          tabIndex={-1}
+          className={drawer ? "ws-sidebar open" : "ws-sidebar"}
+          aria-label="Library"
+          hidden={!showSidebar}
         >
-          <Icon name="files" />
-        </button>
-        <a className="brand" href="/">
-          Tempra
-        </a>
-        <span className="header-sep" aria-hidden="true">
-          /
-        </span>
-        <LibraryMenu urls={urls} place={place} />
-        <span className="spacer" />
-        <InboxLink />
-        <AccountMenu me={props.me} />
-      </header>
-      <section
-        ref={sidebar}
-        tabIndex={-1}
-        className={drawer ? "ws-sidebar open" : "ws-sidebar"}
-        aria-label="Library"
-      >
-        <button type="button" className="search-pill" onClick={() => setSwitching(true)}>
-          <span>Search {urls.slug}…</span>
-          <kbd>{switcherKey()}</kbd>
-        </button>
-        <div className="ws-scroll">
-          <Tree urls={urls} file={place.file} dir={place.dir} onIndex={onIndex} />
-          <ul className="ws-views" aria-label="Views">
-            <li>
-              <a href={urls.ledger()} aria-current={place.view === "ledger" ? "page" : undefined}>
-                <span>Ledger</span>
-                {fresh > 0 && (
-                  <span className="count" title="Changes since you last looked">
-                    {fresh} new
-                  </span>
-                )}
-              </a>
-            </li>
-            <li>
-              <a href={urls.work()} aria-current={place.view === "work" ? "page" : undefined}>
-                <span>Work queue</span>
-                {counts && counts.open_work > 0 && (
-                  <span className="count">{counts.open_work}</span>
-                )}
-              </a>
-            </li>
-          </ul>
+          <Sidebar
+            urls={urls}
+            place={place}
+            me={props.me}
+            changes={agents.changes}
+            latest={agents.latest}
+            now={agents.now}
+            onSearch={() => setSwitching(true)}
+            onHide={() => (narrow ? setDrawer(false) : hide(true))}
+            onIndex={onIndex}
+          />
+        </section>
+        <div className="ws-sheet">
+          {!showSidebar && (
+            <button
+              type="button"
+              className="icon-button sheet-toggle"
+              aria-label="Show sidebar"
+              title="Show sidebar"
+              onClick={() => hide(false)}
+            >
+              <Icon name="sidebar" />
+            </button>
+          )}
+          <main
+            className="ws-main"
+            ref={main}
+            onScroll={(e) => scrolls.set(href, e.currentTarget.scrollTop)}
+          >
+            {props.children}
+          </main>
         </div>
-      </section>
-      <main
-        className="ws-main"
-        ref={main}
-        onScroll={(e) => scrolls.set(href, e.currentTarget.scrollTop)}
-      >
-        <PanelContext.Provider value={panels}>
-          {props.bare ? props.children : <div className="sheet-page">{props.children}</div>}
-        </PanelContext.Provider>
-      </main>
-      <aside
-        ref={setPanelEl}
-        className="ws-panel"
-        hidden={!hasPanel}
-        tabIndex={-1}
-        aria-labelledby="panel-title"
-      />
-      <Switcher urls={urls} index={index} open={switching} onClose={() => setSwitching(false)} />
-    </div>
+        <Switcher urls={urls} index={index} open={switching} onClose={() => setSwitching(false)} />
+      </div>
+    </FrameContext.Provider>
   );
 }
 
 /**
- * The library's name as a menu: the account's other libraries, then this library's settings
- * (import and export, recovery, connect, delete).
+ * The bar at the top of the sheet, kept in view while the page scrolls: where the page is (the
+ * crumbs, or on a phone a way back) on the left, the page's few controls on the right.
  */
-function LibraryMenu({ urls, place }: { urls: Urls; place: Place }) {
-  const libs = useLibraries();
-  const role = useRole(urls);
-  const list = libs.state === "ready" ? libs.data.libraries : [];
-  const others = list.filter((l) => l.owner !== urls.owner || l.slug !== urls.slug);
-  // Recovery and Delete are the owner's (tempra-dev: v2/sharing); members see the rest.
-  const owner = role === "owner";
-  const all: [string, string, Place["view"], boolean][] = [
-    ["Members", urls.members(), "members", true],
-    ["Import & export", urls.transfer(), "transfer", true],
-    ["Recovery", urls.recovery(), "recovery", owner],
-    ["Connect", urls.connect(), "connect", true],
-    ["Delete", urls.remove(), "delete", owner],
-  ];
-  const settings = all.filter(([, , , shown]) => shown);
+export function SheetBar(props: {
+  children?: ReactNode;
+  /** On a phone, in place of the crumbs: back to the folder or page above. */
+  back?: { href: string; label: string };
+  actions?: ReactNode;
+}) {
   return (
-    <Menu
-      name={`Library ${urls.slug}`}
-      label={
-        <>
-          {urls.slug}
-          <span className="caret">
-            <Icon name="down" size={12} />
-          </span>
-        </>
-      }
-    >
-      {others.length > 0 && (
-        <>
-          <div className="menu-note">Switch library</div>
-          {others.map((l) => (
-            <a key={`${l.owner}/${l.slug}`} href={new Urls(l.owner, l.slug).tree("")}>
-              {libraryName(l)}
-            </a>
-          ))}
-          <hr />
-        </>
-      )}
-      <div className="menu-note">Library settings</div>
-      {settings.map(([name, href, key]) => (
-        <a key={name} href={href} aria-current={place.view === key ? "page" : undefined}>
-          {name}
-        </a>
-      ))}
-    </Menu>
+    <div className="sheet-bar">
+      <div className="sheet-bar-start">
+        {props.back && (
+          <a
+            className="icon-button touch sheet-back"
+            href={props.back.href}
+            aria-label={`Back to ${props.back.label}`}
+            title={`Back to ${props.back.label}`}
+          >
+            <Icon name="back" />
+          </a>
+        )}
+        {props.children}
+      </div>
+      {props.actions && <div className="sheet-bar-end">{props.actions}</div>}
+    </div>
   );
+}
+
+/** A page's column in the sheet (everything but a concept, which lays out its own margins). */
+export function SheetPage({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
+  return <div className={wide ? "sheet-page wide" : "sheet-page"}>{children}</div>;
 }

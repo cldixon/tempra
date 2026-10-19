@@ -7,11 +7,13 @@
  * text, plus `text`: the node's text drawn by the reader's rules (with the verification diff in
  * it). Comments anchor in what the reader counts, so a component either puts `text` inside an
  * element carrying `data-text={offset}` (as the default code block does) or marks what it draws
- * `data-opaque`, which the selection toolbar does not offer Comment on.
+ * `data-opaque`, which the selection toolbar does not offer Comment on. A block that is a figure
+ * (prepare.ts: a diagram's fence) gets its `figure` for the caption and the full-screen view.
  */
 import type { Code, RootContent } from "mdast";
 import type { ReactNode } from "react";
 import { Diagram } from "./Diagram";
+import type { Figure } from "./prepare";
 
 export interface BlockProps<N> {
   node: N;
@@ -21,6 +23,8 @@ export interface BlockProps<N> {
   offset: number | undefined;
   /** The block's text as the reader draws it, ready to place inside the `data-text` element. */
   text: ReactNode;
+  /** The figure this block is (a diagram's number and caption), when it is one. */
+  figure?: Figure;
 }
 
 export type BlockComponent<N> = (props: BlockProps<N>) => ReactNode;

@@ -18,6 +18,8 @@ import {
 } from "react";
 import { Body } from "./reader/Body";
 import { offsetAtPoint, pointAt, rangeOf, selectionAt } from "./reader/dom";
+import { OpenFigure } from "./reader/Figure";
+import { type FigureView, Lightbox } from "./reader/Lightbox";
 import type { Prepared } from "./reader/prepare";
 
 /** A highlighted range of the text (text offsets), e.g. a comment's quote. */
@@ -144,6 +146,8 @@ export function Reader(props: {
   onMark?(id: string | null): void;
   /** Offers Comment on selected text (text offsets). */
   onComment?(range: { from: number; to: number }): void;
+  /** What the full-screen view of a figure shows beyond the figure (title, an image's facts). */
+  figureView?: FigureView;
 }) {
   const { prepared, diff, hideFirst, highlights, onComment } = props;
   const root = useRef<HTMLDivElement>(null);
@@ -243,6 +247,10 @@ export function Reader(props: {
     return () => document.removeEventListener("scroll", scrolled, { capture: true });
   }, []);
 
+  // The full-screen view: the figure shown (its number), or none.
+  const [shown, setShown] = useState<number | null>(null);
+  const closeFigure = useCallback(() => setShown(null), []);
+
   const onMark = props.onMark;
   const click = (e: React.MouseEvent) => {
     // A click that ends a selection is not a click on a highlight.
@@ -278,8 +286,17 @@ export function Reader(props: {
         }}
         onBlur={() => hide(0)}
       >
-        {body}
+        <OpenFigure.Provider value={setShown}>{body}</OpenFigure.Provider>
       </div>
+      {shown !== null && prepared.figures[shown - 1] && (
+        <Lightbox
+          figures={prepared.figures}
+          at={shown}
+          view={props.figureView}
+          onMove={setShown}
+          onClose={closeFigure}
+        />
+      )}
       {card && (
         <Floating
           rect={card.rect}

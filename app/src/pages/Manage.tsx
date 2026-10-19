@@ -1,6 +1,7 @@
 import { type FormEvent, useState } from "react";
 import { agentLabel, type Contributor } from "../agents";
 import { ApiError, api, field, useAction, useLoad } from "../api";
+import { CONTENT_OPS } from "../concept/data";
 import { useFeed, useTrailing } from "../live";
 import { useRole } from "../role";
 import { navigate } from "../router";
@@ -8,7 +9,6 @@ import { Chip, Crumbs, type Health, healthWords, plural, Status, useTitle, when 
 import { baseName, type Urls } from "../urls";
 import { ConnectSteps } from "./Account";
 import { DiffLines } from "./Diff";
-import { CONTENT_OPS } from "./File";
 
 /**
  * A library's management pages (TEMPRA-14): work queue, import and export, recovery, revert

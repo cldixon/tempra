@@ -31,6 +31,8 @@ export const LIBRARY_METHODS = [
   "thread",
   "summary",
   "health",
+  "needs",
+  "folder",
   "signDownload",
   "openDownload",
   "dump",

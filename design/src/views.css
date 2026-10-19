@@ -1,0 +1,737 @@
+/*
+ * The person's views of a library (take 3, TEMPRA-106; tempra-dev: app/home, app/needs-you,
+ * app/activity, app/workspace): the library's home, Needs you, Activity and a folder. Quiet pages
+ * in one column: a header, then sections of rows with hairlines between them.
+ */
+
+/* ---------- Shared: a page's header and its sections ---------- */
+
+/* The header: the title (a concept title's look) and a quiet line, a link at the right. */
+.view-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: var(--tempra-space-2) var(--tempra-space-3);
+  margin-bottom: var(--tempra-space-4);
+}
+
+.view-head-main {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--tempra-space-1);
+  min-width: 0;
+}
+
+.view-title {
+  margin: 0;
+  font-family: var(--tempra-font-reader);
+  font-size: var(--tempra-text-title);
+  font-weight: 500;
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+
+.view-meta {
+  margin: 0;
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-meta);
+}
+
+/* "Live": a small ink dot before the line. */
+.view-live {
+  display: flex;
+  align-items: center;
+  gap: var(--tempra-space-2);
+}
+
+.view-live::before {
+  content: "";
+  flex: none;
+  width: var(--tempra-dot);
+  height: var(--tempra-dot);
+  border-radius: 50%;
+  background: var(--tempra-color-text);
+}
+
+/* A link beside a header or a section's heading: "The full ledger", "All 5", "Activity". */
+.view-aside {
+  margin-left: auto;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+  white-space: nowrap;
+}
+
+.view-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--tempra-space-1) var(--tempra-space-2);
+  margin-bottom: var(--tempra-space-2);
+}
+
+.view-section-title {
+  margin: 0;
+  font-size: var(--tempra-text-ui);
+  font-weight: 600;
+}
+
+.view-empty {
+  margin: 0;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-ui);
+}
+
+.view-more {
+  margin: var(--tempra-space-3) 0 0;
+}
+
+/* Filters: pills in a row that wraps. */
+.view-filters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--tempra-space-2);
+  margin-bottom: var(--tempra-space-4);
+  font-size: var(--tempra-text-meta);
+}
+
+.view-filters button,
+.view-filters select {
+  font-size: var(--tempra-text-meta);
+}
+
+/* A segmented control: buttons in one grey pill, the chosen one white. */
+.segmented {
+  display: flex;
+  gap: 2px;
+  min-width: 0;
+  margin: 0;
+  padding: 2px;
+  border: 0;
+  border-radius: var(--tempra-radius-pill);
+  background: var(--tempra-color-ground);
+}
+
+.segmented button {
+  border-color: transparent;
+  background: transparent;
+  color: var(--tempra-color-muted);
+}
+
+.segmented button[aria-pressed="true"],
+.segmented button[aria-pressed="true"]:hover:not(:disabled) {
+  border-color: var(--tempra-color-border);
+  background: var(--tempra-color-bg);
+  color: var(--tempra-color-text);
+}
+
+/* A choice as an outlined pill (a native select, so it works by keyboard and on a phone). */
+.pill-select {
+  border-color: var(--tempra-color-border);
+  border-radius: var(--tempra-radius-pill);
+  color: var(--tempra-color-muted);
+  cursor: pointer;
+}
+
+/* An outlined pill that stays pressed: ink edge and a grey fill when on. */
+.pill-toggle {
+  color: var(--tempra-color-muted);
+}
+
+.pill-toggle[aria-pressed="true"],
+.pill-toggle[aria-pressed="true"]:hover:not(:disabled) {
+  border-color: var(--tempra-color-text);
+  background: var(--tempra-color-selected);
+  color: var(--tempra-color-text);
+}
+
+@media (max-width: 900px) {
+  .view-title {
+    font-size: var(--tempra-text-page);
+  }
+
+  .view-filters button,
+  .view-filters select {
+    min-height: var(--tempra-touch);
+  }
+
+  .segmented button {
+    min-height: calc(var(--tempra-touch) - 4px);
+  }
+}
+
+/* ---------- Home ---------- */
+
+.home-section {
+  margin-top: var(--tempra-space-4);
+}
+
+/* Who works here: their marks overlapping, each ringed in the sheet's white. */
+.home-who {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--tempra-space-2);
+  margin-top: var(--tempra-space-1);
+}
+
+.face-stack {
+  display: flex;
+}
+
+.face-stack .avatar-mark {
+  box-sizing: content-box;
+  width: var(--tempra-avatar-small);
+  height: var(--tempra-avatar-small);
+  border: 2px solid var(--tempra-color-bg);
+  font-size: 8px;
+}
+
+.face-stack .avatar-mark + .avatar-mark {
+  margin-left: -6px;
+}
+
+/* Needs you: rows between hairlines, each one link. */
+.need-rows {
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--tempra-color-border);
+  list-style: none;
+}
+
+.need-rows > li {
+  border-bottom: 1px solid var(--tempra-color-border);
+}
+
+.need-row {
+  display: grid;
+  grid-template-columns: var(--tempra-avatar) minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  min-height: var(--tempra-touch);
+  padding: 12px 4px;
+  color: var(--tempra-color-text);
+  text-decoration: none;
+}
+
+.need-row:hover {
+  background: var(--tempra-color-hover);
+}
+
+.need-row svg {
+  margin-top: 3px;
+}
+
+.need-text {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.need-detail {
+  overflow: hidden;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-ui);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.need-when {
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-meta);
+  white-space: nowrap;
+}
+
+.home-entries {
+  display: flex;
+  flex-direction: column;
+  gap: var(--tempra-space-1);
+}
+
+/* A phone: no glyphs beside the needs, as on the board; the time stays at the right. */
+@media (max-width: 900px) {
+  .need-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    padding: 12px 0;
+  }
+
+  .need-row svg {
+    display: none;
+  }
+}
+
+/* ---------- Needs you ---------- */
+
+/* One column: the header, then a section per kind of need. */
+.needs {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+}
+
+.needs-empty {
+  margin: 0;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-ui);
+}
+
+.needs-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--tempra-space-2);
+}
+
+.needs-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 10px;
+}
+
+.needs-section-head h2 {
+  margin: 0;
+  font-size: var(--tempra-text-ui);
+}
+
+.needs-count {
+  color: var(--tempra-color-faint);
+  font-weight: 400;
+}
+
+.needs-note {
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-meta);
+}
+
+/* A section's rows: one box, hairlines between them. */
+.needs-box {
+  margin: 0;
+  padding: 0;
+  border: 1px solid var(--tempra-color-border);
+  border-radius: var(--tempra-radius-box);
+  list-style: none;
+  overflow: hidden;
+}
+
+.needs-box > li + li {
+  border-top: 1px solid var(--tempra-color-border);
+}
+
+.needs-row {
+  display: grid;
+  align-items: center;
+  gap: 16px;
+  padding: 11px 14px;
+}
+
+/* A thread waiting on a reply: the whole row is the link to it. */
+.needs-reply {
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  color: var(--tempra-color-text);
+  text-decoration: none;
+}
+
+.needs-reply:hover {
+  background: var(--tempra-color-hover);
+}
+
+.needs-reply b {
+  font-weight: 500;
+}
+
+.needs-verify {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 160px) auto;
+}
+
+.needs-stale {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.needs-main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.needs-title {
+  color: var(--tempra-color-text);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.needs-title:hover {
+  text-decoration: underline;
+}
+
+.needs-meta {
+  overflow: hidden;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.needs-for,
+.needs-by,
+.needs-asked {
+  color: var(--tempra-color-muted);
+}
+
+.needs-by,
+.needs-when,
+.needs-asked {
+  font-size: var(--tempra-text-meta);
+  white-space: nowrap;
+}
+
+.needs-when {
+  color: var(--tempra-color-faint);
+}
+
+.needs-by {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Review (a link) and Ask an agent (a button): the same outlined pill. */
+.needs-more {
+  align-self: flex-start;
+}
+
+.needs-error {
+  margin: 0;
+  font-size: var(--tempra-text-meta);
+  font-weight: 500;
+}
+
+/* The agents' share: one quiet, collapsed line. */
+.needs-housekeeping {
+  padding: 12px 14px;
+  border-radius: var(--tempra-radius-box);
+  background: var(--tempra-color-ground);
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-ui);
+}
+
+.needs-housekeeping p {
+  margin: var(--tempra-space-2) 0 0;
+}
+
+/* A phone: who and the action go under the title; pills are touch targets. */
+@media (max-width: 900px) {
+  .needs-verify,
+  .needs-stale {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 12px;
+  }
+
+  .needs-verify .needs-main,
+  .needs-stale .needs-main {
+    grid-column: 1 / -1;
+  }
+
+  .needs-stale .button,
+  .needs-stale button,
+  .needs-stale .needs-asked {
+    grid-column: 2;
+  }
+
+  .needs-reply {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .needs-reply .needs-when {
+    grid-column: 2;
+  }
+
+  .needs-row .button,
+  .needs-row button,
+  .needs-more {
+    min-height: var(--tempra-touch);
+  }
+}
+
+/* ---------- Activity ---------- */
+
+.activity-day {
+  display: flex;
+  flex-direction: column;
+  gap: var(--tempra-space-1);
+  margin-bottom: var(--tempra-space-4);
+}
+
+/* An entry: who, what they did, when; new ones on a faint fill with a dot at the right. */
+.entry {
+  display: grid;
+  grid-template-columns: var(--tempra-avatar) minmax(0, 1fr) auto;
+  gap: 12px;
+  padding: 12px 10px;
+  border-radius: var(--tempra-radius-box);
+  font-size: var(--tempra-text-ui);
+}
+
+.entry.new {
+  background: var(--tempra-color-ground);
+}
+
+.entry > .avatar-mark {
+  margin-top: 1px;
+}
+
+.entry-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--tempra-space-1);
+  min-width: 0;
+}
+
+.entry-line {
+  margin: 0;
+  font-size: var(--tempra-font-size);
+  overflow-wrap: anywhere;
+}
+
+.entry-who {
+  font-weight: 500;
+}
+
+.entry-for,
+.entry-words,
+.entry-more {
+  color: var(--tempra-color-faint);
+}
+
+.entry-words {
+  font-size: var(--tempra-text-meta);
+}
+
+/* The request's note, quoted in the reader's serif. */
+.entry-note {
+  color: var(--tempra-color-muted);
+  font-family: var(--tempra-font-reader);
+  font-size: var(--tempra-font-size);
+  overflow-wrap: anywhere;
+}
+
+.entry-titles {
+  margin: 0;
+  overflow: hidden;
+  color: var(--tempra-color-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The concepts it touched: what happened, the title, the words changed. */
+.entry-touched {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: var(--tempra-space-1) 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.entry-touched li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 10px;
+  min-width: 0;
+}
+
+.entry-what {
+  flex: none;
+  width: 52px;
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-label);
+}
+
+.entry-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--tempra-space-2);
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-meta);
+  white-space: nowrap;
+}
+
+/* On the home: smaller marks, no fill, the note in the body's face. */
+.entry.compact {
+  padding: 6px 0;
+  background: none;
+}
+
+.entry.compact > .avatar-mark {
+  width: var(--tempra-avatar-small);
+  height: var(--tempra-avatar-small);
+  font-size: 8px;
+}
+
+.entry.compact .entry-line {
+  font-size: var(--tempra-text-ui);
+}
+
+.entry.compact .entry-note {
+  font-family: inherit;
+  font-size: var(--tempra-text-ui);
+}
+
+@media (max-width: 900px) {
+  .entry {
+    gap: 10px;
+    padding: 12px 8px;
+  }
+
+  .entry.compact .entry-note,
+  .entry.compact .entry-titles {
+    display: none;
+  }
+}
+
+/* ---------- A folder ---------- */
+
+.folder {
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.folder-legend,
+.folder-empty {
+  margin: 0;
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-meta);
+}
+
+/* Rows between hairlines: subfolders first, then concepts. */
+.folder-list {
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--tempra-color-border);
+  list-style: none;
+}
+
+.folder-list > li {
+  border-bottom: 1px solid var(--tempra-color-border);
+}
+
+.folder-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 170px) 56px;
+  align-items: center;
+  gap: 20px;
+  padding: 13px 6px;
+  color: var(--tempra-color-text);
+  text-decoration: none;
+}
+
+.folder-row:hover {
+  background: var(--tempra-color-hover);
+}
+
+.folder-sub {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.folder-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.folder-title,
+.folder-desc {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.folder-title {
+  font-weight: 500;
+}
+
+.folder-sub .folder-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.folder-sub .folder-title svg {
+  flex: none;
+  color: var(--tempra-color-muted);
+}
+
+.folder-desc {
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-ui);
+}
+
+.folder-by {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-meta);
+  white-space: nowrap;
+}
+
+.folder-by .avatar-mark {
+  width: var(--tempra-avatar-small);
+  height: var(--tempra-avatar-small);
+  font-size: 8px;
+}
+
+.folder-marks {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.folder-threads {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+/* Trust as a dot: filled in ink when a person verified the current version, hollow when not. */
+.folder-dot {
+  display: inline-block;
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border: 1.5px solid var(--tempra-color-muted);
+  border-radius: 50%;
+  vertical-align: middle;
+}
+
+.folder-dot.verified {
+  background: var(--tempra-color-muted);
+}
+
+/* A phone: who and the marks go on a second line; the controls are touch targets. */
+@media (max-width: 900px) {
+  .folder-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 6px 12px;
+  }
+
+  .folder-row .folder-main {
+    grid-column: 1 / -1;
+  }
+
+  .folder-sub .folder-main {
+    grid-column: auto;
+  }
+}

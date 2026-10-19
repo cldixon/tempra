@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { type ActedBy, useAgentNames } from "./agents";
+import { useAgentNames } from "./agents";
 import { api } from "./api";
+import { type AgentChange, warmth } from "./changes";
 import { Icon } from "./chrome";
-import { type FeedEvent, useFeed, useLastSeen } from "./live";
+import { useFeed, useLastSeen } from "./live";
 import { prefetchFile } from "./prefetch";
-import { baseName, dirOf, type Urls } from "./urls";
+import { baseName, dirOf, folderName, type Urls } from "./urls";
 
 /** One file of `GET …/outline`: the library's index, without bodies. */
 export type OutlineFile = Entry;
@@ -19,9 +20,6 @@ interface Entry {
   /** Past its stale_after, or within 14 days of it (the staleness process's flags). */
   stale?: "stale" | "stale_soon";
 }
-
-/** How long a file keeps its "an agent just changed this" mark. */
-const ACTIVE_MS = 5 * 60_000;
 
 /** The least time between two refreshes of the index while writes keep coming. */
 const REFRESH_MS = 3000;
@@ -52,6 +50,16 @@ function saveExpanded(urls: Urls, dirs: Set<string>) {
   } catch {
     // Storage off: folders open again collapsed next time.
   }
+}
+
+/** The concepts under each folder, at any depth. */
+function countConcepts(files: Entry[]): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const f of files) {
+    if (f.kind !== "concept") continue;
+    for (const d of ancestors(f.path)) counts.set(d, (counts.get(d) ?? 0) + 1);
+  }
+  return counts;
 }
 
 /** Every folder's children from the flat list of files: folders first, then files, by name. */
@@ -85,33 +93,33 @@ function buildDirs(files: Entry[]): Record<string, Entry[]> {
 /**
  * The library's file tree (tempra-dev: app/workspace). The whole index (paths, titles,
  * sequences; no bodies) arrives in one small request when the workspace opens, so opening a
- * folder never waits. A folder opens and closes in place (it is not a page); open folders are
- * remembered on this browser, the open file is revealed and marked, and the change feed refreshes
- * the index once per burst of writes, with a mark on files an agent changed in the last minutes or
- * that changed since the last visit.
+ * folder never waits. A folder (named for people, with its count of concepts) opens and closes in
+ * place; it is not a page. Open folders are remembered on this browser, the open file is revealed
+ * and marked, and the change feed refreshes the index once per burst of writes. A dot marks a file
+ * an agent changed (warm, then cooling) or that changed since the person last looked.
  */
 export function Tree(props: {
   urls: Urls;
   file: string | null;
   dir: string | null;
-  /** The index, for the quick switcher's path and title matches. */
-  onIndex?(files: OutlineFile[]): void;
+  /** Agents' recent changes by path, and the clock they are read against (changes.ts). */
+  changes: Map<string, AgentChange>;
+  now: number;
+  /** The index and its sequence, for the quick switcher and the feed's start. */
+  onIndex?(files: OutlineFile[], seq: number): void;
 }) {
-  const { urls } = props;
+  const { urls, changes, now } = props;
   const [files, setFiles] = useState<Entry[] | null>(null);
   const [expanded, setExpanded] = useState(() => loadExpanded(urls));
   const [seq, setSeq] = useState<number | null>(null);
-  const [active, setActive] = useState<
-    Map<string, { actor: string; by?: ActedBy | null; at: number }>
-  >(new Map());
   // Agents named for their person (TEMPRA-77): "Claude for @ann changed this just now".
   const actorName = useAgentNames(
     urls,
-    [...active.values()].map((a) => a.by?.agent),
+    [...changes.values()].map((a) => a.by?.agent),
   );
-  const [now, setNow] = useState(() => Date.now());
   const seen = useLastSeen(urls);
   const dirs = useMemo(() => (files ? buildDirs(files) : null), [files]);
+  const counts = useMemo(() => (files ? countConcepts(files) : new Map<string, number>()), [files]);
 
   // Only the latest request's answer is kept (two loads may cross).
   const asked = useRef(0);
@@ -136,8 +144,8 @@ export function Tree(props: {
   }, [load]);
   const onIndex = props.onIndex;
   useEffect(() => {
-    if (files) onIndex?.(files);
-  }, [files, onIndex]);
+    if (files && seq !== null) onIndex?.(files, seq);
+  }, [files, seq, onIndex]);
 
   // The open file's folders are revealed when it opens (and may be collapsed after).
   const current = props.file ?? props.dir;
@@ -160,24 +168,13 @@ export function Tree(props: {
   useFeed(
     urls,
     seq,
-    (events: FeedEvent[]) => {
+    () => {
       if (timer.current === undefined) {
         const wait = Math.max(300, loadedAt.current + REFRESH_MS - Date.now());
         timer.current = setTimeout(() => {
           timer.current = undefined;
           void load();
         }, wait);
-      }
-      // A comment is not a change to the file; the refresh above updates its count.
-      const agents = events.filter(
-        (e) => !e.actor.startsWith("human:") && e.op !== "delete" && e.op !== "comment",
-      );
-      if (agents.length > 0) {
-        setActive((a) => {
-          const next = new Map(a);
-          for (const e of agents) next.set(e.path, { actor: e.actor, by: e.by, at: Date.now() });
-          return next;
-        });
       }
     },
     () => {
@@ -186,12 +183,6 @@ export function Tree(props: {
       void load();
     },
   );
-  // Activity marks fade after a few minutes.
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(t);
-  }, []);
-
   const toggle = (dir: string) =>
     setExpanded((e) => {
       const next = new Set(e);
@@ -257,20 +248,22 @@ export function Tree(props: {
     </>
   );
   const change = (e: Entry) => {
-    const a = active.get(e.path);
-    if (a && now - a.at < ACTIVE_MS) {
+    const a = changes.get(e.path);
+    const warm = warmth(a, now);
+    if (a && warm) {
       const by = actorName(a.actor, a.by);
+      const said = warm === "warm" ? `${by} changed this just now` : `${by} changed this lately`;
       return (
-        <span className="tree-mark" title={`${by} changed this just now`}>
-          <span aria-hidden="true">●</span>
-          <span className="visually-hidden">changed by {by} just now</span>
+        <span className="tree-mark" title={said}>
+          <span className={`change-dot ${warm}`} aria-hidden="true" />
+          <span className="visually-hidden">{said}</span>
         </span>
       );
     }
     if (seen !== null && typeof e.seq === "number" && e.seq > seen) {
       return (
         <span className="tree-mark" title="Changed since you last looked">
-          <span aria-hidden="true">∗</span>
+          <span className="change-dot cool" aria-hidden="true" />
           <span className="visually-hidden">changed since you last looked</span>
         </span>
       );
@@ -308,7 +301,12 @@ export function Tree(props: {
             <span className="tree-chevron">
               <Icon name="chevron" />
             </span>
-            <span className="tree-name">{baseName(e.path)}</span>
+            <span className="tree-name" title={e.path}>
+              {folderName(e.path)}
+            </span>
+            {(counts.get(e.path) ?? 0) > 0 && (
+              <span className="tree-count">{counts.get(e.path)}</span>
+            )}
           </button>
           {expanded.has(e.path) && <ul>{rows(e.path)}</ul>}
         </li>
