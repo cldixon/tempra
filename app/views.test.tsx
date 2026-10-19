@@ -3,9 +3,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { actorView } from "./src/agents";
 import type { Needs } from "./src/needs";
 import { FolderBody, type FolderView } from "./src/pages/Folder";
+import { WaysIn } from "./src/pages/Home";
 import { NeedsBody } from "./src/pages/NeedsYou";
+import { type OutlineFile, topLevel } from "./src/Tree";
 import { day } from "./src/ui";
 import { Urls } from "./src/urls";
+import { type Place, placeName } from "./src/Workspace";
 
 const urls = new Urls("cl_dixon", "tempra-dev");
 const me = "human:cl_dixon";
@@ -178,5 +181,54 @@ describe("a folder (take 3)", () => {
     expect(html).toContain('class="folder-dot verified" title="Verified"');
     expect(html).toContain('class="folder-dot" title="Not verified"');
     expect(html).toContain('aria-pressed="true">Recent');
+  });
+});
+
+describe("entering a library on a phone (TEMPRA-107)", () => {
+  test("the top bar names the page under the library", () => {
+    const at = (p: Partial<Place>) => placeName({ file: null, dir: null, view: null, ...p });
+    expect(at({ view: "home" })).toBe("Home");
+    expect(at({ view: "needs" })).toBe("Needs you");
+    expect(at({ view: "activity" })).toBe("Activity");
+    expect(at({ view: "transfer" })).toBe("Import & export");
+    expect(at({ dir: "app/style-guide" })).toBe("Style guide");
+    expect(at({ file: "decisions/margins-not-panels.md" })).toBe("Decisions");
+    expect(at({ file: "guide.md" })).toBeNull();
+  });
+
+  const files: OutlineFile[] = [
+    { path: "guide.md", kind: "concept", title: "Guide" },
+    { path: "decisions/a.md", kind: "concept", title: "A" },
+    { path: "decisions/old/b.md", kind: "concept", title: "B" },
+    { path: "app/reader.md", kind: "concept", title: "Reader" },
+    { path: "app/shot.png", kind: "attachment" },
+  ];
+
+  test("the library's top level: folders first with their concepts at any depth, then files", () => {
+    expect(topLevel(files).map(({ entry, count }) => [entry.path, count])).toEqual([
+      ["app", 1],
+      ["decisions", 2],
+      ["guide.md", 0],
+    ]);
+  });
+
+  test("the home's ways in: Needs you, Activity, then the top level as links", () => {
+    const html = renderToStaticMarkup(<WaysIn urls={urls} files={files} />);
+    const needsAt = html.indexOf(`href="${urls.needs()}"`);
+    const activityAt = html.indexOf(`href="${urls.activity()}"`);
+    const folderAt = html.indexOf(`href="${urls.tree("decisions")}"`);
+    expect(needsAt).toBeGreaterThan(-1);
+    expect(needsAt).toBeLessThan(activityAt);
+    expect(activityAt).toBeLessThan(folderAt);
+    // Home is where the person is: no row for it here.
+    expect(html).not.toContain(">Home<");
+    expect(html).toContain('>Decisions</span><span class="nav-count">2</span>');
+    expect(html).toContain(`href="${urls.file("guide.md")}"`);
+    expect(html).toContain(">Guide</span>");
+  });
+
+  test("before the outline arrives, and in an empty library, one quiet line", () => {
+    expect(renderToStaticMarkup(<WaysIn urls={urls} files={null} />)).toContain("Loading…");
+    expect(renderToStaticMarkup(<WaysIn urls={urls} files={[]} />)).toContain("No files yet.");
   });
 });

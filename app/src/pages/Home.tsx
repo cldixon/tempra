@@ -15,9 +15,11 @@ import { api, useLoad } from "../api";
 import { Avatar, type Glyph, Icon } from "../chrome";
 import { useFeed, useLastSeen, useTrailing } from "../live";
 import { type Needs, useNeeds } from "../needs";
+import { ViewNav } from "../Sidebar";
+import { fileLabel, type OutlineFile, topLevel } from "../Tree";
 import { calendarDay, clip, plural, Status, useMe, useTitle } from "../ui";
-import type { Urls } from "../urls";
-import { SheetPage } from "../Workspace";
+import { folderName, type Urls } from "../urls";
+import { SheetPage, useFrame } from "../Workspace";
 
 /** How many entries "Since you last looked" shows, and how many requests it reads for them. */
 const SINCE = 5;
@@ -34,6 +36,7 @@ const FACES = 4;
 export function Home({ urls }: { urls: Urls }) {
   useTitle(urls.slug);
   const me = useMe();
+  const frame = useFrame();
   const loaded = useLoad(`home ${urls.base}`, async () => {
     const summary = await api<{ seq: number; concepts: number }>(urls.api("summary"));
     const page = await api<{ requests: LedgerRequest[] }>(urls.api("requests", { limit: READ }));
@@ -52,6 +55,7 @@ export function Home({ urls }: { urls: Urls }) {
               concepts={home.concepts}
               latest={home.requests[0]}
             />
+            {!frame.sidebar && <WaysIn urls={urls} files={frame.index} />}
             <NeedsSection urls={urls} me={me?.actor ?? null} />
             <SinceSection urls={urls} me={me?.actor ?? null} requests={home.requests} />
           </>
@@ -105,6 +109,48 @@ function HomeHead(props: {
         </p>
       </div>
     </header>
+  );
+}
+
+/**
+ * The library's ways in, when the sidebar is not beside the sheet (a phone, or the sidebar
+ * hidden; TEMPRA-107): the sidebar's own rows for Needs you and Activity, then the library's top
+ * level (folders to their folder views, with their counts; then files), from the outline the
+ * workspace already loaded. The drawer still holds everything else.
+ */
+export function WaysIn({ urls, files }: { urls: Urls; files: OutlineFile[] | null }) {
+  const top = files ? topLevel(files) : null;
+  return (
+    <div className="home-ways">
+      <ViewNav urls={urls} view="home" />
+      <h2 className="home-ways-label" id="home-files">
+        Library
+      </h2>
+      <nav aria-labelledby="home-files">
+        {top === null ? (
+          <p className="view-empty">Loading…</p>
+        ) : top.length === 0 ? (
+          <p className="view-empty">No files yet.</p>
+        ) : (
+          <ul className="home-files">
+            {top.map(({ entry, count }) => (
+              <li key={entry.path}>
+                <a
+                  className="nav-row"
+                  href={entry.kind === "dir" ? urls.tree(entry.path) : urls.file(entry.path)}
+                >
+                  <Icon name={entry.kind === "dir" ? "folder" : "file"} />
+                  <span className="nav-label">
+                    {entry.kind === "dir" ? folderName(entry.path) : fileLabel(entry)}
+                  </span>
+                  {count > 0 && <span className="nav-count">{count}</span>}
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
+      </nav>
+    </div>
   );
 }
 

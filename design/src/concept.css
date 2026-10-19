@@ -54,7 +54,7 @@
   padding: 0;
   list-style: none;
   font-size: var(--tempra-text-meta);
-  line-height: 1.4;
+  line-height: var(--tempra-line-height);
 }
 
 .toc a {
@@ -96,8 +96,8 @@
   margin: 0 0 12px;
   font-family: var(--tempra-font-reader);
   font-size: var(--tempra-text-title);
-  font-weight: 500;
-  line-height: 1.15;
+  font-weight: var(--tempra-weight-medium);
+  line-height: var(--tempra-leading-tight);
   letter-spacing: -0.01em;
 }
 
@@ -106,7 +106,7 @@
   color: var(--tempra-color-muted);
   font-family: var(--tempra-font-reader);
   font-size: var(--tempra-text-reader);
-  line-height: 1.5;
+  line-height: var(--tempra-line-height);
 }
 
 /* ---------- The byline: who wrote this version, its versions, where it stands ---------- */
@@ -138,7 +138,7 @@
 }
 
 .byline-name strong {
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 .byline-sep {
@@ -226,7 +226,7 @@ a.verification:hover {
 }
 
 .history-who {
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 .history-note {
@@ -272,7 +272,7 @@ a.verification:hover {
 
 .history li.verify .history-what > a,
 .history li.verify .history-what {
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 .history .history-what {
@@ -343,14 +343,14 @@ a.verification:hover {
 .doc-sources h2 {
   margin: 0 0 12px;
   font-size: var(--tempra-text-ui);
-  font-weight: 600;
+  font-weight: var(--tempra-weight-strong);
 }
 
 .doc-sources h3 {
   margin: 20px 0 8px;
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 .sources {
@@ -365,7 +365,7 @@ a.verification:hover {
   gap: 6px;
   margin-bottom: 10px;
   font-size: var(--tempra-text-ui);
-  line-height: 1.45;
+  line-height: var(--tempra-line-height);
 }
 
 .sources li:target {
@@ -393,7 +393,7 @@ a.verification:hover {
   border-radius: var(--tempra-radius-box);
   background: var(--tempra-color-ground);
   font-size: var(--tempra-text-ui);
-  line-height: 1.6;
+  line-height: var(--tempra-line-height);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -416,7 +416,7 @@ a.verification:hover {
   color: var(--tempra-color-faint);
   font-family: var(--tempra-font-mono);
   font-size: var(--tempra-text-label);
-  line-height: 1.6;
+  line-height: var(--tempra-line-height);
 }
 
 .facts dd {

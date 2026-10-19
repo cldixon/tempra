@@ -23,13 +23,13 @@
   min-width: 0;
 }
 
+/* A view is the app, not a document: its title is the app's sans, sized as an h1 (TEMPRA-108). */
 .view-title {
   margin: 0;
-  font-family: var(--tempra-font-reader);
-  font-size: var(--tempra-text-title);
-  font-weight: 500;
-  line-height: 1.15;
-  letter-spacing: -0.01em;
+  font-size: var(--tempra-text-page);
+  font-weight: var(--tempra-weight-strong);
+  line-height: var(--tempra-leading-tight);
+  letter-spacing: -0.02em;
   overflow-wrap: anywhere;
 }
 
@@ -74,7 +74,7 @@
 .view-section-title {
   margin: 0;
   font-size: var(--tempra-text-ui);
-  font-weight: 600;
+  font-weight: var(--tempra-weight-strong);
 }
 
 .view-empty {
@@ -149,7 +149,7 @@
 
 @media (max-width: 900px) {
   .view-title {
-    font-size: var(--tempra-text-page);
+    font-size: var(--tempra-text-h2);
   }
 
   .view-filters button,
@@ -186,7 +186,7 @@
   width: var(--tempra-avatar-small);
   height: var(--tempra-avatar-small);
   border: 2px solid var(--tempra-color-bg);
-  font-size: 8px;
+  font-size: var(--tempra-text-initial);
 }
 
 .face-stack .avatar-mark + .avatar-mark {
@@ -244,6 +244,32 @@
   white-space: nowrap;
 }
 
+/* The library's ways in, when the sidebar is not beside the sheet (TEMPRA-107): the sidebar's own
+   rows, their hover fill hanging into the gutter so their text lines up with the page's. */
+.home-ways {
+  margin: var(--tempra-space-3) -10px 0;
+}
+
+.home-ways-label {
+  margin: var(--tempra-space-3) 10px var(--tempra-space-1);
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-label);
+  font-weight: var(--tempra-weight-regular);
+}
+
+.home-ways .view-empty {
+  padding: 0 10px;
+}
+
+.home-files {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 .home-entries {
   display: flex;
   flex-direction: column;
@@ -297,7 +323,7 @@
 
 .needs-count {
   color: var(--tempra-color-faint);
-  font-weight: 400;
+  font-weight: var(--tempra-weight-regular);
 }
 
 .needs-note {
@@ -340,7 +366,7 @@
 }
 
 .needs-reply b {
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 .needs-verify {
@@ -360,7 +386,7 @@
 
 .needs-title {
   color: var(--tempra-color-text);
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
   text-decoration: none;
 }
 
@@ -406,7 +432,7 @@
 .needs-error {
   margin: 0;
   font-size: var(--tempra-text-meta);
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 /* The agents' share: one quiet, collapsed line. */
@@ -497,7 +523,7 @@
 }
 
 .entry-who {
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 .entry-for,
@@ -510,10 +536,9 @@
   font-size: var(--tempra-text-meta);
 }
 
-/* The request's note, quoted in the reader's serif. */
+/* The request's note, quoted. */
 .entry-note {
   color: var(--tempra-color-muted);
-  font-family: var(--tempra-font-reader);
   font-size: var(--tempra-font-size);
   overflow-wrap: anywhere;
 }
@@ -570,7 +595,7 @@
 .entry.compact > .avatar-mark {
   width: var(--tempra-avatar-small);
   height: var(--tempra-avatar-small);
-  font-size: 8px;
+  font-size: var(--tempra-text-initial);
 }
 
 .entry.compact .entry-line {
@@ -653,7 +678,7 @@
 }
 
 .folder-title {
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 .folder-sub .folder-title {
@@ -686,7 +711,7 @@
 .folder-by .avatar-mark {
   width: var(--tempra-avatar-small);
   height: var(--tempra-avatar-small);
-  font-size: 8px;
+  font-size: var(--tempra-text-initial);
 }
 
 .folder-marks {

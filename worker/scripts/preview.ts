@@ -19,8 +19,11 @@
  * `down` and `sweep` take --dry-run: list what would be deleted, delete nothing.
  *
  * Every step is safe to repeat: a re-run or a second push converges. `up` seeds the operator's
- * account (--email, or TEMPRA_PREVIEW_EMAIL) with Google's four sample bundles and a `smoke`
- * library, runs the MCP smoke flow against the preview, and writes `url=` to $GITHUB_OUTPUT.
+ * account (--email, or TEMPRA_PREVIEW_EMAIL) with a copy of the seed library (PREVIEW_SEED_LIBRARY,
+ * PREVIEW_SEED_TOKEN, PREVIEW_SEED_URL: scripts/preview-seed.ts, TEMPRA-109), or with none set
+ * with Google's four sample bundles, and a `smoke` library; runs the MCP smoke flow against the
+ * preview; and writes `url=` and `library_url=` (the seeded copy; empty for the samples) to
+ * $GITHUB_OUTPUT. Scripted agents write into a preview only through `agents`.
  */
 import { appendFileSync } from "node:fs";
 import { parseArgs } from "node:util";
@@ -110,7 +113,10 @@ async function workers(): Promise<string[]> {
 
 // ------------------------------------------------------------------ up
 
-async function up(pr: string, email: string | undefined): Promise<string> {
+async function up(
+  pr: string,
+  email: string | undefined,
+): Promise<{ url: string; library: string | null }> {
   const names = previewDeployment(pr);
   const url = `https://${names.host}`;
 
@@ -138,8 +144,13 @@ async function up(pr: string, email: string | undefined): Promise<string> {
     await cf(["queues", "create", "--queue-name", names.queue]);
   }
 
-  // The Anthropic key goes to the preview Worker as a secret (below), never to a subprocess.
-  const { ANTHROPIC_API_KEY: anthropicKey, ...inherited } = process.env;
+  // The Anthropic key goes to the preview Worker as a secret (below), and the seed token only to
+  // the copy (preview-seed.ts); neither to a subprocess.
+  const {
+    ANTHROPIC_API_KEY: anthropicKey,
+    PREVIEW_SEED_TOKEN: _seedToken,
+    ...inherited
+  } = process.env;
   const env = {
     ...inherited,
     TEMPRA_MODE: "preview",
@@ -152,8 +163,8 @@ async function up(pr: string, email: string | undefined): Promise<string> {
   await run(["bun", "scripts/deploy.ts", "--mode", "preview"], env, { show: true });
   if (anthropicKey) await setWorkerSecret(names.name, "ANTHROPIC_API_KEY", anthropicKey);
   await waitForHealth(url);
-  await seedAndSmoke(url, email, env);
-  return url;
+  const library = await seedAndSmoke(url, email, env);
+  return { url, library };
 }
 
 /**
@@ -213,50 +224,57 @@ async function waitForHealth(url: string, timeoutMs = 600_000) {
   throw new Error(`${url}/healthz did not answer within ${timeoutMs / 1000}s (last: ${last}).`);
 }
 
+/**
+ * Seeds the operator's account, then runs the MCP smoke flow. The library to review against is a
+ * copy of the seed library (PREVIEW_SEED_*, preview-seed.ts) when one is configured, else Google's
+ * four sample bundles (TEMPRA-109). Returns the copy's owner/slug on the preview, for the PR
+ * comment; null for the samples.
+ */
 async function seedAndSmoke(
   url: string,
   email: string | undefined,
   env: Record<string, string | undefined>,
-) {
+): Promise<string | null> {
   const { mcpSmoke } = await import("./mcp-smoke");
-  const { BUNDLES, loadBundle } = await import("../test/fixtures");
-  const { writeTar } = await import("../src/util/tar");
+  const { copyLibrary, importIfEmpty, seedChoice } = await import("./preview-seed");
   const seed = (slug: string, actor: string) => seedRemote(slug, actor, email, env);
+  const on = (s: { owner: string; slug: string; token: string }) => ({
+    url,
+    owner: s.owner,
+    slug: s.slug,
+    token: s.token,
+  });
 
-  for (const bundle of BUNDLES) {
-    const s = await seed(bundle.replace(/_/g, "-"), "github-actions/preview");
-    const lib = `${url}/api/v1/libraries/${s.owner}/${s.slug}`;
-    const headers = { Authorization: `Bearer ${s.token}` };
-    // A library's Durable Object, new in a namespace created moments ago by the deploy, can
-    // answer 5xx for a few seconds (PR #52's first preview). Retry those, checking the library
-    // is still empty first, so a retried import never doubles one that went through.
-    for (let attempt = 1; ; attempt++) {
-      const tree = await fetch(`${lib}/tree`, { headers });
-      if (tree.ok) {
-        const { entries } = (await tree.json()) as { entries?: unknown[] };
-        if ((entries ?? []).length > 0) break;
-        const imp = await fetch(`${lib}/import?source=fixtures/${bundle}`, {
-          method: "POST",
-          headers: { ...headers, "Content-Type": "application/x-tar" },
-          body: writeTar(loadBundle(bundle)),
-        });
-        if (imp.ok) {
-          console.log(`Imported ${bundle} into ${s.owner}/${s.slug}`);
-          break;
-        }
-        if (imp.status < 500 || attempt === 4) {
-          throw new Error(`import ${bundle}: ${imp.status} ${await imp.text()}`);
-        }
-      } else if (tree.status < 500 || attempt === 4) {
-        throw new Error(`tree of ${s.owner}/${s.slug}: ${tree.status} ${await tree.text()}`);
-      }
-      console.log(`${s.owner}/${s.slug} not ready (attempt ${attempt}); retrying`);
-      await Bun.sleep(2000 * 2 ** (attempt - 1));
+  let library: string | null = null;
+  const choice = seedChoice(process.env);
+  if (choice.kind === "library") {
+    const { source } = choice;
+    const s = await seed(source.slug, "github-actions/preview");
+    const done = await copyLibrary(source, on(s));
+    console.log(
+      done === "imported"
+        ? `Copied ${source.owner}/${source.slug} from ${source.url} into ${s.owner}/${s.slug}`
+        : `${s.owner}/${s.slug} already has files; kept`,
+    );
+    library = `${s.owner}/${s.slug}`;
+  } else {
+    const line = `No seed library (${choice.reason}); seeding the sample bundles.`;
+    console.log(choice.warn && process.env.GITHUB_ACTIONS ? `::warning::${line}` : line);
+    const { BUNDLES, loadBundle } = await import("../test/fixtures");
+    const { writeTar } = await import("../src/util/tar");
+    for (const bundle of BUNDLES) {
+      const s = await seed(bundle.replace(/_/g, "-"), "github-actions/preview");
+      const done = await importIfEmpty(on(s), async () => ({
+        bytes: writeTar(loadBundle(bundle)),
+        source: `fixtures/${bundle}`,
+      }));
+      if (done === "imported") console.log(`Imported ${bundle} into ${s.owner}/${s.slug}`);
     }
   }
 
   const smoke = await seed("smoke", "github-actions/smoke");
   if (!(await mcpSmoke({ url, token: smoke.token }))) throw new Error("MCP smoke failed.");
+  return library;
 }
 
 /** A library and write token in the preview's D1, owned by the operator's account. */
@@ -281,8 +299,12 @@ async function previewEnv(pr: string) {
   const d1 = await d1Id(names.d1.name);
   const kv = await kvId(`tempra-oauth-pr-${pr}`);
   if (!d1 || !kv) throw new Error(`PR ${pr} has no preview; bring it up first.`);
-  // The Anthropic key goes to the preview Worker as a secret (below), never to a subprocess.
-  const { ANTHROPIC_API_KEY: anthropicKey, ...inherited } = process.env;
+  // Neither the Anthropic key nor the seed token goes to a subprocess.
+  const {
+    ANTHROPIC_API_KEY: _anthropicKey,
+    PREVIEW_SEED_TOKEN: _seedToken,
+    ...inherited
+  } = process.env;
   const env = {
     ...inherited,
     TEMPRA_MODE: "preview",
@@ -429,9 +451,15 @@ async function sweep(keep: Set<string>) {
 // ------------------------------------------------------------------ main
 
 if (command === "up" && values.pr) {
-  const url = await up(values.pr, values.email || process.env.TEMPRA_PREVIEW_EMAIL || undefined);
-  console.log(`Preview: ${url}`);
-  if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `url=${url}\n`);
+  const { url, library } = await up(
+    values.pr,
+    values.email || process.env.TEMPRA_PREVIEW_EMAIL || undefined,
+  );
+  const libraryUrl = library ? `${url}/${library}` : "";
+  console.log(`Preview: ${url}${libraryUrl ? ` (library ${libraryUrl})` : ""}`);
+  if (process.env.GITHUB_OUTPUT) {
+    appendFileSync(process.env.GITHUB_OUTPUT, `url=${url}\nlibrary_url=${libraryUrl}\n`);
+  }
 } else if (command === "down" && values.pr) {
   await down(values.pr);
 } else if (command === "agents" && values.pr) {

@@ -5,10 +5,11 @@ import {
   useContext,
   useEffect,
   useLayoutEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
-import { useAgentChanges } from "./changes";
+import { type AgentChange, useAgentChanges } from "./changes";
 import { Icon } from "./chrome";
 import { inboxChanged } from "./inbox";
 import { useFeed } from "./live";
@@ -17,7 +18,7 @@ import { Sidebar, TopBar } from "./Sidebar";
 import { Switcher } from "./Switcher";
 import type { OutlineFile } from "./Tree";
 import type { Me } from "./ui";
-import type { Urls } from "./urls";
+import { dirOf, folderName, type Urls } from "./urls";
 
 /** Where the open page is in its library: a file, a folder, or one of the library's views. */
 export interface Place {
@@ -40,15 +41,54 @@ export interface Place {
 /** Under this width the sidebar is a drawer behind the top bar (the phone layout). */
 export const NARROW = "(max-width: 900px)";
 
+/** The names of the library's views and settings pages, as the phone's top bar shows them. */
+const VIEW_NAMES: Record<NonNullable<Place["view"]>, string> = {
+  home: "Home",
+  needs: "Needs you",
+  activity: "Activity",
+  ledger: "Ledger",
+  work: "Work queue",
+  transfer: "Import & export",
+  recovery: "Recovery",
+  connect: "Connect",
+  delete: "Delete",
+  members: "Members",
+};
+
+/**
+ * Where a page is, in a few words (the phone's top bar, under the library's name): the view, a
+ * folder by its readable name, or a concept's folder. Null for a file at the library's root.
+ */
+export function placeName(place: Place): string | null {
+  if (place.view) return VIEW_NAMES[place.view];
+  if (place.dir) return folderName(place.dir);
+  if (place.file) {
+    const dir = dirOf(place.file);
+    return dir ? folderName(dir) : null;
+  }
+  return null;
+}
+
 /** What a page in the workspace may ask of the frame. */
 interface Frame {
   /** The sidebar is beside the sheet (not hidden, not a drawer). */
   sidebar: boolean;
   /** The phone layout: a top bar, the sidebar as a drawer. */
   narrow: boolean;
+  /** The library's index (`GET …/outline`, as the tree loaded it); null until it arrives. */
+  index: OutlineFile[] | null;
+  /** The latest of agents' recent changes, and the clock it is read against (changes.ts). */
+  latest: AgentChange | undefined;
+  now: number;
 }
 
-const FrameContext = createContext<Frame>({ sidebar: true, narrow: false });
+const FrameContext = createContext<Frame>({
+  sidebar: true,
+  narrow: false,
+  index: null,
+  latest: undefined,
+  now: 0,
+});
 
 /** The workspace's frame, for pages that lay themselves out by it. */
 export function useFrame(): Frame {
@@ -103,7 +143,7 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
   const [hidden, setHidden] = useState(() => loadHidden(urls));
   const [switching, setSwitching] = useState(false);
   const narrow = useMedia(NARROW);
-  const [index, setIndex] = useState<OutlineFile[]>([]);
+  const [index, setIndex] = useState<OutlineFile[] | null>(null);
   const [indexSeq, setIndexSeq] = useState<number | null>(null);
   const sidebar = useRef<HTMLElement>(null);
   const agents = useAgentChanges(urls, indexSeq);
@@ -204,12 +244,18 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
   }, []);
 
   const showSidebar = !hidden || narrow;
+  const beside = showSidebar && !narrow;
+  const frame = useMemo<Frame>(
+    () => ({ sidebar: beside, narrow, index, latest: agents.latest, now: agents.now }),
+    [beside, narrow, index, agents.latest, agents.now],
+  );
   const classes = ["workspace", showSidebar ? "" : "sidebar-hidden"].filter(Boolean);
   return (
-    <FrameContext.Provider value={{ sidebar: showSidebar && !narrow, narrow }}>
+    <FrameContext.Provider value={frame}>
       <div className={classes.join(" ")}>
         <TopBar
           urls={urls}
+          place={place}
           me={props.me}
           drawer={drawer}
           onDrawer={() => setDrawer((d) => !d)}
@@ -227,7 +273,6 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
             place={place}
             me={props.me}
             changes={agents.changes}
-            latest={agents.latest}
             now={agents.now}
             onSearch={() => setSwitching(true)}
             onHide={() => (narrow ? setDrawer(false) : hide(true))}
@@ -254,7 +299,12 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
             {props.children}
           </main>
         </div>
-        <Switcher urls={urls} index={index} open={switching} onClose={() => setSwitching(false)} />
+        <Switcher
+          urls={urls}
+          index={index ?? []}
+          open={switching}
+          onClose={() => setSwitching(false)}
+        />
       </div>
     </FrameContext.Provider>
   );

@@ -123,8 +123,8 @@ body.ground {
   border-radius: 50%;
   background: var(--tempra-color-selected);
   color: var(--tempra-color-text);
-  font-size: 10px;
-  font-weight: 600;
+  font-size: var(--tempra-text-initial);
+  font-weight: var(--tempra-weight-strong);
 }
 
 /* A round button holding one 16px glyph. */
@@ -195,8 +195,8 @@ body.ground {
   border-radius: 50%;
   background: var(--tempra-color-selected);
   color: var(--tempra-color-text);
-  font-size: 9px;
-  font-weight: 600;
+  font-size: var(--tempra-text-initial);
+  font-weight: var(--tempra-weight-strong);
   line-height: 1;
 }
 
@@ -239,7 +239,7 @@ body.ground {
 .dialog-head h2 {
   margin: 0;
   font-size: var(--tempra-text-name);
-  font-weight: 600;
+  font-weight: var(--tempra-weight-strong);
 }
 
 .dialog-body {
@@ -319,7 +319,7 @@ body.ground {
   border-radius: var(--tempra-radius-box);
   color: var(--tempra-color-text);
   font-size: var(--tempra-text-name);
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
   text-decoration: none;
 }
 
@@ -329,7 +329,7 @@ body.ground {
 
 .lib-list .owner {
   color: var(--tempra-color-faint);
-  font-weight: 400;
+  font-weight: var(--tempra-weight-regular);
 }
 
 /* The library's open work from the daily check (TEMPRA-66): one quiet line under its name. */
@@ -337,7 +337,7 @@ body.ground {
   display: block;
   color: var(--tempra-color-faint);
   font-size: var(--tempra-text-meta);
-  font-weight: 400;
+  font-weight: var(--tempra-weight-regular);
 }
 
 .page-foot {
@@ -433,20 +433,20 @@ body.ground {
   border-radius: var(--tempra-radius-tile);
   background: var(--tempra-color-text);
   color: var(--tempra-color-bg);
-  font-family: var(--tempra-font-reader);
   font-size: var(--tempra-text-name);
+  font-weight: var(--tempra-weight-strong);
 }
 
 .lib-names {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  line-height: 1.25;
+  line-height: var(--tempra-leading-tight);
 }
 
 .lib-name {
   overflow: hidden;
-  font-weight: 600;
+  font-weight: var(--tempra-weight-strong);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -531,7 +531,7 @@ body.ground {
 .nav-row[aria-current="page"],
 .nav-row[aria-current="location"] {
   background: var(--tempra-color-selected);
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 .nav-row svg {
@@ -684,7 +684,7 @@ button.tree-row[aria-current="page"] {
 
 .tree-row > a[aria-current="page"] {
   color: var(--tempra-color-text);
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 .tree-leaf {
@@ -864,13 +864,34 @@ button.tree-row[aria-current="page"] {
     min-width: 0;
   }
 
-  .ws-topbar-name {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
+  /* The way to everything else, in ink so it reads as the bar's first control. */
+  .ws-menu {
     color: var(--tempra-color-text);
-    font-weight: 600;
+  }
+
+  /* Where the person is: the library's tile and name, the page beneath it, as the switcher draws
+     the library's name over its owner. */
+  .ws-topbar-place {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    min-height: var(--tempra-touch);
+    padding: 0 8px;
+    border-radius: var(--tempra-radius-row);
+    color: var(--tempra-color-text);
     text-decoration: none;
+  }
+
+  .ws-topbar-place:visited {
+    color: var(--tempra-color-text);
+  }
+
+  .ws-topbar-here {
+    overflow: hidden;
+    color: var(--tempra-color-muted);
+    font-size: var(--tempra-text-meta);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -970,7 +991,7 @@ button.tree-row[aria-current="page"] {
   border-radius: var(--tempra-radius-row);
   background: var(--tempra-color-ground);
   font-size: var(--tempra-text-ui);
-  line-height: 1.55;
+  line-height: var(--tempra-line-height);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -1002,7 +1023,7 @@ table.list th {
   border-bottom: 1px solid var(--tempra-color-border);
   color: var(--tempra-color-faint);
   font-size: var(--tempra-text-label);
-  font-weight: 400;
+  font-weight: var(--tempra-weight-regular);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -1013,7 +1034,7 @@ table.list td {
 }
 
 table.list td.name a {
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 /* A group of related controls on a page (a form, a list with its actions). */
@@ -1080,7 +1101,7 @@ pre.diff {
   border-radius: var(--tempra-radius-box);
   background: var(--tempra-color-ground);
   font-size: var(--tempra-text-meta);
-  line-height: 1.55;
+  line-height: var(--tempra-line-height);
 }
 
 pre.src.wrap {
@@ -1089,7 +1110,7 @@ pre.src.wrap {
 }
 
 pre.diff .add {
-  font-weight: 600;
+  font-weight: var(--tempra-weight-strong);
 }
 
 pre.diff .del {
@@ -1167,7 +1188,7 @@ ul.events {
 .lib-list .tally {
   float: right;
   font-size: var(--tempra-text-ui);
-  font-weight: 400;
+  font-weight: var(--tempra-weight-regular);
 }
 
 .inbox-list {
@@ -1197,7 +1218,7 @@ ul.events {
 }
 
 .inbox-list .unread .what a {
-  font-weight: 600;
+  font-weight: var(--tempra-weight-strong);
 }
 
 .inbox-list .when {

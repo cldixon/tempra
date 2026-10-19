@@ -538,8 +538,8 @@ function greyPng(width: number, height: number, shade: number): Uint8Array {
 
 /**
  * The app in a real browser, signed in as the seeded user (layout take 3, TEMPRA-106): the
- * library's home, the workspace (the tree, the quick switcher, the hidden sidebar, the drawer at
- * phone width), a folder's view, every concept in the reader (drawn from the stored tree, with no
+ * library's home, the workspace (the tree, the quick switcher, the hidden sidebar, at phone
+ * width the top bar naming the page, the home's ways in and the drawer), a folder's view, every concept in the reader (drawn from the stored tree, with no
  * Edit, a footnote card on hover), the byline's history and review mode, comments in the margin
  * (and as a bottom sheet on a phone), figures in the full-screen view, Needs you, Activity and
  * the ledger, all drawn from the API; links move within the app without reloading the page, and
@@ -852,8 +852,36 @@ async function browserRenders(
         .click();
       await page.waitForURL(`${lib}/-/activity`);
       await sidebar.waitFor({ state: "hidden" });
+      // The top bar says where the person is (TEMPRA-107): the library, the page beneath it.
+      const here = (name: string) =>
+        topbar
+          .locator(".ws-topbar-here")
+          .filter({ hasText: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`) })
+          .waitFor({ timeout: 5000 });
+      await here("Activity");
+      // The library's name goes home, and the home shows the ways in without the drawer:
+      // Needs you, Activity and the library's top level, a folder opening its folder view.
+      await topbar.locator(".ws-topbar-place").click();
+      await page.waitForURL(`${lib}/`);
+      await here("Home");
+      const ways = page.locator(".home-ways");
+      await ways.getByRole("link", { name: /^Needs you/ }).waitFor({ timeout: 15_000 });
+      await ways.getByRole("link", { name: /^Activity/ }).waitFor();
+      if (shots) await page.screenshot({ path: `${shots}/home-phone.png` });
+      const folder = ways.locator('.home-files a[href$="/"]').first();
+      await folder.waitFor({ timeout: 15_000 });
+      const folderName = (await folder.locator(".nav-label").textContent())?.trim() ?? "";
+      await folder.click();
+      await page.waitForURL((u) => u.pathname.endsWith("/") && u.href !== `${lib}/`);
+      await page.locator(".view-title", { hasText: folderName }).waitFor({ timeout: 15_000 });
+      await here(folderName);
       await page.setViewportSize({ width: 1280, height: 720 });
+      // With the sidebar beside the sheet the home leaves the ways in to it.
       await page.goto(`${lib}/`);
+      await page.locator(".home-head").waitFor({ timeout: 15_000 });
+      if ((await page.locator(".home-ways").count()) > 0) {
+        throw new Error("the home repeats the sidebar's ways in on a desktop");
+      }
     });
 
     // A few concepts with tables, code, footnotes and lists, as screenshots for review.
@@ -1936,7 +1964,8 @@ async function freshAccountConnects(): Promise<string[]> {
       await step(`library tab ${tab}`, async () => {
         await page.goto(`${lib}/`);
         await libraryLink(tab);
-        await page.getByText(text).first().waitFor({ timeout: 15_000 });
+        // In the sheet: the phone's top bar (hidden here) names the page too.
+        await page.locator(".ws-main").getByText(text).first().waitFor({ timeout: 15_000 });
       });
     }
     await step("export now, from Import & export", async () => {

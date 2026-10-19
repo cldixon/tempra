@@ -42,26 +42,39 @@
     0 1px 2px light-dark(rgb(0 0 0 / 0.04), rgb(0 0 0 / 0.4)),
     0 6px 24px light-dark(rgb(0 0 0 / 0.04), rgb(0 0 0 / 0.35));
 
-  /* Type */
+  /* Type (TEMPRA-108): the serif is the document; everything else is the app's sans.
+     body: all of the app and the site (chrome, view titles, the byline, comments, public pages).
+     reader: a concept's own text only (its title, description and .prose body).
+     mono: code, fences, the Markdown view, paths and hashes. */
   --tempra-font-body:
     -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", Helvetica, sans-serif;
   --tempra-font-reader:
     "Iowan Old Style", "Palatino Linotype", Charter, Georgia, "Times New Roman", serif;
   --tempra-font-mono: ui-monospace, "SF Mono", Menlo, monospace;
-  --tempra-font-size: 14px;
-  --tempra-line-height: 1.5;
+  --tempra-font-size: 14px; /* the app's base text */
   --tempra-measure: 680px; /* the reader's column, with its padding */
   --tempra-measure-reader: 34em; /* concept text: about 66 characters of the reader's serif */
 
-  /* Type scale */
+  /* Type scale: the only pixel sizes in the CSS (inside .prose, sizes are em of the reading size) */
+  --tempra-text-initial: 9px; /* an avatar's initials */
   --tempra-text-label: 11px; /* uppercase labels, marks */
   --tempra-text-meta: 12px; /* timestamps, crumbs, small print */
-  --tempra-text-ui: 13px; /* controls, panels, the tree */
-  --tempra-text-name: 15px; /* a library's name, code in the reader */
-  --tempra-text-reader: 17px; /* concept bodies and taglines */
-  --tempra-text-h2: 22px;
-  --tempra-text-page: 28px; /* a page's heading */
+  --tempra-text-ui: 13px; /* controls, panels, the tree, comments */
+  --tempra-text-name: 15px; /* a library's name, dialog heads, the wordmark */
+  --tempra-text-reader: 17px; /* a concept's body and description, the landing page's lede */
+  --tempra-text-h2: 22px; /* a view's title on a phone */
+  --tempra-text-page: 28px; /* a view's title (h1); a concept's title on a phone */
   --tempra-text-title: 36px; /* a concept's title */
+
+  /* Weights: three */
+  --tempra-weight-regular: 400; /* text */
+  --tempra-weight-medium: 500; /* names in rows, a concept's title, the body's h1 and h2 */
+  --tempra-weight-strong: 600; /* the sans's headings, section labels, the wordmark */
+
+  /* Leading: three */
+  --tempra-leading-tight: 1.2; /* titles and headings */
+  --tempra-line-height: 1.5; /* the app's text */
+  --tempra-leading-reader: 1.65; /* reading */
 
   /* Space */
   --tempra-space-1: 0.25rem;
@@ -122,20 +135,20 @@ body {
 h1 {
   margin: 0 0 var(--tempra-space-3);
   font-size: var(--tempra-text-page);
-  font-weight: 500;
-  line-height: 1.2;
+  font-weight: var(--tempra-weight-medium);
+  line-height: var(--tempra-leading-tight);
   letter-spacing: -0.02em;
 }
 
 h2 {
   margin: var(--tempra-space-4) 0 var(--tempra-space-2);
   font-size: var(--tempra-font-size);
-  font-weight: 600;
+  font-weight: var(--tempra-weight-strong);
 }
 
 h3 {
   font-size: var(--tempra-text-ui);
-  font-weight: 600;
+  font-weight: var(--tempra-weight-strong);
 }
 
 a {
@@ -242,7 +255,7 @@ a.button.primary {
   border-color: var(--tempra-color-text);
   background: var(--tempra-color-text);
   color: var(--tempra-color-bg);
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 button.primary:hover:not(:disabled),
@@ -270,7 +283,7 @@ textarea {
 }
 
 textarea {
-  line-height: 1.5;
+  line-height: var(--tempra-line-height);
 }
 
 fieldset {
@@ -288,7 +301,7 @@ form.stack fieldset {
 form.stack legend {
   margin-bottom: 6px;
   padding: 0;
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 .field {
@@ -359,7 +372,7 @@ details > summary {
 }
 
 .warn {
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 /* An uppercase label over a group (SOURCES, LINKED FROM). */
@@ -367,7 +380,7 @@ details > summary {
   margin: 0 0 var(--tempra-space-2);
   color: var(--tempra-color-faint);
   font-size: var(--tempra-text-label);
-  font-weight: 400;
+  font-weight: var(--tempra-weight-regular);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -427,7 +440,7 @@ details > summary {
   color: var(--tempra-color-text);
   font-family: var(--tempra-font-reader);
   font-size: var(--tempra-text-reader);
-  line-height: 1.65;
+  line-height: var(--tempra-leading-reader);
   font-kerning: normal;
   font-optical-sizing: auto;
   font-variant-ligatures: common-ligatures;
@@ -468,7 +481,7 @@ details > summary {
 }
 
 .prose strong {
-  font-weight: 600;
+  font-weight: var(--tempra-weight-strong);
 }
 
 .prose s {
@@ -485,7 +498,7 @@ details > summary {
   margin: 1.9em 0 0.5em;
   font-family: var(--tempra-font-reader);
   font-variant-numeric: lining-nums proportional-nums;
-  line-height: 1.25;
+  line-height: var(--tempra-leading-tight);
   letter-spacing: -0.005em;
   text-wrap: balance;
   break-after: avoid;
@@ -495,19 +508,19 @@ details > summary {
 
 .prose h1 {
   font-size: 1.65em;
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
   letter-spacing: -0.012em;
 }
 
 .prose h2 {
   font-size: 1.35em;
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
   letter-spacing: -0.01em;
 }
 
 .prose h3 {
   font-size: 1.12em;
-  font-weight: 600;
+  font-weight: var(--tempra-weight-strong);
 }
 
 .prose h4,
@@ -515,7 +528,7 @@ details > summary {
 .prose h6 {
   margin-top: 1.6em;
   font-size: 1em;
-  font-weight: 600;
+  font-weight: var(--tempra-weight-strong);
   font-variant-caps: all-small-caps;
   letter-spacing: 0.04em;
 }
@@ -643,7 +656,7 @@ details > summary {
   font-family: var(--tempra-font-mono);
   font-size: 0.8em;
   font-variant-ligatures: none;
-  line-height: 1.6;
+  line-height: var(--tempra-line-height);
   tab-size: 2;
   white-space: pre;
   overflow-wrap: normal;
@@ -698,7 +711,7 @@ details > summary {
   font-family: var(--tempra-font-body);
   font-size: 0.82em;
   font-variant-numeric: lining-nums tabular-nums;
-  line-height: 1.5;
+  line-height: var(--tempra-line-height);
 }
 
 .prose th,
@@ -719,7 +732,7 @@ details > summary {
 
 .prose th {
   background: var(--tempra-color-ground);
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
   vertical-align: bottom;
 }
 
@@ -810,14 +823,14 @@ details > summary {
   color: var(--tempra-color-muted);
   font-family: var(--tempra-font-body);
   font-size: var(--tempra-text-meta);
-  line-height: 1.5;
+  line-height: var(--tempra-line-height);
   text-wrap: pretty;
   user-select: none;
 }
 
 .prose .figure-number {
   color: var(--tempra-color-text);
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 /* An image that can't be shown: a dashed box where it would be, saying so, its path and alt. */
@@ -836,7 +849,7 @@ details > summary {
   font-family: var(--tempra-font-body);
   font-size: var(--tempra-text-meta);
   font-style: normal;
-  line-height: 1.45;
+  line-height: var(--tempra-line-height);
   text-align: center;
   overflow-wrap: anywhere;
 }
@@ -884,13 +897,6 @@ details > summary {
   text-decoration: line-through;
 }
 
-/* On a phone the column is the screen: a little less leading, the same rhythm. */
-@media (max-width: 600px) {
-  .prose {
-    line-height: 1.6;
-  }
-}
-
 /*
  * What sits around a concept body in the reader (tempra-dev: app/reader): the hover cards and the
  * selection toolbar (popovers in the top layer, placed by the app through --float-x and
@@ -923,7 +929,7 @@ details > summary {
   color: var(--tempra-color-text);
   font-family: var(--tempra-font-body);
   font-size: var(--tempra-text-ui);
-  line-height: 1.45;
+  line-height: var(--tempra-line-height);
   text-wrap: pretty;
 }
 
@@ -978,7 +984,7 @@ details > summary {
   background: var(--tempra-color-text);
   color: var(--tempra-color-bg);
   font-size: var(--tempra-text-meta);
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 .selection-tools button:hover:not(:disabled) {
@@ -1135,7 +1141,7 @@ details > summary {
   color: var(--tempra-color-text);
   font-family: var(--tempra-font-body);
   font-size: var(--tempra-text-ui);
-  line-height: 1.5;
+  line-height: var(--tempra-line-height);
   overflow: hidden;
 }
 
@@ -1285,7 +1291,6 @@ details > summary {
 .lightbox-caption {
   max-width: var(--tempra-measure);
   margin: 0;
-  font-family: var(--tempra-font-reader);
   font-size: var(--tempra-text-name);
   text-wrap: pretty;
 }
@@ -1461,8 +1466,8 @@ body.ground {
   border-radius: 50%;
   background: var(--tempra-color-selected);
   color: var(--tempra-color-text);
-  font-size: 10px;
-  font-weight: 600;
+  font-size: var(--tempra-text-initial);
+  font-weight: var(--tempra-weight-strong);
 }
 
 /* A round button holding one 16px glyph. */
@@ -1533,8 +1538,8 @@ body.ground {
   border-radius: 50%;
   background: var(--tempra-color-selected);
   color: var(--tempra-color-text);
-  font-size: 9px;
-  font-weight: 600;
+  font-size: var(--tempra-text-initial);
+  font-weight: var(--tempra-weight-strong);
   line-height: 1;
 }
 
@@ -1577,7 +1582,7 @@ body.ground {
 .dialog-head h2 {
   margin: 0;
   font-size: var(--tempra-text-name);
-  font-weight: 600;
+  font-weight: var(--tempra-weight-strong);
 }
 
 .dialog-body {
@@ -1657,7 +1662,7 @@ body.ground {
   border-radius: var(--tempra-radius-box);
   color: var(--tempra-color-text);
   font-size: var(--tempra-text-name);
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
   text-decoration: none;
 }
 
@@ -1667,7 +1672,7 @@ body.ground {
 
 .lib-list .owner {
   color: var(--tempra-color-faint);
-  font-weight: 400;
+  font-weight: var(--tempra-weight-regular);
 }
 
 /* The library's open work from the daily check (TEMPRA-66): one quiet line under its name. */
@@ -1675,7 +1680,7 @@ body.ground {
   display: block;
   color: var(--tempra-color-faint);
   font-size: var(--tempra-text-meta);
-  font-weight: 400;
+  font-weight: var(--tempra-weight-regular);
 }
 
 .page-foot {
@@ -1771,20 +1776,20 @@ body.ground {
   border-radius: var(--tempra-radius-tile);
   background: var(--tempra-color-text);
   color: var(--tempra-color-bg);
-  font-family: var(--tempra-font-reader);
   font-size: var(--tempra-text-name);
+  font-weight: var(--tempra-weight-strong);
 }
 
 .lib-names {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  line-height: 1.25;
+  line-height: var(--tempra-leading-tight);
 }
 
 .lib-name {
   overflow: hidden;
-  font-weight: 600;
+  font-weight: var(--tempra-weight-strong);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1869,7 +1874,7 @@ body.ground {
 .nav-row[aria-current="page"],
 .nav-row[aria-current="location"] {
   background: var(--tempra-color-selected);
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 .nav-row svg {
@@ -2022,7 +2027,7 @@ button.tree-row[aria-current="page"] {
 
 .tree-row > a[aria-current="page"] {
   color: var(--tempra-color-text);
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 .tree-leaf {
@@ -2202,13 +2207,34 @@ button.tree-row[aria-current="page"] {
     min-width: 0;
   }
 
-  .ws-topbar-name {
-    flex: 1;
-    min-width: 0;
-    overflow: hidden;
+  /* The way to everything else, in ink so it reads as the bar's first control. */
+  .ws-menu {
     color: var(--tempra-color-text);
-    font-weight: 600;
+  }
+
+  /* Where the person is: the library's tile and name, the page beneath it, as the switcher draws
+     the library's name over its owner. */
+  .ws-topbar-place {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    min-height: var(--tempra-touch);
+    padding: 0 8px;
+    border-radius: var(--tempra-radius-row);
+    color: var(--tempra-color-text);
     text-decoration: none;
+  }
+
+  .ws-topbar-place:visited {
+    color: var(--tempra-color-text);
+  }
+
+  .ws-topbar-here {
+    overflow: hidden;
+    color: var(--tempra-color-muted);
+    font-size: var(--tempra-text-meta);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -2308,7 +2334,7 @@ button.tree-row[aria-current="page"] {
   border-radius: var(--tempra-radius-row);
   background: var(--tempra-color-ground);
   font-size: var(--tempra-text-ui);
-  line-height: 1.55;
+  line-height: var(--tempra-line-height);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -2340,7 +2366,7 @@ table.list th {
   border-bottom: 1px solid var(--tempra-color-border);
   color: var(--tempra-color-faint);
   font-size: var(--tempra-text-label);
-  font-weight: 400;
+  font-weight: var(--tempra-weight-regular);
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
@@ -2351,7 +2377,7 @@ table.list td {
 }
 
 table.list td.name a {
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 /* A group of related controls on a page (a form, a list with its actions). */
@@ -2418,7 +2444,7 @@ pre.diff {
   border-radius: var(--tempra-radius-box);
   background: var(--tempra-color-ground);
   font-size: var(--tempra-text-meta);
-  line-height: 1.55;
+  line-height: var(--tempra-line-height);
 }
 
 pre.src.wrap {
@@ -2427,7 +2453,7 @@ pre.src.wrap {
 }
 
 pre.diff .add {
-  font-weight: 600;
+  font-weight: var(--tempra-weight-strong);
 }
 
 pre.diff .del {
@@ -2505,7 +2531,7 @@ ul.events {
 .lib-list .tally {
   float: right;
   font-size: var(--tempra-text-ui);
-  font-weight: 400;
+  font-weight: var(--tempra-weight-regular);
 }
 
 .inbox-list {
@@ -2535,7 +2561,7 @@ ul.events {
 }
 
 .inbox-list .unread .what a {
-  font-weight: 600;
+  font-weight: var(--tempra-weight-strong);
 }
 
 .inbox-list .when {
@@ -2613,7 +2639,7 @@ ul.events {
   padding: 0;
   list-style: none;
   font-size: var(--tempra-text-meta);
-  line-height: 1.4;
+  line-height: var(--tempra-line-height);
 }
 
 .toc a {
@@ -2655,8 +2681,8 @@ ul.events {
   margin: 0 0 12px;
   font-family: var(--tempra-font-reader);
   font-size: var(--tempra-text-title);
-  font-weight: 500;
-  line-height: 1.15;
+  font-weight: var(--tempra-weight-medium);
+  line-height: var(--tempra-leading-tight);
   letter-spacing: -0.01em;
 }
 
@@ -2665,7 +2691,7 @@ ul.events {
   color: var(--tempra-color-muted);
   font-family: var(--tempra-font-reader);
   font-size: var(--tempra-text-reader);
-  line-height: 1.5;
+  line-height: var(--tempra-line-height);
 }
 
 /* ---------- The byline: who wrote this version, its versions, where it stands ---------- */
@@ -2697,7 +2723,7 @@ ul.events {
 }
 
 .byline-name strong {
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 .byline-sep {
@@ -2785,7 +2811,7 @@ a.verification:hover {
 }
 
 .history-who {
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 .history-note {
@@ -2831,7 +2857,7 @@ a.verification:hover {
 
 .history li.verify .history-what > a,
 .history li.verify .history-what {
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 .history .history-what {
@@ -2902,14 +2928,14 @@ a.verification:hover {
 .doc-sources h2 {
   margin: 0 0 12px;
   font-size: var(--tempra-text-ui);
-  font-weight: 600;
+  font-weight: var(--tempra-weight-strong);
 }
 
 .doc-sources h3 {
   margin: 20px 0 8px;
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 .sources {
@@ -2924,7 +2950,7 @@ a.verification:hover {
   gap: 6px;
   margin-bottom: 10px;
   font-size: var(--tempra-text-ui);
-  line-height: 1.45;
+  line-height: var(--tempra-line-height);
 }
 
 .sources li:target {
@@ -2952,7 +2978,7 @@ a.verification:hover {
   border-radius: var(--tempra-radius-box);
   background: var(--tempra-color-ground);
   font-size: var(--tempra-text-ui);
-  line-height: 1.6;
+  line-height: var(--tempra-line-height);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -2975,7 +3001,7 @@ a.verification:hover {
   color: var(--tempra-color-faint);
   font-family: var(--tempra-font-mono);
   font-size: var(--tempra-text-label);
-  line-height: 1.6;
+  line-height: var(--tempra-line-height);
 }
 
 .facts dd {
@@ -3089,7 +3115,7 @@ a.verification:hover {
 .comments-head h2 {
   margin: 0;
   font-size: var(--tempra-text-ui);
-  font-weight: 600;
+  font-weight: var(--tempra-weight-strong);
 }
 
 .comments-head .count {
@@ -3171,13 +3197,13 @@ a.verification:hover {
 .thread.collapsed .avatar-mark {
   width: var(--tempra-avatar-small);
   height: var(--tempra-avatar-small);
-  font-size: 8px;
+  font-size: var(--tempra-text-initial);
 }
 
 .thread.collapsed strong {
   flex: none;
   color: var(--tempra-color-text);
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 .thread-words {
@@ -3222,7 +3248,7 @@ a.verification:hover {
 }
 
 .said-by strong {
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 .said-by time,
@@ -3238,7 +3264,7 @@ a.verification:hover {
 .comment {
   margin: 4px 0 0 calc(var(--tempra-avatar) + 8px);
   font-size: var(--tempra-text-ui);
-  line-height: 1.45;
+  line-height: var(--tempra-line-height);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -3250,7 +3276,7 @@ a.verification:hover {
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
   font-style: italic;
-  line-height: 1.45;
+  line-height: var(--tempra-line-height);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
@@ -3379,13 +3405,13 @@ a.verification:hover {
   min-width: 0;
 }
 
+/* A view is the app, not a document: its title is the app's sans, sized as an h1 (TEMPRA-108). */
 .view-title {
   margin: 0;
-  font-family: var(--tempra-font-reader);
-  font-size: var(--tempra-text-title);
-  font-weight: 500;
-  line-height: 1.15;
-  letter-spacing: -0.01em;
+  font-size: var(--tempra-text-page);
+  font-weight: var(--tempra-weight-strong);
+  line-height: var(--tempra-leading-tight);
+  letter-spacing: -0.02em;
   overflow-wrap: anywhere;
 }
 
@@ -3430,7 +3456,7 @@ a.verification:hover {
 .view-section-title {
   margin: 0;
   font-size: var(--tempra-text-ui);
-  font-weight: 600;
+  font-weight: var(--tempra-weight-strong);
 }
 
 .view-empty {
@@ -3505,7 +3531,7 @@ a.verification:hover {
 
 @media (max-width: 900px) {
   .view-title {
-    font-size: var(--tempra-text-page);
+    font-size: var(--tempra-text-h2);
   }
 
   .view-filters button,
@@ -3542,7 +3568,7 @@ a.verification:hover {
   width: var(--tempra-avatar-small);
   height: var(--tempra-avatar-small);
   border: 2px solid var(--tempra-color-bg);
-  font-size: 8px;
+  font-size: var(--tempra-text-initial);
 }
 
 .face-stack .avatar-mark + .avatar-mark {
@@ -3600,6 +3626,32 @@ a.verification:hover {
   white-space: nowrap;
 }
 
+/* The library's ways in, when the sidebar is not beside the sheet (TEMPRA-107): the sidebar's own
+   rows, their hover fill hanging into the gutter so their text lines up with the page's. */
+.home-ways {
+  margin: var(--tempra-space-3) -10px 0;
+}
+
+.home-ways-label {
+  margin: var(--tempra-space-3) 10px var(--tempra-space-1);
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-label);
+  font-weight: var(--tempra-weight-regular);
+}
+
+.home-ways .view-empty {
+  padding: 0 10px;
+}
+
+.home-files {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 .home-entries {
   display: flex;
   flex-direction: column;
@@ -3653,7 +3705,7 @@ a.verification:hover {
 
 .needs-count {
   color: var(--tempra-color-faint);
-  font-weight: 400;
+  font-weight: var(--tempra-weight-regular);
 }
 
 .needs-note {
@@ -3696,7 +3748,7 @@ a.verification:hover {
 }
 
 .needs-reply b {
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 .needs-verify {
@@ -3716,7 +3768,7 @@ a.verification:hover {
 
 .needs-title {
   color: var(--tempra-color-text);
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
   text-decoration: none;
 }
 
@@ -3762,7 +3814,7 @@ a.verification:hover {
 .needs-error {
   margin: 0;
   font-size: var(--tempra-text-meta);
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 /* The agents' share: one quiet, collapsed line. */
@@ -3853,7 +3905,7 @@ a.verification:hover {
 }
 
 .entry-who {
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 .entry-for,
@@ -3866,10 +3918,9 @@ a.verification:hover {
   font-size: var(--tempra-text-meta);
 }
 
-/* The request's note, quoted in the reader's serif. */
+/* The request's note, quoted. */
 .entry-note {
   color: var(--tempra-color-muted);
-  font-family: var(--tempra-font-reader);
   font-size: var(--tempra-font-size);
   overflow-wrap: anywhere;
 }
@@ -3926,7 +3977,7 @@ a.verification:hover {
 .entry.compact > .avatar-mark {
   width: var(--tempra-avatar-small);
   height: var(--tempra-avatar-small);
-  font-size: 8px;
+  font-size: var(--tempra-text-initial);
 }
 
 .entry.compact .entry-line {
@@ -4009,7 +4060,7 @@ a.verification:hover {
 }
 
 .folder-title {
-  font-weight: 500;
+  font-weight: var(--tempra-weight-medium);
 }
 
 .folder-sub .folder-title {
@@ -4042,7 +4093,7 @@ a.verification:hover {
 .folder-by .avatar-mark {
   width: var(--tempra-avatar-small);
   height: var(--tempra-avatar-small);
-  font-size: 8px;
+  font-size: var(--tempra-text-initial);
 }
 
 .folder-marks {
@@ -4107,7 +4158,7 @@ a.verification:hover {
   gap: 10px;
   color: var(--tempra-color-text);
   font-size: var(--tempra-text-name);
-  font-weight: 600;
+  font-weight: var(--tempra-weight-strong);
   text-decoration: none;
 }
 
@@ -4209,7 +4260,7 @@ a.verification:hover {
   margin: 12px 0 24px;
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-reader);
-  line-height: 1.5;
+  line-height: var(--tempra-line-height);
 }
 
 .public-actions {
@@ -4237,14 +4288,14 @@ a.verification:hover {
 .features h3 {
   margin: 0 0 4px;
   font-size: var(--tempra-text-ui);
-  font-weight: 600;
+  font-weight: var(--tempra-weight-strong);
 }
 
 .features p {
   margin: 0;
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-ui);
-  line-height: 1.5;
+  line-height: var(--tempra-line-height);
 }
 
 /* Steps: numbered in the faint grey, one to a line. */
