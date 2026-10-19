@@ -936,8 +936,9 @@ details > summary {
 }
 
 /*
- * Comments (TEMPRA-13). A thread's quote is underlined in the body (dotted; solid when its thread
- * is the one in focus); a comment being written fills its text with the selection grey. Drawn as
+ * Comments (TEMPRA-13). A thread's quote is underlined in the body (dotted); the one whose thread
+ * is open in the margin is filled grey and underlined solid (take 3); a comment being written
+ * fills its text with the selection grey. Drawn as
  * highlights, so the body's DOM never changes for them.
  */
 ::highlight(tempra-comment) {
@@ -948,9 +949,10 @@ details > summary {
 }
 
 ::highlight(tempra-comment-active) {
+  background-color: var(--tempra-color-hover);
   text-decoration-line: underline;
   text-decoration-style: solid;
-  text-decoration-thickness: 2px;
+  text-decoration-thickness: 1px;
   text-underline-offset: 0.22em;
 }
 
@@ -2699,6 +2701,11 @@ ul.events {
   min-width: 0;
 }
 
+/* Where it stands with the reader keeps to the right, also when the byline wraps. */
+.byline-state {
+  margin-left: auto;
+}
+
 .byline-name strong {
   font-weight: 500;
 }
@@ -3630,14 +3637,6 @@ a.verification:hover {
   gap: 26px;
 }
 
-.needs-head h1 {
-  margin: 0 0 var(--tempra-space-1);
-  font-family: var(--tempra-font-reader);
-  font-size: var(--tempra-text-title);
-  letter-spacing: -0.01em;
-}
-
-.needs-head p,
 .needs-empty {
   margin: 0;
   color: var(--tempra-color-muted);
@@ -3766,25 +3765,6 @@ a.verification:hover {
 }
 
 /* Review (a link) and Ask an agent (a button): the same outlined pill. */
-.needs-action {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  padding: 5px 14px;
-  border: 1px solid var(--tempra-color-border-strong);
-  border-radius: var(--tempra-radius-pill);
-  background: var(--tempra-color-bg);
-  color: var(--tempra-color-text);
-  font-size: var(--tempra-text-meta);
-  font-weight: 500;
-  text-decoration: none;
-  white-space: nowrap;
-}
-
-a.needs-action:hover {
-  background: var(--tempra-color-hover);
-}
-
 .needs-more {
   align-self: flex-start;
 }
@@ -3821,7 +3801,8 @@ a.needs-action:hover {
     grid-column: 1 / -1;
   }
 
-  .needs-stale .needs-action,
+  .needs-stale .button,
+  .needs-stale button,
   .needs-stale .needs-asked {
     grid-column: 2;
   }
@@ -3834,7 +3815,8 @@ a.needs-action:hover {
     grid-column: 2;
   }
 
-  .needs-action,
+  .needs-row .button,
+  .needs-row button,
   .needs-more {
     min-height: var(--tempra-touch);
   }
@@ -3986,67 +3968,11 @@ a.needs-action:hover {
   gap: 22px;
 }
 
-.folder-head h1 {
-  margin: 0 0 6px;
-  font-family: var(--tempra-font-reader);
-  font-size: var(--tempra-text-title);
-  letter-spacing: -0.01em;
-}
-
-.folder-counts,
 .folder-legend,
 .folder-empty {
   margin: 0;
   color: var(--tempra-color-faint);
   font-size: var(--tempra-text-meta);
-}
-
-.folder-controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px;
-}
-
-.folder-controls button {
-  padding: 4px 12px;
-  font-size: var(--tempra-text-meta);
-}
-
-/* Sort: two segments in one grey pill; the chosen one is white. */
-.folder-sort {
-  display: flex;
-  gap: 2px;
-  min-width: 0;
-  margin: 0;
-  padding: 2px;
-  border: 0;
-  border-radius: var(--tempra-radius-pill);
-  background: var(--tempra-color-ground);
-}
-
-.folder-sort button {
-  border-color: transparent;
-  background: transparent;
-  color: var(--tempra-color-muted);
-}
-
-.folder-sort button[aria-pressed="true"],
-.folder-sort button[aria-pressed="true"]:hover:not(:disabled) {
-  border-color: var(--tempra-color-border);
-  background: var(--tempra-color-bg);
-  color: var(--tempra-color-text);
-}
-
-.folder-filter {
-  color: var(--tempra-color-muted);
-}
-
-.folder-filter[aria-pressed="true"],
-.folder-filter[aria-pressed="true"]:hover:not(:disabled) {
-  border-color: var(--tempra-color-text);
-  background: var(--tempra-color-selected);
-  color: var(--tempra-color-text);
 }
 
 /* Rows between hairlines: subfolders first, then concepts. */
@@ -4173,14 +4099,5 @@ a.needs-action:hover {
 
   .folder-sub .folder-main {
     grid-column: auto;
-  }
-
-  .folder-controls button {
-    min-height: var(--tempra-touch);
-    padding: 0 14px;
-  }
-
-  .folder-sort button {
-    min-height: calc(var(--tempra-touch) - 4px);
   }
 }

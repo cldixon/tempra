@@ -105,7 +105,7 @@ function App() {
         page = <NeedsYou urls={urls} />;
         break;
       case "activity":
-        page = <Activity urls={urls} actor={actor} />;
+        page = <Activity urls={urls} actor={actor} filters={route.filters} />;
         break;
       case "file":
         page = (

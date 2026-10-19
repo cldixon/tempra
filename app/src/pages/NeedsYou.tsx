@@ -3,7 +3,7 @@ import { type ActorView, useActors } from "../agents";
 import { api, useAction, useLoad } from "../api";
 import { Avatar } from "../chrome";
 import { type Needs, useNeeds } from "../needs";
-import { Ago, ago, plural, Status, useMe, useTitle, who } from "../ui";
+import { Ago, ago, clip, day, plural, Status, useMe, useTitle, who } from "../ui";
 import type { Urls } from "../urls";
 import { SheetPage } from "../Workspace";
 
@@ -18,21 +18,6 @@ const PAGE = 20;
 
 type View = (actor: string, by?: Needs["replies"][number]["last"]["by"]) => ActorView;
 
-/** A day as a person reads it: "Oct 24" (UTC, as the ledger keeps time). */
-function day(ts: string): string {
-  return new Date(ts).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    timeZone: "UTC",
-  });
-}
-
-/** The first words of a text, on one line, ending in "…" when cut. */
-function clip(text: string, max: number): string {
-  const line = text.replace(/\s+/g, " ").trim();
-  return line.length <= max ? line : `${line.slice(0, max).replace(/\s+\S*$/, "")}…`;
-}
-
 export function NeedsYou({ urls }: { urls: Urls }) {
   useTitle(`Needs you · ${urls.slug}`);
   const me = useMe();
@@ -41,9 +26,13 @@ export function NeedsYou({ urls }: { urls: Urls }) {
   return (
     <SheetPage>
       <div className="needs">
-        <header className="needs-head">
-          <h1>Needs you</h1>
-          <p>What only a person can do here: answer, verify, decide. Agents look after the rest.</p>
+        <header className="view-head">
+          <div className="view-head-main">
+            <h1 className="view-title">Needs you</h1>
+            <p className="view-meta">
+              What only a person can do here: answer, verify, decide. Agents look after the rest.
+            </p>
+          </div>
         </header>
         <Status loaded={loaded}>
           {(needs) => (
@@ -247,7 +236,7 @@ function VerifyRow(props: {
       <span className="needs-by">
         {actor.name} · {ago(item.ts, props.now)}
       </span>
-      <a className="needs-action" href={props.urls.review(item.path)}>
+      <a className="button" href={props.urls.review(item.path)}>
         Review
       </a>
     </li>
@@ -296,7 +285,7 @@ function StaleRow(props: { urls: Urls; item: Needs["stale"][number]; onAsked(): 
       {done ? (
         <span className="needs-asked">Asked an agent</span>
       ) : (
-        <button type="button" className="needs-action" disabled={action.busy} onClick={ask}>
+        <button type="button" disabled={action.busy} onClick={ask}>
           Ask an agent to review
         </button>
       )}

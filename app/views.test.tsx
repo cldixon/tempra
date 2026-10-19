@@ -153,7 +153,7 @@ describe("a folder (take 3)", () => {
   );
 
   test("its name and one line of counts", () => {
-    expect(html).toContain("<h1>Decisions</h1>");
+    expect(html).toContain(`<h1 class="view-title">Decisions</h1>`);
     expect(html).toContain("2 concepts · 1 not verified · newest change 2 h ago");
   });
 

@@ -12,14 +12,15 @@ import {
 import { useActors } from "../agents";
 import { api, useLoad } from "../api";
 import { markSeen, useFeed, useLastSeen, useTrailing } from "../live";
+import { navigate } from "../router";
 import { Status, useTitle } from "../ui";
-import { folderName, type Urls } from "../urls";
+import { type ActivityFilters, folderName, type Urls } from "../urls";
 import { SheetPage } from "../Workspace";
 
 /** Requests per page, as the ledger pages them. */
 const PAGE = 30;
 
-type Who = "everyone" | "agents" | "people";
+type Who = NonNullable<ActivityFilters["who"]>;
 
 interface Page {
   requests: LedgerRequest[];
@@ -30,13 +31,17 @@ interface Page {
  * Activity (take 3, TEMPRA-106; tempra-dev: app/activity): what happened in the library, for
  * people. One entry per request, grouped by day, newest first; new entries arrive live, and
  * those after the person's seen cursor are marked. Looking moves the cursor forward, as the
- * ledger does; the ledger stays as the audit view behind "The full ledger".
+ * ledger does; the ledger stays as the audit view behind "The full ledger". The filters are in
+ * the URL, so a filtered view can be linked and back and forward restore it.
  */
-export function Activity({ urls, actor }: { urls: Urls; actor: string }) {
+export function Activity(props: { urls: Urls; actor: string; filters: ActivityFilters }) {
+  const { urls, actor, filters } = props;
   useTitle(`Activity · ${urls.slug}`);
-  const [who, setWho] = useState<Who>("everyone");
-  const [folder, setFolder] = useState("");
-  const [hideComments, setHideComments] = useState(false);
+  const who: Who = filters.who ?? "everyone";
+  const folder = filters.prefix ?? "";
+  const hideComments = filters.hideComments ?? false;
+  const filter = (change: ActivityFilters) =>
+    navigate(urls.activity({ ...filters, ...change }), { replace: true });
   const titles = useTitles(urls);
   const loaded = useLoad(`activity ${urls.base} ${folder}`, async () => {
     // The head first: the feed then replays anything that lands while the page loads.
@@ -82,12 +87,12 @@ export function Activity({ urls, actor }: { urls: Urls; actor: string }) {
         </a>
       </header>
       <div className="view-filters">
-        <WhoFilter value={who} onChange={setWho} />
+        <WhoFilter value={who} onChange={(w) => filter({ who: w })} />
         <select
           className="pill-select"
           aria-label="Folder"
           value={folder}
-          onChange={(e) => setFolder(e.currentTarget.value)}
+          onChange={(e) => filter({ prefix: e.currentTarget.value || undefined })}
         >
           <option value="">All folders</option>
           {(titles.state === "ready" ? titles.data.folders : []).map((f) => (
@@ -100,7 +105,7 @@ export function Activity({ urls, actor }: { urls: Urls; actor: string }) {
           type="button"
           className="pill-toggle"
           aria-pressed={hideComments}
-          onClick={() => setHideComments((h) => !h)}
+          onClick={() => filter({ hideComments: !hideComments })}
         >
           Hide comments
         </button>

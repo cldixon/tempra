@@ -4,7 +4,7 @@ import { api, useAction } from "../api";
 import { Avatar } from "../chrome";
 import { MentionArea, useMentionable } from "../Mentions";
 import { revealOffset } from "../Reader";
-import { Ago, useMe } from "../ui";
+import { Ago, clip, useMe } from "../ui";
 import type { Urls } from "../urls";
 import type { CommentT, Draft, Placed, Thread } from "./data";
 
@@ -13,8 +13,6 @@ import type { CommentT, Draft, Placed, Thread } from "./data";
  * collapsed to one line (who, the first words, when) until it is the active thread, which shows
  * its comments, a reply field and Resolve. And the composer for a new comment.
  */
-
-const clip = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
 /** Names actors for comments: agents for their person, the signed-in person as "You". */
 function useNamer(urls: Urls): (actor: string, by?: ActedBy | null) => ActorView {

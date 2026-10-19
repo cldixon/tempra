@@ -3,7 +3,7 @@ import { type ActedBy, type ActorView, useActors } from "../agents";
 import { api, useLoad } from "../api";
 import { Avatar, Icon, Menu } from "../chrome";
 import { useFeed, useTrailing } from "../live";
-import { ago, Crumbs, plural, Status, useMe, useTitle, who } from "../ui";
+import { Crumbs, day, plural, recently, Status, useMe, useTitle, who } from "../ui";
 import { folderName, type Urls } from "../urls";
 import { SheetBar, SheetPage } from "../Workspace";
 
@@ -39,18 +39,6 @@ export interface FolderConcept {
 }
 
 type Sort = "recent" | "az";
-
-const DAY = 86_400_000;
-
-/** When, as a row says it: "14 min" today, "Oct 9" before (UTC, as the ledger keeps time). */
-function since(ts: string, now: number): string {
-  if (now - Date.parse(ts) < DAY) return ago(ts, now);
-  return new Date(ts).toLocaleDateString("en-US", {
-    month: "short",
-    day: "numeric",
-    timeZone: "UTC",
-  });
-}
 
 /** The folder view's cache key. Always head: the endpoint has no `at`. */
 const folderKey = (urls: Urls, dir: string) => `folder ${urls.base} ${dir}`;
@@ -117,13 +105,15 @@ export function FolderBody(props: {
   const filtered = unverified || threads;
   return (
     <div className="folder">
-      <header className="folder-head">
-        <h1>{folderName(props.dir)}</h1>
-        <Counts counts={view.counts} now={now} />
+      <header className="view-head">
+        <div className="view-head-main">
+          <h1 className="view-title">{folderName(props.dir)}</h1>
+          <Counts counts={view.counts} now={now} />
+        </div>
       </header>
       {view.concepts.length > 0 && (
-        <div className="folder-controls">
-          <fieldset className="folder-sort">
+        <div className="view-filters">
+          <fieldset className="segmented">
             <legend className="visually-hidden">Sort</legend>
             <button
               type="button"
@@ -138,7 +128,7 @@ export function FolderBody(props: {
           </fieldset>
           <button
             type="button"
-            className="folder-filter"
+            className="pill-toggle"
             aria-pressed={unverified}
             onClick={() => setUnverified((on) => !on)}
           >
@@ -146,7 +136,7 @@ export function FolderBody(props: {
           </button>
           <button
             type="button"
-            className="folder-filter"
+            className="pill-toggle"
             aria-pressed={threads}
             onClick={() => setThreads((on) => !on)}
           >
@@ -194,10 +184,11 @@ function Counts({ counts, now }: { counts: FolderView["counts"]; now: number }) 
   const parts = [plural(counts.concepts, "concept")];
   if (counts.unverified > 0) parts.push(`${counts.unverified} not verified`);
   if (counts.newest) {
-    const t = since(counts.newest.ts, now);
-    parts.push(`newest change ${now - Date.parse(counts.newest.ts) < DAY ? `${t} ago` : t}`);
+    const ts = counts.newest.ts;
+    const t = recently(ts, now);
+    parts.push(`newest change ${t === day(ts) ? t : `${t} ago`}`);
   }
-  return <p className="folder-counts">{parts.join(" · ")}</p>;
+  return <p className="view-meta">{parts.join(" · ")}</p>;
 }
 
 function SubfolderRow(props: { urls: Urls; folder: FolderView["folders"][number]; now: number }) {
@@ -213,7 +204,7 @@ function SubfolderRow(props: { urls: Urls; folder: FolderView["folders"][number]
         </span>
         <span className="folder-by">
           {plural(folder.concepts, "concept")}
-          {folder.newest_ts && ` · ${since(folder.newest_ts, props.now)}`}
+          {folder.newest_ts && ` · ${recently(folder.newest_ts, props.now)}`}
         </span>
       </a>
     </li>
@@ -234,7 +225,7 @@ function ConceptRow(props: { urls: Urls; concept: FolderConcept; who: ActorView;
           {c.ts && (
             <>
               <Avatar name={by.agent ? by.name : who(c.actor)} agent={by.agent} />
-              {by.name} · {since(c.ts, props.now)}
+              {by.name} · {recently(c.ts, props.now)}
             </>
           )}
         </span>

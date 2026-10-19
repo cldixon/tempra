@@ -132,6 +132,11 @@
   min-width: 0;
 }
 
+/* Where it stands with the reader keeps to the right, also when the byline wraps. */
+.byline-state {
+  margin-left: auto;
+}
+
 .byline-name strong {
   font-weight: 500;
 }

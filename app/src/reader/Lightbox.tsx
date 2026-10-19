@@ -9,6 +9,7 @@
  */
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { Icon } from "../chrome";
+import { day, formatSize } from "../ui";
 import { useDiagram } from "./Diagram";
 import { BrokenImage } from "./Figure";
 import type { DiagramFigure, Figure, ImageFigure } from "./prepare";
@@ -33,27 +34,11 @@ export interface FigureView {
   describe?(path: string): Promise<ImageFacts | null>;
 }
 
-/** Bytes in a few characters: "316 KB", "2.1 MB". */
-export function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  const kb = bytes / 1024;
-  if (kb < 1024) return `${Math.round(kb)} KB`;
-  const mb = kb / 1024;
-  return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`;
-}
-
 /** An image figure's quiet line: path (or URL), size, who added it and when. */
 export function factsLine(f: ImageFigure, facts: ImageFacts | null): string {
   const parts = [f.path ?? f.url];
   if (facts?.size != null) parts.push(formatSize(facts.size));
-  if (facts?.by) {
-    const when = facts.at ? new Date(facts.at) : null;
-    const day =
-      when && !Number.isNaN(when.getTime())
-        ? `, ${when.toLocaleDateString(undefined, { month: "short", day: "numeric" })}`
-        : "";
-    parts.push(`added by ${facts.by}${day}`);
-  }
+  if (facts?.by) parts.push(`added by ${facts.by}${facts.at ? `, ${day(facts.at)}` : ""}`);
   return parts.join(" · ");
 }
 

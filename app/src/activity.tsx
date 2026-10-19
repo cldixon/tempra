@@ -37,13 +37,21 @@ export interface LedgerRequest {
 }
 
 /** What a request did to one concept or file. */
-export type What = "added" | "edited" | "moved" | "deleted" | "reverted";
+export type What = "added" | "edited" | "rewrote" | "moved" | "deleted" | "reverted";
 
-/** Words an edit added and removed (the ledger's `meta.words`, on new versions). */
+/**
+ * Words an edit added and removed (the ledger's `meta.words`, on new versions), and how many the
+ * text had before, when the ledger kept it.
+ */
 export interface Words {
   added: number;
   removed: number;
+  before?: number;
 }
+
+/** An edit that removed more than half of what the text said is a rewrite. */
+const rewrote = (w: Words | null) =>
+  w !== null && w.before !== undefined && w.before > 0 && w.removed * 2 > w.before;
 
 /** A concept or file a request touched, and what happened to it. */
 export interface Touched {
@@ -106,9 +114,10 @@ export function joinParts(clauses: Part[][]): Part[] {
 
 const asWords = (v: unknown): Words | null => {
   const w = v as Partial<Words> | null | undefined;
-  return w && typeof w.added === "number" && typeof w.removed === "number"
-    ? { added: w.added, removed: w.removed }
-    : null;
+  if (!w || typeof w.added !== "number" || typeof w.removed !== "number") return null;
+  return typeof w.before === "number"
+    ? { added: w.added, removed: w.removed, before: w.before }
+    : { added: w.added, removed: w.removed };
 };
 
 const isConcept = (path: string) => path.endsWith(".md");
@@ -127,12 +136,14 @@ export function touchedBy(events: LedgerEvent[], titles: Record<string, string>)
     const last = evs[evs.length - 1] as LedgerEvent;
     const created = evs.some((e) => (e.op === "put" || e.op === "import") && e.prev_hash === null);
     const counted = evs.map((e) => asWords(e.meta?.words)).filter((w) => w !== null);
+    const first = counted[0];
     const words: Words | null =
       counted.length === 0
         ? null
         : {
             added: counted.reduce((n, w) => n + w.added, 0),
             removed: counted.reduce((n, w) => n + w.removed, 0),
+            ...(first?.before !== undefined ? { before: first.before } : {}),
           };
     const moved = evs.find((e) => e.op === "move");
     const what: What =
@@ -143,14 +154,16 @@ export function touchedBy(events: LedgerEvent[], titles: Record<string, string>)
           : evs.some((e) => e.op === "revert")
             ? "reverted"
             : evs.some((e) => e.op === "put" || e.op === "import")
-              ? "edited"
+              ? rewrote(words)
+                ? "rewrote"
+                : "edited"
               : "moved";
     const from = typeof moved?.meta?.from_path === "string" ? moved.meta.from_path : null;
     out.push({
       path: last.path,
       title: titleOf(last.path, titles),
       what,
-      words: what === "edited" || what === "reverted" ? words : null,
+      words: what === "edited" || what === "rewrote" || what === "reverted" ? words : null,
       from: what === "moved" ? from : null,
       seq: last.seq,
     });

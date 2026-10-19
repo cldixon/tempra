@@ -3,7 +3,7 @@ import type { ActedBy, ActorView } from "../agents";
 import { warmth } from "../changes";
 import { Avatar, Icon, Menu } from "../chrome";
 import { Dialog } from "../Dialog";
-import { day, plural, useAgo } from "../ui";
+import { day, plural, recently, useAgo } from "../ui";
 import type { Urls } from "../urls";
 import { actedBy, type Concept, type HistoryEvent, type Standing, standing } from "./data";
 import { AllVersions } from "./History";
@@ -25,6 +25,8 @@ export function Byline(props: {
   name: Namer;
   /** The page is current (not a pinned old version), so it can be reviewed. */
   current: boolean;
+  /** The page is in review mode already (its bar has Verify): no Review button. */
+  reviewing: boolean;
 }) {
   const { urls, concept: c, name } = props;
   const s = standing(props.history, c.seq);
@@ -69,7 +71,7 @@ export function Byline(props: {
       </div>
       <div className="byline-state">
         <Verification urls={urls} concept={c} standing={s} name={name} current={props.current} />
-        {props.current && toReview && (
+        {props.current && toReview && !props.reviewing && (
           <a className="button primary" href={urls.review(c.path)}>
             Review
           </a>

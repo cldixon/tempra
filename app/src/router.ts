@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { LedgerFilters } from "./urls";
+import type { ActivityFilters, LedgerFilters } from "./urls";
 
 /** The pages the app draws itself; every other URL is a server page, loaded in full. */
 export type Route =
@@ -14,7 +14,7 @@ export type Route =
   | { page: "members"; owner: string; slug: string }
   | { page: "work"; owner: string; slug: string; kind?: string }
   | { page: "needs"; owner: string; slug: string }
-  | { page: "activity"; owner: string; slug: string }
+  | { page: "activity"; owner: string; slug: string; filters: ActivityFilters }
   | { page: "transfer"; owner: string; slug: string }
   | { page: "recovery"; owner: string; slug: string }
   | { page: "library-connect"; owner: string; slug: string }
@@ -131,8 +131,21 @@ export function match(url: URL): Route | null {
         };
       case "work":
         return tail === "" ? { page: "work", owner, slug, kind: q.get("kind") || undefined } : null;
+      case "activity": {
+        if (tail !== "") return null;
+        const who = q.get("who");
+        return {
+          page: "activity",
+          owner,
+          slug,
+          filters: {
+            who: who === "agents" || who === "people" ? who : "everyone",
+            prefix: q.get("prefix")?.trim() || undefined,
+            hideComments: q.get("comments") === "hide",
+          },
+        };
+      }
       case "needs":
-      case "activity":
       case "transfer":
       case "recovery":
       case "delete":

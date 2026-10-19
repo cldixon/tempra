@@ -13,15 +13,23 @@ const doc = (body: string) =>
 describe("word counts for edits", () => {
   test("the bag-of-words difference: moved words are neither, changed words one of each", () => {
     // Split on whitespace only: a word that gains a full stop is a changed word.
-    expect(wordChange("revenue.", "revenue minus cost.")).toEqual({ added: 3, removed: 1 });
-    expect(wordChange("a b c", "a b c")).toEqual({ added: 0, removed: 0 });
-    expect(wordChange("a b c", "c b a")).toEqual({ added: 0, removed: 0 });
-    expect(wordChange("a b c", "a x c")).toEqual({ added: 1, removed: 1 });
-    expect(wordChange("the the cat", "the cat sat on the mat")).toEqual({ added: 3, removed: 0 });
-    expect(wordChange("one two\n\nthree", "")).toEqual({ added: 0, removed: 3 });
-    expect(wordChange("", "  new\twords\n")).toEqual({ added: 2, removed: 0 });
+    expect(wordChange("revenue.", "revenue minus cost.")).toEqual({
+      added: 3,
+      removed: 1,
+      before: 1,
+    });
+    expect(wordChange("a b c", "a b c")).toEqual({ added: 0, removed: 0, before: 3 });
+    expect(wordChange("a b c", "c b a")).toEqual({ added: 0, removed: 0, before: 3 });
+    expect(wordChange("a b c", "a x c")).toEqual({ added: 1, removed: 1, before: 3 });
+    expect(wordChange("the the cat", "the cat sat on the mat")).toEqual({
+      added: 3,
+      removed: 0,
+      before: 3,
+    });
+    expect(wordChange("one two\n\nthree", "")).toEqual({ added: 0, removed: 3, before: 3 });
+    expect(wordChange("", "  new\twords\n")).toEqual({ added: 2, removed: 0, before: 0 });
     // An atom (an image, a footnote marker) separates words and is not one.
-    expect(wordChange("cost\uFFFCnote", "cost note")).toEqual({ added: 0, removed: 0 });
+    expect(wordChange("cost\uFFFCnote", "cost note")).toEqual({ added: 0, removed: 0, before: 2 });
   });
 
   test("recorded on a new version of a concept, never on a create, move or delete", () => {
@@ -46,9 +54,9 @@ describe("word counts for edits", () => {
     s.apply(ctx(), [{ op: "move", path: "m.md", to: "n.md" }]);
     expect(s.history("n.md").events.map((e) => [e.op, e.meta?.words ?? null])).toEqual([
       ["put", null],
-      ["put", { added: 3, removed: 1 }],
-      ["put", { added: 1, removed: 1 }],
-      ["revert", { added: 1, removed: 1 }],
+      ["put", { added: 3, removed: 1, before: 6 }],
+      ["put", { added: 1, removed: 1, before: 8 }],
+      ["revert", { added: 1, removed: 1, before: 8 }],
       ["move", null],
     ]);
     const current = s.concepts().items[0]?.hash ?? null;
@@ -65,7 +73,7 @@ describe("word counts for edits", () => {
     ]);
     expect(s.history("m.md").events.map((e) => e.meta?.words ?? null)).toEqual([
       null,
-      { added: 3, removed: 1 },
+      { added: 3, removed: 1, before: 4 },
     ]);
     expect(s.history("o.md").events[0]?.meta?.words).toBeUndefined();
   });
@@ -84,16 +92,16 @@ describe("word counts for edits", () => {
       requests: { request_id: string; events: { meta: { words?: unknown } | null }[] }[];
     };
     expect(requests.map((r) => r.events[0]?.meta?.words ?? null)).toEqual([
-      { added: 3, removed: 1 },
+      { added: 3, removed: 1, before: 4 },
       null,
     ]);
     const one = (await (await s.req(`/requests/${requests[0]?.request_id}`)).json()) as {
       events: { meta: { words?: unknown } }[];
     };
-    expect(one.events[0]?.meta.words).toEqual({ added: 3, removed: 1 });
+    expect(one.events[0]?.meta.words).toEqual({ added: 3, removed: 1, before: 4 });
     const history = (await (await s.app.request(`${API}/history/m.md`)).json()) as {
       events: { meta: { words?: unknown } | null }[];
     };
-    expect(history.events.at(-1)?.meta?.words).toEqual({ added: 3, removed: 1 });
+    expect(history.events.at(-1)?.meta?.words).toEqual({ added: 3, removed: 1, before: 4 });
   });
 });

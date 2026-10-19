@@ -57,6 +57,18 @@ const text = (e: Entry | null) =>
     .join("");
 
 describe("toEntry", () => {
+  test("an edit that removed most of the text is a rewrite; a smaller one an edit", () => {
+    const words = (added: number, removed: number, before?: number) => ({
+      meta: { words: before === undefined ? { added, removed } : { added, removed, before } },
+    });
+    const one = (w: ReturnType<typeof words>) =>
+      toEntry(req([ev("put", "app/reader.md", w)]), titles)?.touched[0]?.what;
+    expect(one(words(400, 90, 120))).toBe("rewrote");
+    expect(one(words(38, 12, 120))).toBe("edited");
+    // From before the ledger kept the size: never called a rewrite.
+    expect(one(words(400, 90))).toBe("edited");
+  });
+
   test("one or two changes are named, with their verbs", () => {
     const e = toEntry(
       req([

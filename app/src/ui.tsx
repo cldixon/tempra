@@ -158,10 +158,24 @@ export function day(iso: string): string {
   });
 }
 
-export function formatSize(n: number): string {
-  if (n < 1024) return `${n} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+/** When, as a row says it: "14 min" within a day, else the day ("Oct 9"). */
+export function recently(ts: string, now: number): string {
+  return now - Date.parse(ts) < 86_400_000 ? ago(ts, now) : day(ts);
+}
+
+/** The first words of a text on one line, ending in "…" when cut at `max` characters. */
+export function clip(text: string, max: number): string {
+  const line = text.replace(/\s+/g, " ").trim();
+  return line.length <= max ? line : `${line.slice(0, max - 1).replace(/\s+\S*$/, "")}…`;
+}
+
+/** Bytes in a few characters: "316 KB", "2.1 MB". */
+export function formatSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${Math.round(kb)} KB`;
+  const mb = kb / 1024;
+  return `${mb < 10 ? mb.toFixed(1) : Math.round(mb)} MB`;
 }
 
 /** The quick switcher's shortcut as this platform writes it (⌘K on Apple devices). */

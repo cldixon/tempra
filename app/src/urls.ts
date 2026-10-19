@@ -62,9 +62,13 @@ export class Urls {
   needs() {
     return this.page("needs");
   }
-  /** The ledger for people: requests grouped by day. */
-  activity() {
-    return this.page("activity");
+  /** The ledger for people: requests grouped by day, filtered as the page's controls set. */
+  activity(filters: ActivityFilters = {}) {
+    return `${this.page("activity")}${query({
+      who: filters.who === "everyone" ? undefined : filters.who,
+      prefix: filters.prefix,
+      comments: filters.hideComments ? "hide" : undefined,
+    })}`;
   }
   work(kind?: string) {
     return `${this.page("work")}${query({ kind })}`;
@@ -96,6 +100,13 @@ export class Urls {
   api(rest: string, params: Record<string, string | number | undefined> = {}) {
     return `/api/v1/libraries/${encodeURIComponent(this.owner)}/${encodeURIComponent(this.slug)}/${rest}${query(params)}`;
   }
+}
+
+/** Activity's filters: whose requests, under which folder, with or without comments. */
+export interface ActivityFilters {
+  who?: "everyone" | "agents" | "people";
+  prefix?: string;
+  hideComments?: boolean;
 }
 
 export interface LedgerFilters {

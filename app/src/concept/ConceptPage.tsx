@@ -300,6 +300,7 @@ export function ConceptPage(props: {
               head={head}
               name={name}
               current={current}
+              reviewing={compare?.kind === "review"}
             />
           </header>
           {markdown && <RawMarkdown urls={urls} path={c.path} hash={c.hash} />}

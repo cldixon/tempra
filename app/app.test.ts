@@ -21,7 +21,11 @@ describe("routes follow the server's URLs (tempra-dev: v2/urls-and-handles)", ()
     expect(at(urls.file("a/b.md"))).toMatchObject({ page: "file", compare: undefined });
     expect(at(urls.thread("a/b.md", "t1"))).toMatchObject({ page: "file", path: "a/b.md" });
     expect(at(urls.needs())).toMatchObject({ page: "needs" });
-    expect(at(urls.activity())).toMatchObject({ page: "activity" });
+    expect(at(urls.activity())).toMatchObject({ page: "activity", filters: { who: "everyone" } });
+    const filtered = urls.activity({ who: "agents", prefix: "app", hideComments: true });
+    expect(at(filtered)).toMatchObject({
+      filters: { who: "agents", prefix: "app", hideComments: true },
+    });
   });
 
   test("paths that start with -/ use the pages' own prefixes", () => {

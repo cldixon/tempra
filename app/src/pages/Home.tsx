@@ -15,7 +15,7 @@ import { api, useLoad } from "../api";
 import { Avatar, type Glyph, Icon } from "../chrome";
 import { useFeed, useLastSeen, useTrailing } from "../live";
 import { type Needs, useNeeds } from "../needs";
-import { plural, Status, useMe, useTitle } from "../ui";
+import { clip, day, plural, Status, useMe, useTitle } from "../ui";
 import type { Urls } from "../urls";
 import { SheetPage } from "../Workspace";
 
@@ -145,13 +145,6 @@ interface NeedRow {
 }
 
 /** A sentence's quote, on one line and kept short. */
-const short = (s: string, n = 140) => {
-  const one = s.replace(/\s+/g, " ").trim();
-  return one.length > n ? `${one.slice(0, n - 1)}…` : one;
-};
-
-const day = (iso: string) =>
-  new Date(iso).toLocaleDateString("en", { month: "short", day: "numeric" });
 
 /** "goes stale in 6 days", "is stale". */
 function staleWords(iso: string, now: number): string {
@@ -178,7 +171,7 @@ function NeedsSection({ urls, me }: { urls: Urls; me: string | null }) {
             <b className="entry-who">{r.title ?? r.path}</b>
           </>
         ),
-        detail: r.last.body ? `“${short(r.last.body)}”` : null,
+        detail: r.last.body ? `“${clip(r.last.body, 140)}”` : null,
         when: entryTime(r.last.ts, now, true),
       };
     });

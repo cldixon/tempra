@@ -43,8 +43,9 @@
 }
 
 /*
- * Comments (TEMPRA-13). A thread's quote is underlined in the body (dotted; solid when its thread
- * is the one in focus); a comment being written fills its text with the selection grey. Drawn as
+ * Comments (TEMPRA-13). A thread's quote is underlined in the body (dotted); the one whose thread
+ * is open in the margin is filled grey and underlined solid (take 3); a comment being written
+ * fills its text with the selection grey. Drawn as
  * highlights, so the body's DOM never changes for them.
  */
 ::highlight(tempra-comment) {
@@ -55,9 +56,10 @@
 }
 
 ::highlight(tempra-comment-active) {
+  background-color: var(--tempra-color-hover);
   text-decoration-line: underline;
   text-decoration-style: solid;
-  text-decoration-thickness: 2px;
+  text-decoration-thickness: 1px;
   text-underline-offset: 0.22em;
 }
 
