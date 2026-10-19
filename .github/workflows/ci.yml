@@ -151,19 +151,30 @@ jobs:
       - id: up
         working-directory: worker
         # Only this step sees the key: `preview up` sets it on the preview Worker as a secret.
+        # The seed library (TEMPRA-109, delivery/preview-deployments): `preview up` copies it into
+        # the preview with the read-only token; with no PREVIEW_SEED_LIBRARY it seeds the samples.
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PREVIEW_SEED_LIBRARY: ${{ vars.PREVIEW_SEED_LIBRARY }}
+          PREVIEW_SEED_URL: ${{ vars.PREVIEW_SEED_URL }}
+          PREVIEW_SEED_TOKEN: ${{ secrets.PREVIEW_SEED_TOKEN }}
         run: bun run preview up --pr ${{ github.event.pull_request.number }}
       - name: Comment the URL on the PR
         env:
           GH_TOKEN: ${{ github.token }}
           PR: ${{ github.event.pull_request.number }}
           URL: ${{ steps.up.outputs.url }}
+          LIBRARY_URL: ${{ steps.up.outputs.library_url }}
           SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           marker="<!-- tempra-preview -->"
-          body="Preview: $URL (at ${SHA:0:7}). Torn down when this PR closes.
+          if [ -n "$LIBRARY_URL" ]; then
+            body="Preview: $LIBRARY_URL (at ${SHA:0:7}). Torn down when this PR closes.
           $marker"
+          else
+            body="Preview: $URL (at ${SHA:0:7}). Torn down when this PR closes.
+          $marker"
+          fi
           id=$(gh api --paginate "repos/$GITHUB_REPOSITORY/issues/$PR/comments" \
             --jq ".[] | select(.body | contains(\"$marker\")) | .id" | head -n 1)
           if [ -n "$id" ]; then
