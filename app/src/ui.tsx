@@ -20,7 +20,10 @@ export function useMe(): Me | null {
 export function Header({ me }: { me: Me | null }) {
   return (
     <header className="app-header">
-      <a className="brand" href="/">
+      <a className="wordmark" href="/">
+        <span className="wordmark-tile" aria-hidden="true">
+          T
+        </span>
         Tempra
       </a>
       <span className="spacer" />

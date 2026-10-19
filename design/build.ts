@@ -1,7 +1,8 @@
 /**
  * `bun run build` in design/: bundles src/*.css (tokens, base, prose, reader, workspace, concept,
- * comments, views, in that order) into dist/tempra.css for the site, and dist/tempra.ts for the
- * app's Worker, which serves it at a content-hashed URL. Both outputs are committed; design.test.ts fails when they are stale.
+ * comments, views, public, in that order) into dist/tempra.css for the site, and dist/tempra.ts
+ * for the app's Worker, which serves it at a content-hashed URL. Both outputs are committed;
+ * design.test.ts fails when they are stale.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -16,6 +17,7 @@ export const SOURCES = [
   "concept.css",
   "comments.css",
   "views.css",
+  "public.css",
 ];
 
 export function generate(): { css: string; ts: string } {

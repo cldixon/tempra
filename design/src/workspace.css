@@ -11,18 +11,7 @@ body.ground {
   background: var(--tempra-color-ground);
 }
 
-/* ---------- Shared pieces: the brand, menus, the avatar, icon buttons ---------- */
-
-.brand {
-  color: var(--tempra-color-text);
-  font-weight: 600;
-  letter-spacing: -0.01em;
-  text-decoration: none;
-}
-
-.brand:visited {
-  color: var(--tempra-color-text);
-}
+/* ---------- Shared pieces: menus, the avatar, icon buttons ---------- */
 
 .header-sep {
   color: var(--tempra-color-faint);
@@ -434,7 +423,8 @@ body.ground {
   color: var(--tempra-color-faint);
 }
 
-.lib-tile {
+.lib-tile,
+.wordmark-tile {
   display: grid;
   flex: none;
   place-items: center;
