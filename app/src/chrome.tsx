@@ -1,17 +1,32 @@
 import {
+  Activity,
+  ArrowLeft,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
+  ChevronsUpDown,
   CircleCheck,
   CirclePlus,
   ClockAlert,
   Code,
+  Download,
+  Ellipsis,
+  ExternalLink,
+  Folder as FolderGlyph,
   History,
+  Home,
   Hourglass,
+  ImageOff,
+  Inbox,
   List,
+  Maximize2,
+  Menu as MenuGlyph,
   MessageSquare,
   PanelLeft,
   RefreshCw,
+  Search,
   SlidersHorizontal,
+  X,
 } from "lucide-react";
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { useUnread } from "./inbox";
@@ -35,11 +50,28 @@ const ICONS = {
   history: History,
   properties: SlidersHorizontal,
   plus: CirclePlus,
-  files: PanelLeft,
+  sidebar: PanelLeft,
   chevron: ChevronRight,
   stale: ClockAlert,
   soon: Hourglass,
   down: ChevronDown,
+  updown: ChevronsUpDown,
+  home: Home,
+  needs: CircleCheck,
+  activity: Activity,
+  inbox: Inbox,
+  search: Search,
+  more: Ellipsis,
+  menu: MenuGlyph,
+  close: X,
+  back: ArrowLeft,
+  previous: ChevronLeft,
+  next: ChevronRight,
+  enlarge: Maximize2,
+  download: Download,
+  open: ExternalLink,
+  folder: FolderGlyph,
+  broken: ImageOff,
 } as const;
 
 export type Glyph = keyof typeof ICONS;
@@ -58,6 +90,18 @@ export function initials(handle: string): string {
 }
 
 /**
+ * Someone who acts in a library, as a small round mark with their initials: a person on a light
+ * fill, an agent on ink (take 3). The name beside it is the caller's to draw.
+ */
+export function Avatar({ name, agent = false }: { name: string; agent?: boolean }) {
+  return (
+    <span className={agent ? "avatar-mark agent" : "avatar-mark"} aria-hidden="true">
+      {agent ? (name.trim()[0] ?? "?").toUpperCase() : initials(name)}
+    </span>
+  );
+}
+
+/**
  * A button that opens a list of links under it. It closes on a choice, a click elsewhere or
  * Escape, and gives the focus back to its button.
  */
@@ -69,6 +113,8 @@ export function Menu(props: {
   title?: string;
   buttonClass?: string;
   align?: "start" | "end";
+  /** Opens above its button (a menu at the bottom of the sidebar). */
+  up?: boolean;
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
@@ -114,7 +160,7 @@ export function Menu(props: {
         // biome-ignore lint/a11y/useKeyWithClickEvents: as above.
         <div
           id={id}
-          className={`menu-list ${props.align ?? "start"}`}
+          className={`menu-list ${props.align ?? "start"}${props.up ? " up" : ""}`}
           onClick={(e) => {
             if ((e.target as Element).closest("a, button")) setOpen(false);
           }}
@@ -126,7 +172,7 @@ export function Menu(props: {
   );
 }
 
-/** The inbox and its unread count (TEMPRA-72), beside the avatar in every header. */
+/** The inbox and its unread count (TEMPRA-72), beside the avatar in the account pages' header. */
 export function InboxLink() {
   const unread = useUnread();
   return (
@@ -141,17 +187,10 @@ export function InboxLink() {
   );
 }
 
-/** The avatar and its menu: the account's pages and signing out. */
-export function AccountMenu({ me }: { me: Me | null }) {
-  const handle = me?.handle ?? "";
+/** The account's pages and signing out: the avatar's menu, wherever the avatar is. */
+function AccountItems({ me }: { me: Me | null }) {
   return (
-    <Menu
-      label={initials(handle)}
-      name="Account menu"
-      title={me ? `${handle} · ${me.email}` : "Account"}
-      buttonClass="avatar"
-      align="end"
-    >
+    <>
       {me && <div className="menu-who">{me.email}</div>}
       <a href="/inbox">Inbox</a>
       <a href="/connect">Connect an agent</a>
@@ -163,6 +202,43 @@ export function AccountMenu({ me }: { me: Me | null }) {
       <form method="post" action="/sign-out">
         <button type="submit">Sign out</button>
       </form>
+    </>
+  );
+}
+
+/** The avatar and its menu (the account pages' header, the workspace's phone bar). */
+export function AccountMenu({ me }: { me: Me | null }) {
+  const handle = me?.handle ?? "";
+  return (
+    <Menu
+      label={initials(handle)}
+      name="Account menu"
+      title={me ? `${handle} · ${me.email}` : "Account"}
+      buttonClass="avatar"
+      align="end"
+    >
+      <AccountItems me={me} />
+    </Menu>
+  );
+}
+
+/** The person at the foot of the sidebar: their avatar and name, opening the same menu. */
+export function PersonMenu({ me }: { me: Me | null }) {
+  const handle = me?.handle ?? "";
+  return (
+    <Menu
+      label={
+        <>
+          <Avatar name={handle} />
+          <span className="nav-label">{handle}</span>
+        </>
+      }
+      name="Account menu"
+      title={me ? `${handle} · ${me.email}` : "Account"}
+      buttonClass="nav-row person"
+      up
+    >
+      <AccountItems me={me} />
     </Menu>
   );
 }

@@ -99,7 +99,8 @@ hr {
   border-top: 1px solid var(--tempra-color-border);
 }
 
-/* Controls: pills. A plain button is a ghost; .primary is the one solid action. */
+/* Controls: pills. A plain button is outlined; .primary is the one solid action; .ghost is text.
+   A link that acts as a button (Review, Back to current) takes .button and looks the same. */
 button,
 input,
 select,
@@ -108,7 +109,8 @@ textarea {
   color: inherit;
 }
 
-button {
+button,
+a.button {
   padding: 5px 12px;
   border: 1px solid var(--tempra-color-border);
   border-radius: var(--tempra-radius-pill);
@@ -118,8 +120,17 @@ button {
   cursor: pointer;
 }
 
-button:hover:not(:disabled) {
+a.button {
+  display: inline-block;
+  color: var(--tempra-color-text);
+  line-height: var(--tempra-line-height);
+  text-decoration: none;
+}
+
+button:hover:not(:disabled),
+a.button:hover {
   background: var(--tempra-color-hover);
+  color: var(--tempra-color-text);
 }
 
 button:disabled {
@@ -127,14 +138,16 @@ button:disabled {
   opacity: 0.5;
 }
 
-button.primary {
+button.primary,
+a.button.primary {
   border-color: var(--tempra-color-text);
   background: var(--tempra-color-text);
   color: var(--tempra-color-bg);
   font-weight: 500;
 }
 
-button.primary:hover:not(:disabled) {
+button.primary:hover:not(:disabled),
+a.button.primary:hover {
   background: var(--tempra-color-text);
   opacity: 0.85;
 }

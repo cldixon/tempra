@@ -1,9 +1,9 @@
 /*
- * The app's frame (TEMPRA-19, take 2 in TEMPRA-53). A soft ground; on it the header, the sidebar
- * (no box) and the open file as a floating sheet; the concept's context as one panel at a time,
- * a card beside the sheet, opened from a control cluster that hovers over the sheet's top right.
- * Account pages sit on the same ground in a centred column. Under 1100px the panel overlays the
- * sheet; under 900px the sidebar becomes a drawer.
+ * The app's frame (TEMPRA-19; take 2 in TEMPRA-53, take 3 in TEMPRA-106). A soft ground and on it
+ * two things: the sidebar (no box) and the open page as a full-height sheet with a hairline edge.
+ * The sidebar can be hidden; under 900px it is a drawer behind a top bar. Account pages sit on
+ * the same ground in a centred column under a header. A concept's own layout (its margins) is in
+ * concept.css; the person's views (home, Needs you, Activity, a folder) in views.css.
  */
 body:has(> #root),
 body.ground {
@@ -74,6 +74,12 @@ body.ground {
 
 .menu-list.end {
   right: 0;
+}
+
+/* A menu at the foot of the sidebar opens upwards. */
+.menu-list.up {
+  top: auto;
+  bottom: calc(100% + 6px);
 }
 
 .menu-list a,
@@ -156,16 +162,113 @@ body.ground {
   display: block;
 }
 
-/* A dot on a glyph: open comments exist. */
-.icon-button .dot {
-  position: absolute;
-  top: 5px;
-  right: 5px;
-  width: 7px;
-  height: 7px;
-  border: 1.5px solid var(--tempra-color-bg);
+.icon-button:hover:not(:disabled) {
+  color: var(--tempra-color-text);
+}
+
+/* A button with a glyph and a short word or count beside it (the comments toggle). */
+.icon-button.with-count {
+  gap: 6px;
+  width: auto;
+  padding: 0 10px;
+  border-radius: var(--tempra-radius-row);
+  font-size: var(--tempra-text-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.icon-button.with-count[aria-pressed="true"],
+.icon-button.with-count[aria-pressed="true"]:hover:not(:disabled) {
+  background: var(--tempra-color-selected);
+  color: var(--tempra-color-text);
+}
+
+/* An agent's change: a small dot, warm while fresh, grey once it cools (the one colour). */
+.change-dot {
+  display: inline-block;
+  width: var(--tempra-dot);
+  height: var(--tempra-dot);
   border-radius: 50%;
-  background: currentcolor;
+  background: var(--tempra-color-agent-cool);
+  vertical-align: middle;
+}
+
+.change-dot.warm {
+  background: var(--tempra-color-agent);
+}
+
+/* Someone's initials in a small round mark: a person on a light fill, an agent on ink. */
+.avatar-mark {
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: var(--tempra-avatar);
+  height: var(--tempra-avatar);
+  border-radius: 50%;
+  background: var(--tempra-color-selected);
+  color: var(--tempra-color-text);
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.avatar-mark.agent {
+  background: var(--tempra-color-text);
+  color: var(--tempra-color-bg);
+}
+
+/* A dialog (a concept's properties, its agent notes, all its versions): a card in the top layer. */
+.dialog {
+  width: min(32rem, calc(100vw - 32px));
+  max-height: min(80dvh, 44rem);
+  padding: 0;
+  border: 1px solid var(--tempra-color-border);
+  border-radius: var(--tempra-radius-card);
+  background: var(--tempra-color-bg);
+  box-shadow: var(--tempra-shadow);
+  color: var(--tempra-color-text);
+}
+
+.dialog.wide {
+  width: min(40rem, calc(100vw - 32px));
+}
+
+.dialog::backdrop {
+  background: var(--tempra-color-scrim);
+}
+
+.dialog-head {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 10px 10px 6px 18px;
+  background: var(--tempra-color-bg);
+}
+
+.dialog-head h2 {
+  margin: 0;
+  font-size: var(--tempra-text-name);
+  font-weight: 600;
+}
+
+.dialog-body {
+  padding: 4px 18px 18px;
+  font-size: var(--tempra-text-ui);
+}
+
+.dialog-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin: 12px 0 0;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+}
+
+.dialog-foot a {
+  color: inherit;
 }
 
 /* ---------- Account pages: the ground, a header, a centred column ---------- */
@@ -179,8 +282,7 @@ body.ground {
   padding: 0 20px;
 }
 
-.app-header .spacer,
-.ws-header .spacer {
+.app-header .spacer {
   flex: 1;
 }
 
@@ -259,59 +361,130 @@ body.ground {
   color: inherit;
 }
 
-/* ---------- The workspace ---------- */
+/* ---------- The workspace: the sidebar and the sheet on the ground ---------- */
 
 .workspace {
   display: grid;
-  grid-template-columns: 232px minmax(0, 1fr);
-  grid-template-rows: 48px minmax(0, 1fr);
-  grid-template-areas:
-    "header header"
-    "sidebar main";
+  grid-template-columns: var(--tempra-sidebar) minmax(0, 1fr);
+  grid-template-areas: "sidebar sheet";
   column-gap: var(--tempra-gutter);
   height: 100dvh;
-  padding: 0 var(--tempra-gutter) var(--tempra-gutter);
+  padding: var(--tempra-gutter);
 }
 
-.workspace.has-panel {
-  grid-template-columns: 232px minmax(0, 1fr) 320px;
-  grid-template-areas:
-    "header header header"
-    "sidebar main panel";
+.workspace.sidebar-hidden {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "sheet";
 }
 
-.ws-header {
-  grid-area: header;
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  padding: 0 6px 0 10px;
-}
-
-.ws-files {
+/* The phone's top bar: only under 900px. */
+.ws-topbar {
   display: none;
 }
 
-/* The sidebar sits on the ground: the search pill, the tree (which scrolls), the views. */
+/* The sidebar sits on the ground: the library, search, the views, the files (which scroll), and
+   the inbox and the person at its foot. */
 .ws-sidebar {
   grid-area: sidebar;
   display: flex;
   flex-direction: column;
+  gap: 2px;
   min-width: 0;
   min-height: 0;
-  padding: 8px 4px 0;
+  padding: 8px 6px;
+  font-size: var(--tempra-text-ui);
+}
+
+.ws-sidebar[hidden] {
+  display: none;
+}
+
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.sidebar-head .menu {
+  flex: 1;
+  min-width: 0;
+}
+
+/* The library switcher: its initial, its name over its owner, a chevron. */
+.lib-switch {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--tempra-radius-row);
+  background: transparent;
+  color: var(--tempra-color-text);
+  text-align: left;
+}
+
+.lib-switch:hover:not(:disabled) {
+  background: var(--tempra-color-hover);
+}
+
+.lib-switch svg {
+  flex: none;
+  margin-left: auto;
+  color: var(--tempra-color-faint);
+}
+
+.lib-tile {
+  display: grid;
+  flex: none;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--tempra-radius-tile);
+  background: var(--tempra-color-text);
+  color: var(--tempra-color-bg);
+  font-family: var(--tempra-font-reader);
+  font-size: var(--tempra-text-name);
+}
+
+.lib-names {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: 1.25;
+}
+
+.lib-name {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lib-owner {
+  overflow: hidden;
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-label);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Hiding the sidebar: a quiet glyph beside the switcher, plain until hovered. */
+.sidebar-hide {
+  flex: none;
+  color: var(--tempra-color-faint);
 }
 
 .search-pill {
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
-  margin-bottom: 10px;
-  padding: 6px 8px 6px 12px;
-  box-shadow: var(--tempra-shadow);
+  margin: 10px 2px 8px;
+  padding: 7px 10px;
+  border: 1px solid var(--tempra-color-border);
+  background: var(--tempra-color-bg);
   color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-ui);
   text-align: left;
 }
 
@@ -322,30 +495,113 @@ body.ground {
 
 .search-pill span {
   flex: 1;
+}
+
+.search-pill kbd {
+  border: 0;
+  background: none;
+  color: inherit;
+  font-family: inherit;
+  font-size: var(--tempra-text-label);
+}
+
+.nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* A row in the sidebar: a glyph, a name, a count or mark at the end. */
+.nav-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: var(--tempra-row);
+  padding: 4px 10px;
+  border: 0;
+  border-radius: var(--tempra-radius-row);
+  background: transparent;
+  color: var(--tempra-color-text);
+  font-size: var(--tempra-text-ui);
+  text-align: left;
+  text-decoration: none;
+}
+
+.nav-row:visited {
+  color: var(--tempra-color-text);
+}
+
+.nav-row:hover,
+.nav-row:hover:not(:disabled) {
+  background: var(--tempra-color-hover);
+  color: var(--tempra-color-text);
+}
+
+.nav-row[aria-current="page"],
+.nav-row[aria-current="location"] {
+  background: var(--tempra-color-selected);
+  font-weight: 500;
+}
+
+.nav-row svg {
+  flex: none;
+}
+
+.nav-label {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.ws-scroll {
+.nav-count {
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+  font-variant-numeric: tabular-nums;
+}
+
+.nav-row.person {
+  padding-left: 8px;
+}
+
+.nav-row.person .avatar-mark {
+  margin-right: 0;
+}
+
+.sidebar-label {
+  margin: 18px 10px 4px;
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-label);
+}
+
+.sidebar-scroll {
   flex: 1;
   min-height: 0;
   overflow: auto;
   padding-bottom: 16px;
 }
 
-/* The tree: nested lists, one 30px row per folder or file, indented 14px a level. A folder's row
-   is a button that opens and closes it (a chevron turns); a file's row is a link. */
+.sidebar-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 8px;
+}
+
+/* The tree: nested lists, one row per folder or file, indented a step a level. A folder's row is
+   a button that opens and closes it (a chevron turns) with its count of concepts; a file's row is
+   a link. */
 .tree,
-.tree ul,
-.ws-views {
+.tree ul {
   margin: 0;
   padding: 0;
   list-style: none;
 }
 
 .tree ul {
-  padding-left: 14px;
+  padding-left: 12px;
 }
 
 .tree li {
@@ -356,8 +612,8 @@ body.ground {
   display: flex;
   align-items: center;
   gap: 6px;
-  height: 30px;
-  margin-bottom: 2px;
+  min-height: var(--tempra-row);
+  margin-bottom: 1px;
   padding: 0 10px 0 4px;
   border-radius: var(--tempra-radius-row);
   font-size: var(--tempra-text-ui);
@@ -375,7 +631,6 @@ button.tree-row {
   color: var(--tempra-color-text);
   font: inherit;
   font-size: var(--tempra-text-ui);
-  font-weight: 500;
   text-align: left;
 }
 
@@ -395,6 +650,11 @@ button.tree-row[aria-current="page"] {
   transition: transform 0.15s ease;
 }
 
+.tree-chevron svg {
+  width: 12px;
+  height: 12px;
+}
+
 .tree-row[aria-expanded="true"] .tree-chevron {
   transform: rotate(90deg);
 }
@@ -410,6 +670,13 @@ button.tree-row[aria-current="page"] {
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.tree-count {
+  flex: none;
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-label);
+  font-variant-numeric: tabular-nums;
 }
 
 .tree-row > a {
@@ -435,10 +702,12 @@ button.tree-row[aria-current="page"] {
   width: 16px;
 }
 
-/* Marks: ● an agent's change in the last minutes, ∗ changed since the last visit, open comments,
-   a clock (stale) or an hourglass (stale soon). */
+/* Marks: an agent's change (a dot), open comments (a count), a clock (stale) or an hourglass
+   (stale soon). */
 .tree-mark {
+  display: inline-flex;
   flex: none;
+  align-items: center;
   color: var(--tempra-color-faint);
   font-size: var(--tempra-text-label);
   font-variant-numeric: tabular-nums;
@@ -450,77 +719,78 @@ button.tree-row[aria-current="page"] {
   font-size: var(--tempra-text-meta);
 }
 
-.ws-views {
-  margin-top: 20px;
-}
-
-.ws-views a {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  height: 30px;
-  margin-bottom: 2px;
-  padding: 0 10px 0 28px;
-  border-radius: var(--tempra-radius-row);
-  color: var(--tempra-color-muted);
-  font-size: var(--tempra-text-ui);
-  text-decoration: none;
-}
-
-.ws-views a:hover {
-  background: var(--tempra-color-hover);
-}
-
-.ws-views a[aria-current="page"] {
-  background: var(--tempra-color-selected);
-  color: var(--tempra-color-text);
-  font-weight: 500;
-}
-
-.ws-views .count {
-  color: var(--tempra-color-faint);
-  font-size: var(--tempra-text-label);
-  font-weight: 400;
-  font-variant-numeric: tabular-nums;
-}
-
-/* The sheet: the open file on its own card, scrolling inside. */
-.ws-main {
-  grid-area: main;
+/* The sheet: the open page, full height, a hairline edge; the page scrolls inside it. Its width,
+   not the window's, decides a concept's columns (container queries in concept.css), so hiding the
+   sidebar widens the reading layout. */
+.ws-sheet {
+  grid-area: sheet;
   position: relative;
   min-width: 0;
-  overflow: hidden auto;
+  min-height: 0;
+  overflow: hidden;
   border: 1px solid var(--tempra-color-border);
   border-radius: var(--tempra-radius-card);
   background: var(--tempra-color-bg);
-  box-shadow: var(--tempra-shadow);
 }
 
-/* A library view or folder in the sheet: a wider column than a concept's. */
-.sheet-page {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 48px clamp(16px, 5%, 40px) 96px;
+.ws-main {
+  height: 100%;
+  overflow: hidden auto;
+  container: sheet / inline-size;
 }
 
-/* The library's root: no document open, the sheet blank. */
-.empty {
-  min-height: 50vh;
+/* Showing the hidden sidebar: a glyph at the sheet's top left, over its bar. */
+.sheet-toggle {
+  position: absolute;
+  top: 11px;
+  left: 12px;
+  z-index: 4;
 }
 
-/* A concept in the sheet: the reader's column. */
-.doc {
-  max-width: var(--tempra-measure);
-  margin: 0 auto;
-  padding: 56px clamp(16px, 5%, 40px) 140px;
+/* The sheet's bar: where the page is on the left, the page's few controls on the right. It stays
+   in view while the page scrolls. */
+.sheet-bar {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: var(--tempra-bar);
+  padding: 0 14px 0 20px;
+  background: var(--tempra-color-bg);
+}
+
+.sidebar-hidden .sheet-bar {
+  padding-left: 52px;
+}
+
+.sheet-bar-start {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.sheet-bar-end {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 4px;
+}
+
+/* On a phone the bar goes back a step instead of naming the whole path. */
+.sheet-back {
+  display: none;
 }
 
 .crumbs {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
-  margin-bottom: 24px;
-  color: var(--tempra-color-faint);
+  min-width: 0;
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
 }
 
@@ -534,369 +804,18 @@ button.tree-row[aria-current="page"] {
 }
 
 .crumbs .here {
-  color: var(--tempra-color-muted);
-}
-
-.doc-head {
-  margin-bottom: 32px;
-}
-
-.doc-title {
-  margin: 0 0 12px;
-  font-family: var(--tempra-font-reader);
-  font-size: var(--tempra-text-title);
-  font-weight: 500;
-  line-height: 1.15;
-  letter-spacing: -0.01em;
-}
-
-.doc-tagline {
-  margin: 0;
-  color: var(--tempra-color-muted);
-  font-family: var(--tempra-font-reader);
-  font-size: var(--tempra-text-reader);
-  line-height: 1.5;
-}
-
-/* The control cluster: a pill that hovers at the sheet's top right while it scrolls. */
-.cluster {
-  position: sticky;
-  top: 12px;
-  z-index: 3;
-  display: flex;
-  gap: 2px;
-  width: max-content;
-  margin: 12px 12px -50px auto;
-  padding: 3px;
-  border: 1px solid var(--tempra-color-border);
-  border-radius: var(--tempra-radius-pill);
-  background: var(--tempra-color-bg);
-  box-shadow: var(--tempra-shadow);
-}
-
-.cluster-sep {
-  align-self: center;
-  width: 1px;
-  height: 18px;
-  margin: 0 3px;
-  background: var(--tempra-color-border);
-}
-
-/* A newer version exists: the glyph pulses until it is opened. */
-@keyframes tempra-pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-
-  50% {
-    opacity: 0.35;
-  }
-}
-
-.new-version {
-  position: relative;
-}
-
-.new-version .icon-button {
   color: var(--tempra-color-text);
 }
 
-.new-version .icon-button svg {
-  animation: tempra-pulse 1.6s ease-in-out infinite;
+/* A page's column in the sheet: a library view, a folder, settings. */
+.sheet-page {
+  max-width: var(--tempra-page-width);
+  margin: 0 auto;
+  padding: 72px var(--tempra-sheet-pad) 96px;
 }
 
-.new-version .icon-button[aria-expanded="true"] svg {
-  animation: none;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .new-version .icon-button svg {
-    animation: none;
-  }
-}
-
-/* A short note inside a menu (the new version's who and why). */
-.menu-list p {
-  margin: 4px 10px 6px;
-  color: var(--tempra-color-muted);
-  font-size: var(--tempra-text-meta);
-  line-height: 1.45;
-}
-
-/* The panel: one card beside the sheet, its own scroll. */
-.ws-panel {
-  grid-area: panel;
-  min-height: 0;
-  overflow: auto;
-  border: 1px solid var(--tempra-color-border);
-  border-radius: var(--tempra-radius-card);
-  background: var(--tempra-color-bg);
-  box-shadow: var(--tempra-shadow);
-  font-size: var(--tempra-text-ui);
-}
-
-.ws-panel:focus {
-  outline: none;
-}
-
-.panel-head {
-  position: sticky;
-  top: 0;
-  z-index: 1;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 14px 16px 10px;
-  background: var(--tempra-color-bg);
-}
-
-.panel-head h2 {
-  margin: 0;
-  font-size: var(--tempra-text-ui);
-  font-weight: 500;
-}
-
-.panel-head .count {
-  color: var(--tempra-color-faint);
-  font-size: var(--tempra-text-meta);
-  font-variant-numeric: tabular-nums;
-}
-
-.panel-head .spacer {
-  flex: 1;
-}
-
-.panel-close {
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: var(--tempra-color-faint);
-  font-size: 14px;
-  line-height: 1;
-}
-
-.panel-close:hover:not(:disabled) {
-  color: var(--tempra-color-text);
-}
-
-.panel-body {
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-  padding: 0 16px 16px;
-}
-
-.panel-body section > :last-child {
-  margin-bottom: 0;
-}
-
-.panel-body ul,
-.panel-body ol {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.panel-foot {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  color: var(--tempra-color-faint);
-  font-size: var(--tempra-text-meta);
-}
-
-.panel-foot a {
-  color: inherit;
-}
-
-/* A one-line state with a dot (verified, unverified). */
-.state-line {
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-  font-size: var(--tempra-text-meta);
-  color: var(--tempra-color-muted);
-}
-
-.state-line::before {
-  content: "";
-  flex: none;
-  width: 7px;
-  height: 7px;
-  border: 1px solid var(--tempra-color-text);
-  border-radius: 50%;
-  transform: translateY(-1px);
-}
-
-.state-line.on::before {
-  background: var(--tempra-color-text);
-}
-
-/* Name and value pairs (the Review panel's facts, the Properties panel). */
-.facts {
-  display: grid;
-  grid-template-columns: 6.5rem minmax(0, 1fr);
-  gap: 6px 10px;
-  margin: 0;
-  font-size: var(--tempra-text-meta);
-}
-
-.facts > div {
-  display: contents;
-}
-
-.facts dt {
-  color: var(--tempra-color-faint);
-  font-family: var(--tempra-font-mono);
-  font-size: var(--tempra-text-label);
-  line-height: 1.6;
-}
-
-.facts dd {
-  margin: 0;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.facts pre {
-  margin: 0;
-  white-space: pre-wrap;
-}
-
-/* A card in a panel (a work item, the verify form). */
-.inset {
-  padding: 10px 12px;
-  border-radius: var(--tempra-radius-box);
-  background: var(--tempra-color-ground);
-  font-size: var(--tempra-text-meta);
-  line-height: 1.45;
-}
-
-.inset .chip {
-  background: var(--tempra-color-bg);
-}
-
-.inset-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.verify-form {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.verify-form input {
-  flex: 1 1 8rem;
-  min-width: 0;
-}
-
-/* Contents: a rule down the left, the section in view marked. */
-.toc a {
-  display: block;
-  padding: 4px 0 4px 10px;
-  border-left: 2px solid var(--tempra-color-border);
-  color: var(--tempra-color-muted);
-  text-decoration: none;
-}
-
-.toc a:hover {
-  color: var(--tempra-color-text);
-}
-
-.toc a[aria-current="location"] {
-  border-left-color: var(--tempra-color-text);
-  color: var(--tempra-color-text);
-}
-
-.toc .depth-1 a {
-  padding-left: 22px;
-}
-
-.toc .depth-2 a {
-  padding-left: 34px;
-}
-
-.sources li {
-  display: grid;
-  grid-template-columns: 16px minmax(0, 1fr);
-  gap: 6px;
-  margin-bottom: 10px;
-  font-size: var(--tempra-text-meta);
-  line-height: 1.45;
-}
-
-.sources .num {
-  color: var(--tempra-color-faint);
-}
-
-.sources .meta {
-  display: block;
-  color: var(--tempra-color-faint);
-}
-
-.sources a {
-  color: var(--tempra-color-text);
-}
-
-.linked li {
-  margin-bottom: 4px;
-  font-size: var(--tempra-text-meta);
-}
-
-/* History rows: seq, what and who, when. */
-.history li {
-  display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) auto;
-  gap: 8px;
-  padding: 7px 2px;
-  border-top: 1px solid var(--tempra-color-border);
-  font-size: var(--tempra-text-meta);
-  line-height: 1.4;
-}
-
-.history li > span {
-  min-width: 0;
-}
-
-.history .seq {
-  color: var(--tempra-color-muted);
-  font-variant-numeric: tabular-nums;
-  text-decoration: none;
-}
-
-.history .verify .seq {
-  font-weight: 600;
-}
-
-.history li.current {
-  background: var(--tempra-color-ground);
-}
-
-.history .who {
-  color: var(--tempra-color-muted);
-}
-
-.history .note {
-  display: block;
-  overflow: hidden;
-  color: var(--tempra-color-faint);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.history .when {
-  color: var(--tempra-color-faint);
-  white-space: nowrap;
-}
-
-.history .when a {
-  color: inherit;
+.sheet-page.wide {
+  max-width: 960px;
 }
 
 /* ---------- The quick switcher ---------- */
@@ -912,7 +831,7 @@ button.tree-row[aria-current="page"] {
 }
 
 .switcher::backdrop {
-  background: light-dark(rgb(20 20 22 / 0.2), rgb(0 0 0 / 0.5));
+  background: var(--tempra-color-scrim);
 }
 
 .switcher-head input {
@@ -934,49 +853,46 @@ button.tree-row[aria-current="page"] {
   background: var(--tempra-color-selected);
 }
 
-/* ---------- Narrow screens ---------- */
+/* ---------- Narrow screens: a top bar, the sidebar as a drawer ---------- */
 
-/* Under 1100px the panel overlays the sheet, below the cluster so the cluster stays in reach. */
-@media (max-width: 1100px) {
-  .workspace.has-panel {
-    grid-template-columns: 232px minmax(0, 1fr);
-    grid-template-areas:
-      "header header"
-      "sidebar main";
-  }
-
-  .ws-panel {
-    position: fixed;
-    top: 112px;
-    right: var(--tempra-gutter);
-    bottom: var(--tempra-gutter);
-    z-index: 5;
-    width: min(320px, calc(100vw - 20px));
-  }
-}
-
-/* Under 900px the sidebar is a drawer behind the Files button. */
 @media (max-width: 900px) {
   .workspace,
-  .workspace.has-panel {
+  .workspace.sidebar-hidden {
     grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: var(--tempra-bar) minmax(0, 1fr);
     grid-template-areas:
-      "header"
-      "main";
+      "topbar"
+      "sheet";
+    padding-top: 0;
   }
 
-  .ws-files {
-    display: inline-flex;
+  .ws-topbar {
+    grid-area: topbar;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .ws-topbar-name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--tempra-color-text);
+    font-weight: 600;
+    text-decoration: none;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .ws-sidebar {
     position: fixed;
-    top: 48px;
+    top: var(--tempra-bar);
     bottom: var(--tempra-gutter);
     left: var(--tempra-gutter);
     z-index: 6;
     display: none;
-    width: min(280px, calc(100vw - 20px));
+    width: min(var(--tempra-sidebar), calc(100vw - 2 * var(--tempra-gutter)));
     padding: 8px;
     border: 1px solid var(--tempra-color-border);
     border-radius: var(--tempra-radius-card);
@@ -990,6 +906,45 @@ button.tree-row[aria-current="page"] {
 
   .ws-sidebar:focus {
     outline: none;
+  }
+
+  .sidebar-hide,
+  .sheet-toggle {
+    display: none;
+  }
+
+  /* Touch targets: every row and control at least 44px tall. */
+  .nav-row,
+  .tree-row,
+  .lib-switch {
+    min-height: var(--tempra-touch);
+  }
+
+  .icon-button.touch,
+  .sheet-bar .icon-button {
+    width: var(--tempra-touch);
+    height: var(--tempra-touch);
+  }
+
+  .sheet-bar .icon-button.with-count {
+    width: auto;
+  }
+
+  .sheet-bar,
+  .sidebar-hidden .sheet-bar {
+    padding: 0 6px;
+  }
+
+  .sheet-back {
+    display: inline-flex;
+  }
+
+  .sheet-bar .crumbs {
+    display: none;
+  }
+
+  .sheet-page {
+    padding: 32px 16px 72px;
   }
 
   .page {

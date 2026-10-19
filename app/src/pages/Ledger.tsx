@@ -2,11 +2,11 @@ import type { FormEvent } from "react";
 import { useEffect } from "react";
 import { agentNames, type Contributor } from "../agents";
 import { api, useLoad } from "../api";
+import { CONTENT_OPS } from "../concept/data";
 import { markSeen, useFeed, useLastSeen, useTrailing } from "../live";
 import { type Done, navigate } from "../router";
 import { Chip, plural, Status, useTitle, when } from "../ui";
 import type { LedgerFilters, Urls } from "../urls";
-import { CONTENT_OPS } from "./File";
 
 interface LedgerEvent {
   seq: number;

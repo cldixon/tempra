@@ -1,10 +1,11 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { api, useLoad } from "./api";
 import { Account, Apps, ConnectAccount, Invitations, Tokens, Welcome } from "./pages/Account";
+import { Activity } from "./pages/Activity";
 import { Diff } from "./pages/Diff";
-import { Directory } from "./pages/Directory";
 import { File } from "./pages/File";
+import { Folder } from "./pages/Folder";
+import { Home } from "./pages/Home";
 import { Inbox } from "./pages/Inbox";
 import { Ledger } from "./pages/Ledger";
 import { Libraries } from "./pages/Libraries";
@@ -18,12 +19,16 @@ import {
   Transfer,
   Work,
 } from "./pages/Manage";
+import { NeedsYou } from "./pages/NeedsYou";
 import { interceptLinks, match, useLocation } from "./router";
-import { Header, type Me, PageBoundary } from "./ui";
+import { Header, PageBoundary, useMe } from "./ui";
 import { Urls } from "./urls";
-import { type Place, Workspace } from "./Workspace";
+import { type Place, SheetPage, Workspace } from "./Workspace";
 
 let handle: string | null = null;
+
+/** The pages that lay out the sheet themselves (a concept's margins, the person's views). */
+const OWN_SHEET = new Set(["file", "directory", "needs", "activity"]);
 
 /**
  * One Urls per library and pinned sequence, so pages and their memos see the same object
@@ -42,8 +47,7 @@ function urlsFor(owner: string, slug: string, at: number | undefined): Urls {
 
 function App() {
   const url = useLocation();
-  const me = useLoad("me", () => api<Me>("/api/v1/me"));
-  const who = me.state === "ready" ? me.data : null;
+  const who = useMe();
   handle = who?.handle ?? null;
   const route = match(url);
   const actor = who?.actor ?? "";
@@ -74,7 +78,8 @@ function App() {
     const place: Place = { file: null, dir: null, view: null };
     switch (route.page) {
       case "directory":
-        place.dir = route.dir;
+        if (route.dir === "") place.view = "home";
+        else place.dir = route.dir;
         break;
       case "file":
       case "diff":
@@ -94,11 +99,23 @@ function App() {
     library = { urls: urlsFor(route.owner, route.slug, undefined), place };
     switch (route.page) {
       case "directory":
-        page = <Directory urls={urls} dir={route.dir} />;
+        page = route.dir === "" ? <Home urls={urls} /> : <Folder urls={urls} dir={route.dir} />;
+        break;
+      case "needs":
+        page = <NeedsYou urls={urls} />;
+        break;
+      case "activity":
+        page = <Activity urls={urls} actor={actor} />;
         break;
       case "file":
         page = (
-          <File urls={urls} path={route.path} done={url.searchParams.get("done")} actor={actor} />
+          <File
+            urls={urls}
+            path={route.path}
+            done={url.searchParams.get("done")}
+            actor={actor}
+            compare={route.compare ?? null}
+          />
         );
         break;
       case "ledger":
@@ -137,15 +154,11 @@ function App() {
   // A library's pages share one workspace, kept mounted while the person moves within it.
   if (library) {
     const { urls, place } = library;
+    // The library's own views lay out their sheet; its settings and tools share one column.
+    const own = route && OWN_SHEET.has(route.page);
     return (
-      <Workspace
-        key={`${urls.owner}/${urls.slug}`}
-        urls={urls}
-        place={place}
-        me={who}
-        bare={route?.page === "file" || route?.page === "directory"}
-      >
-        {boundary}
+      <Workspace key={`${urls.owner}/${urls.slug}`} urls={urls} place={place} me={who}>
+        {own ? boundary : <SheetPage>{boundary}</SheetPage>}
       </Workspace>
     );
   }

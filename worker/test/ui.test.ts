@@ -51,6 +51,8 @@ describe("the app's pages (TEMPRA-9)", () => {
       `${LIB}/-/ledger?actor=x`,
       `${LIB}/-/diff/notes/a.md?from=0`,
       `${LIB}/-/work?kind=stale`,
+      `${LIB}/-/needs`,
+      `${LIB}/-/activity`,
       `${LIB}/-/revert/some-request`,
       `${LIB}/-/restore/notes/a.md?to=1`,
       `${LIB}/-/transfer`,

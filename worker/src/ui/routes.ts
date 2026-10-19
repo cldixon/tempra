@@ -211,6 +211,8 @@ export function registerUiRoutes<E extends AppEnv>(
     "revert/:request",
     "restore/*",
     "work",
+    "needs",
+    "activity",
     "transfer",
     "recovery",
     "connect",

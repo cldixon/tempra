@@ -14,6 +14,16 @@ describe("routes follow the server's URLs (tempra-dev: v2/urls-and-handles)", ()
     expect(at("/ann/notes/a%20b/c.md")).toMatchObject({ page: "file", path: "a b/c.md" });
   });
 
+  test("a concept in review mode, or against an earlier version (take 3)", () => {
+    const urls = new Urls("ann", "notes");
+    expect(at(urls.review("a/b.md"))).toMatchObject({ compare: { kind: "review" } });
+    expect(at(urls.since("a/b.md", 7))).toMatchObject({ compare: { kind: "since", seq: 7 } });
+    expect(at(urls.file("a/b.md"))).toMatchObject({ page: "file", compare: undefined });
+    expect(at(urls.thread("a/b.md", "t1"))).toMatchObject({ page: "file", path: "a/b.md" });
+    expect(at(urls.needs())).toMatchObject({ page: "needs" });
+    expect(at(urls.activity())).toMatchObject({ page: "activity" });
+  });
+
   test("paths that start with -/ use the pages' own prefixes", () => {
     expect(at("/ann/notes/-/tree/-/x/")).toMatchObject({ page: "directory", dir: "-/x" });
     expect(at("/ann/notes/-/files/-/x.md")).toMatchObject({ page: "file", path: "-/x.md" });
@@ -45,7 +55,7 @@ describe("routes follow the server's URLs (tempra-dev: v2/urls-and-handles)", ()
     expect(at("/invitations")).toEqual({ page: "invitations" });
     expect(at("/inbox")).toEqual({ page: "inbox", all: false });
     expect(at("/inbox?all=1")).toEqual({ page: "inbox", all: true });
-    for (const p of ["transfer", "recovery", "delete", "members"]) {
+    for (const p of ["needs", "activity", "transfer", "recovery", "delete", "members"]) {
       expect(at(`/ann/notes/-/${p}`)).toMatchObject({ page: p, owner: "ann", slug: "notes" });
     }
   });

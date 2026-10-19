@@ -50,16 +50,81 @@ export function actorLabel(
   return (by?.agent && names[by.agent]) || who(actor);
 }
 
+/** Who acted, as a byline or a row draws them: "Claude Code for @cl_dixon", "You", "ann". */
+export interface ActorView {
+  /** The agent's name, or the person's handle; "You" for the signed-in person. */
+  name: string;
+  /** For an agent, whom it acts for ("@cl_dixon"); null for a person. */
+  for: string | null;
+  agent: boolean;
+  /** The signed-in person themselves (not their agents). */
+  you: boolean;
+}
+
+/** Each agent's contributor entry by its id. */
+function agentsById(contributors: Contributor[]): Record<string, Contributor> {
+  const out: Record<string, Contributor> = {};
+  for (const c of contributors) if (c.agent) out[c.agent.id] = c;
+  return out;
+}
+
+/** An actor as an ActorView, given the library's agents and the signed-in person's actor. */
+export function actorView(
+  actor: string,
+  by: ActedBy | null | undefined,
+  agents: Record<string, Contributor>,
+  me: string | null,
+): ActorView {
+  const c = by?.agent ? agents[by.agent] : undefined;
+  const human = actor.startsWith("human:") && !by?.agent;
+  if (human) {
+    const you = me !== null && actor === me;
+    return { name: you ? "You" : who(actor), for: null, agent: false, you };
+  }
+  const person = c?.person ?? by?.person ?? null;
+  return {
+    name: c?.agent?.name ?? actor,
+    for: person ? `@${person}` : null,
+    agent: true,
+    you: false,
+  };
+}
+
+/** The library's contributors, loaded once per library and shared (see useAgentNames). */
+function useContributors(urls: Urls) {
+  return useLoad(`agents ${urls.base}`, () =>
+    api<{ contributors: Contributor[] }>(urls.api("agents")).then((r) =>
+      agentNames(r.contributors),
+    ),
+  );
+}
+
+/**
+ * Who acted, as an ActorView, for pages that draw people and agents apart (the byline, home,
+ * Activity, Needs you). `me` is the signed-in person's actor (`human:handle`).
+ */
+export function useActors(urls: Urls, me: string | null) {
+  const loaded = useLoad(`contributors ${urls.base}`, () =>
+    api<{ contributors: Contributor[] }>(urls.api("agents")).then((r) => r.contributors),
+  );
+  const list = loaded.state === "ready" ? loaded.data : null;
+  return useMemo(() => {
+    const byId = agentsById(list ?? []);
+    return {
+      view: (actor: string, by?: ActedBy | null) => actorView(actor, by, byId, me),
+      /** Everyone who has worked here: people and agents. */
+      contributors: list ?? [],
+      reload: loaded.reload,
+    };
+  }, [list, me, loaded.reload]);
+}
+
 /**
  * The library's agent names, loaded once per library and kept like any page's data. `seen` are
  * the agent ids on screen: one the list does not know yet (an agent's first write) loads it again.
  */
 export function useAgentNames(urls: Urls, seen: readonly (string | undefined)[] = []) {
-  const loaded = useLoad(`agents ${urls.base}`, () =>
-    api<{ contributors: Contributor[] }>(urls.api("agents")).then((r) =>
-      agentNames(r.contributors),
-    ),
-  );
+  const loaded = useContributors(urls);
   const names = loaded.state === "ready" ? loaded.data : null;
   const asked = useRef(new Set<string>());
   const missing = names ? seen.filter((id): id is string => !!id && !(id in names)) : [];

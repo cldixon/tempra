@@ -181,7 +181,9 @@ async function uiPages(owner: string, slug: string, paths: string[]): Promise<st
   const pages = [
     `${lib}/`,
     `${lib}/-/ledger`,
-    ...["work", "transfer", "recovery", "connect", "delete"].map((p) => `${lib}/-/${p}`),
+    ...["work", "needs", "activity", "transfer", "recovery", "connect", "delete"].map(
+      (p) => `${lib}/-/${p}`,
+    ),
     ...[...dirs].map((d) => `${lib}/${enc(d)}/`),
     ...concepts.map((p) => `${lib}/${enc(p)}`),
   ];
@@ -1236,6 +1238,8 @@ async function strangers(owner: string, slug: string, token: string): Promise<st
     "",
     "-/ledger",
     "-/work",
+    "-/needs",
+    "-/activity",
     "-/transfer",
     "-/recovery",
     "-/connect",

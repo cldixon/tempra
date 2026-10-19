@@ -28,6 +28,18 @@ export class Urls {
   file(path: string, anchor: string | null = null) {
     return `${this.own(path) ?? this.page(`files/${enc(path)}`)}${this.q()}${anchor ?? ""}`;
   }
+  /** A concept opened in review mode: the changes since a person verified it, and Verify. */
+  review(path: string) {
+    return `${this.own(path) ?? this.page(`files/${enc(path)}`)}?review=1`;
+  }
+  /** A concept with the changes since an earlier version drawn in its text. */
+  since(path: string, seq: number) {
+    return `${this.own(path) ?? this.page(`files/${enc(path)}`)}?since=${seq}`;
+  }
+  /** A concept with one comment thread open in its margin. */
+  thread(path: string, id: string) {
+    return this.file(path, `#thread-${encodeURIComponent(id)}`);
+  }
   raw(path: string) {
     return `${this.base}-/raw/${enc(path)}${this.q()}`;
   }
@@ -45,6 +57,14 @@ export class Urls {
   }
   restore(path: string, to: number) {
     return `${this.base}-/restore/${enc(path)}${query({ to })}`;
+  }
+  /** What only a person can do here (take 3, TEMPRA-106). */
+  needs() {
+    return this.page("needs");
+  }
+  /** The ledger for people: requests grouped by day. */
+  activity() {
+    return this.page("activity");
   }
   work(kind?: string) {
     return `${this.page("work")}${query({ kind })}`;
@@ -104,4 +124,13 @@ export function baseName(path: string) {
 export function dirOf(path: string) {
   const i = path.lastIndexOf("/");
   return i === -1 ? "" : path.slice(0, i);
+}
+
+/**
+ * A folder as a person reads it, until folders have titles of their own: its name with the first
+ * letter capitalised and dashes and underscores as spaces ("the-app" → "The app").
+ */
+export function folderName(path: string) {
+  const name = baseName(path).replace(/[-_]+/g, " ").trim();
+  return name ? name[0]?.toUpperCase() + name.slice(1) : path;
 }

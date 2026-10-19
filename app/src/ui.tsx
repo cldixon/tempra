@@ -1,13 +1,19 @@
 import { Component, type ReactNode, useEffect, useState } from "react";
-import type { ApiError, Loaded } from "./api";
+import { type ApiError, api, type Loaded, useLoad } from "./api";
 import { AccountMenu, InboxLink } from "./chrome";
-import { baseName, type Urls } from "./urls";
+import { baseName, folderName, type Urls } from "./urls";
 
 /** The person the app acts for (GET /api/v1/me). */
 export interface Me {
   email: string;
   handle: string;
   actor: string;
+}
+
+/** The signed-in person, loaded once for the whole app (the same load main.tsx makes). */
+export function useMe(): Me | null {
+  const me = useLoad("me", () => api<Me>("/api/v1/me"));
+  return me.state === "ready" ? me.data : null;
 }
 
 /** The account pages' header: Tempra and the avatar's menu. */
@@ -140,6 +146,18 @@ export function when(iso: string): string {
     .replace(/Z$/, "");
 }
 
+/** A day as people say it: "Oct 9", with the year when it is not this one. */
+export function day(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const thisYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString("en", {
+    month: "short",
+    day: "numeric",
+    ...(thisYear ? {} : { year: "numeric" }),
+  });
+}
+
 export function formatSize(n: number): string {
   if (n < 1024) return `${n} B`;
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
@@ -189,32 +207,38 @@ export const anchorId = (prefix: string, label: string) =>
   `${prefix}-${label.replace(/[^\w.-]/g, "_")}`;
 
 /**
- * Breadcrumbs from the library root to `path` (a directory, or a file when `file` is set), and
- * after them what the page adds (the concept's trust and staleness).
+ * Where a page is in its library (the sheet's bar): its folders by name, each a link, then the
+ * file itself (by `title` when it has one), and after them what the page adds (a concept's
+ * staleness or status). The library itself is in the sidebar, so the crumbs start below it.
  */
-export function Crumbs(props: { urls: Urls; path: string; file: boolean; children?: ReactNode }) {
+export function Crumbs(props: {
+  urls: Urls;
+  path: string;
+  file: boolean;
+  title?: string;
+  children?: ReactNode;
+}) {
   const { urls, path, file } = props;
   const parts = path === "" ? [] : path.split("/");
-  const items: ReactNode[] = [
-    <a key="" href={urls.tree("")}>
-      {urls.slug}
-    </a>,
-  ];
+  const items: ReactNode[] = [];
   parts.forEach((seg, i) => {
     const p = parts.slice(0, i + 1).join("/");
+    const last = i === parts.length - 1;
+    if (i > 0) {
+      items.push(
+        <span key={`/${p}`} aria-hidden="true">
+          /
+        </span>,
+      );
+    }
     items.push(
-      <span key={`/${p}`} aria-hidden="true">
-        /
-      </span>,
-    );
-    items.push(
-      i === parts.length - 1 && file ? (
-        <span key={p} className="here">
-          {seg}
+      last ? (
+        <span key={p} className="here" aria-current="page">
+          {file ? (props.title ?? seg) : folderName(p)}
         </span>
       ) : (
         <a key={p} href={urls.tree(p)}>
-          {seg}
+          {folderName(p)}
         </a>
       ),
     );
