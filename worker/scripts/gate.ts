@@ -1964,7 +1964,8 @@ async function freshAccountConnects(): Promise<string[]> {
       await step(`library tab ${tab}`, async () => {
         await page.goto(`${lib}/`);
         await libraryLink(tab);
-        await page.getByText(text).first().waitFor({ timeout: 15_000 });
+        // In the sheet: the phone's top bar (hidden here) names the page too.
+        await page.locator(".ws-main").getByText(text).first().waitFor({ timeout: 15_000 });
       });
     }
     await step("export now, from Import & export", async () => {
