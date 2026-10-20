@@ -280,6 +280,9 @@ export function ConceptPage(props: {
               concept={c}
               links={links}
               head={head}
+              standing={s}
+              name={name}
+              current={current}
               work={work}
               contents={contents}
               markdown={markdown}
@@ -318,15 +321,7 @@ export function ConceptPage(props: {
           <header className="doc-head">
             <h1 className="doc-title">{title}</h1>
             {typeof fm.description === "string" && <p className="doc-tagline">{fm.description}</p>}
-            <Byline
-              urls={urls}
-              concept={c}
-              history={data.history}
-              head={head}
-              name={name}
-              current={current}
-              reviewing={compare?.kind === "review"}
-            />
+            <Byline urls={urls} concept={c} history={data.history} head={head} name={name} />
           </header>
           {markdown && <RawMarkdown urls={urls} path={c.path} hash={c.hash} />}
           {/* Kept mounted under the markdown, so comments keep their place. */}

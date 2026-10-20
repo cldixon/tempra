@@ -3,13 +3,14 @@ import { Icon, Menu } from "../chrome";
 import { Dialog } from "../Dialog";
 import { Chip, when } from "../ui";
 import type { Urls } from "../urls";
+import type { Namer } from "./Byline";
 import { Contents, type Entry } from "./Contents";
-import type { Concept, Links, WorkItem } from "./data";
+import type { Concept, Links, Standing, WorkItem } from "./data";
 import { Properties } from "./Properties";
 
 /**
  * The concept's "…" menu (take 3; tempra-dev: app/reader, The corner controls): the Markdown view,
- * Properties, the raw file, Contents (only while the left margin cannot show it: the stylesheet
+ * Properties (with the concept's verification), the raw file, Contents (only while the left margin cannot show it: the stylesheet
  * hides the item when it can), and the agents' notes on the concept.
  */
 export function MoreMenu(props: {
@@ -17,6 +18,9 @@ export function MoreMenu(props: {
   concept: Concept;
   links: Links;
   head: number;
+  standing: Standing;
+  name: Namer;
+  current: boolean;
   work: WorkItem[];
   contents: Entry[];
   markdown: boolean;
@@ -62,7 +66,17 @@ export function MoreMenu(props: {
         </nav>
       </Dialog>
       <Dialog title="Properties" open={open === "properties"} onClose={close}>
-        <Properties urls={urls} fm={c.frontmatter} links={props.links} head={props.head} />
+        <Properties
+          urls={urls}
+          path={c.path}
+          fm={c.frontmatter}
+          links={props.links}
+          head={props.head}
+          standing={props.standing}
+          name={props.name}
+          current={props.current}
+          onClose={close}
+        />
       </Dialog>
       <Dialog title="Agent notes" open={open === "notes"} onClose={close}>
         <AgentNotes concept={c} work={props.work} />

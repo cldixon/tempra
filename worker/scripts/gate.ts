@@ -540,7 +540,7 @@ function greyPng(width: number, height: number, shade: number): Uint8Array {
  * The app in a real browser, signed in as the seeded user (layout take 3, TEMPRA-106): the
  * library's home, the workspace (the tree, the quick switcher, the hidden sidebar, at phone
  * width the top bar naming the page, the home's ways in and the drawer), a folder's view, every concept in the reader (drawn from the stored tree, with no
- * Edit, a footnote card on hover), the byline's history and review mode, comments in the margin
+ * Edit, a footnote card on hover), the byline's history, review mode from Properties, comments in the margin
  * (and as a bottom sheet on a phone), figures in the full-screen view, Needs you, Activity and
  * the ledger, all drawn from the API; links move within the app without reloading the page, and
  * nothing is refused by the CSP or throws. GATE_SCREENSHOTS=<dir> saves screenshots of them.
@@ -575,6 +575,15 @@ async function browserRenders(
       await page.locator(".menu-list").getByRole("button", { name: item, exact: true }).click();
     };
     const byline = main.locator(".byline");
+    /** The concept's Properties dialog. */
+    const properties = () => page.getByRole("dialog", { name: "Properties" });
+    /** Opens review mode from Properties, where the concept's verification is. */
+    const reviewFromProperties = async (state?: RegExp) => {
+      await more("Properties");
+      if (state) await properties().getByText(state).waitFor({ timeout: 10_000 });
+      await properties().getByRole("link", { name: "Review", exact: true }).click();
+      await properties().waitFor({ state: "hidden", timeout: 5000 });
+    };
     const versionsButton = () => byline.getByRole("button", { name: /^\d+ versions?$/ });
 
     await step("sign in", async () => {
@@ -1102,9 +1111,13 @@ async function browserRenders(
       async () => {
         await agentAppends("A sentence before verification.");
         await page.goto(url);
-        // The byline says where the concept stands; Review opens review mode.
+        // Verification is out of the byline (tempra-dev: decisions/verification-out-of-the-way);
+        // Properties says where the concept stands, and its Review opens review mode.
         await byline.waitFor({ timeout: 15_000 });
-        await byline.getByRole("link", { name: "Review", exact: true }).click();
+        if ((await byline.getByText(/verif|review/i).count()) > 0) {
+          throw new Error("the byline shows verification");
+        }
+        await reviewFromProperties();
         await page.waitForURL(`${url}?review=1`);
         const bar = page.getByRole("region", { name: "Review" });
         await bar.waitFor({ timeout: 10_000 });
@@ -1113,16 +1126,19 @@ async function browserRenders(
         await bar.getByRole("button", { name: "Verify this version" }).click();
         await page.waitForURL(`${url}?done=verify`, { timeout: 10_000 });
         await page.getByText(/^Verified as human:/).waitFor({ timeout: 10_000 });
-        await byline.getByText(/^Verified by you, /).waitFor({ timeout: 10_000 });
-        if ((await byline.getByRole("link", { name: "Review", exact: true }).count()) > 0) {
+        await more("Properties");
+        await properties()
+          .getByText(/^Verified by you on /)
+          .waitFor({ timeout: 10_000 });
+        if ((await properties().getByRole("link", { name: "Review", exact: true }).count()) > 0) {
           throw new Error("Review is offered with nothing to review");
         }
+        await page.keyboard.press("Escape");
+        await properties().waitFor({ state: "hidden", timeout: 5000 });
         await agentAppends("A sentence the gate added.");
         await page.goto(url);
-        await byline
-          .getByRole("link", { name: /^1 change since you verified$/ })
-          .waitFor({ timeout: 10_000 });
-        await byline.getByRole("link", { name: "Review", exact: true }).click();
+        await byline.waitFor({ timeout: 15_000 });
+        await reviewFromProperties(/^1 change since you verified on /);
         await page.waitForURL(`${url}?review=1`);
         // The changes since the person verified, drawn in the text.
         const added = page.locator(".body ins.diff-added").last();
@@ -1506,10 +1522,9 @@ async function browserRenders(
       await more("Show the reader");
       await body.waitFor({ state: "visible" });
       await more("Properties");
-      const properties = page.getByRole("dialog", { name: "Properties" });
-      await properties.waitFor({ timeout: 5000 });
+      await properties().waitFor({ timeout: 5000 });
       await page.keyboard.press("Escape");
-      await properties.waitFor({ state: "hidden", timeout: 5000 });
+      await properties().waitFor({ state: "hidden", timeout: 5000 });
     });
     await step(
       "Activity shows an agent's write live, and links the ledger, which tails live",
@@ -2011,18 +2026,20 @@ async function freshAccountConnects(): Promise<string[]> {
       await page.waitForURL(`${lib}/`, { timeout: 15_000 });
       asInvitee = await context.cookies();
     });
-    /** Opens the open concept in review mode from its byline. */
+    /** Opens the open concept in review mode from Properties, checking its state there. */
     const review = async () => {
-      const byline = page.locator(".byline");
-      await byline.waitFor({ timeout: 15_000 });
-      await byline.getByRole("link", { name: "Review", exact: true }).click();
+      await page.locator(".byline").waitFor({ timeout: 15_000 });
+      await page.getByRole("button", { name: "More", exact: true }).click();
+      await page.locator(".menu-list").getByRole("button", { name: "Properties" }).click();
+      const dialog = page.getByRole("dialog", { name: "Properties" });
+      await dialog.getByText(/^Not yet verified by a person/).waitFor({ timeout: 15_000 });
+      await dialog.getByRole("link", { name: "Review", exact: true }).click();
       await page.waitForURL(`${lib}/shared.md?review=1`);
       await page.getByRole("region", { name: "Review" }).waitFor({ timeout: 15_000 });
     };
     await step("a reader sees the note and no Verify", async () => {
       await page.goto(`${lib}/shared.md`);
       await page.getByText("Read me.").waitFor({ timeout: 15_000 });
-      await page.locator(".byline").getByText("Not yet verified").waitFor({ timeout: 15_000 });
       await review();
       await page.getByText("Not yet verified by a person").waitFor({ timeout: 15_000 });
       // The role loads with the library list; give it the moment it takes.
