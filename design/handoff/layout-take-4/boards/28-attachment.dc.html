@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Attachment</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:inherit;text-decoration:none}
+@keyframes tempra-pulse{0%,100%{opacity:1}50%{opacity:.35}}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 900px; box-sizing: border-box; background: #ffffff; color: #1b1b1b; font-family: -apple-system, BlinkMacSystemFont, system-ui, 'Segoe UI', Helvetica, sans-serif; font-size: 14px; line-height: 1.5; display: grid; grid-template-columns: 264px minmax(0, 1fr); grid-template-rows: 60px minmax(0, 1fr); overflow: hidden">
+<div style="border-right: 1px solid #ececec; border-bottom: 1px solid #ececec; display: flex; align-items: center; gap: 10px; padding: 0 14px 0 18px">
+<span aria-hidden="true" style="width: 22px; height: 22px; border-radius: 6px; background: #1b1b1b; color: #ffffff; display: grid; place-items: center; font-size: 13px; font-weight: 600; flex: none">T</span><span aria-hidden="true" style="width: 1px; height: 18px; background: #e2e2e2"></span>
+<button type="button" aria-label="Switch library" style="display: flex; align-items: center; gap: 6px; border: 0; background: transparent; padding: 4px 6px; border-radius: 8px; font: inherit; font-size: 15px; font-weight: 500; color: #1b1b1b; cursor: pointer">tempra-dev<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8a8a8a" stroke-width="1.6"><path d="m6 9 6 6 6-6"/></svg></button>
+<button type="button" aria-label="Search this library" style="margin-left: auto; width: 34px; height: 34px; border: 1px solid #ececec; border-radius: 999px; background: #ffffff; display: grid; place-items: center; color: #555555; cursor: pointer"><svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-3.5-3.5"/></svg></button>
+</div>
+
+<header style="border-bottom: 1px solid #ececec; display: flex; align-items: center; gap: 10px; padding: 0 20px 0 32px">
+<nav aria-label="Breadcrumb" style="display: flex; gap: 8px; font-size: 15px; color: #8a8a8a; white-space: nowrap"><a href="#">The app</a><span aria-hidden="true">/</span><span style="color: #1b1b1b">workspace-layout.png</span></nav>
+<div style="margin-left: auto; display: flex; align-items: center; gap: 8px">
+<button type="button" aria-label="Inbox, 3 unread" style="position: relative; width: 34px; height: 34px; border: 1px solid #ececec; border-radius: 999px; background: #ffffff; display: grid; place-items: center; color: #3a3a3a; cursor: pointer"><svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg><span style="position: absolute; top: -3px; right: -3px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 999px; background: #1b1b1b; color: #ffffff; font-size: 10px; font-weight: 600; display: grid; place-items: center">3</span></button><button type="button" aria-label="Account" style="width: 34px; height: 34px; border: 0; border-radius: 999px; background: #1b1b1b; color: #ffffff; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer">CD</button>
+</div>
+</header>
+
+<nav aria-label="Library" style="border-right: 1px solid #ececec; display: flex; flex-direction: column; padding: 18px 12px 14px; gap: 2px; font-size: 14px; overflow: hidden">
+<sc-for list="{{nav}}" as="i" hint-placeholder-count="3">
+<a href="#" style="display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; background: {{i.bg}}; font-weight: {{i.weight}}; color: #3a3a3a"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b6b6b" stroke-width="1.6"><path d="{{i.icon}}"/></svg>{{i.label}}<span style="margin-left: auto; font-size: 12px; color: #8a8a8a">{{i.count}}</span></a>
+</sc-for>
+<div style="height: 1px; background: #ececec; margin: 12px 10px"></div>
+<sc-for list="{{tree}}" as="t" hint-placeholder-count="8">
+<a href="#" style="display: flex; align-items: center; gap: 8px; padding: 6px 10px 6px {{t.pad}}; border-radius: 8px; background: {{t.bg}}; color: {{t.fg}}; font-weight: {{t.weight}}">{{t.label}}<span style="margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #9b9b9b">{{t.count}}<sc-if value="{{t.dot}}" hint-placeholder-val="{{ false }}"><span aria-label="changed recently" style="width: 6px; height: 6px; border-radius: 999px; background: #e2550f"></span></sc-if><sc-if value="{{t.group}}" hint-placeholder-val="{{ false }}"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9b9b9b" stroke-width="1.6"><path d="{{t.chev}}"/></svg></sc-if></span></a>
+</sc-for>
+<a href="#" style="margin-top: auto; display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; color: #6b6b6b"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b6b6b" stroke-width="1.5"><path d="M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</a>
+</nav>
+
+<main style="overflow: hidden; display: grid; grid-template-columns: minmax(0, 1fr) 340px">
+<div style="padding: 32px 0 32px 40px; display: flex"><div style="flex: 1; border-radius: 14px; background: #0b0b0c; cursor: zoom-in"><div style="position: relative; width: 100%; height: 100%; display: grid; place-items: center"><div style="width: 78%; aspect-ratio: 16 / 10; border-radius: 8px; background: #f7f7f7; display: grid; grid-template-columns: 22% 1fr 20%; grid-template-rows: 9% 1fr; overflow: hidden; box-shadow: 0 0 0 1px #2a2a2c">
+<div style="grid-column: 1 / -1; border-bottom: 1px solid #e2e2e2; background: #ffffff"></div>
+<div style="border-right: 1px solid #e2e2e2; background: #ffffff; padding: 10%; display: flex; flex-direction: column; gap: 8%"><span style="height: 6%; min-height: 6px; background: #e6e6e6; border-radius: 3px"></span><span style="height: 6%; min-height: 6px; width: 70%; background: #e6e6e6; border-radius: 3px"></span><span style="height: 6%; min-height: 6px; width: 80%; background: #e6e6e6; border-radius: 3px"></span></div>
+<div style="background: #ffffff; padding: 6% 9%; display: flex; flex-direction: column; gap: 5%"><span style="height: 9%; width: 45%; background: #2a2a2a; border-radius: 3px"></span><span style="height: 4%; width: 90%; background: #dcdcdc; border-radius: 3px"></span><span style="height: 4%; width: 84%; background: #dcdcdc; border-radius: 3px"></span><span style="height: 30%; background: #0b0b0c; border-radius: 6px"></span><span style="height: 4%; width: 88%; background: #dcdcdc; border-radius: 3px"></span></div>
+<div style="background: #ffffff; border-left: 1px solid #ececec; padding: 12% 10%; display: flex; flex-direction: column; gap: 8%"><span style="height: 5%; min-height: 5px; background: #e6e6e6; border-radius: 3px"></span><span style="height: 5%; min-height: 5px; width: 70%; background: #e6e6e6; border-radius: 3px"></span></div>
+</div></div></div></div>
+<aside style="padding: 40px 32px; display: flex; flex-direction: column; gap: 22px">
+<div style="display: flex; flex-direction: column; gap: 8px"><h1 style="margin: 0; font-size: 24px; font-weight: 600; letter-spacing: -.015em; word-break: break-all">workspace-layout.png</h1></div>
+<div style="display: flex; gap: 8px"><button type="button" style="display: flex; align-items: center; gap: 7px; height: 34px; padding: 0 16px; border: 0; border-radius: 999px; background: #1b1b1b; font: inherit; font-size: 13px; font-weight: 500; color: #ffffff; cursor: pointer; white-space: nowrap; flex: none"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg>Download</button><button type="button" style="display: flex; align-items: center; gap: 7px; height: 34px; padding: 0 14px; border: 1px solid #e4e4e4; border-radius: 999px; background: #ffffff; font: inherit; font-size: 13px; color: #3a3a3a; cursor: pointer; white-space: nowrap; flex: none">Copy link</button></div>
+<div style="border-top: 1px solid #ececec">
+<div style="display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 16px; padding: 10px 0; border-bottom: 1px solid #ececec; font-size: 14px"><span style="color: #6b6b6b">Type</span><span>PNG image</span></div>
+<div style="display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 16px; padding: 10px 0; border-bottom: 1px solid #ececec; font-size: 14px"><span style="color: #6b6b6b">Size</span><span>1.2 MB · 2400 × 1500</span></div>
+<div style="display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 16px; padding: 10px 0; border-bottom: 1px solid #ececec; font-size: 14px"><span style="color: #6b6b6b">Added</span><span><span style="display: flex; align-items: center; gap: 8px"><span aria-hidden="true" style="position: relative; width: 20px; height: 20px; border-radius: 999px; background: #1b1b1b; color: #ffffff; display: grid; place-items: center; font-size: 9px; font-weight: 600; flex: none">C<span style="position: absolute; right: -2px; bottom: -2px; width: 8px; height: 8px; border-radius: 999px; background: #e2550f; border: 2px solid #ffffff"></span></span>Claude Code · Oct 18</span></span></div>
+<div style="display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 16px; padding: 10px 0; border-bottom: 1px solid #ececec; font-size: 14px"><span style="color: #6b6b6b">Used in</span><span><span style="display: flex; flex-direction: column; gap: 4px"><a href="#" style="color: #1b1b1b; text-decoration: underline; text-decoration-color: #cfcfcf; text-underline-offset: 3px">Workspace</a><a href="#" style="color: #1b1b1b; text-decoration: underline; text-decoration-color: #cfcfcf; text-underline-offset: 3px">Reader</a></span></span></div>
+</div>
+</aside>
+</main>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+renderVals() {
+const ICON = { home: 'M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z', needs: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM8 12.5l3 2.5 5-6', activity: 'M3 12h4l3-8 4 16 3-8h4' };
+const nav = (cur) => [['Home', 'home', ''], ['Activity', 'activity', '']].map(([label, icon, count]) => ({ label, count, icon: ICON[icon], bg: label === cur ? '#f3f3f3' : 'transparent', weight: label === cur ? '500' : '400' }));
+const tree = (open, cur, dots) => {
+const G = { 'Spec': ['Overview', 'Accounts and sign-in', 'Sharing', 'Notifications'], 'Decisions': ['Read and comment only', 'Agents act for a person', 'Diagram styles go through the CSSOM'], 'The app': ['Overview', 'Workspace', 'Reader', 'Comments', 'Diagrams', 'workspace-layout.png'], 'Delivery': [], 'Feedback': [] };
+const N = { 'Spec': '19', 'Decisions': '18', 'The app': '10', 'Delivery': '6', 'Feedback': '4' };
+const out = [];
+for (const k of Object.keys(G)) {
+const o = k === open;
+out.push({ label: k, count: N[k], group: true, chev: o ? 'm6 9 6 6 6-6' : 'm9 6 6 6-6 6', bg: k === cur ? '#f3f3f3' : 'transparent', fg: k === cur ? '#1b1b1b' : '#6b6b6b', weight: k === cur ? '500' : '400', pad: '10px', dot: false });
+if (o) for (const p of G[k]) out.push({ label: p, count: '', group: false, chev: '', bg: p === cur ? '#f3f3f3' : 'transparent', fg: p === cur ? '#1b1b1b' : '#5a5a5a', weight: p === cur ? '500' : '400', pad: '24px', dot: (dots || []).includes(p) });
+}
+return out;
+};
+return { nav: nav(''), tree: tree('The app', 'workspace-layout.png', []) };
+}
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Folder</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:inherit;text-decoration:none}
+@keyframes tempra-pulse{0%,100%{opacity:1}50%{opacity:.35}}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 900px; box-sizing: border-box; background: #ffffff; color: #1b1b1b; font-family: -apple-system, BlinkMacSystemFont, system-ui, 'Segoe UI', Helvetica, sans-serif; font-size: 14px; line-height: 1.5; display: grid; grid-template-columns: 264px minmax(0, 1fr); grid-template-rows: 60px minmax(0, 1fr); overflow: hidden">
+<div style="border-right: 1px solid #ececec; border-bottom: 1px solid #ececec; display: flex; align-items: center; gap: 10px; padding: 0 14px 0 18px">
+<span aria-hidden="true" style="width: 22px; height: 22px; border-radius: 6px; background: #1b1b1b; color: #ffffff; display: grid; place-items: center; font-size: 13px; font-weight: 600; flex: none">T</span><span aria-hidden="true" style="width: 1px; height: 18px; background: #e2e2e2"></span>
+<button type="button" aria-label="Switch library" style="display: flex; align-items: center; gap: 6px; border: 0; background: transparent; padding: 4px 6px; border-radius: 8px; font: inherit; font-size: 15px; font-weight: 500; color: #1b1b1b; cursor: pointer">tempra-dev<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8a8a8a" stroke-width="1.6"><path d="m6 9 6 6 6-6"/></svg></button>
+<button type="button" aria-label="Search this library" style="margin-left: auto; width: 34px; height: 34px; border: 1px solid #ececec; border-radius: 999px; background: #ffffff; display: grid; place-items: center; color: #555555; cursor: pointer"><svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-3.5-3.5"/></svg></button>
+</div>
+
+<header style="border-bottom: 1px solid #ececec; display: flex; align-items: center; gap: 10px; padding: 0 20px 0 32px">
+<nav aria-label="Breadcrumb" style="display: flex; gap: 8px; font-size: 15px; color: #8a8a8a; white-space: nowrap"><span style="color: #1b1b1b">Decisions</span></nav>
+<div style="margin-left: auto; display: flex; align-items: center; gap: 8px">
+<button type="button" aria-label="Inbox, 3 unread" style="position: relative; width: 34px; height: 34px; border: 1px solid #ececec; border-radius: 999px; background: #ffffff; display: grid; place-items: center; color: #3a3a3a; cursor: pointer"><svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg><span style="position: absolute; top: -3px; right: -3px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 999px; background: #1b1b1b; color: #ffffff; font-size: 10px; font-weight: 600; display: grid; place-items: center">3</span></button><button type="button" aria-label="Account" style="width: 34px; height: 34px; border: 0; border-radius: 999px; background: #1b1b1b; color: #ffffff; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer">CD</button>
+</div>
+</header>
+
+<nav aria-label="Library" style="border-right: 1px solid #ececec; display: flex; flex-direction: column; padding: 18px 12px 14px; gap: 2px; font-size: 14px; overflow: hidden">
+<sc-for list="{{nav}}" as="i" hint-placeholder-count="3">
+<a href="#" style="display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; background: {{i.bg}}; font-weight: {{i.weight}}; color: #3a3a3a"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b6b6b" stroke-width="1.6"><path d="{{i.icon}}"/></svg>{{i.label}}<span style="margin-left: auto; font-size: 12px; color: #8a8a8a">{{i.count}}</span></a>
+</sc-for>
+<div style="height: 1px; background: #ececec; margin: 12px 10px"></div>
+<sc-for list="{{tree}}" as="t" hint-placeholder-count="8">
+<a href="#" style="display: flex; align-items: center; gap: 8px; padding: 6px 10px 6px {{t.pad}}; border-radius: 8px; background: {{t.bg}}; color: {{t.fg}}; font-weight: {{t.weight}}">{{t.label}}<span style="margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #9b9b9b">{{t.count}}<sc-if value="{{t.dot}}" hint-placeholder-val="{{ false }}"><span aria-label="changed recently" style="width: 6px; height: 6px; border-radius: 999px; background: #e2550f"></span></sc-if><sc-if value="{{t.group}}" hint-placeholder-val="{{ false }}"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9b9b9b" stroke-width="1.6"><path d="{{t.chev}}"/></svg></sc-if></span></a>
+</sc-for>
+<a href="#" style="margin-top: auto; display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; color: #6b6b6b"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b6b6b" stroke-width="1.5"><path d="M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</a>
+</nav>
+
+<main style="overflow: hidden; display: flex; justify-content: center">
+<div style="width: 100%; max-width: 760px; padding: 56px 48px 40px; box-sizing: border-box; display: flex; flex-direction: column; gap: 30px">
+<header style="display: flex; flex-direction: column; gap: 12px"><h1 style="margin: 0; font-size: 42px; font-weight: 600; letter-spacing: -.025em; line-height: 1.1">Decisions</h1><p style="margin: 0; font-size: 19px; line-height: 1.55; color: #555555">Why Tempra is the way it is: one decision a page, with what was weighed.</p></header><div style="display: flex; flex-direction: column; gap: 2px"><a href="#" style="display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; margin: 0 -14px; border-radius: 10px; background-color: transparent"><span style="display: flex; align-items: center; gap: 10px; font-weight: 500">Diagram styles go through the CSSOM<span aria-label="changed since you last looked" style="width: 6px; height: 6px; border-radius: 999px; background: #e2550f; flex: none; animation: tempra-pulse 1.6s ease-in-out infinite"></span><span style="margin-left: auto"><span style="display: flex; align-items: center; gap: 6px; font-size: 12.5px; color: #8a8a8a; font-weight: 400">Claude Code is editing</span></span></span><span style="font-size: 14px; color: #6b6b6b">The app moves the style attributes in Pele's SVG into the CSSOM.</span></a><a href="#" style="display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; margin: 0 -14px; border-radius: 10px; background-color: transparent"><span style="display: flex; align-items: center; gap: 10px; font-weight: 500">Create libraries: a consent choice<span aria-label="changed since you last looked" style="width: 6px; height: 6px; border-radius: 999px; background: #e2550f; flex: none"></span><span style="margin-left: auto"></span></span><span style="font-size: 14px; color: #6b6b6b">An agent may create libraries only on a connection granted it.</span></a><a href="#" style="display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; margin: 0 -14px; border-radius: 10px; background-color: transparent"><span style="display: flex; align-items: center; gap: 10px; font-weight: 500">Read and comment only<span aria-label="changed since you last looked" style="width: 6px; height: 6px; border-radius: 999px; background: #e2550f; flex: none"></span><span style="margin-left: auto"></span></span><span style="font-size: 14px; color: #6b6b6b">People read and comment; only agents write.</span></a><a href="#" style="display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; margin: 0 -14px; border-radius: 10px; background-color: transparent"><span style="display: flex; align-items: center; gap: 10px; font-weight: 500">Agents act for a person<span style="margin-left: auto"></span></span><span style="font-size: 14px; color: #6b6b6b">An outside agent never acts beyond its person's role.</span></a><a href="#" style="display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; margin: 0 -14px; border-radius: 10px; background-color: transparent"><span style="display: flex; align-items: center; gap: 10px; font-weight: 500">Comments are ledger events<span style="margin-left: auto"></span></span><span style="font-size: 14px; color: #6b6b6b">Comments live as their own events, never in the markdown.</span></a><a href="#" style="display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; margin: 0 -14px; border-radius: 10px; background-color: transparent"><span style="display: flex; align-items: center; gap: 10px; font-weight: 500">Production deploys without approval<span style="margin-left: auto"></span></span><span style="font-size: 14px; color: #6b6b6b">Every push to main deploys staging, then production.</span></a><a href="#" style="display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; margin: 0 -14px; border-radius: 10px; background-color: transparent"><span style="display: flex; align-items: center; gap: 10px; font-weight: 500">One Worker per PR<span style="margin-left: auto"></span></span><span style="font-size: 14px; color: #6b6b6b">Previews run as separate Workers with their own resources.</span></a></div>
+</div>
+</main>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+renderVals() {
+const ICON = { home: 'M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z', needs: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM8 12.5l3 2.5 5-6', activity: 'M3 12h4l3-8 4 16 3-8h4' };
+const nav = (cur) => [['Home', 'home', ''], ['Activity', 'activity', '']].map(([label, icon, count]) => ({ label, count, icon: ICON[icon], bg: label === cur ? '#f3f3f3' : 'transparent', weight: label === cur ? '500' : '400' }));
+const tree = (open, cur, dots) => {
+const G = { 'Spec': ['Overview', 'Accounts and sign-in', 'Sharing', 'Notifications'], 'Decisions': ['Read and comment only', 'Agents act for a person', 'Diagram styles go through the CSSOM'], 'The app': ['Overview', 'Workspace', 'Reader', 'Comments', 'Diagrams', 'workspace-layout.png'], 'Delivery': [], 'Feedback': [] };
+const N = { 'Spec': '19', 'Decisions': '18', 'The app': '10', 'Delivery': '6', 'Feedback': '4' };
+const out = [];
+for (const k of Object.keys(G)) {
+const o = k === open;
+out.push({ label: k, count: N[k], group: true, chev: o ? 'm6 9 6 6 6-6' : 'm9 6 6 6-6 6', bg: k === cur ? '#f3f3f3' : 'transparent', fg: k === cur ? '#1b1b1b' : '#6b6b6b', weight: k === cur ? '500' : '400', pad: '10px', dot: false });
+if (o) for (const p of G[k]) out.push({ label: p, count: '', group: false, chev: '', bg: p === cur ? '#f3f3f3' : 'transparent', fg: p === cur ? '#1b1b1b' : '#5a5a5a', weight: p === cur ? '500' : '400', pad: '24px', dot: (dots || []).includes(p) });
+}
+return out;
+};
+return { nav: nav(''), tree: tree('Decisions', 'Decisions', ['Read and comment only', 'Diagram styles go through the CSSOM']) };
+}
+}
+</script>
+</body>
+</html>
