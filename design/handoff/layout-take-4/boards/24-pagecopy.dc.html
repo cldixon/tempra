@@ -1,0 +1,99 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Page · the ⋯ menu</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:inherit;text-decoration:none}
+@keyframes tempra-pulse{0%,100%{opacity:1}50%{opacity:.35}}
+</style>
+</helmet>
+<div style="position: relative; width: 1440px; height: 900px; box-sizing: border-box; background: #ffffff; color: #1b1b1b; font-family: -apple-system, BlinkMacSystemFont, system-ui, 'Segoe UI', Helvetica, sans-serif; font-size: 14px; line-height: 1.5; display: grid; grid-template-columns: 264px minmax(0, 1fr); grid-template-rows: 60px minmax(0, 1fr); overflow: hidden">
+<div style="border-right: 1px solid #ececec; border-bottom: 1px solid #ececec; display: flex; align-items: center; gap: 10px; padding: 0 14px 0 18px">
+<span aria-hidden="true" style="width: 22px; height: 22px; border-radius: 6px; background: #1b1b1b; color: #ffffff; display: grid; place-items: center; font-size: 13px; font-weight: 600; flex: none">T</span><span aria-hidden="true" style="width: 1px; height: 18px; background: #e2e2e2"></span>
+<button type="button" aria-label="Switch library" style="display: flex; align-items: center; gap: 6px; border: 0; background: transparent; padding: 4px 6px; border-radius: 8px; font: inherit; font-size: 15px; font-weight: 500; color: #1b1b1b; cursor: pointer">tempra-dev<svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#8a8a8a" stroke-width="1.6"><path d="m6 9 6 6 6-6"/></svg></button>
+<button type="button" aria-label="Search this library" style="margin-left: auto; width: 34px; height: 34px; border: 1px solid #ececec; border-radius: 999px; background: #ffffff; display: grid; place-items: center; color: #555555; cursor: pointer"><svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-3.5-3.5"/></svg></button>
+</div>
+
+<header style="border-bottom: 1px solid #ececec; display: flex; align-items: center; gap: 10px; padding: 0 20px 0 32px">
+<nav aria-label="Breadcrumb" style="display: flex; gap: 8px; font-size: 15px; color: #8a8a8a; white-space: nowrap"><a href="#">The app</a><span aria-hidden="true">/</span><span style="color: #1b1b1b">Reader</span></nav>
+<div style="margin-left: auto; display: flex; align-items: center; gap: 8px">
+<button type="button" aria-label="Comments, 2 open" aria-pressed="false" style="display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 12px; border: 1px solid #ececec; border-radius: 999px; background: #ffffff; font: inherit; font-size: 13px; color: #3a3a3a; cursor: pointer"><svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.6A8 8 0 1 1 21 12z"/></svg>2</button><button type="button" style="display: flex; align-items: center; gap: 7px; height: 34px; padding: 0 12px; border: 1px solid #ececec; border-radius: 999px; background: #ffffff; font: inherit; font-size: 13px; color: #3a3a3a; cursor: pointer"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>Copy page</button><button type="button" aria-label="More for this page" aria-expanded="true" style="width: 34px; height: 34px; border: 1px solid #ececec; border-radius: 999px; background: #f3f3f3; display: grid; place-items: center; color: #3a3a3a; cursor: pointer"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M5 11.2a.8.8 0 1 0 0 1.6.8.8 0 0 0 0-1.6zM12 11.2a.8.8 0 1 0 0 1.6.8.8 0 0 0 0-1.6zM19 11.2a.8.8 0 1 0 0 1.6.8.8 0 0 0 0-1.6z"/></svg></button><button type="button" aria-label="Inbox, 3 unread" style="position: relative; width: 34px; height: 34px; border: 1px solid #ececec; border-radius: 999px; background: #ffffff; display: grid; place-items: center; color: #3a3a3a; cursor: pointer"><svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg><span style="position: absolute; top: -3px; right: -3px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 999px; background: #1b1b1b; color: #ffffff; font-size: 10px; font-weight: 600; display: grid; place-items: center">3</span></button><button type="button" aria-label="Account" style="width: 34px; height: 34px; border: 0; border-radius: 999px; background: #1b1b1b; color: #ffffff; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer">CD</button>
+</div>
+</header>
+
+<nav aria-label="Library" style="border-right: 1px solid #ececec; display: flex; flex-direction: column; padding: 18px 12px 14px; gap: 2px; font-size: 14px; overflow: hidden">
+<sc-for list="{{nav}}" as="i" hint-placeholder-count="3">
+<a href="#" style="display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; background: {{i.bg}}; font-weight: {{i.weight}}; color: #3a3a3a"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b6b6b" stroke-width="1.6"><path d="{{i.icon}}"/></svg>{{i.label}}<span style="margin-left: auto; font-size: 12px; color: #8a8a8a">{{i.count}}</span></a>
+</sc-for>
+<div style="height: 1px; background: #ececec; margin: 12px 10px"></div>
+<sc-for list="{{tree}}" as="t" hint-placeholder-count="8">
+<a href="#" style="display: flex; align-items: center; gap: 8px; padding: 6px 10px 6px {{t.pad}}; border-radius: 8px; background: {{t.bg}}; color: {{t.fg}}; font-weight: {{t.weight}}">{{t.label}}<span style="margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 11.5px; color: #9b9b9b">{{t.count}}<sc-if value="{{t.dot}}" hint-placeholder-val="{{ false }}"><span aria-label="changed recently" style="width: 6px; height: 6px; border-radius: 999px; background: #e2550f"></span></sc-if><sc-if value="{{t.group}}" hint-placeholder-val="{{ false }}"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#9b9b9b" stroke-width="1.6"><path d="{{t.chev}}"/></svg></sc-if></span></a>
+</sc-for>
+<a href="#" style="margin-top: auto; display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; color: #6b6b6b"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b6b6b" stroke-width="1.5"><path d="M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>Settings</a>
+</nav>
+
+<main style="display: grid; grid-template-columns: minmax(0, 1fr) 260px; overflow: hidden">
+<article style="padding: 56px 48px 40px 72px; max-width: 780px; justify-self: center; width: 100%; box-sizing: border-box">
+
+<h1 style="margin: 0; font-size: 42px; font-weight: 600; letter-spacing: -.025em; line-height: 1.1">Reader</h1>
+<p style="margin: 14px 0 0; font-size: 19px; line-height: 1.55; color: #555555">How a page's body is drawn: the stored tree as React elements, with cards, comments and the changes since verification.</p>
+<div style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: #8a8a8a; margin: 16px 0 30px">
+<span aria-hidden="true" style="position: relative; width: 20px; height: 20px; border-radius: 999px; background: #1b1b1b; color: #ffffff; display: grid; place-items: center; font-size: 9px; font-weight: 600; flex: none">C<span style="position: absolute; right: -2px; bottom: -2px; width: 8px; height: 8px; border-radius: 999px; background: #e2550f; border: 2px solid #ffffff"></span></span><span><span style="color: #3a3a3a">Claude Code</span> for @cl_dixon · edited 14 min ago</span><span aria-hidden="true">·</span><span>Verified by you Oct 12</span><a href="#" style="color: #1b1b1b; text-decoration: underline; text-decoration-color: #cfcfcf; text-underline-offset: 3px; color: #6b6b6b">3 edits since</a>
+</div>
+<figure style="margin: 4px 0 30px; display: flex; flex-direction: column; gap: 10px">
+<div style="height: 230px; border-radius: 12px; background: #0b0b0c; display: flex; align-items: center; justify-content: center; color: #f2f2f2; font-size: 15px; cursor: zoom-in">
+<span style="padding: 10px 18px; border: 1px solid #3a3a3d; border-radius: 10px; display: flex; align-items: center; gap: 8px"><span aria-hidden="true" style="width: 8px; height: 8px; border-radius: 999px; background: #e2550f; flex: none"></span>Agent</span>
+<span aria-hidden="true" style="width: 70px; height: 1px; background: #5a5a5e"></span>
+<span style="padding: 10px 18px; border: 1px solid #3a3a3d; border-radius: 10px">Ledger</span>
+<span aria-hidden="true" style="width: 70px; height: 1px; background: #5a5a5e"></span>
+<span style="padding: 10px 18px; border: 1px solid #3a3a3d; border-radius: 10px">Reader</span>
+</div>
+<figcaption style="font-size: 13px; color: #8a8a8a; padding-left: 14px"><i style="font-family: Georgia, 'Times New Roman', serif">fig. 01</i>&nbsp; A write goes through the ledger before anyone reads it</figcaption>
+</figure>
+<h2 style="margin: 30px 0 10px; font-size: 22px; font-weight: 600; letter-spacing: -.01em; margin-top: 0">Layout</h2>
+<p style="margin: 0 0 18px; font-size: 16.5px; line-height: 1.7; color: #3a3a3a">The body is the stored tree from <code style="font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 14px; background: #f5f5f5; border: 1px solid #ececec; padding: 1px 6px; border-radius: 6px">GET …/files/{path}</code>, drawn as React elements. Nothing is parsed in the browser and no HTML is injected.<sup style="font-size: 11px; color: #8a8a8a"> 1</sup></p>
+<p style="margin: 0 0 18px; font-size: 16.5px; line-height: 1.7; color: #3a3a3a">Every block carries its ID, and every run of text its offset into the document's text, so comments, the diff and selections all count the same way.</p>
+<h2 style="margin: 30px 0 10px; font-size: 22px; font-weight: 600; letter-spacing: -.01em">Rich blocks</h2>
+<p style="margin: 0 0 18px; font-size: 16.5px; line-height: 1.7; color: #3a3a3a">Rich blocks go through a small registry: a fence's language or a node type maps to a component. Diagrams are the first entry, drawn by Pele and loaded only when a page has one.</p>
+</article>
+<nav aria-label="On this page" style="padding: 64px 28px 0 8px; font-size: 13.5px; line-height: 1.45"><div style="border-left: 1px solid #ececec; display: flex; flex-direction: column; gap: 12px"><a href="#" style="margin-left: -1px; padding-left: 15px; border-left: 2px solid #1b1b1b; color: #1b1b1b">Layout</a><a href="#" style="padding-left: 16px; color: #8a8a8a">Rich blocks</a><a href="#" style="padding-left: 30px; color: #8a8a8a">Diagrams</a><a href="#" style="padding-left: 30px; color: #8a8a8a">Cards</a><a href="#" style="padding-left: 16px; color: #8a8a8a">Comments</a><a href="#" style="padding-left: 16px; color: #8a8a8a">The diff</a><a href="#" style="padding-left: 16px; color: #8a8a8a">Sources</a></div></nav>
+</main>
+<div role="menu" aria-label="More for this page" style="position: absolute; top: 52px; right: 104px; width: 230px; padding: 6px; background: #ffffff; border-radius: 12px; box-shadow: 0 18px 50px rgb(0 0 0 / .14), 0 0 0 1px rgb(0 0 0 / .06); z-index: 20">
+<a href="#" style="display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px; font-size: 13.5px; color: #1b1b1b"><span style="color: #6b6b6b; display: grid"><svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7v5l3 2"/></svg></span>History</a>
+<a href="#" style="display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px; font-size: 13.5px; color: #1b1b1b"><span style="color: #6b6b6b; display: grid"><svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h16M4 12h16M4 18h10"/></svg></span>Properties</a>
+<a href="#" style="display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px; font-size: 13.5px; color: #1b1b1b"><span style="color: #6b6b6b; display: grid"><svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 6h16v12H4zM7 15V9l2.5 3L12 9v6M16 9v6M14 13l2 2 2-2"/></svg></span>View Markdown</a>
+<div style="height: 1px; background: #ececec; margin: 4px 6px"></div>
+<a href="#" style="display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px; font-size: 13.5px; color: #1b1b1b"><span style="color: #6b6b6b; display: grid"><svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/></svg></span>Copy link</a>
+<a href="#" style="display: flex; align-items: center; gap: 10px; padding: 9px 12px; border-radius: 8px; font-size: 13.5px; color: #1b1b1b"><span style="color: #6b6b6b; display: grid"><svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M12 4v11M7 10l5 5 5-5M5 20h14"/></svg></span>Download<span style="margin-left: auto; font-size: 12px; color: #9b9b9b">.md</span></a>
+</div><span aria-hidden="true" style="position: absolute; left: 1316px; top: 26px; z-index: 50; pointer-events: none"><svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24"><path d="M5 3l14 8-6.5 1.5L9.5 19z" fill="#1b1b1b" stroke="#ffffff" stroke-width="1.5" stroke-linejoin="round"/></svg></span>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+renderVals() {
+const ICON = { home: 'M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z', needs: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM8 12.5l3 2.5 5-6', activity: 'M3 12h4l3-8 4 16 3-8h4' };
+const nav = (cur) => [['Home', 'home', ''], ['Activity', 'activity', '']].map(([label, icon, count]) => ({ label, count, icon: ICON[icon], bg: label === cur ? '#f3f3f3' : 'transparent', weight: label === cur ? '500' : '400' }));
+const tree = (open, cur, dots) => {
+const G = { 'Spec': ['Overview', 'Accounts and sign-in', 'Sharing', 'Notifications'], 'Decisions': ['Read and comment only', 'Agents act for a person', 'Diagram styles go through the CSSOM'], 'The app': ['Overview', 'Workspace', 'Reader', 'Comments', 'Diagrams', 'workspace-layout.png'], 'Delivery': [], 'Feedback': [] };
+const N = { 'Spec': '19', 'Decisions': '18', 'The app': '10', 'Delivery': '6', 'Feedback': '4' };
+const out = [];
+for (const k of Object.keys(G)) {
+const o = k === open;
+out.push({ label: k, count: N[k], group: true, chev: o ? 'm6 9 6 6 6-6' : 'm9 6 6 6-6 6', bg: k === cur ? '#f3f3f3' : 'transparent', fg: k === cur ? '#1b1b1b' : '#6b6b6b', weight: k === cur ? '500' : '400', pad: '10px', dot: false });
+if (o) for (const p of G[k]) out.push({ label: p, count: '', group: false, chev: '', bg: p === cur ? '#f3f3f3' : 'transparent', fg: p === cur ? '#1b1b1b' : '#5a5a5a', weight: p === cur ? '500' : '400', pad: '24px', dot: (dots || []).includes(p) });
+}
+return out;
+};
+return { nav: nav(''), tree: tree('The app', 'Reader', ['Reader', 'Diagrams']) };
+}
+}
+</script>
+</body>
+</html>

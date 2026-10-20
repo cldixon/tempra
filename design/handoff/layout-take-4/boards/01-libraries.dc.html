@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>All libraries</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:inherit;text-decoration:none}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; box-sizing: border-box; background: #ffffff; color: #1b1b1b; font-family: -apple-system, BlinkMacSystemFont, system-ui, 'Segoe UI', Helvetica, sans-serif; font-size: 14px; line-height: 1.5; display: grid; grid-template-columns: 264px minmax(0, 1fr); grid-template-rows: 60px minmax(0, 1fr); overflow: hidden">
+
+<div style="border-right: 1px solid #ececec; border-bottom: 1px solid #ececec; display: flex; align-items: center; gap: 10px; padding: 0 14px 0 18px">
+<span aria-hidden="true" style="width: 22px; height: 22px; border-radius: 6px; background: #1b1b1b; color: #ffffff; display: grid; place-items: center; font-size: 13px; font-weight: 600">T</span>
+<span aria-hidden="true" style="width: 1px; height: 18px; background: #e2e2e2"></span>
+<span style="font-size: 15px; font-weight: 500">Tempra</span>
+<button type="button" aria-label="Search all libraries" style="margin-left: auto; width: 34px; height: 34px; border: 1px solid #ececec; border-radius: 999px; background: #ffffff; display: grid; place-items: center; color: #555555; cursor: pointer"><svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg></button>
+</div>
+
+<header style="border-bottom: 1px solid #ececec; display: flex; align-items: center; gap: 10px; padding: 0 20px 0 32px">
+<span style="font-size: 15px">Libraries</span>
+<div style="margin-left: auto; display: flex; align-items: center; gap: 8px">
+<button type="button" style="display: flex; align-items: center; gap: 6px; height: 34px; padding: 0 14px; border: 0; border-radius: 999px; background: #1b1b1b; font: inherit; font-size: 13px; font-weight: 500; color: #ffffff; cursor: pointer"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg>New library</button>
+<button type="button" aria-label="Inbox, 3 unread" style="position: relative; width: 34px; height: 34px; border: 1px solid #ececec; border-radius: 999px; background: #ffffff; display: grid; place-items: center; color: #3a3a3a; cursor: pointer"><svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg><span style="position: absolute; top: -3px; right: -3px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 999px; background: #1b1b1b; color: #ffffff; font-size: 10px; font-weight: 600; display: grid; place-items: center">3</span></button>
+<button type="button" aria-label="Account" style="width: 34px; height: 34px; border: 0; border-radius: 999px; background: #1b1b1b; color: #ffffff; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer">CD</button>
+</div>
+</header>
+
+<nav aria-label="Account" style="border-right: 1px solid #ececec; display: flex; flex-direction: column; padding: 18px 12px 14px; gap: 2px; font-size: 14px">
+<a href="#" aria-current="page" style="display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; background: #f3f3f3; font-weight: 500"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b6b6b" stroke-width="1.6"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>Libraries</a>
+<a href="#" style="display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; color: #3a3a3a"><svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6b6b6b" stroke-width="1.6"><path d="M3 13h5l1.5 3h5L16 13h5M5 5h14l2 8v6a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-6z"/></svg>Inbox<span style="margin-left: auto; font-size: 12px; color: #8a8a8a">3</span></a>
+<div style="height: 18px"></div>
+<div style="padding: 4px 10px 6px; font-size: 12px; color: #9b9b9b">Yours</div>
+<sc-for list="{{mine}}" as="l" hint-placeholder-count="3">
+<a href="#" style="display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; color: #3a3a3a"><span aria-hidden="true" style="width: 18px; height: 18px; border-radius: 5px; background: #1b1b1b; color: #ffffff; display: grid; place-items: center; font-size: 10px; font-weight: 600">{{l.initial}}</span>{{l.name}}<span style="margin-left: auto; font-size: 12px; color: #8a8a8a">{{l.unread}}</span></a>
+</sc-for>
+<div style="height: 12px"></div>
+<div style="padding: 4px 10px 6px; font-size: 12px; color: #9b9b9b">Shared with you</div>
+<sc-for list="{{shared}}" as="l" hint-placeholder-count="2">
+<a href="#" style="display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; color: #3a3a3a"><span aria-hidden="true" style="width: 18px; height: 18px; border-radius: 999px; background: #6b6b6b; color: #ffffff; display: grid; place-items: center; font-size: 9px; font-weight: 600">{{l.initial}}</span>{{l.name}}<span style="margin-left: auto; font-size: 12px; color: #8a8a8a">{{l.unread}}</span></a>
+</sc-for>
+</nav>
+
+<main style="overflow: hidden; display: flex; justify-content: center">
+<div style="width: 100%; max-width: 1040px; padding: 56px 48px 40px; box-sizing: border-box; display: flex; flex-direction: column; gap: 30px">
+<header style="display: flex; flex-direction: column; gap: 10px">
+<h1 style="margin: 0; font-size: 42px; font-weight: 600; letter-spacing: -.025em; line-height: 1.1">Libraries</h1>
+</header>
+<sc-for list="{{sections}}" as="sec" hint-placeholder-count="2">
+<section style="display: flex; flex-direction: column; gap: 14px">
+<h2 style="margin: 0; font-size: 17px; font-weight: 600">{{sec.title}}</h2>
+<div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px">
+<sc-for list="{{sec.libs}}" as="l" hint-placeholder-count="3">
+<a href="#" style="display: flex; flex-direction: column; border: 1px solid #ececec; border-radius: 12px; overflow: hidden">
+<div style="height: 88px; padding: 16px; display: flex; align-items: flex-start; justify-content: space-between; background: #fafafa; border-bottom: 1px solid #f0f0f0">
+<span aria-hidden="true" style="width: 28px; height: 28px; border-radius: {{l.radius}}; background: #1b1b1b; color: #ffffff; display: grid; place-items: center; font-size: 13px; font-weight: 600">{{l.initial}}</span>
+<sc-if value="{{l.live}}" hint-placeholder-val="{{ false }}"><span style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #6b6b6b"><span aria-hidden="true" style="width: 6px; height: 6px; border-radius: 999px; background: #e2550f"></span>{{l.live}}</span></sc-if>
+</div>
+<div style="padding: 14px 16px 16px; display: flex; flex-direction: column; gap: 6px">
+<span style="display: flex; align-items: baseline; gap: 8px"><span style="font-weight: 500">{{l.name}}</span><span style="margin-left: auto; font-size: 12px; color: #6b6b6b">{{l.unreadLabel}}</span></span>
+<span style="font-size: 13px; color: #6b6b6b; min-height: 40px">{{l.desc}}</span>
+<span style="font-size: 12px; color: #9b9b9b">{{l.meta}}</span>
+</div>
+</a>
+</sc-for>
+</div>
+</section>
+</sc-for>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+renderVals() {
+const L = (name, initial, unread, desc, meta, live, shared) => ({ name, initial, unread, desc, meta, live,
+unreadLabel: unread ? unread + ' for you' : '', radius: shared ? '999px' : '7px' });
+const mine = [
+L('tempra-dev', 'T', '2', "Tempra's design, decisions and current state.", '61 pages · you and 2 agents', 'Claude Code · 14 min'),
+L('acme', 'A', '1', 'Retail metrics, tables and policies (a sample).', '11 pages · 1 agent', ''),
+L('notes', 'N', '', 'Personal notes kept by Claude.', '23 pages · 1 agent', '')
+];
+const shared = [
+L('ann / research', 'A', '', "Ann's reading notes on agent memory.", 'Read · 40 pages · Ann and 1 agent', 'Claude · 2 h', true),
+L('subverse / handbook', 'S', '', 'How the team works.', 'Write · 18 pages · 3 people, 2 agents', '', true)
+];
+return { mine, shared, sections: [{ title: 'Yours', libs: mine }, { title: 'Shared with you', libs: shared }] };
+}
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Sign in</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:inherit}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; box-sizing: border-box; background: #ffffff; color: #1b1b1b; font-family: -apple-system, BlinkMacSystemFont, system-ui, 'Segoe UI', Helvetica, sans-serif; font-size: 14px; line-height: 1.5; display: flex; flex-direction: column">
+<header style="height: 60px; border-bottom: 1px solid #ececec; display: flex; align-items: center; gap: 10px; padding: 0 18px">
+<span aria-hidden="true" style="width: 22px; height: 22px; border-radius: 6px; background: #1b1b1b; color: #ffffff; display: grid; place-items: center; font-size: 13px; font-weight: 600">T</span>
+<span aria-hidden="true" style="width: 1px; height: 18px; background: #e2e2e2"></span>
+<span style="font-size: 15px; font-weight: 500">Tempra</span>
+</header>
+<main style="flex: 1; display: flex; align-items: flex-start; justify-content: center; padding-top: 150px">
+<form style="width: 380px; display: flex; flex-direction: column; gap: 18px">
+<h1 style="margin: 0; font-size: 34px; font-weight: 600; letter-spacing: -.02em; line-height: 1.15">Sign in</h1>
+<p style="margin: 0; font-size: 15px; color: #6b6b6b">We'll email you a link.</p>
+<label style="display: flex; flex-direction: column; gap: 6px; font-size: 13px; color: #3a3a3a">Email<input type="email" value="cl@example.com" style="height: 42px; padding: 0 14px; border: 1px solid #dcdcdc; border-radius: 10px; font: inherit; font-size: 15px; color: #1b1b1b"></label>
+<button type="submit" style="height: 42px; border: 0; border-radius: 999px; background: #1b1b1b; color: #ffffff; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer">Email me a link</button>
+<p style="margin: 6px 0 0; font-size: 12.5px; color: #8a8a8a">No account? <a href="#" style="text-decoration: underline; text-decoration-color: #cfcfcf; text-underline-offset: 3px">Join the waitlist</a>.</p>
+</form>
+</main>
+<footer style="height: 56px; display: flex; align-items: center; justify-content: center; gap: 18px; font-size: 12.5px; color: #9b9b9b"><a href="#" style="text-decoration: none">Terms</a><a href="#" style="text-decoration: none">Privacy</a></footer>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>

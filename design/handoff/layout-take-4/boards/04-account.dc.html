@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Account settings</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+body{margin:0}
+a{color:inherit;text-decoration:none}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; box-sizing: border-box; background: #ffffff; color: #1b1b1b; font-family: -apple-system, BlinkMacSystemFont, system-ui, 'Segoe UI', Helvetica, sans-serif; font-size: 14px; line-height: 1.5; display: grid; grid-template-columns: 264px minmax(0, 1fr); grid-template-rows: 60px minmax(0, 1fr); overflow: hidden">
+
+<div style="border-right: 1px solid #ececec; border-bottom: 1px solid #ececec; display: flex; align-items: center; gap: 10px; padding: 0 14px 0 18px">
+<span aria-hidden="true" style="width: 22px; height: 22px; border-radius: 6px; background: #1b1b1b; color: #ffffff; display: grid; place-items: center; font-size: 13px; font-weight: 600">T</span>
+<span aria-hidden="true" style="width: 1px; height: 18px; background: #e2e2e2"></span>
+<span style="font-size: 15px; font-weight: 500">Settings</span>
+</div>
+
+<header style="border-bottom: 1px solid #ececec; display: flex; align-items: center; gap: 10px; padding: 0 20px 0 32px">
+<nav aria-label="Breadcrumb" style="display: flex; gap: 8px; font-size: 15px; color: #8a8a8a"><a href="#">Settings</a><span aria-hidden="true">/</span><span style="color: #1b1b1b">Account</span></nav>
+<div style="margin-left: auto; display: flex; align-items: center; gap: 8px">
+<button type="button" aria-label="Inbox, 3 unread" style="position: relative; width: 34px; height: 34px; border: 1px solid #ececec; border-radius: 999px; background: #ffffff; display: grid; place-items: center; color: #3a3a3a; cursor: pointer"><svg aria-hidden="true" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.9 1.9 0 0 0 3.4 0"/></svg><span style="position: absolute; top: -3px; right: -3px; min-width: 16px; height: 16px; padding: 0 4px; box-sizing: border-box; border-radius: 999px; background: #1b1b1b; color: #ffffff; font-size: 10px; font-weight: 600; display: grid; place-items: center">3</span></button>
+<button type="button" aria-label="Account" style="width: 34px; height: 34px; border: 0; border-radius: 999px; background: #1b1b1b; color: #ffffff; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer">CD</button>
+</div>
+</header>
+
+<nav aria-label="Settings" style="border-right: 1px solid #ececec; display: flex; flex-direction: column; padding: 18px 12px 14px; gap: 2px; font-size: 14px">
+<a href="#" style="display: flex; align-items: center; gap: 8px; padding: 7px 10px; color: #6b6b6b"><svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="m15 6-6 6 6 6"/></svg>Back to libraries</a>
+<div style="height: 14px"></div>
+<sc-for list="{{nav}}" as="i" hint-placeholder-count="5">
+<a href="#" style="display: flex; align-items: center; gap: 10px; padding: 7px 10px; border-radius: 8px; background: {{i.bg}}; font-weight: {{i.weight}}; color: #3a3a3a">{{i.label}}</a>
+</sc-for>
+</nav>
+
+<main style="overflow: hidden; display: flex; justify-content: center">
+<div style="width: 100%; max-width: 720px; padding: 56px 48px 40px; box-sizing: border-box; display: flex; flex-direction: column; gap: 34px">
+<h1 style="margin: 0; font-size: 42px; font-weight: 600; letter-spacing: -.025em; line-height: 1.1">Account</h1>
+
+<section aria-labelledby="s-profile" style="display: flex; flex-direction: column; gap: 14px">
+<h2 id="s-profile" style="margin: 0; font-size: 17px; font-weight: 600">Profile</h2>
+<div style="display: grid; grid-template-columns: 160px minmax(0, 1fr) auto; gap: 14px 20px; align-items: center; border-top: 1px solid #ececec; padding-top: 14px">
+<span style="color: #6b6b6b">Name</span><span>CL Dixon</span><button type="button" style="height: 30px; padding: 0 12px; border: 1px solid #ececec; border-radius: 999px; background: #ffffff; font: inherit; font-size: 13px; cursor: pointer">Change</button>
+<span style="color: #6b6b6b">Handle</span><span>@cl_dixon</span><button type="button" style="height: 30px; padding: 0 12px; border: 1px solid #ececec; border-radius: 999px; background: #ffffff; font: inherit; font-size: 13px; cursor: pointer">Change</button>
+<span style="color: #6b6b6b">Email</span><span>cl@example.com</span><button type="button" style="height: 30px; padding: 0 12px; border: 1px solid #ececec; border-radius: 999px; background: #ffffff; font: inherit; font-size: 13px; cursor: pointer">Change</button>
+</div>
+</section>
+
+<section aria-labelledby="s-look" style="display: flex; flex-direction: column; gap: 14px">
+<h2 id="s-look" style="margin: 0; font-size: 17px; font-weight: 600">Appearance</h2>
+<div style="display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 20px; align-items: center; border-top: 1px solid #ececec; padding-top: 14px">
+<span style="color: #6b6b6b">Theme</span>
+<div role="radiogroup" aria-label="Theme" style="display: flex; gap: 2px; padding: 3px; border-radius: 999px; background: #f5f5f5; font-size: 13px; justify-self: start">
+<button type="button" role="radio" aria-checked="true" style="height: 28px; padding: 0 14px; border: 0; border-radius: 999px; background: #ffffff; box-shadow: 0 1px 2px rgb(0 0 0 / .08); font: inherit; cursor: pointer">System</button>
+<button type="button" role="radio" aria-checked="false" style="height: 28px; padding: 0 14px; border: 0; border-radius: 999px; background: transparent; font: inherit; color: #6b6b6b; cursor: pointer">Light</button>
+<button type="button" role="radio" aria-checked="false" style="height: 28px; padding: 0 14px; border: 0; border-radius: 999px; background: transparent; font: inherit; color: #6b6b6b; cursor: pointer">Dark</button>
+</div>
+</div>
+</section>
+
+<section aria-labelledby="s-sessions" style="display: flex; flex-direction: column; gap: 14px">
+<h2 id="s-sessions" style="margin: 0; font-size: 17px; font-weight: 600">Where you're signed in</h2>
+<div style="display: flex; flex-direction: column; border-top: 1px solid #ececec">
+<div style="display: flex; align-items: center; padding: 12px 0; border-bottom: 1px solid #ececec"><span>Safari on macOS <span style="color: #8a8a8a">· this browser</span></span><span style="margin-left: auto; font-size: 13px; color: #8a8a8a">active now</span></div>
+<div style="display: flex; align-items: center; padding: 12px 0; border-bottom: 1px solid #ececec"><span>Chrome on iPhone</span><span style="margin-left: auto; font-size: 13px; color: #8a8a8a; margin-right: 14px">2 days ago</span><button type="button" style="height: 30px; padding: 0 12px; border: 1px solid #ececec; border-radius: 999px; background: #ffffff; font: inherit; font-size: 13px; cursor: pointer">Sign out</button></div>
+</div>
+</section>
+
+<section aria-labelledby="s-danger" style="display: flex; align-items: center; gap: 14px; padding-top: 14px; border-top: 1px solid #ececec">
+<div style="display: flex; flex-direction: column"><h2 id="s-danger" style="margin: 0; font-size: 15px; font-weight: 600">Delete account</h2></div>
+<button type="button" style="margin-left: auto; height: 32px; padding: 0 14px; border: 1px solid #e2c4b8; border-radius: 999px; background: #ffffff; font: inherit; font-size: 13px; color: #a3360b; cursor: pointer">Delete account…</button>
+</section>
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+renderVals() {
+const cur = 'Account';
+return {
+nav: ['Account', 'Notifications', 'Connect an agent', 'Tokens', 'Connected apps'].map((label) => ({ label, bg: label === cur ? '#f3f3f3' : 'transparent', weight: label === cur ? '500' : '400' }))
+};
+}
+}
+</script>
+</body>
+</html>
