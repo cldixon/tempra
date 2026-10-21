@@ -499,7 +499,7 @@
   margin-bottom: var(--tempra-space-4);
 }
 
-/* An entry: who, what they did, when; new ones on a faint fill with a dot at the right. */
+/* An entry: who, what they did, when; new ones carry the solid dot at the right (take 4). */
 .entry {
   display: grid;
   grid-template-columns: var(--tempra-avatar) minmax(0, 1fr) auto;
@@ -509,8 +509,10 @@
   font-size: var(--tempra-text-ui);
 }
 
-.entry.new {
-  background: var(--tempra-color-ground);
+/* On Activity's Summary, entries are rows with hairlines between them, no fill. */
+.activity-day .entry {
+  border-bottom: 1px solid var(--tempra-color-border);
+  border-radius: 0;
 }
 
 .entry > .avatar-mark {
@@ -592,6 +594,137 @@
   color: var(--tempra-color-faint);
   font-size: var(--tempra-text-meta);
   white-space: nowrap;
+}
+
+/* Activity's controls (take 4, TEMPRA-115): the view switch and the filters, Download at the
+   right end of the row. */
+.activity-filters select {
+  max-width: 14rem;
+}
+
+a.activity-download {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  font-size: var(--tempra-text-meta);
+}
+
+/* The text filter: an outlined pill with a search glyph inside it. */
+.activity-find {
+  display: flex;
+  flex: 1 1 14rem;
+  align-items: center;
+  gap: 6px;
+  max-width: 24rem;
+  padding: 0 12px;
+  border: 1px solid var(--tempra-color-border);
+  border-radius: var(--tempra-radius-pill);
+  color: var(--tempra-color-faint);
+}
+
+.activity-find:focus-within {
+  border-color: var(--tempra-color-border-strong);
+}
+
+.activity-find input:not([type="checkbox"], [type="radio"], [type="file"]) {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 0;
+  border: 0;
+  outline: 0;
+  background: none;
+  color: var(--tempra-color-text);
+  font-size: var(--tempra-text-meta);
+}
+
+/* The live entry: an agent writing now, the pulsing dot and "now" at the right. */
+.entry.live {
+  align-items: center;
+}
+
+.entry-now {
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Every event: the ledger as a quiet table, hairlines between rows, the path in the mono. */
+.events-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--tempra-text-ui);
+}
+
+.events-table th {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--tempra-color-border);
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-meta);
+  font-weight: var(--tempra-weight-regular);
+  text-align: left;
+  white-space: nowrap;
+}
+
+.events-table td {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--tempra-color-border);
+  vertical-align: baseline;
+}
+
+.events-seq,
+.events-when,
+.events-kind {
+  color: var(--tempra-color-muted);
+  white-space: nowrap;
+}
+
+.events-seq {
+  font-family: var(--tempra-font-mono);
+  font-size: var(--tempra-text-meta);
+}
+
+/* The dot sits in the seq column's left gutter, so the numbers line up with or without it. */
+.events-seq .change-dot {
+  margin: 0 8px 0 -14px;
+}
+
+.events-table td.events-seq {
+  padding-left: 22px;
+}
+
+.events-person {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.events-path {
+  overflow-wrap: anywhere;
+}
+
+.events-path a {
+  text-decoration: none;
+}
+
+.events-path a:hover code {
+  text-decoration: underline;
+}
+
+.events-path code {
+  font-size: var(--tempra-text-meta);
+  white-space: nowrap;
+}
+
+.events-note,
+.events-aside {
+  margin-left: 10px;
+  color: var(--tempra-color-muted);
+}
+
+.events-aside {
+  font-size: var(--tempra-text-meta);
 }
 
 /* On the home: smaller marks, no fill, the note in the body's face. */

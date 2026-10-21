@@ -15,7 +15,6 @@ import { File } from "./pages/File";
 import { Folder } from "./pages/Folder";
 import { Home } from "./pages/Home";
 import { Inbox } from "./pages/Inbox";
-import { Ledger } from "./pages/Ledger";
 import { Libraries } from "./pages/Libraries";
 import {
   ConnectLibrary,
@@ -108,9 +107,8 @@ function App() {
       case "restore":
         place.file = route.path;
         break;
-      case "ledger":
       case "revert":
-        place.view = "ledger";
+        place.view = "activity";
         break;
       case "library-connect":
         place.view = "connect";
@@ -127,7 +125,7 @@ function App() {
         page = <NeedsYou urls={urls} />;
         break;
       case "activity":
-        page = <Activity urls={urls} actor={actor} filters={route.filters} />;
+        page = <Activity urls={urls} actor={actor} filters={route.filters} done={route.done} />;
         break;
       case "file":
         page = (
@@ -139,9 +137,6 @@ function App() {
             compare={route.compare ?? null}
           />
         );
-        break;
-      case "ledger":
-        page = <Ledger urls={urls} filters={route.filters} done={route.done} actor={actor} />;
         break;
       case "diff":
         page = <Diff urls={urls} path={route.path} from={route.from} to={route.to} />;
@@ -175,14 +170,18 @@ function App() {
         break;
     }
   }
-  // A page starts afresh on a new URL; a concept's page stays mounted while only how it is
-  // shown changes (`?since=`, `?review=`, `?panel=`, `?done=`), so its open panel stays open
-  // (tempra-dev: app/reader, The panels). A pinned version (`?at=`) is another page.
+  // A page starts afresh on a new URL, with two exceptions. A concept's page stays mounted while
+  // only how it is shown changes (`?since=`, `?review=`, `?panel=`, `?done=`), so its open panel
+  // stays open (tempra-dev: app/reader, The panels); a pinned version (`?at=`) is another page.
+  // Activity keeps its page across its own view and filter changes (a text filter keeps focus
+  // while the URL follows it).
   const at = url.searchParams.get("at");
   const pageKey =
     route?.page === "file"
       ? `${url.pathname}${at === null ? "" : `?at=${at}`}`
-      : url.pathname + url.search;
+      : route?.page === "activity"
+        ? url.pathname
+        : url.pathname + url.search;
   const boundary = <PageBoundary key={pageKey}>{page}</PageBoundary>;
   // A library's pages share one workspace, kept mounted while the person moves within it.
   if (library) {

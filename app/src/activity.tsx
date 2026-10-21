@@ -327,6 +327,114 @@ export function whoWorksHere(you: boolean, people: number, agents: number): stri
   return parts.length > 0 ? `${parts.join(", ")} and ${last}` : last;
 }
 
+// ---------------------------------------------------------------- every event
+
+/**
+ * Every event (take 4, TEMPRA-115): the ledger as a table, one row per event, newest first. The
+ * rows come from the same `GET …/requests` pages as the Summary, so each carries its request's
+ * note, who acted and whether a person or an agent did.
+ */
+
+/** The kinds the table names, in the order the "Any kind" filter lists them. */
+export const KINDS = [
+  "write",
+  "edit",
+  "move",
+  "delete",
+  "comment",
+  "verify",
+  "revert",
+  "import",
+] as const;
+
+/** An event's kind as the table names it: a new concept is a write, a new version an edit. */
+export function kindOf(e: Pick<LedgerEvent, "op" | "prev_hash">): string {
+  if (e.op === "put") return e.prev_hash === null ? "write" : "edit";
+  return e.op;
+}
+
+/** One row of Every event. */
+export interface EventRow {
+  event: LedgerEvent;
+  request: LedgerRequest;
+  kind: string;
+  /** What the row says beside the path: a comment's words, where a move came from, the note. */
+  note: string;
+  /** The first row of its request shown: the one that names who and when. */
+  lead: boolean;
+}
+
+const oneLine = (s: string, max = 140) => {
+  const t = s.replace(/\s+/g, " ").trim();
+  return t.length > max ? `${t.slice(0, max - 1)}…` : t;
+};
+
+/** What an event's row says beside its path. */
+export function eventNote(e: LedgerEvent, r: Pick<LedgerRequest, "note">): string {
+  if (e.op === "comment") {
+    const c = e.meta?.comment as { kind?: string; body?: unknown } | undefined;
+    if (typeof c?.body === "string" && c.body.trim()) return oneLine(c.body);
+    if (c?.kind === "resolve") return "Resolved a thread";
+    if (c?.kind === "reopen") return "Reopened a thread";
+  }
+  if (e.op === "move" && typeof e.meta?.from_path === "string") {
+    const from = e.meta.from_path;
+    return r.note?.trim() ? oneLine(r.note) : `From ${from}`;
+  }
+  return r.note?.trim() ? oneLine(r.note) : "";
+}
+
+/** The filters Every event applies in the app (who and the folder go to the server). */
+export interface EventFilter {
+  who?: "everyone" | "agents" | "people";
+  kind?: string;
+  /** Text to find in the path or the note, case aside. */
+  q?: string;
+}
+
+/**
+ * Requests (newest first, as the API pages them) as table rows, newest event first, filtered.
+ * A request is listed once even when two pages both carry it.
+ */
+export function eventRows(requests: LedgerRequest[], f: EventFilter = {}): EventRow[] {
+  const q = f.q?.trim().toLowerCase() ?? "";
+  const ids = new Set<string>();
+  const rows: EventRow[] = [];
+  for (const r of requests) {
+    if (ids.has(r.request_id)) continue;
+    ids.add(r.request_id);
+    if (f.who === "people" && !byPerson(r)) continue;
+    if (f.who === "agents" && byPerson(r)) continue;
+    let lead = true;
+    for (const e of [...r.events].reverse()) {
+      const kind = kindOf(e);
+      if (f.kind && kind !== f.kind) continue;
+      const note = eventNote(e, r);
+      if (q && !e.path.toLowerCase().includes(q) && !note.toLowerCase().includes(q)) continue;
+      rows.push({ event: e, request: r, kind, note, lead });
+      lead = false;
+    }
+  }
+  return rows;
+}
+
+/** How long after an agent's last write it still reads as writing now (the pulsing dot). */
+export const LIVE_MS = 60_000;
+
+/** An agent's write seen arriving on the change feed. */
+export interface LiveWrite {
+  actor: string;
+  by: ActedBy | null;
+  path: string;
+  seq: number;
+  /** When it arrived (this browser's clock). */
+  at: number;
+}
+
+/** Whether an agent's write arrived recently enough to read as writing now. */
+export const isLive = (w: Pick<LiveWrite, "at"> | null | undefined, now: number) =>
+  !!w && now - w.at < LIVE_MS;
+
 // ---------------------------------------------------------------- times
 
 /** A local day as a key ("2026-10-19"). */
@@ -496,7 +604,10 @@ export function EntryRow(props: {
   compact?: boolean;
 }) {
   const { entry: e, urls, actor, now, isNew, compact = false } = props;
-  const warm = isNew && actor.agent && warmth({ at: Date.parse(e.ts) }, now) === "warm";
+  // Activity's entries (take 4): the solid dot, new since the person looked. The home's compact
+  // entries keep take 3's warmth until the home is redrawn (TEMPRA-117).
+  const warm =
+    isNew && (!compact || (actor.agent && warmth({ at: Date.parse(e.ts) }, now) === "warm"));
   // A compact entry that names its changes by count lists their titles on a second line.
   const titles = !e.named && compact ? e.touched.slice(0, 3).map((t) => t.title) : [];
   const classes = ["entry", compact ? "compact" : "", isNew ? "new" : ""].filter(Boolean);
@@ -528,6 +639,35 @@ export function EntryRow(props: {
             <span className="visually-hidden">New since you looked</span>
           </span>
         )}
+      </span>
+    </article>
+  );
+}
+
+/**
+ * The live entry at the top of the Summary: an agent writing now ("Claude Code is editing
+ * Reader"), with the pulsing dot, while its writes keep arriving.
+ */
+export function LiveEntry(props: {
+  write: LiveWrite;
+  urls: Urls;
+  actor: ActorView;
+  title: string;
+}) {
+  const { write: w, urls, actor } = props;
+  return (
+    <article className="entry live" aria-live="polite">
+      <Avatar name={actor.name} agent={actor.agent} />
+      <div className="entry-body">
+        <p className="entry-line">
+          <b className="entry-who">{actor.name}</b>
+          {actor.for && <span className="entry-for"> for {actor.for}</span>} is editing{" "}
+          <a href={urls.file(w.path)}>{props.title}</a>
+        </p>
+      </div>
+      <span className="entry-side entry-now">
+        <span className="change-dot live" aria-hidden="true" />
+        now
       </span>
     </article>
   );
