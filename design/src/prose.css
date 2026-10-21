@@ -454,10 +454,12 @@
   text-decoration: underline;
 }
 
-/* Changes since human verification, over the text: lines and greys only. */
+/* Changes in the text (review mode, a version chosen in History): insertions underlined on a
+   grey ground, deletions struck through in grey; the changed block's rule is concept.css's. */
 .prose ins.diff-added {
+  background: var(--tempra-color-ground);
   text-decoration: underline;
-  text-decoration-thickness: 2px;
+  text-decoration-thickness: 1px;
   text-underline-offset: 0.22em;
 }
 

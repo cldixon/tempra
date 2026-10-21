@@ -223,13 +223,19 @@ export function Tree(props: {
     currentRow.current.scrollIntoView({ block: "nearest" });
   }, [current, dirs]);
 
-  // A file's page is loaded ahead when the pointer rests on it, or the keyboard reaches it.
+  // A file's page is loaded ahead when the pointer rests on it, or the keyboard reaches it; not
+  // the file already open (a click rests the pointer on the row it opened, whose page has just
+  // loaded it).
   const hoverTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(hoverTimer.current), []);
+  const openFile = useRef(props.file);
+  openFile.current = props.file;
   const ahead = (path: string) => ({
     onMouseEnter: () => {
       clearTimeout(hoverTimer.current);
-      hoverTimer.current = setTimeout(() => prefetchFile(urls, path), HOVER_MS);
+      hoverTimer.current = setTimeout(() => {
+        if (path !== openFile.current) prefetchFile(urls, path);
+      }, HOVER_MS);
     },
     onMouseLeave: () => clearTimeout(hoverTimer.current),
     onFocus: (e: { currentTarget: Element }) => {

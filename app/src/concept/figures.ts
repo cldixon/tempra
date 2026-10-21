@@ -35,6 +35,6 @@ export function useFigureView(urls: Urls, title: string, name: Namer): FigureVie
       }
       return facts;
     };
-    return { title, describe };
+    return { title, describe, fileHref: (path: string) => urls.pinned(undefined).file(path) };
   }, [urls, title, name]);
 }

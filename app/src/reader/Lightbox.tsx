@@ -1,8 +1,8 @@
 /**
  * The full-screen view of a concept's figures (tempra-dev: app/reader, Figures): over the app on
  * the ground colour, the image (or the diagram, drawn again at the view's size) as large as fits,
- * previous and next through the concept's figures, Escape to close. For an image, "Open original"
- * and "Download" as pills, and beneath the caption a quiet line: its path, size and who added it,
+ * previous and next through the concept's figures ("fig. n of m"), Escape to close. For an image,
+ * Download and Open file (its attachment page; "Open original" for an external image) as pills, and beneath the caption a quiet line: its path, size and who added it,
  * asked of the page when the view opens (`FigureView.describe`); an external image shows its URL.
  *
  * A modal <dialog> (showModal: the top layer, focus kept inside, Escape), its look in reader.css.
@@ -32,6 +32,8 @@ export interface FigureView {
   title?: string;
   /** Facts about an image at a library path, loaded when the view shows it. */
   describe?(path: string): Promise<ImageFacts | null>;
+  /** The page of an image stored in the library (its attachment page), for Open file. */
+  fileHref?(path: string): string;
 }
 
 /** An image figure's quiet line: path (or URL), size, who added it and when. */
@@ -155,18 +157,24 @@ export function Lightbox(props: {
       <header className="lightbox-head">
         {view?.title && <span className="lightbox-where">{view.title}</span>}
         <span id={label}>
-          Figure {figure.n} of {total}
+          fig. {figure.n} of {total}
         </span>
         <span className="lightbox-actions">
           {image?.src && (
-            <>
+            <a href={image.src} download="">
+              <Icon name="download" /> Download
+            </a>
+          )}
+          {image?.path && view?.fileHref ? (
+            <a href={view.fileHref(image.path)} onClick={onClose}>
+              Open file
+            </a>
+          ) : (
+            image?.src && (
               <a href={image.src} target="_blank" rel="noopener noreferrer">
                 Open original
               </a>
-              <a href={image.src} download="">
-                Download
-              </a>
-            </>
+            )
           )}
           <button
             ref={close}

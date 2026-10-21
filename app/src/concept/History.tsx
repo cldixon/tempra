@@ -1,83 +1,76 @@
 import { useState } from "react";
-import { Ago, ago, when } from "../ui";
+import { recently, useAgo } from "../ui";
 import type { Urls } from "../urls";
 import type { Namer } from "./Byline";
-import { actedBy, CONTENT_OPS, type Concept, type HistoryEvent, standing } from "./data";
+import { actedBy, type Concept, type Standing } from "./data";
+
+/** How many versions the History panel lists at first, and adds with each "older versions". */
+const PAGE = 10;
 
 /**
- * Every event of the concept, newest first (the history menu's "All versions"): each version
- * with its number, who and why, a link to read it as it was and to its diff; verifications and
- * moves between them. The ledger and the raw file are linked at the foot, and on a pinned old
- * version, Restore.
+ * The History panel (take 4, TEMPRA-114; tempra-dev: app/reader, The panels): the concept's
+ * versions, newest first (number, note, who and when). Each opens what it changed in the text
+ * (`?since=`, the word diff to the version on screen); the version on screen goes back to the
+ * latest. Verification is in Properties, not here (decisions/verification-out-of-the-way).
  */
-export function AllVersions(props: {
+export function HistoryList(props: {
   urls: Urls;
   concept: Concept;
-  head: number;
-  events: HistoryEvent[];
+  standing: Standing;
   name: Namer;
+  /** The version whose changes are drawn (`?since=`), if any. */
+  since: number | null;
 }) {
-  const { urls, concept: c, head, name } = props;
-  // Comments are in the margin; history is the concept's versions and what happened to them.
-  const events = props.events.filter((e) => e.op !== "comment");
-  const s = standing(events, c.seq);
-  const numbers = new Map(s.versions.map((v) => [v.event.seq, v.n]));
-  const shown = [...events].reverse().slice(0, 100);
-  const pinnedOld = urls.at !== undefined && urls.at < head;
-  const [now] = useState(() => Date.now());
+  const { urls, concept: c, standing: s, name } = props;
+  const [shown, setShown] = useState(PAGE);
+  const versions = [...s.versions].reverse();
+  const older = versions.length - shown;
+  const latest = urls.pinned(undefined).file(c.path);
   return (
     <>
-      <ol className="history">
-        {shown.map((e) => {
+      <ol className="versions">
+        {versions.slice(0, shown).map((version) => {
+          const e = version.event;
+          const who = name(e.actor, actedBy(e));
           const note = typeof e.meta?.note === "string" ? e.meta.note : "";
-          const from = typeof e.meta?.from_path === "string" ? `from ${e.meta.from_path}` : "";
-          const n = numbers.get(e.seq);
-          const what =
-            e.op === "verify" ? "verified" : e.op === "move" ? "moved" : n ? `version ${n}` : e.op;
-          // The version on screen (its last event may be a move or a verification).
-          const current = e.seq === s.current?.event.seq;
-          const classes = [current ? "current" : "", e.op === "verify" ? "verify" : ""];
+          const isCurrent = e.seq === s.current?.event.seq;
+          const chosen = props.since === e.seq;
           return (
-            <li key={e.seq} className={classes.filter(Boolean).join(" ") || undefined}>
-              <span className="history-what">
-                {e.op === "delete" ? (
-                  what
-                ) : (
-                  <a href={urls.pinned(e.seq).file(e.path)} title="Read this version as it was">
-                    {what}
-                  </a>
-                )}{" "}
-                <span className="history-who">{name(e.actor, actedBy(e)).name}</span>
-                {(note || from) && (
-                  <span className="history-note">{[from, note].filter(Boolean).join(" · ")}</span>
-                )}
-              </span>
-              <span className="history-when">
-                {CONTENT_OPS.has(e.op) ? (
-                  <a href={urls.diff(e.path, undefined, e.seq)} title={`Diff · ${when(e.ts)} UTC`}>
-                    {ago(e.ts, now)}
-                  </a>
-                ) : (
-                  <Ago ts={e.ts} now={now} />
-                )}
-              </span>
+            <li key={e.seq}>
+              <a
+                className={chosen ? "version chosen" : isCurrent ? "version current" : "version"}
+                href={isCurrent ? latest : urls.since(c.path, e.seq)}
+                aria-current={chosen ? "true" : undefined}
+                title={isCurrent ? "The version on screen" : `What version ${version.n} changed`}
+              >
+                <span className="version-n">v{version.n}</span>
+                <span className="version-what">
+                  <span className="version-note">{note || (isCurrent ? "Latest" : "No note")}</span>
+                  <span className="version-who">
+                    {who.name}
+                    {who.for && ` for ${who.for}`} · <When ts={e.ts} />
+                  </span>
+                </span>
+              </a>
             </li>
           );
         })}
       </ol>
-      {events.length > shown.length && (
-        <p className="small muted">{events.length - shown.length} older events not shown.</p>
+      {older > 0 && (
+        <button
+          type="button"
+          className="ghost older-versions"
+          onClick={() => setShown((n) => n + PAGE)}
+        >
+          {older} older version{older === 1 ? "" : "s"}
+        </button>
       )}
-      <p className="dialog-foot">
-        <a href={urls.ledger({ prefix: c.path })}>All {events.length} in the ledger</a>
-        <a href={urls.raw(c.path)}>Raw file</a>
-        {pinnedOld && (
-          <>
-            <a href={urls.pinned(undefined).file(c.path)}>Current version</a>
-            <a href={urls.restore(c.path, urls.at as number)}>Restore this version…</a>
-          </>
-        )}
-      </p>
     </>
   );
+}
+
+/** "14 min" within a day, else the day; kept current as time passes. */
+function When({ ts }: { ts: string }) {
+  useAgo(ts);
+  return <time dateTime={ts}>{recently(ts, Date.now())}</time>;
 }

@@ -9,9 +9,9 @@ import type { Urls } from "../urls";
 import type { CommentT, Draft, Placed, Thread } from "./data";
 
 /*
- * One comment thread as the margin and the comment sheets draw it (tempra-dev: app/comments):
- * collapsed to one line (who, the first words, when) until it is the active thread, which shows
- * its comments, a reply field and Resolve. And the composer for a new comment.
+ * One comment thread as the Comments panel draws it (tempra-dev: app/comments): compact (its
+ * quote, then who, the first words, when) until it is the active thread, a card with its
+ * comments, a reply field and Resolve (Reopen once resolved). And the composer for a new comment.
  */
 
 /** Names actors for comments: agents for their person, the signed-in person as "You". */
@@ -56,10 +56,18 @@ export function ThreadView(props: {
         aria-expanded="false"
         onClick={select}
       >
-        {first && <By who={name(first.actor, first.by)} />}
-        <span className="thread-words">{first ? clip(first.body, 80) : ""}</span>
-        {t.replies > 0 && <span className="thread-replies">{t.replies + 1}</span>}
-        {first && <Ago ts={t.comments[t.comments.length - 1]?.ts ?? first.ts} now={now} />}
+        {t.anchor && (
+          <span className="quote thread-quote">
+            {outdated && <span className="visually-hidden">Outdated: </span>}
+            {clip(t.anchor.quote, 120)}
+          </span>
+        )}
+        <span className="thread-meta">
+          {first && <By who={name(first.actor, first.by)} />}
+          <span className="thread-words">{first ? clip(first.body, 80) : ""}</span>
+          {t.replies > 0 && <span className="thread-replies">{t.replies + 1}</span>}
+          {first && <Ago ts={t.comments[t.comments.length - 1]?.ts ?? first.ts} now={now} />}
+        </span>
       </button>
     );
   }
@@ -205,8 +213,8 @@ function ThreadActions(props: {
 }
 
 /**
- * A new comment: on the selected text (a draft, started from the selection toolbar and shown
- * beside it) or on the whole concept. Escape, Cancel, or leaving it empty drops it.
+ * A new comment: on the selected text (a draft, started from the selection toolbar, at the top
+ * of the Comments panel) or on the whole concept. Escape, Cancel, or leaving it empty drops it.
  */
 export function NewComment(props: {
   urls: Urls;

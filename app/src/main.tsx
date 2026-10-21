@@ -170,9 +170,18 @@ function App() {
         break;
     }
   }
+  // A page starts afresh on a new URL, with two exceptions. A concept's page stays mounted while
+  // only how it is shown changes (`?since=`, `?review=`, `?panel=`, `?done=`), so its open panel
+  // stays open (tempra-dev: app/reader, The panels); a pinned version (`?at=`) is another page.
   // Activity keeps its page across its own view and filter changes (a text filter keeps focus
-  // while the URL follows it); every other page starts afresh on a new URL.
-  const pageKey = route?.page === "activity" ? url.pathname : url.pathname + url.search;
+  // while the URL follows it).
+  const at = url.searchParams.get("at");
+  const pageKey =
+    route?.page === "file"
+      ? `${url.pathname}${at === null ? "" : `?at=${at}`}`
+      : route?.page === "activity"
+        ? url.pathname
+        : url.pathname + url.search;
   const boundary = <PageBoundary key={pageKey}>{page}</PageBoundary>;
   // A library's pages share one workspace, kept mounted while the person moves within it.
   if (library) {

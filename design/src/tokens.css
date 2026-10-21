@@ -99,11 +99,9 @@
   --tempra-avatar-small: 20px;
   --tempra-dot: 6px; /* an agent's change, a reader's unverified state */
 
-  /* A concept's columns: contents on the left, the text, comments on the right */
+  /* A concept's columns (take 4): the text, centred; on the right its contents, or a panel */
   --tempra-column-text: 620px;
-  --tempra-margin-contents: 180px;
-  --tempra-margin-comments: 290px;
-  --tempra-margin-gap: 48px;
+  --tempra-contents: 200px;
   --tempra-page-width: 760px; /* home, Needs you, Activity, a folder */
 
   /* Shape: squarer than take 2 */

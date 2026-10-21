@@ -1,16 +1,8 @@
-import {
-  type RefObject,
-  useCallback,
-  useEffect,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useActors } from "../agents";
 import { Icon } from "../chrome";
+import { CommentsList } from "../comments/CommentsPanel";
 import { highlightsOf, placeThreads, type Thread, useDraft } from "../comments/data";
-import { CommentsMargin, type CommentsMode } from "../comments/Margin";
 import { Reader } from "../Reader";
 import { type BodyOptions, prepare } from "../reader/prepare";
 import { pushRecent } from "../recent";
@@ -24,77 +16,15 @@ import { Contents, contentsOf } from "./Contents";
 import { useCompare } from "./compare";
 import { bodyHref, type ConceptData, standing, titleOf } from "./data";
 import { useFigureView } from "./figures";
+import { HistoryList } from "./History";
 import { useHoverCards } from "./hover";
 import { type Live, LiveNotice, NewVersion } from "./live";
-import { MoreMenu } from "./MoreMenu";
+import { Panel, type PanelName, panelInUrl } from "./Panel";
+import { PropertiesList } from "./Properties";
 import { RawMarkdown } from "./RawMarkdown";
 import { ReviewBar } from "./ReviewBar";
 import { SourcesSection } from "./Sources";
-
-/** Whether the person keeps a concept's comments shown (remembered on this browser). */
-const COMMENTS_KEY = "tempra:comments";
-
-function storedComments(): boolean {
-  try {
-    return localStorage.getItem(COMMENTS_KEY) !== "off";
-  } catch {
-    return true;
-  }
-}
-
-function storeComments(on: boolean) {
-  try {
-    localStorage.setItem(COMMENTS_KEY, on ? "on" : "off");
-  } catch {
-    // Storage off: the choice lasts for this page load.
-  }
-}
-
-/**
- * How the comments are shown at the sheet's width: the stylesheet decides (container queries on
- * the sheet set `--comments-mode` on the page), and this reads its answer as the sheet resizes.
- * Null until the page has been measured once.
- */
-function useCommentsMode(page: RefObject<HTMLElement | null>): CommentsMode | null {
-  const [mode, setMode] = useState<CommentsMode | null>(null);
-  useLayoutEffect(() => {
-    const el = page.current;
-    if (!el) return;
-    const read = () => {
-      const v = getComputedStyle(el).getPropertyValue("--comments-mode").trim();
-      setMode(v === "side" || v === "bottom" ? v : "margin");
-    };
-    read();
-    const watch = new ResizeObserver(read);
-    watch.observe(el.closest(".ws-main") ?? el);
-    return () => watch.disconnect();
-  }, [page]);
-  return mode;
-}
-
-/**
- * Whether the comments show, and how. In the margin they show as the person last chose (kept on
- * this browser); a sheet (where there is no room for a margin) shows only when the person opens
- * it, never by itself.
- */
-function useCommentsShown(page: RefObject<HTMLElement | null>) {
-  const measured = useCommentsMode(page);
-  const mode = measured ?? "margin";
-  const [kept, setKept] = useState(storedComments);
-  const [opened, setOpened] = useState(false);
-  /** Shows or hides them; `remember` keeps the choice (a link opening them does not). */
-  const set = useCallback(
-    (on: boolean, remember = true) => {
-      if (mode !== "margin") setOpened(on);
-      else {
-        setKept(on);
-        if (remember) storeComments(on);
-      }
-    },
-    [mode],
-  );
-  return { mode, measured: measured !== null, shown: mode === "margin" ? kept : opened, set };
-}
+import { CopyPage, PageMenu } from "./Tools";
 
 /** The thread a link names (`#thread-<id>`), if any. */
 function threadInHash(): string | null {
@@ -103,10 +33,13 @@ function threadInHash(): string | null {
 }
 
 /**
- * A concept's page (take 3; tempra-dev: app/reader, app/comments): the sheet's bar (where it is,
- * the comments toggle, "…"), the title, description and byline, the body in the reader with its
- * contents in the left margin and its comment threads in the right, and its sources at the end.
- * Review mode and a chosen version draw their diff in the text under a slim bar.
+ * A concept's page (take 4, TEMPRA-114; tempra-dev: app/reader, app/comments,
+ * decisions/one-panel-from-the-top-bar): its tools in the top bar (Comments n, Copy page, ⋯), the
+ * title, description and byline, the body in the reader and its sources at the end, centred in
+ * its column; on the right the contents, or one panel in their place (Comments, History,
+ * Properties), opened only by the person and never remembered. Review mode and a version chosen
+ * in History draw their diff in the text under a slim bar; View Markdown shows the stored file
+ * in place of the page.
  */
 export function ConceptPage(props: {
   urls: Urls;
@@ -175,18 +108,35 @@ export function ConceptPage(props: {
         : null;
   const changes = useCompare(urls, c.path, prepared, base);
 
-  // Comments: each thread's quote found in the body on screen, highlighted while open, in the
-  // margin beside it. Shown or not as the person last chose; a sheet (where there is no room for
-  // a margin) never opens by itself.
-  const page = useRef<HTMLDivElement>(null);
-  const toggle = useRef<HTMLButtonElement>(null);
-  const comments = useCommentsShown(page);
-  const { mode, shown: showComments, set: showCommentsAs } = comments;
-  /** Closes a comment sheet (or the margin) and gives the focus back to the toggle. */
-  const closeComments = useCallback(() => {
-    showCommentsAs(false);
-    toggle.current?.focus();
-  }, [showCommentsAs]);
+  // The right column: the contents, or one panel. A page opens on its contents; a panel opens
+  // only from a control, a quote, or a link asking for one (`?panel=`, `#thread-…`,
+  // `#comments`), and closing it (×, Escape, the control again) brings the contents back.
+  const [panel, setPanel] = useState<PanelName | null>(panelInUrl);
+  const commentsButton = useRef<HTMLButtonElement>(null);
+  const opener = useRef<HTMLElement | null>(null);
+  const panelBox = useRef<HTMLDivElement>(null);
+  const openPanel = useCallback((name: PanelName) => {
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && !panelBox.current?.contains(focused)) {
+      opener.current = focused.closest(".menu") ? commentsButton.current : focused;
+    }
+    setPanel(name);
+  }, []);
+  const closePanel = useCallback(() => {
+    setPanel(null);
+    // The focus goes back where it was, unless the person has moved on.
+    const focused = document.activeElement;
+    if (!focused || focused === document.body || panelBox.current?.contains(focused)) {
+      (opener.current ?? commentsButton.current)?.focus();
+    }
+  }, []);
+  const togglePanel = useCallback(
+    (name: PanelName) => (panel === name ? closePanel() : openPanel(name)),
+    [panel, openPanel, closePanel],
+  );
+
+  // Comments: each thread's quote found in the body on screen, highlighted while open, listed in
+  // the Comments panel.
   const [active, setActive] = useState<string | null>(threadInHash);
   const placed = useMemo(
     () => placeThreads(props.threads ?? [], prepared.text),
@@ -197,50 +147,55 @@ export function ConceptPage(props: {
   const startDraft = useCallback(
     (range: { from: number; to: number }) => {
       draft.start(range);
-      showCommentsAs(true);
+      openPanel("comments");
     },
-    [draft.start, showCommentsAs],
+    [draft.start, openPanel],
   );
   const onMark = useCallback(
     (id: string | null) => {
       setActive(id);
-      if (id) showCommentsAs(true);
+      if (id) openPanel("comments");
     },
-    [showCommentsAs],
+    [openPanel],
   );
   const highlights = useMemo(
     () => highlightsOf(placed, active, draft.draft),
     [placed, active, draft.draft],
   );
-  // A link to a thread (Needs you, the inbox, the ledger) or to the comments opens them, once
-  // the page knows how it shows them, and again when the #fragment changes; not on a resize.
-  const show = useRef(showCommentsAs);
-  show.current = showCommentsAs;
+  // A link that asks for a panel or a thread (Needs you, the inbox, `?panel=`) opens it when the
+  // URL changes to it, and again when the #fragment changes; never on its own otherwise.
+  const asked = panelInUrl();
+  const where = `${location.search}${location.hash}`;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: on a move to a URL that asks.
   useEffect(() => {
-    if (!comments.measured) return;
+    if (!asked) return;
+    const id = threadInHash();
+    if (id) setActive(id);
+    setPanel(asked);
+  }, [asked, where]);
+  useEffect(() => {
     const follow = () => {
       const id = threadInHash();
       if (id) setActive(id);
-      if (id || location.hash === "#comments") show.current(true, false);
+      if (id || location.hash === "#comments") setPanel("comments");
     };
-    follow();
     window.addEventListener("hashchange", follow);
     return () => window.removeEventListener("hashchange", follow);
-  }, [comments.measured]);
-  // Escape closes a comment sheet (the margin stays: it is part of the page). One Escape, one
-  // thing closed: the event is marked handled for the drawer and the rest.
+  }, []);
+  // Escape closes the panel (one Escape, one thing closed: a menu, a dialog, a draft or the
+  // drawer handle theirs first and mark it handled).
   useEffect(() => {
-    if (mode === "margin" || !showComments) return;
+    if (!panel) return;
     const onKey = (e: KeyboardEvent) => {
       const t = e.target instanceof Element ? e.target : null;
       if (e.key === "Escape" && !e.defaultPrevented && !t?.closest("dialog, .menu, form")) {
         e.preventDefault();
-        closeComments();
+        closePanel();
       }
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [mode, showComments, closeComments]);
+  }, [panel, closePanel]);
 
   // Recent files, for the quick switcher.
   useEffect(() => {
@@ -249,43 +204,36 @@ export function ConceptPage(props: {
 
   const work = data.work.filter((w) => w.kind !== "comment" && w.kind !== "lint");
   const moved = live && (live.change.op === "move" || live.change.op === "delete");
-  const prose = useCallback(() => page.current?.querySelector(".doc .body > .prose") ?? null, []);
   const dir = dirOf(c.path);
-  const classes = [
-    "concept",
-    showComments ? "comments-on" : "",
-    contents.length >= 2 ? "has-contents" : "",
-  ];
+  const mayVerify = role !== null && role !== "read";
+  const hasContents = contents.length >= 2;
+  const classes = ["concept", panel ? "panel-open" : "", markdown ? "markdown-on" : ""];
   return (
-    <div ref={page} className={classes.filter(Boolean).join(" ")}>
+    <div className={classes.filter(Boolean).join(" ")}>
       <PageBar
         back={{ href: urls.tree(dir), label: dir ? folderName(dir) : urls.slug }}
         actions={
           <>
             {live && !moved && <NewVersion urls={urls} live={live} />}
             <button
-              ref={toggle}
+              ref={commentsButton}
               type="button"
               className="icon-button with-count"
               aria-label={openCount > 0 ? `Comments, ${openCount} open` : "Comments"}
               title="Comments"
-              aria-pressed={showComments}
-              onClick={() => showCommentsAs(!showComments)}
+              aria-pressed={panel === "comments"}
+              onClick={() => togglePanel("comments")}
             >
               <Icon name="comments" />
               {openCount > 0 && <span aria-hidden="true">{openCount}</span>}
             </button>
-            <MoreMenu
+            <CopyPage urls={urls} path={c.path} />
+            <PageMenu
               urls={urls}
-              concept={c}
-              links={links}
-              head={head}
-              standing={s}
-              name={name}
-              current={current}
-              work={work}
-              contents={contents}
+              path={c.path}
+              panel={panel}
               markdown={markdown}
+              onPanel={togglePanel}
               onMarkdown={setMarkdown}
             />
           </>
@@ -296,36 +244,46 @@ export function ConceptPage(props: {
           {status && status !== "stable" && <span className="crumb-flag">{status}</span>}
         </Crumbs>
       </PageBar>
-      {compare && (
-        <ReviewBar
-          urls={urls}
-          concept={c}
-          compare={compare}
-          standing={s}
-          name={name}
-          mayVerify={role !== null && role !== "read"}
-          error={changes.error}
-          onVerified={props.onVerified}
-        />
-      )}
       <div className="concept-grid">
-        {contents.length >= 2 && (
-          <nav className="concept-contents" aria-label="Contents">
-            <Contents headings={contents} />
-          </nav>
-        )}
         <article className="doc">
+          {compare && (
+            <ReviewBar
+              urls={urls}
+              concept={c}
+              compare={compare}
+              standing={s}
+              name={name}
+              mayVerify={mayVerify}
+              error={changes.error}
+              onVerified={props.onVerified}
+            />
+          )}
           {props.notice && <div className="notice">{props.notice}</div>}
           {moved && live && <LiveNotice urls={urls} live={live} />}
           <AtNotice urls={urls} head={head} current={urls.pinned(undefined).file(c.path)} />
-          <header className="doc-head">
-            <h1 className="doc-title">{title}</h1>
-            {typeof fm.description === "string" && <p className="doc-tagline">{fm.description}</p>}
-            <Byline urls={urls} concept={c} history={data.history} head={head} name={name} />
-          </header>
-          {markdown && <RawMarkdown urls={urls} path={c.path} hash={c.hash} />}
+          {markdown && (
+            <RawMarkdown
+              urls={urls}
+              path={c.path}
+              hash={c.hash}
+              onBack={() => setMarkdown(false)}
+            />
+          )}
           {/* Kept mounted under the markdown, so comments keep their place. */}
-          <div hidden={markdown}>
+          <div className="doc-page" hidden={markdown}>
+            <header className="doc-head">
+              <h1 className="doc-title">{title}</h1>
+              {typeof fm.description === "string" && (
+                <p className="doc-tagline">{fm.description}</p>
+              )}
+              <Byline concept={c} history={data.history} name={name} live={live} />
+              {hasContents && (
+                <details className="toc-inline">
+                  <summary>On this page</summary>
+                  <Contents headings={contents} />
+                </details>
+              )}
+            </header>
             <Reader
               prepared={prepared}
               diff={changes.diff}
@@ -339,24 +297,60 @@ export function ConceptPage(props: {
             <SourcesSection urls={urls} data={sources} prepared={prepared} numbers={numbers} />
           </div>
         </article>
-        {showComments && (
-          <CommentsMargin
-            urls={urls}
-            path={c.path}
-            mode={mode}
-            placed={placed}
-            error={props.threadsError}
-            writable={current}
-            draft={draft.draft}
-            onDraftDone={draft.clear}
-            active={active}
-            onActive={setActive}
-            onChanged={props.onCommented}
-            onClose={closeComments}
-            prose={prose}
-            drawn={`${changes.diff ? "diff" : ""} ${markdown} ${c.hash}`}
-          />
-        )}
+        <div className="concept-side" ref={panelBox}>
+          {panel === "comments" ? (
+            <Panel
+              name="comments"
+              count={openCount > 0 ? `${openCount} open` : null}
+              onClose={closePanel}
+            >
+              <CommentsList
+                urls={urls}
+                path={c.path}
+                placed={placed}
+                error={props.threadsError}
+                writable={current}
+                draft={draft.draft}
+                onDraftDone={draft.clear}
+                active={active}
+                onActive={setActive}
+                onChanged={props.onCommented}
+              />
+            </Panel>
+          ) : panel === "history" ? (
+            <Panel name="history" onClose={closePanel}>
+              <HistoryList
+                urls={urls}
+                concept={c}
+                standing={s}
+                name={name}
+                since={compare?.kind === "since" ? compare.seq : null}
+              />
+            </Panel>
+          ) : panel === "properties" ? (
+            <Panel name="properties" onClose={closePanel}>
+              <PropertiesList
+                urls={urls}
+                concept={c}
+                links={links}
+                head={head}
+                standing={s}
+                name={name}
+                work={work}
+                current={current}
+                reviewing={compare?.kind === "review"}
+                mayVerify={mayVerify}
+                onVerified={props.onVerified}
+              />
+            </Panel>
+          ) : (
+            hasContents && (
+              <nav className="concept-contents" aria-label="Contents">
+                <Contents headings={contents} />
+              </nav>
+            )
+          )}
+        </div>
       </div>
     </div>
   );

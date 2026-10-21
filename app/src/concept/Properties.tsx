@@ -1,81 +1,121 @@
-import { day, plural, when } from "../ui";
-import type { Urls } from "../urls";
+import { type ReactNode, useState } from "react";
+import { ApiError, api } from "../api";
+import { navigate } from "../router";
+import { Chip, day, plural, when } from "../ui";
+import { enc, type Urls } from "../urls";
 import type { Namer } from "./Byline";
-import { actedBy, type Json, type JsonObject, type Links, type Standing } from "./data";
+import { actedBy, type Concept, type Json, type Links, type Standing, type WorkItem } from "./data";
 
 /**
- * A concept's properties (from the "…" menu): its frontmatter, read-only, what links to it, and
- * where it stands with human verification (tempra-dev: app/reader, The corner controls;
- * decisions/verification-out-of-the-way).
+ * The Properties panel (take 4, TEMPRA-114; tempra-dev: app/reader, The panels): the concept's
+ * facts (type, status, stale after, sources, path, generated), what links to it and its broken
+ * links, the agents' notes on it (lint, work items), and the Verification section when there is
+ * something to review (decisions/verification-out-of-the-way).
  */
-export function Properties(props: {
+export function PropertiesList(props: {
   urls: Urls;
-  path: string;
-  fm: JsonObject;
+  concept: Concept;
   links: Links;
   head: number;
   standing: Standing;
   name: Namer;
+  work: WorkItem[];
   /** The page is current (not a pinned old version), so it can be reviewed. */
   current: boolean;
-  /** Closes the dialog (Review opens review mode under it). */
-  onClose(): void;
+  /** Review mode is on (the changes since verification are drawn). */
+  reviewing: boolean;
+  /** A write member: may verify. */
+  mayVerify: boolean;
+  onVerified(): void;
 }) {
+  const { urls, concept: c } = props;
   return (
     <>
-      <Frontmatter fm={props.fm} />
-      <LinkedFrom urls={props.urls} links={props.links} head={props.head} />
-      <Verification
-        urls={props.urls}
-        path={props.path}
-        standing={props.standing}
-        name={props.name}
-        current={props.current}
-        onReview={props.onClose}
-      />
+      <Facts concept={c} />
+      <LinkedFrom urls={urls} links={props.links} head={props.head} />
+      <AgentNotes concept={c} work={props.work} />
+      {props.current && (
+        <Verification
+          urls={urls}
+          path={c.path}
+          standing={props.standing}
+          name={props.name}
+          reviewing={props.reviewing}
+          mayVerify={props.mayVerify}
+          onVerified={props.onVerified}
+        />
+      )}
     </>
   );
 }
 
-/** "Verified by you on Oct 9", "2 changes since you verified", "Not yet verified", and Review. */
+/**
+ * "2 changes since you verified" (or "Not yet verified by a person"), Show changes or Hide
+ * changes, and Verify this version for a write member. Shown only when there is something to
+ * review: not once the version on screen is the one a person verified.
+ */
 function Verification(props: {
   urls: Urls;
   path: string;
   standing: Standing;
   name: Namer;
-  current: boolean;
-  onReview(): void;
+  reviewing: boolean;
+  mayVerify: boolean;
+  onVerified(): void;
 }) {
-  const { standing: s } = props;
+  const { urls, path, standing: s } = props;
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   const v = s.verified;
+  if (v && s.since === 0) return null;
   const by = v ? props.name(v.event.actor, actedBy(v.event)) : null;
   const whom = by?.you ? "you" : by?.name;
   const words =
-    !v || !by
-      ? "Not yet verified by a person"
-      : s.since === 0
-        ? `Verified by ${whom} on ${day(v.event.ts)}${v.version ? `, at version ${v.version.n}` : ""}`
-        : `${plural(s.since, "change")} since ${whom} verified on ${day(v.event.ts)}`;
-  const toReview = !v || s.since > 0;
+    v && by
+      ? `${plural(s.since, "change")} since ${whom} verified on ${day(v.event.ts)}`
+      : "Not yet verified by a person";
+  const plain = `${urls.pinned(undefined).file(path)}`;
+  const verify = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await api(urls.api(`verify/${enc(path)}`), { method: "POST" });
+      navigate(`${plain}?done=verify`, { replace: true });
+      props.onVerified();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
-    <section>
+    <section className="panel-section verification" aria-label="Verification">
       <h3 className="label">Verification</h3>
-      <p className="small muted">
-        {words}
-        {props.current && toReview && (
-          <>
-            {" · "}
-            <a href={props.urls.review(props.path)} onClick={props.onReview}>
-              Review
-            </a>
-          </>
+      <p className="verification-state">{words}</p>
+      <div className="actions">
+        {props.reviewing ? (
+          <a className="button" href={plain}>
+            Hide changes
+          </a>
+        ) : (
+          <a className="button" href={urls.review(path)}>
+            Show changes
+          </a>
         )}
-      </p>
+        {/* In review mode the bar over the text carries Verify, with its note. */}
+        {props.mayVerify && !props.reviewing && (
+          <button type="button" className="primary" disabled={busy} onClick={verify}>
+            Verify this version
+          </button>
+        )}
+      </div>
+      {error && <p className="small warn">{error}</p>}
     </section>
   );
 }
 
-function Scalar({ v }: { v: Json }) {
+/** A frontmatter value as text: a list joined, a link a link, an object as JSON. */
+function Value({ v }: { v: Json }) {
   if (v === null) return <span className="muted">null</span>;
   if (typeof v === "string" && /^https?:\/\//i.test(v)) {
     return (
@@ -84,66 +124,69 @@ function Scalar({ v }: { v: Json }) {
       </a>
     );
   }
+  if (Array.isArray(v) && v.every((x) => x === null || typeof x !== "object")) {
+    return <>{v.map(String).join(", ")}</>;
+  }
+  if (typeof v === "object") return <pre className="src">{JSON.stringify(v, null, 2)}</pre>;
   return <>{String(v)}</>;
 }
 
-/** `{ by, at }` as "by … · at …". */
-function stamp(v: Json): { by: string; at: string } | null {
+/** `generated: { by, at }` as who and when. */
+function stamp(v: Json | undefined): { by: string; at: string } | null {
   if (!v || typeof v !== "object" || Array.isArray(v)) return null;
-  if (!Object.keys(v).every((k) => k === "by" || k === "at")) return null;
   return { by: String(v.by ?? ""), at: String(v.at ?? "") };
 }
 
-function FmValue({ k, v }: { k: string; v: Json }) {
-  if (k === "sources" && Array.isArray(v)) {
-    return (
-      <a href="#sources">
-        {v.length} source{v.length === 1 ? "" : "s"}
+/** The concept's facts, read-only: the frontmatter a person asks about, in a fixed order. */
+function Facts({ concept: c }: { concept: Concept }) {
+  const fm = c.frontmatter;
+  const sources = Array.isArray(fm.sources) ? fm.sources.length : 0;
+  const generated = stamp(fm.generated);
+  const rows: [string, ReactNode][] = [
+    [
+      "Type",
+      typeof fm.type === "string" && fm.type ? fm.type : <Chip key="t" text="no type" tone="bad" />,
+    ],
+  ];
+  if (fm.status !== undefined) rows.push(["Status", <Value key="s" v={fm.status} />]);
+  if (fm.stale_after !== undefined) {
+    rows.push([
+      "Stale after",
+      <span key="sa">
+        {day(String(fm.stale_after))}
+        {c.stale && <Chip text="stale" tone="bad" />}
+        {c.stale_soon && <Chip text="stale soon" />}
+      </span>,
+    ]);
+  }
+  if (fm.tags !== undefined) rows.push(["Tags", <Value key="t" v={fm.tags} />]);
+  if (fm.resource !== undefined) rows.push(["Resource", <Value key="r" v={fm.resource} />]);
+  rows.push([
+    "Sources",
+    sources > 0 ? (
+      <a key="s" href="#sources">
+        {plural(sources, "source")}
       </a>
-    );
+    ) : (
+      "None"
+    ),
+  ]);
+  rows.push(["Path", <code key="p">{c.path}</code>]);
+  if (generated) {
+    rows.push([
+      "Generated",
+      <span key="g">
+        {generated.at ? when(generated.at) : ""}
+        {generated.by && <div className="small muted">{generated.by}</div>}
+      </span>,
+    ]);
   }
-  const stamps = Array.isArray(v) ? v.map(stamp) : [stamp(v)];
-  if (stamps.length > 0 && stamps.every((s) => s !== null)) {
-    return (
-      <>
-        {stamps.map((s, i) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: stamps are shown in order, never moved.
-          <span key={i}>
-            {s?.by}
-            <div className="small muted">{when(s?.at ?? "")}</div>
-          </span>
-        ))}
-      </>
-    );
-  }
-  if (Array.isArray(v) && v.every((x) => x === null || typeof x !== "object")) {
-    return (
-      <>
-        {v.map((x, i) => (
-          // biome-ignore lint/suspicious/noArrayIndexKey: list items are shown in order.
-          <span key={i}>
-            {i > 0 && ", "}
-            <Scalar v={x} />
-          </span>
-        ))}
-      </>
-    );
-  }
-  if (v !== null && typeof v === "object")
-    return <pre className="src">{JSON.stringify(v, null, 2)}</pre>;
-  return <Scalar v={v} />;
-}
-
-/** The frontmatter, read-only. */
-function Frontmatter({ fm }: { fm: JsonObject }) {
   return (
     <dl className="facts">
-      {Object.entries(fm).map(([k, v]) => (
+      {rows.map(([k, v]) => (
         <div key={k} className="fact">
           <dt>{k}</dt>
-          <dd>
-            <FmValue k={k} v={v} />
-          </dd>
+          <dd>{v}</dd>
         </div>
       ))}
     </dl>
@@ -154,7 +197,7 @@ function Frontmatter({ fm }: { fm: JsonObject }) {
 function LinkedFrom({ urls, links, head }: { urls: Urls; links: Links; head: number }) {
   const atHead = urls.at === undefined || urls.at >= head;
   return (
-    <section>
+    <section className="panel-section">
       <h3 className="label">Linked from</h3>
       {links.inbound.length > 0 ? (
         <ul className="linked">
@@ -180,6 +223,41 @@ function LinkedFrom({ urls, links, head }: { urls: Urls; links: Links; head: num
             </span>
           ))}
         </p>
+      )}
+    </section>
+  );
+}
+
+/**
+ * What agents should fix in this concept: its lint and its work items (broken links, staleness,
+ * structure), with what to do about each. For people to see, not to act on.
+ */
+function AgentNotes({ concept: c, work }: { concept: Concept; work: WorkItem[] }) {
+  const count = c.lint.length + work.length;
+  return (
+    <section className="panel-section" aria-label="Agent notes">
+      <h3 className="label">Agent notes{count > 0 ? ` (${count})` : ""}</h3>
+      {count === 0 ? (
+        <p className="small muted">Nothing for agents to fix here.</p>
+      ) : (
+        <ul className="notes-list">
+          {c.lint.map((l, i) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: lint warnings have no id.
+            <li key={i}>
+              <Chip text="lint" /> <code>{l.code}</code> <span className="muted">{l.message}</span>
+            </li>
+          ))}
+          {work.map((w) => (
+            <li key={`${w.kind} ${w.detail}`}>
+              <Chip
+                text={w.kind.replace("_", " ")}
+                tone={w.kind === "structure" ? "warn" : "bad"}
+              />{" "}
+              <span>{w.detail}</span>
+              <div className="muted">→ {w.suggested_action}</div>
+            </li>
+          ))}
+        </ul>
       )}
     </section>
   );

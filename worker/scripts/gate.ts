@@ -537,12 +537,16 @@ function greyPng(width: number, height: number, shade: number): Uint8Array {
 }
 
 /**
- * The app in a real browser, signed in as the seeded user (layout take 3, TEMPRA-106): the
- * library's home, the workspace (the tree, the quick switcher, the hidden sidebar, at phone
- * width the top bar naming the page, the home's ways in and the drawer), a folder's view, every concept in the reader (drawn from the stored tree, with no
- * Edit, a footnote card on hover), the byline's history, review mode from Properties, comments in the margin
- * (and as a bottom sheet on a phone), figures in the full-screen view, Needs you, and Activity
- * with its two views (Summary and Every event, take 4), all drawn from the API; links move within the app without reloading the page, and
+ * The app in a real browser, signed in as the seeded user (layout take 3, TEMPRA-106; the concept
+ * page and Activity of take 4, TEMPRA-114 and 115): the library's home, the workspace (the tree,
+ * the quick switcher, the hidden sidebar, at phone width the top bar naming the page, the home's
+ * ways in and the drawer), a folder's view, every concept in the reader (drawn from the stored
+ * tree, with no Edit, a footnote card on hover), the concept's panels (Comments, History,
+ * Properties: opened from the top bar, closed by ×, Escape and the control, the contents back,
+ * `?panel=`), Copy page, the byline while an agent edits, History's versions, review mode from
+ * Properties, comments in the panel (and as a bottom sheet on a phone), the Markdown view,
+ * figures in the full-screen view, Needs you, and Activity with its two views (Summary and
+ * Every event), all drawn from the API; links move within the app without reloading the page, and
  * nothing is refused by the CSP or throws. GATE_SCREENSHOTS=<dir> saves screenshots of them.
  */
 async function browserRenders(
@@ -567,24 +571,28 @@ async function browserRenders(
     };
     /** The concept's comments toggle ("Comments" or "Comments, n open"). */
     const commentsToggle = () => sheetBar.getByRole("button", { name: /^Comments(, \d+ open)?$/ });
-    /** The comments: the margin, or a sheet where there is no room for one. */
-    const comments = page.locator("aside#comments");
-    /** An item of the concept's "…" menu. */
+    /** The concept's panels (take 4): one at a time, in place of the contents. */
+    const comments = page.locator("aside#comments.concept-panel");
+    const historyPanel = page.locator("aside#history.concept-panel");
+    const properties = () => page.locator("aside#properties.concept-panel");
+    /** The contents on the right, while no panel is open and there is room. */
+    const contentsNav = main.locator("nav.concept-contents");
+    /** An item of the concept's ⋯ menu. */
     const more = async (item: string) => {
       await sheetBar.getByRole("button", { name: "More", exact: true }).click();
       await page.locator(".menu-list").getByRole("button", { name: item, exact: true }).click();
     };
     const byline = main.locator(".byline");
-    /** The concept's Properties dialog. */
-    const properties = () => page.getByRole("dialog", { name: "Properties" });
-    /** Opens review mode from Properties, where the concept's verification is. */
+    /** Opens review mode from Properties' Verification section, checking its state there. */
     const reviewFromProperties = async (state?: RegExp) => {
-      await more("Properties");
+      if (!(await properties().isVisible())) await more("Properties");
+      await properties().waitFor({ timeout: 5000 });
       if (state) await properties().getByText(state).waitFor({ timeout: 10_000 });
-      await properties().getByRole("link", { name: "Review", exact: true }).click();
-      await properties().waitFor({ state: "hidden", timeout: 5000 });
+      await properties().getByRole("link", { name: "Show changes", exact: true }).click();
     };
-    const versionsButton = () => byline.getByRole("button", { name: /^\d+ versions?$/ });
+    /** A width with room for the contents (or a panel) beside the text. */
+    const wide = () => page.setViewportSize({ width: 1600, height: 900 });
+    const usual = () => page.setViewportSize({ width: 1280, height: 720 });
 
     await step("sign in", async () => {
       await b.signInAs("dev@localhost", `/${owner}/${slug}/`);
@@ -647,12 +655,11 @@ async function browserRenders(
       if ((await sidebar.locator(`a[aria-current="page"][title="${nested}"]`).count()) !== 1) {
         throw new Error("the open file is not marked in the tree");
       }
-      // The byline's versions open the history menu; Escape closes it.
-      await versionsButton().click();
-      const history = byline.locator(".menu-list");
-      await history.getByRole("button", { name: "All versions" }).waitFor({ timeout: 10_000 });
+      // ⋯ → History opens the History panel; Escape closes it.
+      await more("History");
+      await historyPanel.locator("a.version").first().waitFor({ timeout: 10_000 });
       await page.keyboard.press("Escape");
-      await history.waitFor({ state: "detached", timeout: 5000 });
+      await historyPanel.waitFor({ state: "detached", timeout: 5000 });
       await page.goBack();
       await page.waitForURL(`${lib}/`);
       await home();
@@ -988,22 +995,27 @@ async function browserRenders(
         if ((await body.locator("[data-block]").count()) === 0) throw new Error("no block IDs");
         if (shots && shotsOf.includes(concept)) {
           const name = concept.replace(/\.md$/, "").replaceAll("/", "-");
-          // The comments in the margin (on by default on a desktop).
-          await comments.waitFor({ timeout: 5000 });
+          // On a desktop the page opens on its contents; a panel only when asked.
+          await wide();
           await main.evaluate((el) => {
             el.scrollTop = 0;
           });
           await page.screenshot({ path: `${shots}/reader-${name}.png` });
+          await commentsToggle().click();
+          await comments.waitFor({ timeout: 5000 });
+          await page.screenshot({ path: `${shots}/reader-${name}-comments.png` });
+          await commentsToggle().click();
+          await comments.waitFor({ state: "detached", timeout: 5000 });
           await page.setViewportSize({ width: 390, height: 844 });
           await page.waitForTimeout(200);
           await page.screenshot({ path: `${shots}/reader-${name}-phone.png` });
           // On a phone the comments are a bottom sheet, opened from the toggle.
           await commentsToggle().click();
-          await page.locator("aside#comments.bottom").waitFor({ timeout: 5000 });
+          await comments.waitFor({ timeout: 5000 });
           await page.screenshot({ path: `${shots}/reader-${name}-phone-comments.png` });
           await page.getByRole("button", { name: "Close comments" }).click();
           await comments.waitFor({ state: "detached", timeout: 5000 });
-          await page.setViewportSize({ width: 1280, height: 720 });
+          await usual();
         }
         const ref = page.locator(".body .fnref a").first();
         if (!tooltipShown && (await ref.count()) > 0) {
@@ -1109,10 +1121,15 @@ async function browserRenders(
       await page.getByRole("button", { name: "Enlarge image: A grey block" }).click();
       const view = page.locator("dialog.lightbox");
       await view.waitFor({ state: "visible", timeout: 5000 });
-      await view.getByText("Figure 1 of 2", { exact: true }).waitFor({ timeout: 5000 });
+      await view.getByText("fig. 1 of 2", { exact: true }).waitFor({ timeout: 5000 });
       await view.getByRole("button", { name: "Next figure" }).click();
-      await view.getByText("Figure 2 of 2", { exact: true }).waitFor({ timeout: 5000 });
-      if (!(await view.getByText("Download").count())) throw new Error("no Download");
+      await view.getByText("fig. 2 of 2", { exact: true }).waitFor({ timeout: 5000 });
+      if (!(await view.getByRole("link", { name: "Download" }).count())) {
+        throw new Error("no Download");
+      }
+      // Open file: the image's attachment page.
+      const open = await view.getByRole("link", { name: "Open file" }).getAttribute("href");
+      if (open !== `/${owner}/${slug}/gate-figure-2.png`) throw new Error(`Open file: ${open}`);
       if (shots) await page.screenshot({ path: `${shots}/lightbox.png` });
       await page.keyboard.press("Escape");
       await view.waitFor({ state: "hidden", timeout: 5000 });
@@ -1181,6 +1198,8 @@ async function browserRenders(
     await step(
       "review mode: verify, an agent's edit, and the changes since verification",
       async () => {
+        // From here on, a desktop with room for a panel beside the text (1280px overlays it).
+        await wide();
         await agentAppends("A sentence before verification.");
         await page.goto(url);
         // Verification is out of the byline (tempra-dev: decisions/verification-out-of-the-way);
@@ -1198,15 +1217,14 @@ async function browserRenders(
         await bar.getByRole("button", { name: "Verify this version" }).click();
         await page.waitForURL(`${url}?done=verify`, { timeout: 10_000 });
         await page.getByText(/^Verified as human:/).waitFor({ timeout: 10_000 });
-        await more("Properties");
+        // Nothing to review now: Properties has no Verification section.
+        if (!(await properties().isVisible())) await more("Properties");
+        await properties().getByText("Agent notes").first().waitFor({ timeout: 10_000 });
         await properties()
-          .getByText(/^Verified by you on /)
-          .waitFor({ timeout: 10_000 });
-        if ((await properties().getByRole("link", { name: "Review", exact: true }).count()) > 0) {
-          throw new Error("Review is offered with nothing to review");
-        }
+          .getByRole("region", { name: "Verification" })
+          .waitFor({ state: "detached", timeout: 10_000 });
         await page.keyboard.press("Escape");
-        await properties().waitFor({ state: "hidden", timeout: 5000 });
+        await properties().waitFor({ state: "detached", timeout: 5000 });
         await agentAppends("A sentence the gate added.");
         await page.goto(url);
         await byline.waitFor({ timeout: 15_000 });
@@ -1219,6 +1237,18 @@ async function browserRenders(
           throw new Error(`added: ${await added.innerText()}`);
         }
         if (shots) await page.screenshot({ path: `${shots}/changes.png`, fullPage: true });
+        // Properties stays open in review mode, with Hide changes (Verify is on the bar).
+        await properties().getByRole("link", { name: "Hide changes" }).waitFor({ timeout: 5000 });
+        if ((await page.getByRole("button", { name: "Verify this version" }).count()) !== 1) {
+          throw new Error("Verify is offered twice in review mode");
+        }
+        // Each changed block has the rule beside it.
+        // (A script string: this file has no DOM types.)
+        const rule = await page.evaluate<string>(`(() => {
+          const added = [...document.querySelectorAll(".body ins.diff-added")].pop();
+          return getComputedStyle(added.closest(".prose > *")).borderLeftWidth;
+        })()`);
+        if (rule !== "1px") throw new Error(`no rule beside the changed block: ${rule}`);
         // Done leaves review mode: the plain text again.
         await bar.getByRole("link", { name: "Done" }).click();
         await page.waitForURL(url);
@@ -1226,25 +1256,37 @@ async function browserRenders(
         if ((await page.locator(".body ins.diff-added").count()) > 0) {
           throw new Error("the changes are still drawn after Done");
         }
+        await page.getByRole("button", { name: "Close properties" }).click();
+        await properties().waitFor({ state: "detached", timeout: 5000 });
       },
     );
-    await step("the history menu opens the changes since a version, and all versions", async () => {
+    await step("History: a version's changes in the text, and back to the latest", async () => {
       await page.locator(".body .prose").waitFor({ timeout: 15_000 });
-      await versionsButton().click();
-      const history = byline.locator(".menu-list");
-      const earlier = history.locator("a.history-row:not(.current)");
+      await more("History");
+      const earlier = historyPanel.locator("a.version:not(.current)");
       await earlier.first().waitFor({ timeout: 10_000 });
+      if ((await historyPanel.getByText(/verif/i).count()) > 0) {
+        throw new Error("History shows verification");
+      }
       if (shots) await page.screenshot({ path: `${shots}/history.png` });
       await earlier.first().click();
       await page.waitForURL(/\?since=\d+$/);
-      await page.getByRole("region", { name: "Changes" }).waitFor({ timeout: 10_000 });
+      // The slim bar names the version; the panel stays open on it, marked.
+      const bar = page.getByRole("region", { name: "Changes" });
+      await bar
+        .getByText(/^v\d+$/)
+        .first()
+        .waitFor({ timeout: 10_000 });
       await page.locator(".body ins.diff-added").first().waitFor({ timeout: 10_000 });
-      await versionsButton().click();
-      await history.getByRole("button", { name: "All versions" }).click();
-      const all = page.getByRole("dialog", { name: "All versions" });
-      await all.waitFor({ timeout: 5000 });
-      await page.keyboard.press("Escape");
-      await all.waitFor({ state: "hidden", timeout: 5000 });
+      await historyPanel.locator('a.version[aria-current="true"]').waitFor({ timeout: 5000 });
+      if (shots) await page.screenshot({ path: `${shots}/version.png` });
+      const read = await bar.getByRole("link", { name: /^Read v\d+$/ }).getAttribute("href");
+      if (!read?.includes("?at=")) throw new Error(`the bar's Read link: ${read}`);
+      await bar.getByRole("link", { name: "Back to latest" }).click();
+      await page.waitForURL(url);
+      await bar.waitFor({ state: "detached", timeout: 5000 });
+      await page.getByRole("button", { name: "Close history" }).click();
+      await historyPanel.waitFor({ state: "detached", timeout: 5000 });
     });
     await step("an internal link's tooltip", async () => {
       await page.goto(url);
@@ -1256,16 +1298,15 @@ async function browserRenders(
       if (shots) await page.screenshot({ path: `${shots}/link.png` });
     });
     // Comments (TEMPRA-13): a person comments on selected text; an agent answers and resolves,
-    // and the open page follows without reloading, in the margin.
+    // and the open page follows without reloading, in the Comments panel (take 4).
     await step(
       "comments: comment on a selection, an agent replies and resolves, live",
       async () => {
         await page.goto(url);
         await page.locator(".body .prose").waitFor({ timeout: 15_000 });
-        // On a desktop the comments are a margin beside the text (on unless turned off).
-        const toggle = commentsToggle();
-        if ((await toggle.getAttribute("aria-pressed")) !== "true") await toggle.click();
-        await page.locator("aside#comments.margin").waitFor({ timeout: 5000 });
+        // The page opens on its contents: no panel until the person asks for one.
+        await page.waitForTimeout(300);
+        if ((await comments.count()) > 0) throw new Error("the comments opened by themselves");
         // Selects the first 16 characters of the first longer run of paragraph text, as a
         // person dragging over it would (a script string: this file has no DOM types).
         const select = () =>
@@ -1328,10 +1369,10 @@ async function browserRenders(
         await unselect();
         await tools.waitFor({ state: "detached", timeout: 5_000 });
         if ((await page.locator(".comment-form .quote").count()) > 0) {
-          throw new Error("a quote stayed in the margin after the selection went");
+          throw new Error("a quote was held for a comment after the selection went");
         }
-        // Comment on the toolbar starts a draft: filled in the body, its composer in the
-        // margin with the box focused. Escape drops it; a second draft is posted.
+        // Comment on the toolbar opens the Comments panel with a draft at the top: filled in
+        // the body, the box focused. Escape drops it (the panel stays); a second is posted.
         await select();
         await tools.getByRole("button", { name: "Comment" }).click();
         const drafted = await highlight("tempra-comment-draft", false, 5_000);
@@ -1340,8 +1381,11 @@ async function browserRenders(
             `the draft covers ${JSON.stringify(drafted)}, not ${JSON.stringify(quote)}`,
           );
         }
-        // The composer carries the quote (shown beside the text in the margin, not twice).
-        await comments.locator("form.comment-form .quote").waitFor({ state: "attached" });
+        // The draft is at the top of the panel, with its quote.
+        await comments.waitFor({ timeout: 5000 });
+        await comments
+          .locator(".comments-list > form.comment-form:first-of-type .quote")
+          .waitFor({ timeout: 5000 });
         const box = comments.getByPlaceholder("Comment on the selection");
         if (!(await box.evaluate((el) => el === el.ownerDocument.activeElement))) {
           throw new Error("the comment box did not take the focus");
@@ -1349,6 +1393,7 @@ async function browserRenders(
         await page.keyboard.press("Escape");
         await highlight("tempra-comment-draft", true, 5_000);
         await comments.locator("form.comment-form").waitFor({ state: "detached", timeout: 5000 });
+        if (!(await comments.isVisible())) throw new Error("Escape on a draft closed the panel");
         await select();
         await tools.getByRole("button", { name: "Comment" }).click();
         await tools.waitFor({ state: "detached", timeout: 5_000 });
@@ -1382,8 +1427,8 @@ async function browserRenders(
         )?.id;
         if (!thread) throw new Error(`the thread is not listed: ${JSON.stringify(listed)}`);
         const threadEl = comments.locator(`[id="thread-${thread}"]`);
-        // A click elsewhere in the text lets the thread go (one line in the margin); a click
-        // on its quote makes it the active thread again.
+        // A click elsewhere in the text lets the thread go (compact in the panel); a click on
+        // its quote makes it the active thread again.
         await page
           .locator(".body .prose")
           .getByText("A sentence the gate added.", { exact: true })
@@ -1445,7 +1490,7 @@ async function browserRenders(
           }
           await page.waitForTimeout(100);
         }
-        // The agent answers: the reply shows in the thread's card in the margin, live.
+        // The agent answers: the reply shows in the thread's card in the panel, live.
         const reply = await fetch(`${libApi}/comments/${thread}`, {
           method: "POST",
           headers: { ...bearer, "Content-Type": "application/json" },
@@ -1460,9 +1505,7 @@ async function browserRenders(
         });
         if (!resolve.ok)
           throw new Error(`agent resolve: ${resolve.status} ${await resolve.text()}`);
-        await comments
-          .getByRole("button", { name: "Show resolved (1 thread)" })
-          .waitFor({ timeout: 10_000 });
+        await comments.getByRole("button", { name: "Resolved 1" }).waitFor({ timeout: 10_000 });
         await highlight("tempra-comment", true);
         await highlight("tempra-comment-active", true);
         if ((await commentsToggle().getAttribute("aria-label")) !== "Comments") {
@@ -1470,6 +1513,11 @@ async function browserRenders(
             `the toggle still counts open threads: ${await commentsToggle().getAttribute("aria-label")}`,
           );
         }
+        // Under Resolved it is there, with Reopen.
+        await comments.getByRole("button", { name: "Resolved 1" }).click();
+        await threadEl.waitFor({ timeout: 5000 });
+        if ((await threadEl.evaluate((el) => el.tagName)) === "BUTTON") await threadEl.click();
+        await threadEl.getByRole("button", { name: "Reopen" }).waitFor({ timeout: 5000 });
         if (!(await stayed())) throw new Error("the page reloaded");
         // Notifications (TEMPRA-72, TEMPRA-74): the agent's reply on the person's thread is in
         // their inbox, its count shows on the open page's bell (take 4) without a reload, and
@@ -1536,7 +1584,7 @@ async function browserRenders(
       ).json()) as { count: number };
       if (count < 1) throw new Error(`GET …/needs counts ${count} with a reply waiting`);
       if (shots) await page.screenshot({ path: `${shots}/needs.png` });
-      // The row opens the concept with that thread open in the margin.
+      // The row opens the concept with that thread open in the Comments panel.
       await row.click();
       await page.waitForURL(`${lib}/${enc(target)}#thread-${encodeURIComponent(id)}`);
       await comments.locator(`section.thread.open[id="thread-${id}"]`).waitFor({ timeout: 15_000 });
@@ -1548,8 +1596,8 @@ async function browserRenders(
       });
       if (!resolved.ok) throw new Error(`agent resolve: ${resolved.status}`);
     });
-    // At phone width there is no room for a margin: the comments are a bottom sheet, opened
-    // only from the toggle, never by themselves.
+    // At phone width the Comments panel is a bottom sheet, opened only from the toggle, never by
+    // itself.
     await step("comments at phone width: a bottom sheet, only when asked", async () => {
       await page.setViewportSize({ width: 390, height: 844 });
       try {
@@ -1563,34 +1611,150 @@ async function browserRenders(
           throw new Error("the comments toggle is pressed with the comments closed");
         }
         await toggle.click();
-        const sheet = page.locator("aside#comments.concept-comments.bottom");
+        const sheet = comments;
         await sheet.waitFor({ timeout: 5000 });
+        // A sheet from the bottom: as wide as the screen, its foot at the screen's.
+        const box = await sheet.boundingBox();
+        if (!box || box.x > 1 || Math.abs(box.y + box.height - 844) > 2 || box.width < 380) {
+          throw new Error(`the comments are not a bottom sheet: ${JSON.stringify(box)}`);
+        }
         await sheet.getByRole("button", { name: "Comment on this concept" }).waitFor();
         if (shots) await page.screenshot({ path: `${shots}/comments-phone.png` });
         await sheet.getByRole("button", { name: "Close comments" }).click();
         await sheet.waitFor({ state: "detached", timeout: 5000 });
       } finally {
-        await page.setViewportSize({ width: 1280, height: 720 });
+        await wide();
       }
     });
-    // Markdown, in the "…" menu, shows the file as stored, frontmatter first, in place of the
-    // reader; Properties opens as a dialog.
+    // View Markdown, in ⋯, shows the file as stored, frontmatter first, with line numbers, in
+    // place of the page; Back to page returns.
     await step("the Markdown view shows the file as stored", async () => {
       await page.goto(url);
       const body = page.locator(".body .prose");
       await body.waitFor({ timeout: 15_000 });
-      await more("Markdown");
+      await more("View Markdown");
       const stored = page.locator(".raw-markdown pre");
       await stored.waitFor({ timeout: 10_000 });
       const text = await stored.innerText();
       if (!text.startsWith("---\ntype:")) throw new Error(`markdown view: ${text.slice(0, 60)}`);
       if (await body.isVisible()) throw new Error("the reader still shows beside the markdown");
-      await more("Show the reader");
+      if (await main.locator("h1.doc-title").isVisible()) {
+        throw new Error("the page's title shows over the markdown");
+      }
+      const numbers = await page.locator(".raw-lines > span").count();
+      if (numbers !== text.replace(/\n$/, "").split("\n").length) {
+        throw new Error(`${numbers} line numbers for ${text.split("\n").length} lines`);
+      }
+      await page.locator(".raw-markdown").getByText(concept, { exact: true }).waitFor();
+      if (shots) await page.screenshot({ path: `${shots}/markdown.png` });
+      await page.getByRole("button", { name: "Back to page" }).click();
       await body.waitFor({ state: "visible" });
+    });
+    // The panels (take 4, tempra-dev: decisions/one-panel-from-the-top-bar): one at a time in
+    // place of the contents, opened from the top bar, closed by ×, Escape or the same control,
+    // the contents back; a link with ?panel= opens one; none is remembered. Under 1100px a panel
+    // overlays the page. Copy page copies the stored file; the byline says an agent is editing.
+    await step("panels: open and close, the contents come back, ?panel=, Copy page", async () => {
+      const path = "gate-panels.md";
+      const put = await fetch(`${libApi}/files/${path}`, {
+        method: "PUT",
+        headers: { ...bearer, "Content-Type": "text/markdown", "X-Note": "gate: panels" },
+        body: [
+          "---\ntype: Note\ntitle: Gate panels\ndescription: A page with contents.\n---",
+          "## First\n\nOne.\n",
+          "### Inside\n\nTwo.\n",
+          "## Second\n\nThree.\n",
+        ].join("\n"),
+      });
+      if (!put.ok) throw new Error(`write: ${put.status} ${await put.text()}`);
+      const here = `${lib}/${path}`;
+      await page.goto(here);
+      await contentsNav.waitFor({ timeout: 15_000 });
+      // Just written by an agent: the byline says it is editing now, with the pulsing dot.
+      await byline.getByText(/ is editing now$/).waitFor({ timeout: 5000 });
+      await byline.locator(".change-dot.live").waitFor();
+      if (shots) await page.screenshot({ path: `${shots}/page.png` });
+      const entries = await contentsNav.locator("a").allInnerTexts();
+      if (entries.join("|") !== "First|Inside|Second") throw new Error(`contents: ${entries}`);
+      const back = async (what: string) => {
+        await contentsNav.waitFor({ timeout: 5000 });
+        if ((await page.locator("aside.concept-panel").count()) > 0) {
+          throw new Error(`a panel is still open after ${what}`);
+        }
+      };
+      // The control, then the same control again.
+      const toggle = commentsToggle();
+      await toggle.click();
+      await comments.waitFor({ timeout: 5000 });
+      if ((await toggle.getAttribute("aria-pressed")) !== "true") throw new Error("not pressed");
+      if ((await contentsNav.count()) > 0) throw new Error("the contents show beside a panel");
+      await comments.getByText("No open threads. Select text to comment on it.").waitFor();
+      await toggle.click();
+      await back("the control again");
+      // ⋯ → History, closed by ×; ⋯ → Properties, closed by Escape; one at a time.
+      await more("History");
+      await historyPanel.waitFor({ timeout: 5000 });
       await more("Properties");
       await properties().waitFor({ timeout: 5000 });
+      if ((await page.locator("aside.concept-panel").count()) !== 1) {
+        throw new Error("two panels at once");
+      }
+      await properties().getByText(path, { exact: true }).waitFor();
+      if (shots) await page.screenshot({ path: `${shots}/properties.png` });
+      await page.getByRole("button", { name: "Close properties" }).click();
+      await back("×");
+      await more("History");
+      await historyPanel.waitFor({ timeout: 5000 });
       await page.keyboard.press("Escape");
-      await properties().waitFor({ state: "hidden", timeout: 5000 });
+      await back("Escape");
+      // A link asks for a panel; a page opened plainly has none (nothing is remembered).
+      await commentsToggle().click();
+      await comments.waitFor({ timeout: 5000 });
+      await page.goto(`${here}?panel=history`);
+      await historyPanel.waitFor({ timeout: 15_000 });
+      await page.goto(here);
+      await contentsNav.waitFor({ timeout: 15_000 });
+      await page.waitForTimeout(300);
+      await back("a plain reload");
+      // Under 1100px the contents hide (On this page under the byline) and a panel overlays.
+      await usual();
+      try {
+        await contentsNav.waitFor({ state: "hidden", timeout: 5000 });
+        await main.locator(".toc-inline summary").waitFor({ timeout: 5000 });
+        await commentsToggle().click();
+        await comments.waitFor({ timeout: 5000 });
+        const position = await page.evaluate<string>(
+          `getComputedStyle(document.querySelector("aside#comments")).position`,
+        );
+        if (position !== "fixed") throw new Error(`the panel does not overlay: ${position}`);
+        if (shots) await page.screenshot({ path: `${shots}/panel-narrow.png` });
+        await page.keyboard.press("Escape");
+        await comments.waitFor({ state: "detached", timeout: 5000 });
+      } finally {
+        await wide();
+      }
+      // Copy page: the stored file, frontmatter and body, on the clipboard.
+      await b.context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: base });
+      const copy = sheetBar.getByRole("button", { name: /^Copy page$/ });
+      await copy.click();
+      await sheetBar.getByRole("button", { name: "Copied" }).waitFor({ timeout: 5000 });
+      const copied = await page.evaluate<string>("navigator.clipboard.readText()");
+      if (!copied.startsWith("---\ntype: Note\ntitle: Gate panels")) {
+        throw new Error(`Copy page copied: ${copied.slice(0, 80)}`);
+      }
+      // ⋯ holds Copy link and Download .md too.
+      await sheetBar.getByRole("button", { name: "More", exact: true }).click();
+      const download = page.locator(".menu-list").getByRole("link", { name: "Download .md" });
+      if ((await download.getAttribute("download")) !== path) throw new Error("no Download .md");
+      await page.locator(".menu-list").getByRole("button", { name: "Copy link" }).click();
+      // The copy lands a moment after the click.
+      let link = "";
+      for (const until = Date.now() + 5000; link !== here && Date.now() < until; ) {
+        await page.waitForTimeout(100);
+        link = await page.evaluate<string>("navigator.clipboard.readText()");
+      }
+      if (link !== here) throw new Error(`Copy link copied: ${link.slice(0, 80)}`);
+      await agentDeletes(path);
     });
     await step(
       "Activity: the Summary follows an agent's write live with its live entry, Every event lists it by seq and tails live, -/ledger opens it, Download is the ledger as JSON lines",
@@ -2159,9 +2323,9 @@ async function freshAccountConnects(): Promise<string[]> {
       await page.locator(".byline").waitFor({ timeout: 15_000 });
       await page.getByRole("button", { name: "More", exact: true }).click();
       await page.locator(".menu-list").getByRole("button", { name: "Properties" }).click();
-      const dialog = page.getByRole("dialog", { name: "Properties" });
-      await dialog.getByText(/^Not yet verified by a person/).waitFor({ timeout: 15_000 });
-      await dialog.getByRole("link", { name: "Review", exact: true }).click();
+      const panel = page.locator("aside#properties.concept-panel");
+      await panel.getByText(/^Not yet verified by a person/).waitFor({ timeout: 15_000 });
+      await panel.getByRole("link", { name: "Show changes", exact: true }).click();
       await page.waitForURL(`${lib}/shared.md?review=1`);
       await page.getByRole("region", { name: "Review" }).waitFor({ timeout: 15_000 });
     };
@@ -2169,7 +2333,10 @@ async function freshAccountConnects(): Promise<string[]> {
       await page.goto(`${lib}/shared.md`);
       await page.getByText("Read me.").waitFor({ timeout: 15_000 });
       await review();
-      await page.getByText("Not yet verified by a person").waitFor({ timeout: 15_000 });
+      await page
+        .getByRole("region", { name: "Review" })
+        .getByText("Not yet verified by a person")
+        .waitFor({ timeout: 15_000 });
       // The role loads with the library list; give it the moment it takes.
       await page.waitForTimeout(500);
       const verify = await page.getByRole("button", { name: "Verify this version" }).count();

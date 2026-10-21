@@ -2,16 +2,16 @@ import { type FormEvent, useState } from "react";
 import { ApiError, api } from "../api";
 import type { Compare } from "../router";
 import { navigate } from "../router";
-import { day } from "../ui";
+import { day, recently } from "../ui";
 import { enc, type Urls } from "../urls";
 import type { Namer } from "./Byline";
 import { actedBy, type Concept, type Standing } from "./data";
 
 /**
- * The slim bar at the top of the sheet while the text shows changes (take 3; tempra-dev:
- * app/reader, Review): in review mode, what the diff is against, a note and Verify this version
- * (not for a read member); against a chosen version, which one, a way to read it as it was, and
- * the way back.
+ * The slim bar over the text while it shows changes (tempra-dev: app/reader, Review mode, The
+ * panels): in review mode, what the diff is against, a note and Verify this version (not for a
+ * read member); against a version chosen in History, "v16 · note · who · when", a way to read
+ * it as it was (`?at=`), and Back to latest.
  */
 export function ReviewBar(props: {
   urls: Urls;
@@ -27,24 +27,28 @@ export function ReviewBar(props: {
   const plain = urls.pinned(undefined).file(c.path);
   if (compare.kind === "since") {
     const version = s.versions.find((v) => v.event.seq === compare.seq);
-    const label = version ? `version ${version.n}` : `sequence ${compare.seq}`;
+    const label = version ? `v${version.n}` : `seq ${compare.seq}`;
     const by = version ? name(version.event.actor, actedBy(version.event)).name : null;
+    const note = typeof version?.event.meta?.note === "string" ? version.event.meta.note : "";
     return (
       <section className="review-bar" aria-label="Changes">
         <span className="review-what">
-          Changes since {label}
+          <span className="version-n">{label}</span>
+          {note && <span className="review-note"> {note}</span>}
           {by && version && (
             <span className="muted">
               {" "}
-              · {by}, {day(version.event.ts)}
+              · {by} · {recently(version.event.ts, Date.now())}
             </span>
           )}
         </span>
         {props.error && <span className="warn">{props.error}</span>}
         <span className="review-actions">
-          <a href={urls.pinned(compare.seq).file(c.path)}>Read {label}</a>
+          <a href={urls.pinned(compare.seq).file(c.path)} title="Read this version as it was">
+            Read {label}
+          </a>
           <a className="button" href={plain}>
-            Back to current
+            Back to latest
           </a>
         </span>
       </section>
