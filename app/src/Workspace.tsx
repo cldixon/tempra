@@ -111,6 +111,8 @@ interface Frame {
   slots: { crumbs: HTMLElement | null; tools: HTMLElement | null };
   /** Tells the frame a page has crumbs of its own, so the default ones step aside. */
   setOwnCrumbs(own: boolean): void;
+  /** Opens the quick switcher (a library's frame; elsewhere it does nothing). */
+  search(): void;
 }
 
 const FrameContext = createContext<Frame>({
@@ -121,6 +123,7 @@ const FrameContext = createContext<Frame>({
   now: 0,
   slots: { crumbs: null, tools: null },
   setOwnCrumbs: () => {},
+  search: () => {},
 });
 
 /** The workspace's frame, for pages that lay themselves out by it. */
@@ -188,7 +191,7 @@ interface Chrome {
 function Shell(props: {
   chrome: Chrome;
   me: Me | null;
-  frame: Omit<Frame, "sidebar" | "narrow" | "slots" | "setOwnCrumbs">;
+  frame: Omit<Frame, "sidebar" | "narrow" | "slots" | "setOwnCrumbs" | "search">;
   children: ReactNode;
 }) {
   const { chrome } = props;
@@ -275,8 +278,9 @@ function Shell(props: {
       narrow,
       slots: { crumbs: crumbsSlot, tools: toolsSlot },
       setOwnCrumbs,
+      search: chrome.onSearch ?? (() => {}),
     }),
-    [props.frame, beside, narrow, crumbsSlot, toolsSlot],
+    [props.frame, beside, narrow, crumbsSlot, toolsSlot, chrome.onSearch],
   );
   const classes = ["workspace", showSidebar ? "" : "sidebar-hidden"].filter(Boolean);
   return (

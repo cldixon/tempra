@@ -161,3 +161,17 @@ describe("GET /folder", () => {
     expect((await other.app.request(`${API}/folder?dir=notes`)).status).toBe(404);
   });
 });
+
+describe("an attachment's links", () => {
+  test("the concepts that use it, and none of its own", () => {
+    const s = seeded();
+    write(s, agent(), "about.md", doc("About", "", "![chart](/metrics/chart.png)"));
+    write(s, agent(), "metrics/margin.md", doc("Margin", "", "See [the chart](chart.png)."));
+    const links = s.links("metrics/chart.png");
+    expect(links.inbound.map((l) => l.path)).toEqual(["about.md", "metrics/margin.md"]);
+    expect(links.outbound).toEqual([]);
+    expect(links.broken).toEqual([]);
+    expect(s.links("metrics/img/logo.png").inbound).toEqual([]);
+    expect(() => s.links("metrics/none.png")).toThrow(OkfError);
+  });
+});

@@ -185,6 +185,22 @@ export const switcherKey = () =>
 
 export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
+/** Copies text from a click; `state` says "copied" (or "failed") for a moment after. */
+export function useCopy() {
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
+  useEffect(() => {
+    if (state === "idle") return;
+    const t = setTimeout(() => setState("idle"), 2000);
+    return () => clearTimeout(t);
+  }, [state]);
+  const copy = (text: string) =>
+    navigator.clipboard.writeText(text).then(
+      () => setState("copied"),
+      () => setState("failed"),
+    );
+  return { state, copy };
+}
+
 /** A library's health summary, as the daily check leaves it (TEMPRA-66, `GET …/health`). */
 export interface Health {
   at: string;
