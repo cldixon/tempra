@@ -3,7 +3,7 @@ import { agentLabel, type Contributor } from "../agents";
 import { ApiError, api, field, useAction, useLoad } from "../api";
 import { CONTENT_OPS } from "../concept/data";
 import { useFeed, useTrailing } from "../live";
-import { useLibraries, useRole } from "../role";
+import { librariesChanged, useLibraries, useRole } from "../role";
 import { navigate } from "../router";
 import { Chip, Crumbs, type Health, healthWords, plural, Status, useTitle, when } from "../ui";
 import { baseName, type Urls } from "../urls";
@@ -726,7 +726,7 @@ export function General({ urls }: { urls: Urls }) {
         body: JSON.stringify({ title: title || null, description: description || null }),
       });
       setNotice("Saved.");
-      libs.reload();
+      librariesChanged();
     });
   };
   return (

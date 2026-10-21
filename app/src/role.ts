@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { api, useLoad } from "./api";
 
 /**
@@ -18,11 +19,25 @@ export interface ReachableLibrary {
   description?: string;
 }
 
-/** The person's libraries, own and shared (one load, shared by the workspace's parts). */
+/** Said on window when the libraries changed (a title set, one made): every list reloads. */
+const LIBRARIES_EVENT = "tempra:libraries";
+
+export const librariesChanged = () => window.dispatchEvent(new Event(LIBRARIES_EVENT));
+
+/**
+ * The person's libraries, own and shared (one load, shared by the workspace's parts; each part
+ * reloads when told the libraries changed, since each holds its own copy of the answer).
+ */
 export function useLibraries() {
-  return useLoad("workspace libraries", () =>
+  const loaded = useLoad("workspace libraries", () =>
     api<{ libraries: ReachableLibrary[] }>("/api/v1/libraries"),
   );
+  const { reload } = loaded;
+  useEffect(() => {
+    window.addEventListener(LIBRARIES_EVENT, reload);
+    return () => window.removeEventListener(LIBRARIES_EVENT, reload);
+  }, [reload]);
+  return loaded;
 }
 
 /** The person's role in this library; null while it loads. */
