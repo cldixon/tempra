@@ -11,6 +11,7 @@ import {
   CirclePlus,
   ClockAlert,
   Code,
+  Copy,
   Download,
   Ellipsis,
   ExternalLink,
@@ -23,6 +24,7 @@ import {
   Inbox,
   KeyRound,
   LayoutGrid,
+  Link,
   List,
   LogOut,
   Maximize2,
@@ -96,6 +98,8 @@ const ICONS = {
   apps: Puzzle,
   theme: SunMoon,
   signout: LogOut,
+  copy: Copy,
+  link: Link,
 } as const;
 
 export type Glyph = keyof typeof ICONS;

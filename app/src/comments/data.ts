@@ -108,11 +108,11 @@ export function useDraft(text: DocText) {
 }
 
 /**
- * Open threads in the order the margin shows them: threads on the whole concept (and those whose
- * quote is gone) first, beside the title, then the rest in document order.
+ * Threads of one status in the order the Comments panel lists them: those on the whole concept
+ * (and those whose quote is gone) first, then the rest in document order.
  */
-export function marginOrder(placed: Placed[]): Placed[] {
+export function panelOrder(placed: Placed[], status: Thread["status"]): Placed[] {
   return placed
-    .filter((t) => t.status === "open")
+    .filter((t) => t.status === status)
     .sort((a, b) => (a.at?.from ?? -1) - (b.at?.from ?? -1) || a.created_seq - b.created_seq);
 }

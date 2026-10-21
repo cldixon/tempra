@@ -175,7 +175,15 @@ function App() {
         break;
     }
   }
-  const boundary = <PageBoundary key={url.pathname + url.search}>{page}</PageBoundary>;
+  // A page starts afresh on a new URL; a concept's page stays mounted while only how it is
+  // shown changes (`?since=`, `?review=`, `?panel=`, `?done=`), so its open panel stays open
+  // (tempra-dev: app/reader, The panels). A pinned version (`?at=`) is another page.
+  const at = url.searchParams.get("at");
+  const pageKey =
+    route?.page === "file"
+      ? `${url.pathname}${at === null ? "" : `?at=${at}`}`
+      : url.pathname + url.search;
+  const boundary = <PageBoundary key={pageKey}>{page}</PageBoundary>;
   // A library's pages share one workspace, kept mounted while the person moves within it.
   if (library) {
     const { urls, place } = library;

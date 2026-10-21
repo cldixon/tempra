@@ -1,101 +1,55 @@
 /*
- * Comments on a concept (take 3, TEMPRA-106; tempra-dev: app/comments). In the margin, each
- * thread sits beside the line its quote is on (the app sets `--slot-y` on each slot, measured and
- * pushed down past the one before); the active one is a card joined to its quote by a hairline,
- * the others one line each. Where there is no margin, the same list is a sheet over the right side
- * of the page, or on a phone a sheet from the bottom. Lines and greys only: no colour.
+ * Comments on a concept (take 4, TEMPRA-114; tempra-dev: app/comments): the threads in the
+ * Comments panel (its frame is concept.css's), Open and Resolved n, a draft at the top while one
+ * is written, the active thread as a card, the others compact (their quote, then who, the first
+ * words, when). Lines and greys only: no colour.
  */
 
-.concept-comments {
-  grid-row: 1;
-  grid-column: comments;
-  min-width: 0;
-  padding-top: 40px;
-  font-size: var(--tempra-text-ui);
-}
-
-.comments-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.comments-head h2 {
-  margin: 0;
-  font-size: var(--tempra-text-ui);
-  font-weight: var(--tempra-weight-strong);
-}
-
-.comments-head .count {
-  flex: 1;
-  color: var(--tempra-color-muted);
-  font-size: var(--tempra-text-meta);
-}
-
-.comments-body {
+.comments-list {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
 }
 
-.new-thread,
-.show-resolved {
+.comments-list .segmented {
+  align-self: flex-start;
+  margin-bottom: 6px;
+}
+
+.new-thread {
   align-self: flex-start;
   padding-left: 8px;
   font-size: var(--tempra-text-meta);
 }
 
-/* In the margin, slots are placed by the app; in a sheet they stack. */
-.comments-slots {
-  position: relative;
-  min-height: var(--margin-height, 0);
-}
-
-.concept-comments.margin .slot {
-  position: absolute;
-  top: var(--slot-y, 0);
-  right: 0;
-  left: 0;
-}
-
-.concept-comments:not(.margin) .comments-slots {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-/* The hairline from the active thread's quote to the thread, across the gap. */
-.thread-line {
-  position: absolute;
-  top: calc(var(--line-y, 0) + 0.8em);
-  left: calc(-1 * var(--tempra-margin-gap));
-  width: calc(var(--tempra-margin-gap) - 8px);
-  border-top: 1px solid var(--tempra-color-border-strong);
-}
-
-.concept-comments:not(.margin) .thread-line {
-  display: none;
-}
-
-/* A thread's quote is beside it in the margin; in a sheet it is shown with the thread. */
-.concept-comments.margin .thread-quote {
-  display: none;
-}
-
-/* A collapsed thread: one line, who, the first words, when. */
+/* A compact thread: its quote, then one line: who, the first words, when. */
 .thread.collapsed {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  flex-direction: column;
+  gap: 6px;
   width: 100%;
-  min-height: var(--tempra-row);
-  padding: 4px 8px;
-  border: 0;
-  border-radius: var(--tempra-radius-row);
+  padding: 10px 12px;
+  border: 1px solid var(--tempra-color-border);
+  border-radius: var(--tempra-radius-box);
   background: transparent;
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
   text-align: left;
+}
+
+.thread-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+
+.thread.collapsed .thread-quote {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .thread.collapsed:hover:not(:disabled) {
@@ -246,44 +200,14 @@
   font-size: var(--tempra-text-meta);
 }
 
-/* No margin: a sheet over the right side of the page, under the sheet's bar. */
-.concept-comments.side,
-.concept-comments.bottom {
-  position: fixed;
-  z-index: 5;
-  overflow: auto;
-  padding: 12px 14px 20px;
-  border: 1px solid var(--tempra-color-border);
-  background: var(--tempra-color-bg);
-  box-shadow: var(--tempra-shadow);
+/* The active thread's card is drawn in ink, as its quote's highlight is filled. */
+section.thread.open {
+  border-color: var(--tempra-color-text);
 }
 
-.concept-comments.side {
-  top: calc(var(--tempra-topbar) + var(--tempra-gutter));
-  right: var(--tempra-gutter);
-  bottom: var(--tempra-gutter);
-  width: min(340px, calc(100vw - 4 * var(--tempra-gutter)));
-  border-radius: var(--tempra-radius-card);
-}
-
-/* A phone: a sheet from the bottom of the screen. */
-.concept-comments.bottom {
-  right: 0;
-  bottom: 0;
-  left: 0;
-  max-height: 75dvh;
-  border-bottom: 0;
-  border-radius: var(--tempra-radius-card) var(--tempra-radius-card) 0 0;
-}
-
-.concept-comments.bottom .comments-head {
-  position: sticky;
-  top: -12px;
-  margin: -12px -14px 4px;
-  padding: 4px 6px 4px 14px;
-  background: var(--tempra-color-bg);
-}
-
-.concept-comments.bottom .thread.collapsed {
-  min-height: var(--tempra-touch);
+/* On a phone, a compact thread is a touch target. */
+@media (max-width: 900px) {
+  .thread.collapsed {
+    min-height: var(--tempra-touch);
+  }
 }

@@ -507,6 +507,7 @@ describe("figures (tempra-dev: app/reader, Figures)", () => {
           asked.push(path);
           return { size: 316 * 1024, by: "ann", at: "2026-10-18T10:00:00Z" };
         },
+        fileHref: (path) => `/o/l/${path}`,
       };
       const { host, root } = await mount(
         window,
@@ -522,17 +523,18 @@ describe("figures (tempra-dev: app/reader, Figures)", () => {
       expect(d).not.toBeNull();
       expect(d.open).toBe(true);
       const label = d.ownerDocument.getElementById(d.getAttribute("aria-labelledby") ?? "");
-      expect(label?.textContent).toBe("Figure 1 of 2");
+      expect(label?.textContent).toBe("fig. 1 of 2");
       expect(d.querySelector(".lightbox-where")?.textContent).toBe("Diagrams");
       expect(d.querySelector(".lightbox-figure img")?.getAttribute("src")).toBe(
         "/o/l/-/download/assets/tower.png",
       );
       expect(d.querySelector(".lightbox-caption")?.textContent).toBe("The tower at dusk");
       const links = [...d.querySelectorAll(".lightbox-actions a")];
-      expect(links.map((a) => a.textContent)).toEqual(["Open original", "Download"]);
+      // Download, and Open file: the image's attachment page.
+      expect(links.map((a) => a.textContent?.trim())).toEqual(["Download", "Open file"]);
       expect(links[0]?.getAttribute("href")).toBe("/o/l/-/download/assets/tower.png");
-      expect(links[0]?.getAttribute("target")).toBe("_blank");
-      expect(links[1]?.hasAttribute("download")).toBe(true);
+      expect(links[0]?.hasAttribute("download")).toBe(true);
+      expect(links[1]?.getAttribute("href")).toBe("/o/l/assets/tower.png");
       expect(asked).toEqual(["assets/tower.png"]);
       const facts = () => d.querySelector(".lightbox-facts")?.textContent ?? "";
       expect(facts()).toMatch(/^assets\/tower\.png · 316 KB · added by ann, /);
@@ -541,8 +543,12 @@ describe("figures (tempra-dev: app/reader, Figures)", () => {
       // Next: the external image, its URL and nothing asked.
       await act(async () => (d.querySelector(".lightbox-next") as HTMLButtonElement).click());
       expect(dialog()?.open).toBe(true);
-      expect(label?.textContent).toBe("Figure 2 of 2");
+      expect(label?.textContent).toBe("fig. 2 of 2");
       expect(facts()).toMatch(/^https:\/\/e\.com\/photo\.jpg/);
+      // An external image has no page here: Open original, in a new tab.
+      const outside = [...d.querySelectorAll(".lightbox-actions a")];
+      expect(outside.map((a) => a.textContent?.trim())).toEqual(["Download", "Open original"]);
+      expect(outside[1]?.getAttribute("target")).toBe("_blank");
       expect(asked).toEqual(["assets/tower.png"]);
       expect((d.querySelector(".lightbox-next") as HTMLButtonElement).disabled).toBe(true);
       // The arrow keys move too.
@@ -553,7 +559,7 @@ describe("figures (tempra-dev: app/reader, Figures)", () => {
           );
         });
       await key("ArrowLeft");
-      expect(label?.textContent).toBe("Figure 1 of 2");
+      expect(label?.textContent).toBe("fig. 1 of 2");
       // Escape closes.
       await key("Escape");
       expect(dialog()).toBeNull();
