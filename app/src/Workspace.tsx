@@ -285,7 +285,7 @@ function Shell(props: {
     <FrameContext.Provider value={frame}>
       <div className={classes.join(" ")}>
         <header className="ws-topbar">
-          {showSidebar && <div className="topbar-brand">{chrome.brand}</div>}
+          <div className="topbar-brand">{chrome.brand}</div>
           <div className="topbar-page">
             <button
               type="button"

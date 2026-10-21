@@ -102,7 +102,11 @@ export class Urls {
   }
   /** The REST API for this library. */
   api(rest: string, params: Record<string, string | number | undefined> = {}) {
-    return `/api/v1/libraries/${encodeURIComponent(this.owner)}/${encodeURIComponent(this.slug)}/${rest}${query(params)}`;
+    return `${this.apiRoot()}/${rest}${query(params)}`;
+  }
+  /** The library itself in the REST API (its title and description, TEMPRA-102). */
+  apiRoot() {
+    return `/api/v1/libraries/${encodeURIComponent(this.owner)}/${encodeURIComponent(this.slug)}`;
   }
 }
 

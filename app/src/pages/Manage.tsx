@@ -721,7 +721,7 @@ export function General({ urls }: { urls: Urls }) {
     const title = field(form, "title").trim();
     const description = field(form, "description").trim();
     void action.run(async () => {
-      await api(urls.api(""), {
+      await api(urls.apiRoot(), {
         method: "PATCH",
         body: JSON.stringify({ title: title || null, description: description || null }),
       });
