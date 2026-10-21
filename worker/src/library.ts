@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import { d1Accounts } from "./accounts";
 import { d1BlobRefs } from "./blobrefs";
 import { type CallResult, callStore, type LibraryMethod, r2BlobStore } from "./client";
 import {
@@ -18,6 +19,7 @@ import {
   MaintenanceSchedule,
   runMaintenance,
 } from "./maintain";
+import { d1Notifications, notifyStale } from "./notify";
 import { prepareRestore, type RestoreOutcome, type RestoreTarget } from "./recovery";
 import { doSqlHandle } from "./store/sql";
 import { type LibraryHealth, LibraryStore } from "./store/store";
@@ -235,6 +237,14 @@ export class Library extends DurableObject<Env> {
       libraryId: this.libraryId(),
       now: new Date(),
       retentionDays: Number(this.env.EXPORT_RETENTION_DAYS) || DEFAULT_RETENTION_DAYS,
+      // The maintainer hands its stale concepts to the Inbox itself (TEMPRA-116): the pass runs
+      // when staleness has work, so no daily call to every library is needed.
+      notifyStale: (concepts) =>
+        notifyStale(
+          { accounts: d1Accounts(this.env.DB), notifications: d1Notifications(this.env.DB) },
+          this.libraryId(),
+          concepts,
+        ),
     });
   }
 

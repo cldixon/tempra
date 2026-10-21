@@ -66,9 +66,16 @@ export class Urls {
   restore(path: string, to: number) {
     return `${this.base}-/restore/${enc(path)}${query({ to })}`;
   }
-  /** What only a person can do here (take 3, TEMPRA-106). */
+  /**
+   * What only a person can do here: take 3's Needs you is the Inbox filtered to this library
+   * since take 4 (TEMPRA-116); `-/needs` redirects there.
+   */
   needs() {
-    return this.page("needs");
+    return this.inbox();
+  }
+  /** The Inbox, filtered to this library. */
+  inbox() {
+    return inboxUrl({ library: `${this.owner}/${this.slug}` });
   }
   /**
    * Activity (take 4, TEMPRA-115): the Summary (requests grouped by day) or Every event (the
@@ -176,4 +183,14 @@ export function dirOf(path: string) {
 export function folderName(path: string) {
   const name = baseName(path).replace(/[-_]+/g, " ").trim();
   return name ? name[0]?.toUpperCase() + name.slice(1) : path;
+}
+
+/** The account's Inbox: Open or Done, all libraries or one (`owner/slug`). */
+export function inboxUrl(opts: { done?: boolean; library?: string | null } = {}): string {
+  const q = new URLSearchParams();
+  if (opts.done) q.set("done", "1");
+  if (opts.library) q.set("library", opts.library);
+  // The slash between owner and slug reads better left as it is.
+  const s = q.toString().replace(/%2F/g, "/");
+  return s ? `/inbox?${s}` : "/inbox";
 }

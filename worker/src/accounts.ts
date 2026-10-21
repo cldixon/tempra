@@ -200,6 +200,8 @@ export interface Accounts {
   revokeInvitation(id: string, libraryId: string): Promise<boolean>;
   /** A library by its path, with its owner's users row id; null when there is none. */
   library(owner: string, slug: string): Promise<(LibraryRef & { ownerId: string }) | null>;
+  /** A library by its Durable Object name, with its owner's users row id (for a maintainer). */
+  libraryByDoId(doId: string): Promise<(LibraryRef & { ownerId: string }) | null>;
   /**
    * Creates a library owned by `owner`, within their library limit. With `grant`, a "selected"
    * app connection's id (AccountGrant.id), the connection that made it also reaches it
@@ -757,6 +759,16 @@ export function d1Accounts(db: D1Database): Accounts {
         .bind(libraryId, userId)
         .run();
       return r.meta.changes > 0;
+    },
+    async libraryByDoId(doId) {
+      return db
+        .prepare(
+          `SELECT l.id, l.slug, l.do_id, u.handle AS owner, u.id AS ownerId
+           FROM libraries l JOIN users u ON u.id = l.owner
+           WHERE l.do_id = ? AND u.suspended IS NULL`,
+        )
+        .bind(doId)
+        .first<LibraryRef & { ownerId: string }>();
     },
     async library(owner, slug) {
       return db

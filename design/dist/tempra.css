@@ -2016,6 +2016,7 @@ body.ground {
 }
 
 .bell-pop-head button {
+  width: auto;
   padding: 0;
   border: 0;
   background: none;
@@ -2909,47 +2910,7 @@ ul.events {
   font-size: var(--tempra-text-label);
 }
 
-/* ---------- Notifications (TEMPRA-72, TEMPRA-73): the inbox, mentions ---------- */
-
-.inbox-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.inbox-list li {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 12px;
-  padding: 12px 18px;
-  border-radius: var(--tempra-radius-box);
-}
-
-.inbox-list li:hover {
-  background: var(--tempra-color-hover);
-}
-
-.inbox-list .what {
-  flex: 1 1 20rem;
-}
-
-.inbox-list .unread .what a {
-  font-weight: var(--tempra-weight-strong);
-}
-
-.inbox-list .when {
-  font-size: var(--tempra-text-meta);
-}
-
-.inbox-list .excerpt {
-  flex-basis: 100%;
-  margin: 0;
-  color: var(--tempra-color-muted);
-}
+/* ---------- Notifications (TEMPRA-72, TEMPRA-73): mentions (the Inbox is inbox.css) ---------- */
 
 /* The comment box with its @ suggestions under it. */
 .mention-box {
@@ -4648,6 +4609,128 @@ a.activity-download {
 
   .folder-sub .folder-main {
     grid-column: auto;
+  }
+}
+
+/* ---------- The Inbox (take 4, boards 02 and 13; TEMPRA-116) ---------- */
+
+/*
+ * One list, newest first, between hairline rules: an unread dot in the gutter, the library, kind
+ * and time on a quiet line, the title, the detail line and a quote, and the row's actions on the
+ * right. Lines and greys only.
+ */
+
+.inbox-filters .inbox-mark {
+  margin-left: auto;
+  color: var(--tempra-color-muted);
+}
+
+/* The library the list is filtered to, as a chosen pill: ink edge, a grey fill, × to clear. */
+.inbox-filters .inbox-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--tempra-space-2);
+  border-color: var(--tempra-color-text);
+  background: var(--tempra-color-selected);
+  color: var(--tempra-color-text);
+}
+
+.inbox-list {
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--tempra-color-border);
+  list-style: none;
+}
+
+.inbox-row {
+  display: grid;
+  grid-template-columns: var(--tempra-space-4) minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 0 var(--tempra-space-2);
+  padding: var(--tempra-space-3) 0;
+  border-bottom: 1px solid var(--tempra-color-border);
+}
+
+.inbox-dot {
+  justify-self: center;
+  width: var(--tempra-dot);
+  height: var(--tempra-dot);
+  margin-top: calc(var(--tempra-text-meta) * 0.6);
+  border-radius: 50%;
+}
+
+.inbox-row.unread .inbox-dot {
+  background: var(--tempra-color-text);
+}
+
+.inbox-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--tempra-space-1);
+  min-width: 0;
+}
+
+.inbox-main p {
+  margin: 0;
+}
+
+.inbox-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--tempra-space-2);
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+}
+
+.inbox-meta .lib-tile {
+  width: 18px;
+  height: 18px;
+  font-size: var(--tempra-text-label);
+}
+
+.inbox-title a {
+  color: var(--tempra-color-text);
+  font-weight: var(--tempra-weight-medium);
+  text-decoration: none;
+}
+
+.inbox-title a:hover {
+  text-decoration: underline;
+}
+
+.inbox-detail {
+  color: var(--tempra-color-muted);
+}
+
+.inbox-quote {
+  margin: var(--tempra-space-1) 0 0;
+  padding: 0 0 0 var(--tempra-space-3);
+  border-left: 2px solid var(--tempra-color-border);
+  color: var(--tempra-color-muted);
+}
+
+.inbox-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: var(--tempra-space-2);
+}
+
+@media (max-width: 900px) {
+  .inbox-row {
+    grid-template-columns: var(--tempra-space-4) minmax(0, 1fr);
+  }
+
+  .inbox-actions {
+    grid-column: 2;
+    justify-content: flex-start;
+    margin-top: var(--tempra-space-2);
+  }
+
+  .inbox-actions .button,
+  .inbox-actions button {
+    min-height: var(--tempra-touch);
   }
 }
 

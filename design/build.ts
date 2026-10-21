@@ -1,6 +1,6 @@
 /**
  * `bun run build` in design/: bundles src/*.css (tokens, base, prose, reader, workspace, concept,
- * comments, views, public, in that order) into dist/tempra.css for the site, and dist/tempra.ts
+ * comments, views, inbox, public, in that order) into dist/tempra.css for the site, and dist/tempra.ts
  * for the app's Worker, which serves it at a content-hashed URL. Both outputs are committed;
  * design.test.ts fails when they are stale.
  */
@@ -17,6 +17,7 @@ export const SOURCES = [
   "concept.css",
   "comments.css",
   "views.css",
+  "inbox.css",
   "public.css",
 ];
 

@@ -1,4 +1,4 @@
-import { StrictMode } from "react";
+import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import {
   Account,
@@ -27,8 +27,7 @@ import {
   Transfer,
   Work,
 } from "./pages/Manage";
-import { NeedsYou } from "./pages/NeedsYou";
-import { interceptLinks, match, useLocation } from "./router";
+import { interceptLinks, match, navigate, useLocation } from "./router";
 import { PageBoundary, useMe } from "./ui";
 import { Urls } from "./urls";
 import { AccountFrame, type AccountPage, type Place, SheetPage, Workspace } from "./Workspace";
@@ -36,7 +35,13 @@ import { AccountFrame, type AccountPage, type Place, SheetPage, Workspace } from
 let handle: string | null = null;
 
 /** The pages that lay out their column themselves (a concept's columns, the person's views). */
-const OWN_SHEET = new Set(["file", "directory", "needs", "activity"]);
+const OWN_SHEET = new Set(["file", "directory", "activity"]);
+
+/** A page that moved (Needs you, into the Inbox): the URL is replaced, as the server's 308 does. */
+function Redirect({ to }: { to: string }) {
+  useEffect(() => navigate(to, { replace: true }), [to]);
+  return null;
+}
 
 /**
  * One Urls per library and pinned sequence, so pages and their memos see the same object
@@ -93,7 +98,10 @@ function App() {
     page = <Invitations />;
   } else if (route.page === "inbox") {
     account = "inbox";
-    page = <Inbox all={route.all} />;
+    page = <Inbox done={route.done} library={route.library} />;
+  } else if (route.page === "redirect") {
+    account = "inbox";
+    page = <Redirect to={route.to} />;
   } else {
     const urls = urlsFor(route.owner, route.slug, "at" in route ? route.at : undefined);
     const place: Place = { file: null, dir: null, view: null };
@@ -120,9 +128,6 @@ function App() {
     switch (route.page) {
       case "directory":
         page = route.dir === "" ? <Home urls={urls} /> : <Folder urls={urls} dir={route.dir} />;
-        break;
-      case "needs":
-        page = <NeedsYou urls={urls} />;
         break;
       case "activity":
         page = <Activity urls={urls} actor={actor} filters={route.filters} done={route.done} />;

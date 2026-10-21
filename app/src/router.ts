@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { ActivityFilters, ActivityView } from "./urls";
+import { type ActivityFilters, type ActivityView, inboxUrl } from "./urls";
 
 /** The pages the app draws itself; every other URL is a server page, loaded in full. */
 export type Route =
@@ -11,10 +11,11 @@ export type Route =
   | { page: "account"; done: string | null }
   | { page: "notifications" }
   | { page: "invitations" }
-  | { page: "inbox"; all: boolean }
+  | { page: "inbox"; done: boolean; library: string | null }
+  /** A page that moved: the app replaces the URL with `to` (as the server answers with a 308). */
+  | { page: "redirect"; to: string }
   | { page: "members"; owner: string; slug: string }
   | { page: "work"; owner: string; slug: string; kind?: string }
-  | { page: "needs"; owner: string; slug: string }
   | { page: "settings"; owner: string; slug: string }
   | { page: "activity"; owner: string; slug: string; filters: ActivityFilters; done: Done }
   | { page: "transfer"; owner: string; slug: string }
@@ -87,7 +88,15 @@ export function match(url: URL): Route | null {
   if (path === "/account") return { page: "account", done: q.get("done") };
   if (path === "/notifications") return { page: "notifications" };
   if (path === "/invitations") return { page: "invitations" };
-  if (path === "/inbox") return { page: "inbox", all: q.get("all") === "1" };
+  // The Inbox (take 4, TEMPRA-116): Open or Done (take 3's `?all=1` showed done ones too), all
+  // libraries or one.
+  if (path === "/inbox") {
+    return {
+      page: "inbox",
+      done: q.get("done") === "1" || q.get("all") === "1",
+      library: q.get("library")?.trim() || null,
+    };
+  }
   const m = /^\/([^/]+)\/([^/]+)\/(.*)$/.exec(path);
   if (!m) return null;
   const owner = decode(m[1] ?? "");
@@ -128,7 +137,11 @@ export function match(url: URL): Route | null {
         };
       case "work":
         return tail === "" ? { page: "work", owner, slug, kind: q.get("kind") || undefined } : null;
+      // Needs you retired into the Inbox, filtered to the library (TEMPRA-116).
       case "needs":
+        return tail === ""
+          ? { page: "redirect", to: inboxUrl({ library: `${owner}/${slug}` }) }
+          : null;
       case "settings":
       case "transfer":
       case "recovery":

@@ -376,13 +376,19 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, []);
-  // A comment may be for the person: the inbox's count reloads a moment after one (the item is
-  // written just after the comment commits).
+  // A comment, a write or a verification may make, change or close an item of the person's
+  // (TEMPRA-116): the inbox's count reloads a moment after one (items are written just after the
+  // write commits), once for a burst.
+  const inboxTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   useFeed(
     urls,
     indexSeq,
     (events) => {
-      if (events.some((e) => e.op === "comment")) setTimeout(inboxChanged, 1500);
+      if (events.length === 0 || inboxTimer.current) return;
+      inboxTimer.current = setTimeout(() => {
+        inboxTimer.current = null;
+        inboxChanged();
+      }, 1500);
     },
     () => {},
   );

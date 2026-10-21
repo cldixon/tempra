@@ -1,7 +1,7 @@
 import type { Context, Hono } from "hono";
 import type { User } from "./accounts";
 import type { Deps } from "./app";
-import type { Notifications } from "./notify";
+import type { ItemKind, Notifications } from "./notify";
 import { devMailer, devOutbox, flushMail, itemLink } from "./notify-mail";
 import { esc } from "./oauth/pages";
 import { devSignIn, html } from "./signin";
@@ -19,6 +19,25 @@ type C = Context<any>;
 export function notificationsOf(d: Deps): Notifications {
   if (!d.notifications) throw new OkfError(501, "unavailable", "Notifications are not wired here.");
   return d.notifications;
+}
+
+/** What an open item lets the person do from the Inbox (TEMPRA-116). */
+export function itemActions(kind: ItemKind): string[] {
+  switch (kind) {
+    case "reply":
+    case "thread":
+      return ["reply", "resolve"];
+    case "mention":
+      return ["reply"];
+    case "verify":
+      return ["review", "dismiss"];
+    case "stale":
+      return ["open", "dismiss"];
+    case "invitation":
+      return ["accept", "decline"];
+    default:
+      return ["open"];
+  }
 }
 
 export function registerInboxApi(
@@ -40,21 +59,63 @@ export function registerInboxApi(
 
   // ------------------------------------------------------------------ the inbox
 
+  /** A library by {owner}/{slug}, among those the person reaches; 404 otherwise. */
+  const reachableNamed = async (d: Deps, user: User, name: string) => {
+    const lib = (await d.accounts.reachable(user.id)).find((l) => `${l.owner}/${l.slug}` === name);
+    if (!lib) throw new OkfError(404, "no_library", `There is no library ${name}.`);
+    return lib;
+  };
+
+  // The Inbox (take 4, TEMPRA-116): open items, `?done=1` the Done tab, `?all=1` both;
+  // `?library=<owner>/<slug>` one library's. Each item says what the Inbox draws: its library's
+  // name and title, the page's title, who did it (an agent by its name) and the actions it takes.
   app.get("/api/v1/inbox", async (c) => {
-    const { n, user } = await person(c);
+    const { d, n, user } = await person(c);
     const limit = Number(c.req.query("limit") ?? "") || undefined;
+    const named = c.req.query("library");
+    const [libs, filter] = await Promise.all([
+      d.accounts.reachable(user.id),
+      named ? reachableNamed(d, user, named) : Promise.resolve(null),
+    ]);
     const [page, unread] = await Promise.all([
       n.inbox(user.id, {
         all: c.req.query("all") === "1",
+        done: c.req.query("done") === "1",
+        library: filter?.id,
         before: c.req.query("before") || undefined,
         limit,
       }),
       n.unread(user.id),
     ]);
+    const byId = new Map(libs.map((l) => [l.id, l]));
+    const agentIds = [...new Set(page.items.flatMap((i) => (i.by_agent ? [i.by_agent] : [])))];
+    const [agents, invitations] = await Promise.all([
+      agentIds.length ? d.accounts.agents(agentIds) : Promise.resolve([]),
+      page.items.some((i) => i.kind === "invitation" && i.done_at === null)
+        ? d.accounts.invitations(user.id)
+        : Promise.resolve([]),
+    ]);
+    const agentName = new Map(agents.map((a) => [a.id, a.name]));
+    const invitation = new Map(invitations.map((v) => [`${v.owner}/${v.slug}`, v.id]));
     return c.json({
-      items: page.items.map(({ library: _l, ...i }) => ({ ...i, href: itemLink("", i) })),
+      items: page.items.map(({ library, by_user: _u, by_agent, ...i }) => {
+        const lib = library ? byId.get(library) : undefined;
+        const agent = by_agent ? (agentName.get(by_agent) ?? null) : null;
+        return {
+          ...i,
+          // Where it is now (a renamed handle), or where it happened.
+          library: lib ? `${lib.owner}/${lib.slug}` : i.place,
+          library_title: lib?.title || null,
+          who: agent ?? (by_agent ? i.actor : i.actor.replace(/^human:/, "")),
+          agent: by_agent !== null || !i.actor.startsWith("human:"),
+          invitation: i.kind === "invitation" ? (invitation.get(i.place) ?? null) : null,
+          actions: i.done_at === null ? itemActions(i.kind) : [],
+          href: itemLink("", { ...i, place: lib ? `${lib.owner}/${lib.slug}` : i.place }),
+        };
+      }),
       next: page.next,
       unread: unread.total,
+      open: page.open,
     });
   });
 
@@ -70,11 +131,7 @@ export function registerInboxApi(
     let library: string | undefined;
     if (typeof b.library === "string" && b.library) {
       // By {owner}/{slug}, among the libraries the person reaches.
-      const lib = (await d.accounts.reachable(user.id)).find(
-        (l) => `${l.owner}/${l.slug}` === b.library,
-      );
-      if (!lib) throw new OkfError(404, "no_library", `There is no library ${b.library}.`);
-      library = lib.id;
+      library = (await reachableNamed(d, user, b.library)).id;
     }
     const ids = Array.isArray(b.ids)
       ? b.ids.filter((x): x is string => typeof x === "string")

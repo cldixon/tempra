@@ -51,7 +51,6 @@ describe("the app's pages (TEMPRA-9)", () => {
       `${LIB}/-/ledger?actor=x`,
       `${LIB}/-/diff/notes/a.md?from=0`,
       `${LIB}/-/work?kind=stale`,
-      `${LIB}/-/needs`,
       `${LIB}/-/activity`,
       `${LIB}/-/revert/some-request`,
       `${LIB}/-/restore/notes/a.md?to=1`,
@@ -83,6 +82,15 @@ describe("the app's pages (TEMPRA-9)", () => {
     const one = await page(s, "/");
     expect(one.html).not.toMatch(/<script(?![^>]*\bsrc=)/);
     expect(one.html).not.toMatch(/<style|\sstyle=/);
+  });
+
+  test("Needs you's URL lands on the Inbox filtered to the library (TEMPRA-116)", async () => {
+    const s = setup();
+    const r = await page(s, `${LIB}/-/needs`);
+    expect(r.status).toBe(308);
+    expect(r.headers.get("Location")).toBe("/inbox?library=owner/demo");
+    const stranger = await s.stranger("needs@example.com");
+    expect((await stranger.app.request(`${LIB}/-/needs`)).status).toBe(404);
   });
 
   test("the bundle is served at its hashed path, immutable; any other name is a 404", async () => {
