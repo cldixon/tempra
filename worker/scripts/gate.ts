@@ -1472,10 +1472,10 @@ async function browserRenders(
         }
         if (!(await stayed())) throw new Error("the page reloaded");
         // Notifications (TEMPRA-72, TEMPRA-74): the agent's reply on the person's thread is in
-        // their inbox, its count shows in the open page's sidebar without a reload, and the
-        // batched mail lands in the dev outbox.
-        await sidebar
-          .getByRole("link", { name: /^Inbox, \d+ unread$/ })
+        // their inbox, its count shows on the open page's bell (take 4) without a reload, and
+        // the batched mail lands in the dev outbox.
+        await sheetBar
+          .getByRole("button", { name: /^Inbox, \d+ unread$/ })
           .waitFor({ timeout: 10_000 });
         const inbox = (await (await apiAs(devCookie, "/api/v1/inbox")).json()) as {
           items: { kind: string; excerpt: string; href: string }[];
