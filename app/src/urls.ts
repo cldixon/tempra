@@ -49,8 +49,16 @@ export class Urls {
   diff(path: string, from?: number, to?: number) {
     return `${this.base}-/diff/${enc(path)}${query({ from, to })}`;
   }
-  ledger(filters: LedgerFilters = {}) {
-    return `${this.base}-/ledger${query({ ...filters })}`;
+  /**
+   * Activity's Every event view at the ledger's own address (take 4, TEMPRA-115): `-/ledger`
+   * stays as the audit view's URL and opens that view, with the same filters.
+   */
+  ledger(filters: Omit<ActivityFilters, "view"> = {}) {
+    return `${this.base}-/ledger${activityQuery(filters)}`;
+  }
+  /** The ledger as JSON lines, every event in order (a server download). */
+  ledgerJsonl() {
+    return this.page("ledger.jsonl");
   }
   revert(requestId: string) {
     return `${this.base}-/revert/${encodeURIComponent(requestId)}`;
@@ -62,13 +70,13 @@ export class Urls {
   needs() {
     return this.page("needs");
   }
-  /** The ledger for people: requests grouped by day, filtered as the page's controls set. */
+  /**
+   * Activity (take 4, TEMPRA-115): the Summary (requests grouped by day) or Every event (the
+   * ledger as a table), filtered as the page's controls set.
+   */
   activity(filters: ActivityFilters = {}) {
-    return `${this.page("activity")}${query({
-      who: filters.who === "everyone" ? undefined : filters.who,
-      prefix: filters.prefix,
-      comments: filters.hideComments ? "hide" : undefined,
-    })}`;
+    const view = filters.view === "events" ? "events" : undefined;
+    return `${this.page("activity")}${activityQuery(filters, view)}`;
   }
   work(kind?: string) {
     return `${this.page("work")}${query({ kind })}`;
@@ -110,19 +118,35 @@ export class Urls {
   }
 }
 
-/** Activity's filters: whose requests, under which folder, with or without comments. */
-export interface ActivityFilters {
-  who?: "everyone" | "agents" | "people";
-  prefix?: string;
-  hideComments?: boolean;
-}
+/** Activity's views: the Summary (the default) and Every event (the ledger as a table). */
+export type ActivityView = "summary" | "events";
 
-export interface LedgerFilters {
+/** Whose requests a view shows: anyone, agents only, people only. */
+export type Who = "everyone" | "agents" | "people";
+
+/**
+ * Activity's filters, in the URL so a view can be linked. Both views: who, and the server's
+ * folder `prefix` (reachable by URL, no control). Every event also: one exact `actor`, an event
+ * `kind` and a text filter `q` on path or note.
+ */
+export interface ActivityFilters {
+  view?: ActivityView;
+  who?: Who;
   prefix?: string;
   actor?: string;
-  from?: string;
-  to?: string;
-  before?: number;
+  kind?: string;
+  q?: string;
+}
+
+function activityQuery(f: ActivityFilters, view?: string) {
+  return query({
+    view,
+    who: f.who === "everyone" ? undefined : f.who,
+    prefix: f.prefix,
+    actor: f.actor,
+    kind: f.kind,
+    q: f.q,
+  });
 }
 
 export const enc = (p: string) => p.split("/").map(encodeURIComponent).join("/");

@@ -84,7 +84,7 @@ export function LibrarySidebar(props: {
         <Row href={urls.tree("")} current={place.view === "home"} icon="home" label="Home" />
         <Row
           href={urls.activity()}
-          current={place.view === "activity" || place.view === "ledger"}
+          current={place.view === "activity"}
           icon="activity"
           label="Activity"
           end={

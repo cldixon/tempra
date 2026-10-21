@@ -184,6 +184,28 @@ describe("the app's pages (TEMPRA-9)", () => {
   });
 });
 
+describe("Activity's Download (TEMPRA-115)", () => {
+  test("the ledger as JSON lines, every event in order, as a download", async () => {
+    const s = setup();
+    for (let i = 0; i < 3; i++) {
+      await put(s, `d${i}.md`, `---\ntype: Note\ntitle: D${i}\n---\nWords ${i}.\n`, `note ${i}`);
+    }
+    const r = await s.app.request(`${LIB}/-/ledger.jsonl`);
+    expect(r.status).toBe(200);
+    expect(r.headers.get("Content-Type")).toBe("application/x-ndjson");
+    expect(r.headers.get("Content-Disposition")).toContain("attachment");
+    const lines = (await r.text()).trimEnd().split("\n");
+    const events = lines.map((l) => JSON.parse(l) as { t: string; seq: number; path: string });
+    expect(events.every((e) => e.t === "event")).toBe(true);
+    const seqs = events.map((e) => e.seq);
+    expect(seqs).toEqual([...seqs].sort((a, b) => a - b));
+    expect(events.map((e) => e.path)).toEqual(expect.arrayContaining(["d0.md", "d1.md", "d2.md"]));
+    // Signed out, it is a sign-in page or a 404, never the ledger.
+    const anon = await s.anon.request(`${LIB}/-/ledger.jsonl`, { redirect: "manual" });
+    expect(anon.status).not.toBe(200);
+  });
+});
+
 async function json<T>(r: Response): Promise<T> {
   return (await r.json()) as T;
 }

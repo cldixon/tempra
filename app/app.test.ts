@@ -21,11 +21,33 @@ describe("routes follow the server's URLs (tempra-dev: v2/urls-and-handles)", ()
     expect(at(urls.file("a/b.md"))).toMatchObject({ page: "file", compare: undefined });
     expect(at(urls.thread("a/b.md", "t1"))).toMatchObject({ page: "file", path: "a/b.md" });
     expect(at(urls.needs())).toMatchObject({ page: "needs" });
-    expect(at(urls.activity())).toMatchObject({ page: "activity", filters: { who: "everyone" } });
-    const filtered = urls.activity({ who: "agents", prefix: "app", hideComments: true });
-    expect(at(filtered)).toMatchObject({
-      filters: { who: "agents", prefix: "app", hideComments: true },
+    expect(at(urls.activity())).toMatchObject({
+      page: "activity",
+      filters: { view: "summary", who: "everyone" },
     });
+    const filtered = urls.activity({ who: "agents", prefix: "app" });
+    expect(filtered).toBe("/ann/notes/-/activity?who=agents&prefix=app");
+    expect(at(filtered)).toMatchObject({
+      filters: { view: "summary", who: "agents", prefix: "app" },
+    });
+  });
+
+  test("Activity's two views and their filters, in the URL (take 4, TEMPRA-115)", () => {
+    const urls = new Urls("ann", "notes");
+    const events = urls.activity({ view: "events", who: "people", kind: "edit", q: "reader" });
+    expect(events).toBe("/ann/notes/-/activity?view=events&who=people&kind=edit&q=reader");
+    expect(at(events)).toMatchObject({
+      page: "activity",
+      filters: { view: "events", who: "people", kind: "edit", q: "reader" },
+      done: null,
+    });
+    // The ledger's address opens Every event, keeping its filters and the revert notice.
+    expect(at(urls.ledger())).toMatchObject({ page: "activity", filters: { view: "events" } });
+    expect(urls.ledger({ actor: "claude-code" })).toBe("/ann/notes/-/ledger?actor=claude-code");
+    // The Summary leaves the default out of its URL; take 3's comments filter is gone.
+    expect(urls.activity({ view: "summary" })).toBe("/ann/notes/-/activity");
+    expect(at("/ann/notes/-/activity?comments=hide")?.page).toBe("activity");
+    expect(urls.ledgerJsonl()).toBe("/ann/notes/-/ledger.jsonl");
   });
 
   test("paths that start with -/ use the pages' own prefixes", () => {
@@ -38,8 +60,8 @@ describe("routes follow the server's URLs (tempra-dev: v2/urls-and-handles)", ()
       to: 5,
     });
     expect(at("/ann/notes/-/ledger?actor=x&before=9&done=revert&n=2")).toMatchObject({
-      page: "ledger",
-      filters: { actor: "x", before: 9 },
+      page: "activity",
+      filters: { view: "events", actor: "x" },
       done: { kind: "revert", n: 2 },
     });
   });
@@ -75,6 +97,7 @@ describe("routes follow the server's URLs (tempra-dev: v2/urls-and-handles)", ()
       "/ann/notes/-/export",
       "/ann/notes/-/exports/2026-10-01/bundle.tar",
       "/ann/notes/-/ledger/x",
+      "/ann/notes/-/ledger.jsonl",
     ]) {
       expect(at(p)).toBeNull();
     }

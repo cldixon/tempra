@@ -45,7 +45,6 @@ export interface Place {
     | "home"
     | "needs"
     | "activity"
-    | "ledger"
     | "work"
     | "settings"
     | "transfer"
@@ -64,7 +63,6 @@ const VIEW_NAMES: Record<NonNullable<Place["view"]>, string> = {
   home: "Home",
   needs: "Needs you",
   activity: "Activity",
-  ledger: "Ledger",
   work: "Work queue",
   settings: "General",
   transfer: "Import & export",
