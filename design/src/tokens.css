@@ -68,7 +68,7 @@
   --tempra-text-ui: 13px; /* controls, panels, the tree, comments */
   --tempra-text-name: 15px; /* a library's name, dialog heads, the wordmark */
   --tempra-text-reader: 17px; /* a concept's body and description, the landing page's lede */
-  --tempra-text-h2: 22px; /* a view's title on a phone */
+  --tempra-text-h2: 22px; /* an attachment's name */
   --tempra-text-page: 28px; /* a view's title (h1); a concept's title on a phone */
   --tempra-text-title: 36px; /* a concept's title */
 
@@ -94,9 +94,11 @@
      The breakpoints are 1100px (the panel overlays the page) and 900px (the phone layout); a
      media query cannot read a token, so they are written where they are used. */
   --tempra-topbar: 60px; /* the top bar */
-  --tempra-sidebar: 264px; /* the sidebar's width, and the phone drawer's */
+  --tempra-sidebar: 264px; /* the sidebar's width */
   --tempra-panel: 360px; /* a concept's panel (Comments, History, Properties) */
   --tempra-bar: 52px; /* the phone's top bar */
+  --tempra-drawer: min(82vw, 360px); /* the phone's drawer: about four fifths of the screen */
+  --tempra-sheet: 67dvh; /* a panel as the phone's bottom sheet: about two thirds of the screen */
   --tempra-row: 30px; /* a sidebar row */
   --tempra-touch: 44px; /* the least touch target on a phone */
   --tempra-avatar: 22px;

@@ -2,12 +2,13 @@ import { useEffect, useState } from "react";
 import { ApiError } from "../api";
 import { Icon, Menu } from "../chrome";
 import { baseName, enc, type Urls } from "../urls";
+import { useFrame } from "../Workspace";
 import type { PanelName } from "./Panel";
 
 /*
  * A concept's tools in the top bar (take 4, TEMPRA-114; tempra-dev: app/reader, Layout): Copy
- * page and ⋯ (History, Properties, View Markdown, Copy link, Download .md). Comments n is the
- * page's own (it carries the open count).
+ * page and ⋯ (History, Properties, View Markdown, Copy link, Download .md; on a phone Copy page
+ * moves to the head of ⋯, TEMPRA-118). Comments n is the page's own (it carries the open count).
  */
 
 /** The file as stored, frontmatter and body: what an agent reads (`GET …/files/{path}`). */
@@ -83,6 +84,9 @@ export function PageMenu(props: {
 }) {
   const { urls, path } = props;
   const link = useCopied();
+  const page = useCopied();
+  // On a phone Copy page has no room in the top bar: it heads ⋯ (and stays open to say so).
+  const { narrow } = useFrame();
   return (
     <Menu
       name="More"
@@ -91,6 +95,26 @@ export function PageMenu(props: {
       align="end"
       label={<Icon name="more" />}
     >
+      {narrow && (
+        <>
+          <button
+            type="button"
+            className="menu-item"
+            data-stay
+            onClick={() => page.run(() => storedFile(urls, path))}
+          >
+            <Icon name="copy" />{" "}
+            <span aria-live="polite">
+              {page.state === "copied"
+                ? "Copied"
+                : page.state === "failed"
+                  ? "Could not copy"
+                  : "Copy page"}
+            </span>
+          </button>
+          <hr />
+        </>
+      )}
       <button
         type="button"
         className="menu-item"

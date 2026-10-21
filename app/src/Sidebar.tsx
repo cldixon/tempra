@@ -12,8 +12,9 @@ import { useFrame } from "./Workspace";
  * The frame's sidebars (take 4, TEMPRA-113; tempra-dev: app/workspace): a library's (Home,
  * Activity, a rule, the tree, Settings at the foot), its settings' (a way back, then the tabs by
  * role), the account's (Libraries, the Inbox, the person's libraries) and the account's
- * settings' (a way back, then each page). On a phone the library's is the drawer, with the
- * switcher and search at its head and the Inbox at its foot.
+ * settings' (a way back, then each page). On a phone each is the drawer's content (take 4,
+ * board 34): the frame puts the mark, the switcher and × at its head; the library's adds a
+ * search field at its top and the Inbox at its foot.
  */
 
 /** A library's tile: its initial on a dark square (a lighter round one for a shared library). */
@@ -67,18 +68,16 @@ export function LibrarySidebar(props: {
   const unread = useUnread();
   return (
     <>
-      <div className="drawer-head">
-        <LibrarySwitcher urls={urls} name={props.name} />
-        <button
-          type="button"
-          className="icon-button touch"
-          aria-label="Search"
-          title={`Search (${switcherKey()})`}
-          onClick={props.onSearch}
-        >
-          <Icon name="search" />
-        </button>
-      </div>
+      {/* On a phone, search as a field at the drawer's top (board 34); it opens the switcher. */}
+      <button
+        type="button"
+        className="drawer-search"
+        title={`Search (${switcherKey()})`}
+        onClick={props.onSearch}
+      >
+        <Icon name="search" />
+        <span>Search {props.name}</span>
+      </button>
       <nav className="nav" aria-label="Views">
         <Row href={urls.tree("")} current={place.view === "home"} icon="home" label="Home" />
         <Row
@@ -108,6 +107,7 @@ export function LibrarySidebar(props: {
         />
       </div>
       <div className="sidebar-foot">
+        <Row href={urls.settings()} icon="settings" label="Settings" />
         <Row
           href="/inbox"
           icon="inbox"
@@ -116,7 +116,6 @@ export function LibrarySidebar(props: {
           ariaLabel={unread > 0 ? `Inbox, ${unread} unread` : "Inbox"}
           end={unread > 0 ? <span className="nav-count">{unread}</span> : undefined}
         />
-        <Row href={urls.settings()} icon="settings" label="Settings" />
       </div>
     </>
   );
