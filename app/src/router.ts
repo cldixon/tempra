@@ -3,17 +3,19 @@ import type { ActivityFilters, LedgerFilters } from "./urls";
 
 /** The pages the app draws itself; every other URL is a server page, loaded in full. */
 export type Route =
-  | { page: "libraries" }
+  | { page: "libraries"; create: boolean }
   | { page: "welcome" }
   | { page: "connect" }
   | { page: "tokens"; library: string | null }
   | { page: "apps" }
   | { page: "account"; done: string | null }
+  | { page: "notifications" }
   | { page: "invitations" }
   | { page: "inbox"; all: boolean }
   | { page: "members"; owner: string; slug: string }
   | { page: "work"; owner: string; slug: string; kind?: string }
   | { page: "needs"; owner: string; slug: string }
+  | { page: "settings"; owner: string; slug: string }
   | { page: "activity"; owner: string; slug: string; filters: ActivityFilters }
   | { page: "transfer"; owner: string; slug: string }
   | { page: "recovery"; owner: string; slug: string }
@@ -77,13 +79,14 @@ const SERVER_ROOTS = new Set([
 export function match(url: URL): Route | null {
   const path = url.pathname;
   const q = url.searchParams;
-  if (path === "/") return { page: "libraries" };
+  if (path === "/") return { page: "libraries", create: q.get("new") === "1" };
   // The account's pages; sign-in, consent and the email-change link are server pages.
   if (path === "/welcome") return { page: "welcome" };
   if (path === "/connect") return { page: "connect" };
   if (path === "/tokens") return { page: "tokens", library: q.get("library") };
   if (path === "/apps") return { page: "apps" };
   if (path === "/account") return { page: "account", done: q.get("done") };
+  if (path === "/notifications") return { page: "notifications" };
   if (path === "/invitations") return { page: "invitations" };
   if (path === "/inbox") return { page: "inbox", all: q.get("all") === "1" };
   const m = /^\/([^/]+)\/([^/]+)\/(.*)$/.exec(path);
@@ -146,6 +149,7 @@ export function match(url: URL): Route | null {
         };
       }
       case "needs":
+      case "settings":
       case "transfer":
       case "recovery":
       case "delete":

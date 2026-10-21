@@ -39,6 +39,14 @@
   font-size: var(--tempra-text-meta);
 }
 
+/* A library's description under its name on the home (TEMPRA-102, take 4). */
+.view-lede {
+  margin: var(--tempra-space-1) 0 0;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-reader);
+  line-height: var(--tempra-line-height);
+}
+
 /* "Live": a small ink dot before the line. */
 .view-live {
   display: flex;

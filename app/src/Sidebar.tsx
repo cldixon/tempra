@@ -1,53 +1,103 @@
 import { type AgentChange, warmth } from "./changes";
-import { AccountMenu, Icon, Menu, PersonMenu } from "./chrome";
+import { Icon, Menu } from "./chrome";
 import { useUnread } from "./inbox";
 import { useNeeds } from "./needs";
-import { libraryName, useLibraries, useRole } from "./role";
+import { libraryName, type ReachableLibrary, useLibraries, useRole } from "./role";
 import { type OutlineFile, Tree } from "./Tree";
-import { type Me, switcherKey } from "./ui";
+import { switcherKey } from "./ui";
 import { Urls } from "./urls";
-import { type Place, placeName, useFrame } from "./Workspace";
+import type { AccountPage, Place } from "./Workspace";
+import { useFrame } from "./Workspace";
 
-/**
- * The workspace's sidebar (take 3, tempra-dev: app/workspace): the library switcher, search, the
- * person's three views (Home, Needs you, Activity), the library's files, and at its foot the
- * inbox and the person. On a phone it is the drawer behind the top bar's menu button.
+/*
+ * The frame's sidebars (take 4, TEMPRA-113; tempra-dev: app/workspace): a library's (Home,
+ * Activity, a rule, the tree, Settings at the foot), its settings' (a way back, then the tabs by
+ * role), the account's (Libraries, the Inbox, the person's libraries) and the account's
+ * settings' (a way back, then each page). On a phone the library's is the drawer, with the
+ * switcher and search at its head and the Inbox at its foot.
  */
-export function Sidebar(props: {
+
+/** A library's tile: its initial on a dark square (a lighter round one for a shared library). */
+export function LibraryTile({ name, shared = false }: { name: string; shared?: boolean }) {
+  return (
+    <span className={shared ? "lib-tile shared" : "lib-tile"} aria-hidden="true">
+      {(name.trim()[0] ?? "?").toUpperCase()}
+    </span>
+  );
+}
+
+/** A row of the sidebar: a glyph (or a tile), a name, a count or a mark at the end. */
+function Row(props: {
+  href: string;
+  current?: boolean;
+  icon?: Parameters<typeof Icon>[0]["name"];
+  tile?: { name: string; shared?: boolean };
+  label: string;
+  end?: React.ReactNode;
+  className?: string;
+  ariaLabel?: string;
+}) {
+  return (
+    <a
+      className={props.className ? `nav-row ${props.className}` : "nav-row"}
+      href={props.href}
+      aria-current={props.current ? "page" : undefined}
+      aria-label={props.ariaLabel}
+    >
+      {props.icon && <Icon name={props.icon} />}
+      {props.tile && <LibraryTile name={props.tile.name} shared={props.tile.shared} />}
+      <span className="nav-label">{props.label}</span>
+      {props.end}
+    </a>
+  );
+}
+
+/** The library's sidebar: Home, Activity, a rule, the files, Settings at the foot. */
+export function LibrarySidebar(props: {
   urls: Urls;
+  name: string;
   place: Place;
-  me: Me | null;
   changes: Map<string, AgentChange>;
   now: number;
   onSearch(): void;
-  onHide(): void;
   onIndex(files: OutlineFile[], seq: number): void;
 }) {
   const { urls, place } = props;
+  const { latest, now } = useFrame();
+  const recent = warmth(latest, now);
   const unread = useUnread();
   return (
     <>
-      <div className="sidebar-head">
-        <LibrarySwitcher urls={urls} place={place} />
+      <div className="drawer-head">
+        <LibrarySwitcher urls={urls} name={props.name} />
         <button
           type="button"
-          className="icon-button sidebar-hide"
-          aria-label="Hide sidebar"
-          title="Hide sidebar"
-          onClick={props.onHide}
+          className="icon-button touch"
+          aria-label="Search"
+          title={`Search (${switcherKey()})`}
+          onClick={props.onSearch}
         >
-          <Icon name="sidebar" />
+          <Icon name="search" />
         </button>
       </div>
-      <button type="button" className="search-pill" onClick={props.onSearch}>
-        <Icon name="search" size={14} />
-        <span>Search</span>
-        <kbd>{switcherKey()}</kbd>
-      </button>
-      <ViewNav urls={urls} view={place.view} home />
-      <div className="sidebar-label" id="sidebar-files">
-        Library
-      </div>
+      <nav className="nav" aria-label="Views">
+        <Row href={urls.tree("")} current={place.view === "home"} icon="home" label="Home" />
+        <Row
+          href={urls.activity()}
+          current={place.view === "activity" || place.view === "ledger"}
+          icon="activity"
+          label="Activity"
+          end={
+            recent ? (
+              <span className="nav-count" title="An agent changed something lately">
+                <span className={`change-dot ${recent}`} aria-hidden="true" />
+                <span className="visually-hidden">An agent changed something lately</span>
+              </span>
+            ) : undefined
+          }
+        />
+      </nav>
+      <hr className="sidebar-rule" />
       <div className="sidebar-scroll">
         <Tree
           urls={urls}
@@ -59,27 +109,25 @@ export function Sidebar(props: {
         />
       </div>
       <div className="sidebar-foot">
-        <a
-          className="nav-row"
+        <Row
           href="/inbox"
-          aria-label={unread > 0 ? `Inbox, ${unread} unread` : "Inbox"}
-        >
-          <Icon name="inbox" />
-          <span className="nav-label">Inbox</span>
-          {unread > 0 && <span className="nav-count">{unread}</span>}
-        </a>
-        <PersonMenu me={props.me} />
+          icon="inbox"
+          label="Inbox"
+          className="phone-only"
+          ariaLabel={unread > 0 ? `Inbox, ${unread} unread` : "Inbox"}
+          end={unread > 0 ? <span className="nav-count">{unread}</span> : undefined}
+        />
+        <Row href={urls.settings()} icon="settings" label="Settings" />
       </div>
     </>
   );
 }
 
 /**
- * The person's views of a library as rows: Home (in the sidebar), Needs you with its count, and
- * Activity with a dot after an agent's recent change. The sidebar shows them, and so does the
- * library's home when the sidebar is not beside the sheet (TEMPRA-107, tempra-dev: app/workspace).
+ * The person's views as rows (Needs you with its count, Activity): the home's ways in on a phone
+ * (TEMPRA-107) until Needs you retires into the Inbox (TEMPRA-116).
  */
-export function ViewNav(props: { urls: Urls; view: Place["view"]; home?: boolean }) {
+export function ViewNav(props: { urls: Urls; view: Place["view"] }) {
   const { urls, view } = props;
   const needs = useNeeds(urls);
   const { latest, now } = useFrame();
@@ -87,149 +135,187 @@ export function ViewNav(props: { urls: Urls; view: Place["view"]; home?: boolean
   const recent = warmth(latest, now);
   return (
     <nav className="nav" aria-label="Views">
-      {props.home && (
-        <a
-          className="nav-row"
-          href={urls.tree("")}
-          aria-current={view === "home" ? "page" : undefined}
-        >
-          <Icon name="home" />
-          <span className="nav-label">Home</span>
-        </a>
-      )}
-      <a
-        className="nav-row"
+      <Row
         href={urls.needs()}
-        aria-current={view === "needs" ? "page" : view === "work" ? "location" : undefined}
-      >
-        <Icon name="needs" />
-        <span className="nav-label">Needs you</span>
-        {count > 0 && <span className="nav-count">{count}</span>}
-      </a>
-      <a
-        className="nav-row"
+        current={view === "needs"}
+        icon="needs"
+        label="Needs you"
+        end={count > 0 ? <span className="nav-count">{count}</span> : undefined}
+      />
+      <Row
         href={urls.activity()}
-        aria-current={view === "activity" ? "page" : view === "ledger" ? "location" : undefined}
-      >
-        <Icon name="activity" />
-        <span className="nav-label">Activity</span>
-        {recent && (
-          <span className="nav-count" title="An agent changed something lately">
-            <span className={`change-dot ${recent}`} aria-hidden="true" />
-            <span className="visually-hidden">An agent changed something lately</span>
-          </span>
-        )}
-      </a>
+        current={view === "activity"}
+        icon="activity"
+        label="Activity"
+        end={
+          recent ? (
+            <span className="nav-count" title="An agent changed something lately">
+              <span className={`change-dot ${recent}`} aria-hidden="true" />
+              <span className="visually-hidden">An agent changed something lately</span>
+            </span>
+          ) : undefined
+        }
+      />
     </nav>
   );
 }
 
-/** The library's tile: its initial on a dark square. */
-function LibraryTile({ urls }: { urls: Urls }) {
+/** The library's settings pages by role (tempra-dev: v2/sharing). */
+export function settingsTabs(urls: Urls, role: string | null) {
+  const owner = role === "owner";
+  const all: [string, string, Place["view"], boolean][] = [
+    ["General", urls.settings(), "settings", true],
+    ["Members", urls.members(), "members", true],
+    ["Connect", urls.connect(), "connect", true],
+    ["Import & export", urls.transfer(), "transfer", true],
+    ["Recovery", urls.recovery(), "recovery", owner],
+    ["Delete library", urls.remove(), "delete", owner],
+  ];
+  return all.filter(([, , , shown]) => shown).map(([label, href, view]) => ({ label, href, view }));
+}
+
+/** The settings' sidebar: back to the library, then its tabs. */
+export function SettingsSidebar({ urls, name, place }: { urls: Urls; name: string; place: Place }) {
+  const role = useRole(urls);
   return (
-    <span className="lib-tile" aria-hidden="true">
-      {(urls.slug[0] ?? "?").toUpperCase()}
-    </span>
+    <nav className="nav" aria-label="Library settings">
+      <Row href={urls.tree("")} icon="previous" label={`Back to ${name}`} className="back" />
+      {settingsTabs(urls, role).map((t) => (
+        <Row key={t.view} href={t.href} current={place.view === t.view} label={t.label} />
+      ))}
+    </nav>
+  );
+}
+
+/** The account's sidebar: Libraries, the Inbox, then the person's libraries by kind. */
+export function AccountSidebar({ page }: { page: AccountPage }) {
+  const libs = useLibraries();
+  const unread = useUnread();
+  const list = libs.state === "ready" ? libs.data.libraries : [];
+  const yours = list.filter((l) => (l.role ?? "owner") === "owner");
+  const shared = list.filter((l) => (l.role ?? "owner") !== "owner");
+  const row = (l: ReachableLibrary) => (
+    <Row
+      key={`${l.owner}/${l.slug}`}
+      href={new Urls(l.owner, l.slug).tree("")}
+      tile={{ name: l.title || l.slug, shared: (l.role ?? "owner") !== "owner" }}
+      label={l.title || libraryName(l)}
+    />
+  );
+  return (
+    <>
+      <nav className="nav" aria-label="Account">
+        <Row href="/" current={page === "libraries"} icon="libraries" label="Libraries" />
+        <Row
+          href="/inbox"
+          current={page === "inbox"}
+          icon="inbox"
+          label="Inbox"
+          ariaLabel={unread > 0 ? `Inbox, ${unread} unread` : "Inbox"}
+          end={unread > 0 ? <span className="nav-count">{unread}</span> : undefined}
+        />
+      </nav>
+      <div className="sidebar-scroll">
+        {yours.length > 0 && (
+          <>
+            <div className="sidebar-label">Yours</div>
+            <nav className="nav" aria-label="Your libraries">
+              {yours.map(row)}
+            </nav>
+          </>
+        )}
+        {shared.length > 0 && (
+          <>
+            <div className="sidebar-label">Shared with you</div>
+            <nav className="nav" aria-label="Shared with you">
+              {shared.map(row)}
+            </nav>
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
+/** The account settings' sidebar: back to the libraries, then each page. */
+export function AccountSettingsSidebar({ page }: { page: AccountPage }) {
+  const tabs: [AccountPage, string, string][] = [
+    ["account", "/account", "Account"],
+    ["notifications", "/notifications", "Notifications"],
+    ["connect", "/connect", "Connect an agent"],
+    ["tokens", "/tokens", "Tokens"],
+    ["apps", "/apps", "Connected apps"],
+  ];
+  return (
+    <nav className="nav" aria-label="Settings">
+      <Row href="/" icon="previous" label="Back to libraries" className="back" />
+      {tabs.map(([key, href, label]) => (
+        <Row key={key} href={href} current={page === key} label={label} />
+      ))}
+    </nav>
   );
 }
 
 /**
- * The library's name and owner as a menu: the person's other libraries, then this library's
- * settings by role (Recovery and Delete are the owner's; tempra-dev: v2/sharing).
+ * The library switcher (take 4, board 07): the library's name and a chevron in the top bar; its
+ * menu lists the person's libraries (Yours, then Shared with you with their role, this one
+ * ticked), then All libraries, New library, and this library's settings.
  */
-export function LibrarySwitcher({ urls, place }: { urls: Urls; place: Place }) {
+export function LibrarySwitcher({ urls, name }: { urls: Urls; name: string }) {
   const libs = useLibraries();
-  const role = useRole(urls);
   const list = libs.state === "ready" ? libs.data.libraries : [];
-  const others = list.filter((l) => l.owner !== urls.owner || l.slug !== urls.slug);
-  const owner = role === "owner";
-  const all: [string, string, Place["view"], boolean][] = [
-    ["Members", urls.members(), "members", true],
-    ["Import & export", urls.transfer(), "transfer", true],
-    ["Recovery", urls.recovery(), "recovery", owner],
-    ["Connect", urls.connect(), "connect", true],
-    ["Delete", urls.remove(), "delete", owner],
-  ];
-  const settings = all.filter(([, , , shown]) => shown);
+  const yours = list.filter((l) => (l.role ?? "owner") === "owner");
+  const shared = list.filter((l) => (l.role ?? "owner") !== "owner");
+  const here = (l: ReachableLibrary) => l.owner === urls.owner && l.slug === urls.slug;
+  const row = (l: ReachableLibrary) => (
+    <a
+      key={`${l.owner}/${l.slug}`}
+      className="menu-lib"
+      href={new Urls(l.owner, l.slug).tree("")}
+      aria-current={here(l) ? "page" : undefined}
+    >
+      <LibraryTile name={l.title || l.slug} shared={(l.role ?? "owner") !== "owner"} />
+      <span>{l.title || libraryName(l)}</span>
+      {(l.role ?? "owner") !== "owner" && (
+        <span className="menu-lib-role">{l.role === "write" ? "Write" : "Read"}</span>
+      )}
+      {here(l) && (
+        <span className="menu-lib-check">
+          <Icon name="check" size={14} />
+        </span>
+      )}
+    </a>
+  );
   return (
     <Menu
       name={`Library ${urls.slug}, owned by ${urls.owner}`}
       buttonClass="lib-switch"
+      listClass="libraries"
       label={
         <>
-          <LibraryTile urls={urls} />
-          <span className="lib-names">
-            <span className="lib-name">{urls.slug}</span>
-            <span className="lib-owner">{urls.owner}</span>
-          </span>
-          <Icon name="updown" size={14} />
+          <span className="lib-name">{name}</span>
+          <Icon name="down" size={14} />
         </>
       }
     >
-      {others.length > 0 && (
-        <>
-          <div className="menu-note">Switch library</div>
-          {others.map((l) => (
-            <a key={`${l.owner}/${l.slug}`} href={new Urls(l.owner, l.slug).tree("")}>
-              {libraryName(l)}
-            </a>
-          ))}
-        </>
-      )}
-      <a href="/">All libraries</a>
+      {yours.length > 0 && <div className="menu-note">Yours</div>}
+      {yours.map(row)}
+      {shared.length > 0 && <div className="menu-note">Shared with you</div>}
+      {shared.map(row)}
       <hr />
-      <div className="menu-note">Library settings</div>
-      {settings.map(([name, href, key]) => (
-        <a key={name} href={href} aria-current={place.view === key ? "page" : undefined}>
-          {name}
-        </a>
-      ))}
-    </Menu>
-  );
-}
-
-/**
- * The phone's top bar (TEMPRA-107): the drawer's button on the left, then where the person is
- * (the library's tile and name, a link to its home, with the page beneath it), then search and the
- * person on the right.
- */
-export function TopBar(props: {
-  urls: Urls;
-  place: Place;
-  me: Me | null;
-  drawer: boolean;
-  onDrawer(): void;
-  onSearch(): void;
-}) {
-  const { urls } = props;
-  const here = placeName(props.place);
-  return (
-    <header className="ws-topbar">
-      <button
-        type="button"
-        className="icon-button touch ws-menu"
-        aria-label="Menu"
-        aria-expanded={props.drawer}
-        onClick={props.onDrawer}
-      >
-        <Icon name="menu" />
-      </button>
-      <a className="ws-topbar-place" href={urls.tree("")}>
-        <LibraryTile urls={urls} />
-        <span className="lib-names">
-          <span className="lib-name">{urls.slug}</span>
-          {here && <span className="ws-topbar-here">{here}</span>}
-        </span>
+      <a className="menu-item" href="/">
+        <Icon name="libraries" />
+        All libraries
       </a>
-      <button
-        type="button"
-        className="icon-button touch"
-        aria-label="Search"
-        onClick={props.onSearch}
-      >
-        <Icon name="search" />
-      </button>
-      <AccountMenu me={props.me} />
-    </header>
+      <a className="menu-item" href="/?new=1">
+        <Icon name="plus" />
+        New library
+      </a>
+      <hr />
+      <a className="menu-item" href={urls.settings()}>
+        <Icon name="menu" />
+        {name} settings
+      </a>
+    </Menu>
   );
 }

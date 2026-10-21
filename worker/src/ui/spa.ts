@@ -28,12 +28,16 @@ export function appScript(file: string): Response | null {
  * styles (the reader's popovers get their coordinates through the CSSOM, which CSP leaves alone).
  * The page carries nothing private: the app reads everything through the API.
  */
-export function spaShell(request: Request): Response {
+export function spaShell(request: Request, opts: { theme?: string | null } = {}): Response {
   const url = new URL(request.url);
+  // The account's theme on the root (take 4): the tokens' light-dark() values follow it from the
+  // first paint; absent, the system decides.
+  const theme =
+    opts.theme === "light" || opts.theme === "dark" ? ` data-theme="${opts.theme}"` : "";
   // The change feed's WebSocket, on this host (wss:, or ws: for local http).
   const socket = `${url.protocol === "https:" ? "wss" : "ws"}://${url.host}`;
   const html = `<!doctype html>
-<html lang="en"><head><meta charset="utf-8">
+<html lang="en"${theme}><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Tempra</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">

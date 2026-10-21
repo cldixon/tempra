@@ -1,6 +1,14 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { Account, Apps, ConnectAccount, Invitations, Tokens, Welcome } from "./pages/Account";
+import {
+  Account,
+  Apps,
+  ConnectAccount,
+  Invitations,
+  Notifications,
+  Tokens,
+  Welcome,
+} from "./pages/Account";
 import { Activity } from "./pages/Activity";
 import { Diff } from "./pages/Diff";
 import { File } from "./pages/File";
@@ -12,6 +20,7 @@ import { Libraries } from "./pages/Libraries";
 import {
   ConnectLibrary,
   DeleteLibrary,
+  General,
   Members,
   Recovery,
   Restore,
@@ -21,13 +30,13 @@ import {
 } from "./pages/Manage";
 import { NeedsYou } from "./pages/NeedsYou";
 import { interceptLinks, match, useLocation } from "./router";
-import { Header, PageBoundary, useMe } from "./ui";
+import { PageBoundary, useMe } from "./ui";
 import { Urls } from "./urls";
-import { type Place, SheetPage, Workspace } from "./Workspace";
+import { AccountFrame, type AccountPage, type Place, SheetPage, Workspace } from "./Workspace";
 
 let handle: string | null = null;
 
-/** The pages that lay out the sheet themselves (a concept's margins, the person's views). */
+/** The pages that lay out their column themselves (a concept's columns, the person's views). */
 const OWN_SHEET = new Set(["file", "directory", "needs", "activity"]);
 
 /**
@@ -54,24 +63,37 @@ function App() {
   let page: React.ReactNode = null;
   /** For a library's pages: the library and where in it the page is (the workspace frame). */
   let library: { urls: Urls; place: Place } | null = null;
+  /** For the account's pages: which one, for its frame. */
+  let account: AccountPage | null = null;
   if (!route) {
     // The Worker serves this page only at the app's own URLs, so this is a bug, not a 404.
     page = <h1>Not found</h1>;
   } else if (route.page === "libraries") {
-    page = <Libraries />;
+    account = "libraries";
+    page = <Libraries create={route.create} />;
   } else if (route.page === "welcome") {
+    account = "welcome";
     page = <Welcome me={who} />;
   } else if (route.page === "connect") {
+    account = "connect";
     page = <ConnectAccount />;
   } else if (route.page === "tokens") {
+    account = "tokens";
     page = <Tokens me={who} library={route.library} />;
   } else if (route.page === "apps") {
+    account = "apps";
     page = <Apps />;
   } else if (route.page === "account") {
+    account = "account";
     page = <Account done={route.done} />;
+  } else if (route.page === "notifications") {
+    account = "notifications";
+    page = <Notifications />;
   } else if (route.page === "invitations") {
+    account = "invitations";
     page = <Invitations />;
   } else if (route.page === "inbox") {
+    account = "inbox";
     page = <Inbox all={route.all} />;
   } else {
     const urls = urlsFor(route.owner, route.slug, "at" in route ? route.at : undefined);
@@ -127,6 +149,9 @@ function App() {
       case "work":
         page = <Work urls={urls} kind={route.kind} />;
         break;
+      case "settings":
+        page = <General urls={urls} />;
+        break;
       case "transfer":
         page = <Transfer urls={urls} />;
         break;
@@ -154,7 +179,7 @@ function App() {
   // A library's pages share one workspace, kept mounted while the person moves within it.
   if (library) {
     const { urls, place } = library;
-    // The library's own views lay out their sheet; its settings and tools share one column.
+    // The library's own views lay out their column; its settings and tools share one.
     const own = route && OWN_SHEET.has(route.page);
     return (
       <Workspace key={`${urls.owner}/${urls.slug}`} urls={urls} place={place} me={who}>
@@ -162,11 +187,11 @@ function App() {
       </Workspace>
     );
   }
+  // The account's pages share its frame.
   return (
-    <>
-      <Header me={who} />
-      <main className="page">{boundary}</main>
-    </>
+    <AccountFrame page={account ?? "libraries"} me={who}>
+      <SheetPage>{boundary}</SheetPage>
+    </AccountFrame>
   );
 }
 

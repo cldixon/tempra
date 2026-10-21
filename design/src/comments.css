@@ -259,9 +259,9 @@
 }
 
 .concept-comments.side {
-  top: calc(var(--tempra-gutter) + var(--tempra-bar));
-  right: calc(var(--tempra-gutter) + 1px);
-  bottom: calc(var(--tempra-gutter) + 1px);
+  top: calc(var(--tempra-topbar) + var(--tempra-gutter));
+  right: var(--tempra-gutter);
+  bottom: var(--tempra-gutter);
   width: min(340px, calc(100vw - 4 * var(--tempra-gutter)));
   border-radius: var(--tempra-radius-card);
 }

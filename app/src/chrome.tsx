@@ -1,6 +1,8 @@
 import {
   Activity,
   ArrowLeft,
+  Bell as BellGlyph,
+  Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
@@ -19,19 +21,29 @@ import {
   Hourglass,
   ImageOff,
   Inbox,
+  KeyRound,
+  LayoutGrid,
   List,
+  LogOut,
   Maximize2,
   Menu as MenuGlyph,
   MessageSquare,
   PanelLeft,
+  Plug,
+  Puzzle,
   RefreshCw,
   Search,
+  Settings,
   SlidersHorizontal,
+  SunMoon,
+  User,
   X,
 } from "lucide-react";
-import { type ReactNode, useEffect, useId, useRef, useState } from "react";
-import { useUnread } from "./inbox";
-import type { Me } from "./ui";
+import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
+import { api, useLoad } from "./api";
+import { INBOX_EVENT, inboxChanged, useUnread } from "./inbox";
+import { THEMES, useTheme } from "./theme";
+import { type Me, recently } from "./ui";
 
 /*
  * The app's chrome (take 2, TEMPRA-53): the icons, menus and the avatar shared by the workspace
@@ -74,6 +86,16 @@ const ICONS = {
   folder: FolderGlyph,
   file: FileText,
   broken: ImageOff,
+  bell: BellGlyph,
+  check: Check,
+  settings: Settings,
+  libraries: LayoutGrid,
+  user: User,
+  key: KeyRound,
+  plug: Plug,
+  apps: Puzzle,
+  theme: SunMoon,
+  signout: LogOut,
 } as const;
 
 export type Glyph = keyof typeof ICONS;
@@ -114,12 +136,27 @@ export function Menu(props: {
   name?: string;
   title?: string;
   buttonClass?: string;
+  /** A class for the list, for one that has a shape of its own (the libraries, the bell). */
+  listClass?: string;
   align?: "start" | "end";
   /** Opens above its button (a menu at the bottom of the sidebar). */
   up?: boolean;
+  /** Told when the menu opens or closes (the bell loads its items on open). */
+  onOpen?(open: boolean): void;
   children: ReactNode;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpenState] = useState(false);
+  const onOpen = useRef(props.onOpen);
+  onOpen.current = props.onOpen;
+  const setOpen = useCallback(
+    (next: boolean | ((o: boolean) => boolean)) =>
+      setOpenState((o) => {
+        const n = typeof next === "function" ? next(o) : next;
+        if (n !== o) onOpen.current?.(n);
+        return n;
+      }),
+    [],
+  );
   const box = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const id = useId();
@@ -140,7 +177,7 @@ export function Menu(props: {
       document.removeEventListener("pointerdown", away);
       document.removeEventListener("keydown", key, true);
     };
-  }, [open]);
+  }, [open, setOpen]);
   return (
     <div className="menu" ref={box}>
       <button
@@ -162,9 +199,10 @@ export function Menu(props: {
         // biome-ignore lint/a11y/useKeyWithClickEvents: as above.
         <div
           id={id}
-          className={`menu-list ${props.align ?? "start"}${props.up ? " up" : ""}`}
+          className={`menu-list ${props.align ?? "start"}${props.up ? " up" : ""}${props.listClass ? ` ${props.listClass}` : ""}`}
           onClick={(e) => {
-            if ((e.target as Element).closest("a, button")) setOpen(false);
+            const choice = (e.target as Element).closest("a, button");
+            if (choice && !choice.hasAttribute("data-stay")) setOpen(false);
           }}
         >
           {props.children}
@@ -174,73 +212,201 @@ export function Menu(props: {
   );
 }
 
-/** The inbox and its unread count (TEMPRA-72), beside the avatar in the account pages' header. */
-export function InboxLink() {
+/** One item of the inbox, as the bell's popover shows it (the latest few). */
+interface BellItem {
+  id: string;
+  kind: string;
+  place: string;
+  path: string | null;
+  actor: string;
+  excerpt: string;
+  created: string;
+  read_at: string | null;
+  href: string;
+}
+
+const BELL_VERBS: Record<string, string> = {
+  reply: "replied",
+  mention: "mentioned you",
+  thread: "opened a thread",
+  invitation: "invited you",
+  access: "changed your access",
+  verify: "changed a page you verified",
+  stale: "is going stale",
+};
+
+/** Who did it, as people read it. */
+const whoDid = (actor: string) => actor.replace(/^human:/, "@");
+
+/**
+ * The bell (take 4, board 03): the Inbox's unread count as a badge, and a popover of the latest
+ * few items with Mark all read and Open inbox. The count follows the feed, as the inbox does.
+ */
+export function Bell() {
   const unread = useUnread();
+  const [open, setOpen] = useState(false);
+  const latest = useLoad("inbox-latest", () => api<{ items: BellItem[] }>("/api/v1/inbox?limit=5"));
+  const { reload } = latest;
+  useEffect(() => {
+    window.addEventListener(INBOX_EVENT, reload);
+    return () => window.removeEventListener(INBOX_EVENT, reload);
+  }, [reload]);
+  // Read when the popover draws (it opens on a state change, so this is fresh enough).
+  const now = Date.now();
+  const markAll = () =>
+    void api("/api/v1/inbox/read", { method: "POST", body: JSON.stringify({ all: true }) })
+      .then(inboxChanged)
+      .catch(() => {});
+  const items = latest.state === "ready" ? latest.data.items : [];
   return (
-    <a
-      className="inbox-link"
-      href="/inbox"
-      aria-label={unread > 0 ? `Inbox, ${unread} unread` : "Inbox"}
+    <Menu
+      label={
+        <>
+          <Icon name="bell" />
+          {unread > 0 && (
+            <span className="badge" aria-hidden="true">
+              {unread > 99 ? "99+" : unread}
+            </span>
+          )}
+        </>
+      }
+      name={unread > 0 ? `Inbox, ${unread} unread` : "Inbox"}
+      title="Inbox"
+      buttonClass="icon-button bell"
+      listClass="bell-pop"
+      align="end"
+      onOpen={setOpen}
     >
-      Inbox
-      {unread > 0 && <span className="count">{unread}</span>}
-    </a>
+      <div className="bell-pop-head">
+        <span>Inbox</span>
+        {unread > 0 && (
+          <button type="button" onClick={markAll}>
+            Mark all read
+          </button>
+        )}
+      </div>
+      {open && items.length === 0 && <div className="bell-empty">Nothing for you</div>}
+      {items.map((i) => {
+        const page = i.path?.replace(/\.md$/, "").split("/").pop() ?? i.place;
+        return (
+          <a key={i.id} className="bell-item" href={i.href}>
+            <span className="lib-tile" aria-hidden="true">
+              {(i.place.split("/").pop()?.[0] ?? "?").toUpperCase()}
+            </span>
+            <span className="bell-item-what">
+              <strong>{whoDid(i.actor)}</strong> {BELL_VERBS[i.kind] ?? i.kind}
+              {i.path && (
+                <>
+                  {" "}
+                  on <strong>{page}</strong>
+                </>
+              )}
+            </span>
+            <span className="bell-item-where">
+              {i.place.split("/").pop()} · {recently(i.created, now)}
+            </span>
+            {i.read_at === null && (
+              <>
+                <span className="unread-dot" aria-hidden="true" />
+                <span className="visually-hidden">unread</span>
+              </>
+            )}
+          </a>
+        );
+      })}
+      <a className="bell-foot" href="/inbox">
+        Open inbox
+      </a>
+    </Menu>
   );
 }
 
-/** The account's pages and signing out: the avatar's menu, wherever the avatar is. */
-function AccountItems({ me }: { me: Me | null }) {
-  return (
-    <>
-      {me && <div className="menu-who">{me.email}</div>}
-      <a href="/inbox">Inbox</a>
-      <a href="/connect">Connect an agent</a>
-      <a href="/tokens">Tokens</a>
-      <a href="/apps">Connected apps</a>
-      <a href="/invitations">Invitations</a>
-      <a href="/account">Account</a>
-      <hr />
-      <form method="post" action="/sign-out">
-        <button type="submit">Sign out</button>
-      </form>
-    </>
-  );
-}
+/** The person's name as the app has it: their handle, until accounts carry a name (TEMPRA-54). */
+const displayName = (me: Me | null) => me?.handle ?? "";
 
-/** The avatar and its menu (the account pages' header, the workspace's phone bar). */
+/**
+ * The avatar and its menu (take 4, board 08): who, then Account, Notifications, Connect an agent,
+ * Tokens, Connected apps; the theme; Sign out.
+ */
 export function AccountMenu({ me }: { me: Me | null }) {
   const handle = me?.handle ?? "";
+  const [theme, setTheme] = useTheme();
   return (
     <Menu
       label={initials(handle)}
       name="Account menu"
       title={me ? `${handle} · ${me.email}` : "Account"}
       buttonClass="avatar"
+      listClass="account"
       align="end"
     >
-      <AccountItems me={me} />
+      <div className="menu-person">
+        <Avatar name={handle} />
+        <span className="menu-person-names">
+          <span>{displayName(me)}</span>
+          <span className="handle">{me ? `@${handle}` : ""}</span>
+        </span>
+      </div>
+      <hr />
+      <a className="menu-item" href="/account">
+        <Icon name="user" />
+        Account
+      </a>
+      <a className="menu-item" href="/notifications">
+        <Icon name="bell" />
+        Notifications
+      </a>
+      <a className="menu-item" href="/connect">
+        <Icon name="plug" />
+        Connect an agent
+      </a>
+      <a className="menu-item" href="/tokens">
+        <Icon name="key" />
+        Tokens
+      </a>
+      <a className="menu-item" href="/apps">
+        <Icon name="apps" />
+        Connected apps
+      </a>
+      <hr />
+      <div className="menu-theme">
+        <Icon name="theme" />
+        <span>Theme</span>
+        <ThemeChoice value={theme} onChange={setTheme} />
+      </div>
+      <hr />
+      <form method="post" action="/sign-out">
+        <button type="submit" className="menu-item">
+          <Icon name="signout" />
+          Sign out
+        </button>
+      </form>
     </Menu>
   );
 }
 
-/** The person at the foot of the sidebar: their avatar and name, opening the same menu. */
-export function PersonMenu({ me }: { me: Me | null }) {
-  const handle = me?.handle ?? "";
+/** System, Light, Dark as one segmented control (the avatar's menu, the Account page). */
+export function ThemeChoice({
+  value,
+  onChange,
+}: {
+  value: "system" | "light" | "dark";
+  onChange(theme: "system" | "light" | "dark"): void;
+}) {
   return (
-    <Menu
-      label={
-        <>
-          <Avatar name={handle} />
-          <span className="nav-label">{handle}</span>
-        </>
-      }
-      name="Account menu"
-      title={me ? `${handle} · ${me.email}` : "Account"}
-      buttonClass="nav-row person"
-      up
-    >
-      <AccountItems me={me} />
-    </Menu>
+    <fieldset className="segmented">
+      <legend className="visually-hidden">Theme</legend>
+      {THEMES.map(([key, label]) => (
+        <button
+          key={key}
+          type="button"
+          aria-pressed={value === key}
+          data-stay
+          onClick={() => onChange(key)}
+        >
+          {label}
+        </button>
+      ))}
+    </fieldset>
   );
 }

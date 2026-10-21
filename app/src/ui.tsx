@@ -1,6 +1,5 @@
 import { Component, type ReactNode, useEffect, useState } from "react";
 import { type ApiError, api, type Loaded, useLoad } from "./api";
-import { AccountMenu, InboxLink } from "./chrome";
 import { baseName, folderName, type Urls } from "./urls";
 
 /** The person the app acts for (GET /api/v1/me). */
@@ -8,29 +7,14 @@ export interface Me {
   email: string;
   handle: string;
   actor: string;
+  /** The account's theme (take 4): light, dark, or null for the system's. */
+  theme?: "light" | "dark" | null;
 }
 
 /** The signed-in person, loaded once for the whole app (the same load main.tsx makes). */
 export function useMe(): Me | null {
   const me = useLoad("me", () => api<Me>("/api/v1/me"));
   return me.state === "ready" ? me.data : null;
-}
-
-/** The account pages' header: Tempra and the avatar's menu. */
-export function Header({ me }: { me: Me | null }) {
-  return (
-    <header className="app-header">
-      <a className="wordmark" href="/">
-        <span className="wordmark-tile" aria-hidden="true">
-          T
-        </span>
-        Tempra
-      </a>
-      <span className="spacer" />
-      <InboxLink />
-      <AccountMenu me={me} />
-    </header>
-  );
 }
 
 /** Sets the document title, as the server pages do: "{title} · Tempra". */

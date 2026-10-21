@@ -156,10 +156,10 @@ export function registerUiRoutes<E extends AppEnv>(
 ) {
   const get = (path: string, handler: (p: Page) => Promise<Response>) =>
     app.get(path, ui(deps, handler) as never);
-  const shell = (p: Page) => Promise.resolve(spaShell(p.c.req.raw));
+  const shell = (p: Page) => Promise.resolve(spaShell(p.c.req.raw, { theme: p.user.theme }));
   const library = async (p: Page) => {
     await openLibrary(p);
-    return spaShell(p.c.req.raw);
+    return shell(p);
   };
 
   get("/", async (p) => {
@@ -174,6 +174,7 @@ export function registerUiRoutes<E extends AppEnv>(
     "/connect",
     "/tokens",
     "/account",
+    "/notifications",
     "/apps",
     "/invitations",
     "/inbox",
@@ -202,7 +203,7 @@ export function registerUiRoutes<E extends AppEnv>(
   const file = async (p: Page, path: string) => {
     const { urls } = await openLibrary(p);
     if (basename(path) === "index.md") return p.c.redirect(urls.tree(dirname(path)));
-    return spaShell(p.c.req.raw);
+    return shell(p);
   };
   get("/:owner/:lib/-/files/*", (p) => file(p, tail(p.c, "/-/files/")));
   for (const page of [
@@ -212,6 +213,7 @@ export function registerUiRoutes<E extends AppEnv>(
     "restore/*",
     "work",
     "needs",
+    "settings",
     "activity",
     "transfer",
     "recovery",
