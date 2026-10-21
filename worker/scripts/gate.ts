@@ -182,13 +182,18 @@ async function uiPages(owner: string, slug: string, paths: string[]): Promise<st
   const pages = [
     `${lib}/`,
     `${lib}/-/ledger`,
-    ...["work", "needs", "activity", "transfer", "recovery", "connect", "delete"].map(
+    ...["work", "activity", "transfer", "recovery", "connect", "delete"].map(
       (p) => `${lib}/-/${p}`,
     ),
     ...[...dirs].map((d) => `${lib}/${enc(d)}/`),
     ...concepts.map((p) => `${lib}/${enc(p)}`),
   ];
   const problems: string[] = [];
+  // Needs you retired into the Inbox (TEMPRA-116): its URL lands on the Inbox for the library.
+  const needs = await ui(`${lib}/-/needs`);
+  if (needs.status !== 308 || needs.headers.get("Location") !== `/inbox?library=${owner}/${slug}`) {
+    problems.push(`-/needs: ${needs.status} ${needs.headers.get("Location")}`);
+  }
   for (const url of pages) {
     const r = await ui(url);
     const html = await r.text();
@@ -568,7 +573,9 @@ function greyPng(width: number, height: number, shade: number): Uint8Array {
  * Properties: opened from the top bar, closed by ×, Escape and the control, the contents back,
  * `?panel=`), Copy page, the byline while an agent edits, History's versions, review mode from
  * Properties, comments in the panel (and as a bottom sheet on a phone), the Markdown view,
- * figures in the full-screen view, and Activity with its two views (Summary and
+ * figures in the full-screen view, the Inbox (a reply waiting, a page to verify, the bell, Done,
+ * filtered to the library from the home's For you here and from Needs you's old URL), and
+ * Activity with its two views (Summary and
  * Every event), all drawn from the API; links move within the app without reloading the page, and
  * nothing is refused by the CSP or throws. GATE_SCREENSHOTS=<dir> saves screenshots of them.
  */
@@ -1375,6 +1382,58 @@ async function browserRenders(
         await properties().waitFor({ state: "detached", timeout: 5000 });
       },
     );
+    // The Inbox's verify items (TEMPRA-116): the person verified the concept and an agent edited
+    // it since, so it waits in their Inbox and on the bell; Review opens review mode, Dismiss
+    // moves it to Done.
+    await step("Inbox: a page the person verified, edited by an agent, to verify", async () => {
+      const reviewHref = `/${owner}/${slug}/${enc(concept)}?review=1`;
+      const row = page
+        .locator("main.ws-main li.inbox-row")
+        .filter({ has: page.locator(`a[href="${reviewHref}"]`) });
+      await page.goto(`${base}/inbox`);
+      await page
+        .locator("main.ws-main")
+        .getByRole("heading", { level: 1, name: "Inbox", exact: true })
+        .waitFor({ timeout: 15_000 });
+      await row.waitFor({ timeout: 10_000 });
+      await row.getByText("To verify").waitFor({ timeout: 5000 });
+      await row.getByText(/^1 edit by .+ since you verified$/).waitFor({ timeout: 5000 });
+      // The bell lists it; Mark all read clears the badge.
+      const bellButton = page.getByRole("button", { name: /^Inbox, \d+ unread$/ });
+      await bellButton.waitFor({ timeout: 10_000 });
+      await bellButton.click();
+      const bell = page.locator(".menu-list.bell-pop");
+      await bell.locator(`a.bell-item[href="${reviewHref}"]`).waitFor({ timeout: 5000 });
+      await bell.getByText("changed a page you verified").first().waitFor({ timeout: 5000 });
+      if (shots) await page.screenshot({ path: `${shots}/bell.png` });
+      await bell.getByRole("button", { name: "Mark all read" }).click();
+      await page.getByRole("button", { name: "Inbox", exact: true }).waitFor({ timeout: 10_000 });
+      if ((await page.locator(".bell .badge").count()) > 0) throw new Error("the badge stayed");
+      await page.keyboard.press("Escape");
+      await bell.waitFor({ state: "detached", timeout: 5000 });
+      // Review opens the page in review mode.
+      await row.getByRole("link", { name: "Review", exact: true }).click();
+      await page.waitForURL(`${url}?review=1`);
+      await page.getByRole("region", { name: "Review" }).waitFor({ timeout: 15_000 });
+      // Dismiss marks it done: gone from Open, listed under Done.
+      await page.goto(`${base}/inbox`);
+      await row.waitFor({ timeout: 15_000 });
+      await row.getByRole("button", { name: "Dismiss", exact: true }).click();
+      await row.waitFor({ state: "detached", timeout: 10_000 });
+      await page
+        .locator("main.ws-main .inbox-filters")
+        .getByRole("button", { name: "Done", exact: true })
+        .click();
+      await page.waitForURL(`${base}/inbox?done=1`);
+      // Newest first: the one just dismissed (an earlier one, closed by verifying, is below).
+      await row
+        .first()
+        .getByText(/^1 edit by .+ since you verified$/)
+        .waitFor({ timeout: 10_000 });
+      if (shots) await page.screenshot({ path: `${shots}/inbox-done.png` });
+      await page.goto(url);
+      await byline.waitFor({ timeout: 15_000 });
+    });
     await step("History: a version's changes in the text, and back to the latest", async () => {
       await page.locator(".body .prose").waitFor({ timeout: 15_000 });
       await more("History");
@@ -1613,6 +1672,29 @@ async function browserRenders(
         });
         if (!reply.ok) throw new Error(`agent reply: ${reply.status} ${await reply.text()}`);
         await threadEl.getByText("Checked it; it holds.").waitFor({ timeout: 10_000 });
+        // Notifications (TEMPRA-72, TEMPRA-74): the agent's reply on the person's thread is in
+        // their inbox, its count shows on the open page's bell (take 4) without a reload, and
+        // the batched mail lands in the dev outbox.
+        await sheetBar
+          .getByRole("button", { name: /^Inbox, \d+ unread$/ })
+          .waitFor({ timeout: 10_000 });
+        const inbox = (await (await apiAs(devCookie, "/api/v1/inbox")).json()) as {
+          items: { id: string; kind: string; excerpt: string; href: string }[];
+        };
+        const item = inbox.items.find((i) => i.excerpt === "Checked it; it holds.");
+        if (item?.kind !== "reply" || !item.href.endsWith("#comments")) {
+          throw new Error(`inbox: ${JSON.stringify(inbox.items.slice(0, 3))}`);
+        }
+        const sent = await ui(`${base}/_dev/mail/send`, {
+          method: "POST",
+          headers: { Accept: "application/json" },
+        });
+        const outbox = (await (await ui(`${base}/_dev/mail.json`)).json()) as {
+          mails: { to: string; text: string }[];
+        };
+        if (!sent.ok || !outbox.mails.some((m) => m.text.includes("Checked it; it holds."))) {
+          throw new Error(`dev outbox: ${sent.status} ${JSON.stringify(outbox.mails[0] ?? null)}`);
+        }
         const resolve = await fetch(`${libApi}/comments/${thread}/resolve`, {
           method: "POST",
           headers: { ...bearer, "Content-Type": "application/json" },
@@ -1634,34 +1716,20 @@ async function browserRenders(
         if ((await threadEl.evaluate((el) => el.tagName)) === "BUTTON") await threadEl.click();
         await threadEl.getByRole("button", { name: "Reopen" }).waitFor({ timeout: 5000 });
         if (!(await stayed())) throw new Error("the page reloaded");
-        // Notifications (TEMPRA-72, TEMPRA-74): the agent's reply on the person's thread is in
-        // their inbox, its count shows on the open page's bell (take 4) without a reload, and
-        // the batched mail lands in the dev outbox.
-        await sheetBar
-          .getByRole("button", { name: /^Inbox, \d+ unread$/ })
-          .waitFor({ timeout: 10_000 });
-        const inbox = (await (await apiAs(devCookie, "/api/v1/inbox")).json()) as {
-          items: { kind: string; excerpt: string; href: string }[];
+        // Resolving the thread closed its item (TEMPRA-116): it is under Done, no longer open.
+        const closed = (await (await apiAs(devCookie, "/api/v1/inbox?all=1")).json()) as {
+          items: { id: string; done_at: string | null }[];
         };
-        const item = inbox.items.find((i) => i.excerpt === "Checked it; it holds.");
-        if (item?.kind !== "reply" || !item.href.endsWith("#comments")) {
-          throw new Error(`inbox: ${JSON.stringify(inbox.items.slice(0, 3))}`);
-        }
-        const sent = await ui(`${base}/_dev/mail/send`, {
-          method: "POST",
-          headers: { Accept: "application/json" },
-        });
-        const outbox = (await (await ui(`${base}/_dev/mail.json`)).json()) as {
-          mails: { to: string; text: string }[];
-        };
-        if (!sent.ok || !outbox.mails.some((m) => m.text.includes("Checked it; it holds."))) {
-          throw new Error(`dev outbox: ${sent.status} ${JSON.stringify(outbox.mails[0] ?? null)}`);
+        if (!closed.items.find((i) => i.id === item.id)?.done_at) {
+          throw new Error("resolving the thread left its inbox item open");
         }
       },
     );
-    // For you here (take 4, TEMPRA-117): an agent's reply on a thread the person opened waits on
-    // them on the library's home, from `GET …/needs`.
-    await step("For you here: an agent's reply on the person's thread waits on them", async () => {
+    // The Inbox (take 4, TEMPRA-116) and the home's For you here (TEMPRA-117): an agent's reply
+    // on a thread the person opened waits on them on the home, as a card from GET …/needs, and
+    // in the Inbox, filtered to the library from the home's "All n in Inbox" and from Needs
+    // you's old URL.
+    await step("Inbox: an agent's reply waits on the home and in the Inbox", async () => {
       const target = concepts.find((c) => c !== concept) ?? concept;
       const posted = await apiAs(devCookie, `/api/v1/libraries/${owner}/${slug}/comments`, "POST", {
         path: target,
@@ -1676,29 +1744,47 @@ async function browserRenders(
         body: JSON.stringify({ body: "Gate: yes, it is still current." }),
       });
       if (!answered.ok) throw new Error(`agent reply: ${answered.status}`);
-      // The home's For you here (take 4, TEMPRA-117): the reply as a card, and "All n in Inbox"
-      // to the Inbox filtered to this library.
+      const filtered = `${base}/inbox?library=${owner}/${slug}`;
+      const inboxHeading = main.getByRole("heading", { level: 1, name: "Inbox", exact: true });
+      const row = main
+        .locator("li.inbox-row")
+        .filter({ hasText: "Gate: yes, it is still current." });
+      // The home's For you here: the reply as a card, and "All n in Inbox" to the Inbox
+      // filtered to this library.
       await page.goto(`${lib}/`);
       await home();
       await markStay();
       const forYou = main.getByRole("region", { name: "For you here" });
-      const row = forYou
+      await forYou
         .locator("a.home-card")
-        .filter({ hasText: "Gate: yes, it is still current." });
-      await row.waitFor({ timeout: 15_000 });
+        .filter({ hasText: "Gate: yes, it is still current." })
+        .waitFor({ timeout: 15_000 });
+      if (shots) await page.screenshot({ path: `${shots}/home-for-you.png` });
+      const all = forYou.getByRole("link", { name: /^All \d+ in Inbox$/ });
+      const allHref = await all.getAttribute("href");
+      if (allHref !== `/inbox?library=${owner}/${slug}`) throw new Error(`All n: ${allHref}`);
+      await all.click();
+      await page.waitForURL(filtered);
+      await inboxHeading.waitFor({ timeout: 15_000 });
+      await row.waitFor({ timeout: 10_000 });
+      await row.getByText("replied to your thread").waitFor({ timeout: 5000 });
+      await main.locator(".inbox-filter").waitFor({ timeout: 5000 });
+      if (!(await stayed())) throw new Error("the link reloaded the page");
       const { count } = (await (
         await apiAs(devCookie, `/api/v1/libraries/${owner}/${slug}/needs`)
       ).json()) as { count: number };
       if (count < 1) throw new Error(`GET …/needs counts ${count} with a reply waiting`);
-      const all = forYou.getByRole("link", { name: /^All \d+ in Inbox$/ });
-      const allHref = await all.getAttribute("href");
-      if (allHref !== `/inbox?library=${owner}/${slug}`) throw new Error(`All n: ${allHref}`);
-      if (shots) await page.screenshot({ path: `${shots}/home-for-you.png` });
-      // The card opens the concept with that thread open in the Comments panel.
-      await row.click();
+      if (shots) await page.screenshot({ path: `${shots}/inbox.png` });
+      // Needs you's old URL lands on the same filtered Inbox.
+      await page.goto(`${lib}/-/needs`);
+      await page.waitForURL(filtered);
+      await row.waitFor({ timeout: 15_000 });
+      // Reply opens the concept with that thread open in the Comments panel.
+      await markStay();
+      await row.getByRole("link", { name: "Reply", exact: true }).click();
       await page.waitForURL(`${lib}/${enc(target)}#thread-${encodeURIComponent(id)}`);
       await comments.locator(`section.thread.open[id="thread-${id}"]`).waitFor({ timeout: 15_000 });
-      if (!(await stayed())) throw new Error("the row reloaded the page");
+      if (!(await stayed())) throw new Error("Reply reloaded the page");
       const resolved = await fetch(`${libApi}/comments/${id}/resolve`, {
         method: "POST",
         headers: { ...bearer, "Content-Type": "application/json" },

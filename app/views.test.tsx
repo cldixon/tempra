@@ -12,9 +12,7 @@ import {
   HomeSections,
   inboxHref,
 } from "./src/pages/Home";
-import { NeedsBody } from "./src/pages/NeedsYou";
 import { type OutlineFile, topLevel } from "./src/Tree";
-import { day } from "./src/ui";
 import { Urls } from "./src/urls";
 import { type Place, placeName } from "./src/Workspace";
 
@@ -42,96 +40,6 @@ const needs = (over: Partial<Needs> = {}): Needs => ({
   housekeeping: { lint: 0, structure: 0, broken_link: 0, total: 0 },
   count: 0,
   ...over,
-});
-
-const needsHtml = (n: Needs) =>
-  renderToStaticMarkup(<NeedsBody urls={urls} needs={n} view={view} me={me} reload={() => {}} />);
-
-describe("Needs you (take 3)", () => {
-  test("nothing to do is one quiet line, and no empty sections", () => {
-    const html = needsHtml(needs());
-    expect(html).toContain("Nothing needs you right now.");
-    expect(html).not.toContain("<section");
-    expect(html).not.toContain("housekeeping");
-  });
-
-  test("each kind of need is a section with its count and its way to act", () => {
-    const html = needsHtml(
-      needs({
-        replies: [
-          {
-            thread: "t1",
-            path: "app/reader.md",
-            title: "Reader",
-            quote: "Hover or focus a footnote marker",
-            last: {
-              actor: "claude-code/dev",
-              by: { person: "cl_dixon", agent: "a1" },
-              body: "Resolve if that's what you meant.",
-              ts: hour(0.2),
-              seq: 39,
-            },
-          },
-        ],
-        verify: {
-          total: 21,
-          next_offset: 20,
-          items: [
-            {
-              path: "app/reader.md",
-              title: "Reader",
-              seq: 38,
-              ts: hour(1),
-              actor: "claude-code/dev",
-              by: { person: "cl_dixon", agent: "a1" },
-              verified: { actor: me, seq: 10, ts: "2026-10-05T12:00:00Z" },
-              changes: 2,
-            },
-            {
-              path: "app/diagrams.md",
-              title: null,
-              seq: 30,
-              ts: hour(2),
-              actor: "claude-code/dev",
-              by: null,
-              verified: { actor: "human:ann", seq: 12, ts: "2026-10-06T12:00:00Z" },
-              changes: 1,
-            },
-          ],
-        },
-        stale: [
-          {
-            path: "v2/limits.md",
-            title: "Limits",
-            stale_after: "2026-10-24T00:00:00Z",
-            stale: "stale_soon",
-          },
-        ],
-        unverified: { total: 48 },
-        housekeeping: { lint: 1, structure: 21, broken_link: 0, total: 22 },
-      }),
-    );
-    expect(html).toContain('Waiting on your reply <span class="needs-count">· 1</span>');
-    expect(html).toContain(`href="${urls.thread("app/reader.md", "t1")}"`);
-    expect(html).toContain("Claude Code");
-    expect(html).toContain(" for @cl_dixon");
-    expect(html).toContain("Resolve if that&#x27;s what you meant.");
-    expect(html).toContain('To verify <span class="needs-count">· 21</span>');
-    // A moment, shown on the reader's own calendar.
-    expect(html).toContain(`2 changes since you verified on ${day("2026-10-05T12:00:00Z")}`);
-    expect(html).toContain(`1 change since @ann verified on ${day("2026-10-06T12:00:00Z")}`);
-    // Never verified (TEMPRA-111): one counted line, not rows.
-    expect(html).toContain("Not yet verified · 48 concepts.");
-    expect(html).not.toContain("Never verified");
-    expect(html).toContain(">app/diagrams.md<");
-    expect(html).toContain(`href="${urls.review("app/reader.md")}"`);
-    expect(html).toContain(">More<");
-    expect(html).toContain("Its review date is Oct 24.");
-    expect(html).toContain("Ask an agent to review");
-    expect(html).not.toContain("Still true");
-    expect(html).toContain("22 items (21 structure, 1 lint). You don&#x27;t need to act.");
-    expect(html).toContain(`href="${urls.work()}"`);
-  });
 });
 
 const folder: FolderView = {

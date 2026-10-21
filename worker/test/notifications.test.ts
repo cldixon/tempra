@@ -181,9 +181,16 @@ describe("the inbox (TEMPRA-72)", () => {
     // The owner answers: the friend took part, so they hear of it.
     await call(s.app, `${API}/comments/${id}`, "POST", { body: "Thanks." });
     expect((await inbox(friend.app)).items).toMatchObject([{ kind: "reply", excerpt: "Thanks." }]);
-    // A resolve without a body is not news.
+    // A resolve without a body is not news; it closes the thread's items for everyone
+    // (TEMPRA-116), and reopening does not open them again.
     await call(friend.app, `${API}/comments/${id}/resolve`, "POST");
-    expect((await inbox(s.app)).items).toHaveLength(1);
+    expect((await inbox(s.app)).items).toEqual([]);
+    expect((await inbox(friend.app)).items).toEqual([]);
+    const done = (await inbox(s.app, true)).items;
+    expect(done).toHaveLength(1);
+    expect(done[0]?.done_at).not.toBeNull();
+    await call(friend.app, `${API}/comments/${id}/reopen`, "POST");
+    expect((await inbox(s.app)).items).toEqual([]);
   });
 
   test("the person's own agent replying does tell them", async () => {
@@ -197,7 +204,9 @@ describe("the inbox (TEMPRA-72)", () => {
       body: JSON.stringify({ body: "Added." }),
     });
     expect(r.status).toBe(200);
-    expect((await inbox(s.app)).items).toMatchObject([
+    // The answer is news, and the resolve that carries it closes it at once (TEMPRA-116).
+    expect((await inbox(s.app)).items).toEqual([]);
+    expect((await inbox(s.app, true)).items).toMatchObject([
       { kind: "reply", actor: "claude-code/laptop", excerpt: "Added." },
     ]);
   });
@@ -462,9 +471,182 @@ describe("notification mail (TEMPRA-74)", () => {
         created: new Date().toISOString(),
         read_at: null,
         done_at: null,
+        title: null,
+        by_user: null,
+        by_agent: null,
+        count: null,
+        due: null,
       },
     ]);
     expect(m.subject).toBe("@bo mentioned you on x.md");
     expect(m.html).toContain("@ann see &#60;this&#62;");
+  });
+});
+
+describe("the Inbox's verify and stale items (TEMPRA-116)", () => {
+  /** The current hash of a file, or none when it is not there. */
+  const hashOf = async (s: S, path: string) => {
+    const r = await s.app.request(`${API}/files/${path}`, {
+      headers: { Accept: "application/json" },
+    });
+    return r.ok ? ((await r.json()) as { hash: string }).hash : null;
+  };
+  const put = async (s: S, token: string, path: string, body: string) => {
+    const hash = await hashOf(s, path);
+    return s.req(`/files/${path}`, {
+      method: "PUT",
+      token,
+      headers: {
+        "Content-Type": "text/markdown",
+        "X-Note": "agent edit",
+        ...(hash ? { "If-Match": hash } : {}),
+      },
+      body,
+    });
+  };
+  /** Writes as the person in `app` (the owner's session). */
+  const saveAs = async (s: S, app: App, path: string, body: string) => {
+    const hash = await hashOf(s, path);
+    return app.request(`${API}/files/${path}`, {
+      method: "PUT",
+      headers: {
+        Origin: ORIGIN,
+        "Content-Type": "text/markdown",
+        ...(hash ? { "If-Match": hash } : {}),
+      },
+      body,
+    });
+  };
+  const verify = (app: App, path: string) => call(app, `${API}/verify/${path}`, "POST");
+  const edited = (title: string, n: number) => doc(title).replace("Revenue minus cost.", `v${n}`);
+  const days = (n: number) => new Date(Date.now() + n * 86_400_000).toISOString();
+  const staleDoc = (title: string, after: string) =>
+    `---\ntype: Metric\ntitle: ${title}\ndescription: A metric.\nstale_after: ${after}\n---\n# ${title}\n\nBody.\n`;
+
+  test("an agent's edit to a page a person verified is one keyed item, closed by verifying", async () => {
+    const { s, friend, agent } = await shared();
+    await write(s.app, "metrics/margin.md");
+    expect((await verify(friend.app, "metrics/margin.md")).status).toBe(200);
+    for (const n of [1, 2]) {
+      const r = await put(s, agent, "metrics/margin.md", edited("Margin", n));
+      expect(r.status).toBeLessThan(300);
+      // The notice is the Worker's, never the caller's.
+      expect(await r.json()).not.toHaveProperty("notify");
+    }
+    const { items, unread } = await inbox(friend.app);
+    expect(unread).toBe(1);
+    expect(items).toMatchObject([
+      {
+        kind: "verify",
+        path: "metrics/margin.md",
+        title: "Margin",
+        count: 2,
+        excerpt: "2 edits since you verified",
+        actor: "claude-code/laptop",
+        href: "/owner/demo/metrics/margin.md?review=1",
+        actions: ["review", "dismiss"],
+        library: "owner/demo",
+      },
+    ]);
+    // The owner never verified it: nothing for them.
+    expect((await inbox(s.app)).items).toEqual([]);
+    // Verifying closes it, for everyone.
+    expect((await verify(friend.app, "metrics/margin.md")).status).toBe(200);
+    expect((await inbox(friend.app)).items).toEqual([]);
+    const done = (await (await call(friend.app, "/api/v1/inbox?done=1")).json()) as {
+      items: InboxItem[];
+      open: number;
+    };
+    expect(done.items.map((i) => i.kind)).toEqual(["verify"]);
+    expect(done.items[0]?.done_at).not.toBeNull();
+    expect(done.open).toBe(0);
+  });
+
+  test("the person acting in the app is not told of their own edit; their agent's is news", async () => {
+    const { s, agent } = await shared();
+    await write(s.app, "metrics/margin.md");
+    expect((await verify(s.app, "metrics/margin.md")).status).toBe(200);
+    expect((await saveAs(s, s.app, "metrics/margin.md", edited("Margin", 1))).status).toBeLessThan(
+      300,
+    );
+    expect((await inbox(s.app)).items).toEqual([]);
+    expect((await put(s, agent, "metrics/margin.md", edited("Margin", 2))).status).toBeLessThan(
+      300,
+    );
+    expect((await inbox(s.app)).items.map((i) => i.kind)).toEqual(["verify"]);
+  });
+
+  test("a moved page takes its verify item along", async () => {
+    const { s, friend, agent } = await shared();
+    await write(s.app, "metrics/margin.md");
+    await verify(friend.app, "metrics/margin.md");
+    await put(s, agent, "metrics/margin.md", edited("Margin", 1));
+    const moved = await s.req("/batch", {
+      method: "POST",
+      token: agent,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ops: [{ op: "move", path: "metrics/margin.md", to: "metrics/gross-margin.md" }],
+      }),
+    });
+    expect(moved.status).toBeLessThan(300);
+    expect((await inbox(friend.app)).items).toMatchObject([
+      { kind: "verify", path: "metrics/gross-margin.md" },
+    ]);
+  });
+
+  test("stale items go to the owner and write members once, until a new stale_after", async () => {
+    const s = setup();
+    const writer = await s.stranger("writer@example.com");
+    const reader = await s.stranger("reader@example.com");
+    await s.accounts.share(LIB.id, writer.user.id, "write", OWNER.id);
+    await s.accounts.share(LIB.id, reader.user.id, "read", OWNER.id);
+    const save = (path: string, body: string) => saveAs(s, s.app, path, body);
+    const maintain = async () =>
+      expect((await call(s.app, `${API}/maintain`, "POST")).status).toBeLessThan(300);
+    expect((await save("ops/soon.md", staleDoc("Soon", days(5)))).status).toBeLessThan(300);
+    expect((await save("ops/later.md", staleDoc("Later", days(60)))).status).toBeLessThan(300);
+    await maintain();
+    await maintain();
+    for (const app of [s.app, writer.app]) {
+      expect((await inbox(app)).items).toMatchObject([
+        { kind: "stale", path: "ops/soon.md", title: "Soon", actions: ["open", "dismiss"] },
+      ]);
+    }
+    // A read member cannot ask an agent to refresh it.
+    expect((await inbox(reader.app)).items).toEqual([]);
+    // Dismissed, it stays dismissed through the next pass.
+    const [item] = (await inbox(writer.app)).items;
+    await call(writer.app, `/api/v1/inbox/${item?.id}/done`, "POST", {});
+    await maintain();
+    expect((await inbox(writer.app)).items).toEqual([]);
+    // A new stale_after closes it; the next pass, still within 14 days, tells them again.
+    expect((await save("ops/soon.md", staleDoc("Soon", days(6)))).status).toBeLessThan(300);
+    expect((await inbox(s.app)).items).toEqual([]);
+    await maintain();
+    expect((await inbox(writer.app)).items.map((i) => i.path)).toEqual(["ops/soon.md"]);
+    // A delete closes it.
+    const del = await s.app.request(`${API}/files/ops/soon.md`, {
+      method: "DELETE",
+      headers: { Origin: ORIGIN, "If-Match": (await hashOf(s, "ops/soon.md")) ?? "" },
+    });
+    expect(del.status).toBeLessThan(300);
+    expect((await inbox(s.app)).items).toEqual([]);
+    expect((await inbox(writer.app)).items).toEqual([]);
+  });
+
+  test("resolving a thread closes its mention items too", async () => {
+    const { s, friend } = await shared();
+    await write(friend.app, "notes/plan.md");
+    const id = await open(s.app, "notes/plan.md", "@friend can we split this?");
+    const mine = (await (await call(friend.app, "/api/v1/inbox?library=owner/demo")).json()) as {
+      items: (InboxItem & { actions: string[]; who: string })[];
+      open: number;
+    };
+    expect(mine.open).toBe(1);
+    expect(mine.items).toMatchObject([{ kind: "mention", actions: ["reply"], who: "owner" }]);
+    expect((await call(friend.app, "/api/v1/inbox?library=owner/nope")).status).toBe(404);
+    await call(s.app, `${API}/comments/${id}/resolve`, "POST");
+    expect((await inbox(friend.app)).items).toEqual([]);
   });
 });

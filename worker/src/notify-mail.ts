@@ -39,6 +39,8 @@ const KIND_TEXT: Record<string, string> = {
   access: "changed your access",
   invitation: "invited you",
   report: "reported",
+  verify: "changed a page you verified",
+  stale: "is going stale",
 };
 
 /** Who did it, as people read it: @ann for a person, the actor otherwise. */
@@ -49,6 +51,9 @@ export function itemLink(origin: string, i: Pick<Item, "kind" | "place" | "path"
   if (i.kind === "invitation") return `${origin}/invitations`;
   if (!i.path) return `${origin}/${i.place}/`;
   const path = i.path.split("/").map(encodeURIComponent).join("/");
+  // A page to verify opens in review mode; a page going stale, as it is (TEMPRA-116).
+  if (i.kind === "verify") return `${origin}/${i.place}/${path}?review=1`;
+  if (i.kind === "stale") return `${origin}/${i.place}/${path}`;
   return `${origin}/${i.place}/${path}#comments`;
 }
 

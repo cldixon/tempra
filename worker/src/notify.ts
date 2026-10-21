@@ -3,7 +3,7 @@ import type { Accounts, LibraryRef } from "./accounts";
 import type { TokenInfo } from "./auth";
 import type { LibraryClient } from "./client";
 import type { CommentAction, CommentResult, Mention } from "./store/comments";
-import type { RequestContext } from "./store/store";
+import type { RequestContext, StaleConcept, WriteNotice } from "./store/store";
 
 /**
  * Notifications (TEMPRA-58 design, TEMPRA-72, TEMPRA-73): items addressed to one person are
@@ -16,9 +16,23 @@ import type { RequestContext } from "./store/store";
  * people who wrote or verified the concept, a mention to the person mentioned; never to the
  * person who acted in the app themselves (their agents acting for them do notify them), and
  * only to people who can reach the library at that moment.
+ *
+ * Take 4 (TEMPRA-116) adds two keyed kinds, so the Inbox holds what Needs you did: `verify`, from
+ * the content write path after it commits (a concept the person verified changed since), and
+ * `stale`, from each library's daily maintainer (a concept stale or going stale within 14 days,
+ * to the owner and write members). Items are also closed by what resolves them: a verification,
+ * a new `stale_after` or a delete, a resolved thread.
  */
 
-export type ItemKind = "reply" | "mention" | "thread" | "invitation" | "access" | "report";
+export type ItemKind =
+  | "reply"
+  | "mention"
+  | "thread"
+  | "invitation"
+  | "access"
+  | "report"
+  | "verify"
+  | "stale";
 
 /** Kinds that are mailed at once (batched): the ones addressed to the person. */
 export const MAILED: ReadonlySet<ItemKind> = new Set(["reply", "mention", "thread", "access"]);
@@ -37,6 +51,16 @@ export interface NewItem {
   excerpt?: string;
   /** Whether the item may be mailed (prefs are checked when the batch goes out). */
   mail?: boolean;
+  /**
+   * `verify` and `stale`: one open item per (user, library, key); another add updates it (its
+   * excerpt, time and count, unread again) instead of adding a row. A `stale` item is updated or
+   * made again only for a new `due`, so the daily run never undoes a dismissal or a read.
+   */
+  key?: string | null;
+  title?: string | null;
+  by_agent?: string | null;
+  count?: number | null;
+  due?: string | null;
 }
 
 export interface Item {
@@ -52,6 +76,21 @@ export interface Item {
   created: string;
   read_at: string | null;
   done_at: string | null;
+  title: string | null;
+  by_user: string | null;
+  by_agent: string | null;
+  count: number | null;
+  due: string | null;
+}
+
+/** What resolves items in a library after a write (TEMPRA-116): see `closeAfterWrite`. */
+export interface Closes {
+  /** Verified by a person: the page's open `verify` items, for everyone. */
+  verified: string[];
+  /** Changed: its open `stale` items whose `due` is not its new `stale_after`; deleted: all. */
+  changed: { path: string; stale_after: string | null; deleted: boolean }[];
+  /** Moved: open items on the old path follow the page. */
+  moved: { from: string; to: string }[];
 }
 
 /** An account's mail settings; a library's override is null where it follows the account. */
@@ -69,11 +108,19 @@ export const MAILS_PER_DAY = 20;
 
 export interface Notifications {
   add(items: NewItem[]): Promise<void>;
-  /** The inbox, newest first: open items, or with `all` read and done ones too; `before` is `next`. */
+  /**
+   * The inbox, newest first (by when the item was made or last updated): open items, or with
+   * `done` only done ones, or with `all` both; `library` limits it to one library (its id);
+   * `before` is `next`. `open` counts the open items under the same library filter.
+   */
   inbox(
     user: string,
-    opts?: { all?: boolean; before?: string; limit?: number },
-  ): Promise<{ items: Item[]; next: string | null }>;
+    opts?: { all?: boolean; done?: boolean; library?: string; before?: string; limit?: number },
+  ): Promise<{ items: Item[]; next: string | null; open: number }>;
+  /** Closes what a committed write resolved in a library (TEMPRA-116). */
+  closeAfterWrite(library: string, closes: Closes): Promise<void>;
+  /** Closes a resolved thread's reply, thread and mention items, for everyone. */
+  closeThread(library: string, thread: string): Promise<void>;
   /** Unread items, in all and per library. */
   unread(user: string): Promise<{ total: number; libraries: Record<string, number> }>;
   /** Marks items read: these ids, a library's, or all; returns how many changed. */
@@ -114,51 +161,154 @@ const bool = (v: number | null | undefined) => (v === null || v === undefined ? 
 const flag = (v: boolean | null | undefined) => (v === null || v === undefined ? null : v ? 1 : 0);
 
 export function d1Notifications(db: D1Database): Notifications {
-  const items = `SELECT id, library, kind, place, path, thread, seq, actor, excerpt, created, read_at, done_at FROM notifications`;
+  const items = `SELECT id, library, kind, place, path, thread, seq, actor, excerpt, created, read_at, done_at, title, by_user, by_agent, count, due FROM notifications`;
+  const COLS =
+    "id, user, library, kind, place, path, thread, seq, actor, by_user, excerpt, created, mail, key, title, by_agent, count, due";
+  const MARKS = COLS.split(",")
+    .map((_, n) => `?${n + 1}`)
+    .join(", ");
   return {
     async add(list) {
       if (list.length === 0) return;
       const now = new Date().toISOString();
-      await db.batch(
-        list.map((i) =>
-          db
-            .prepare(
-              `INSERT INTO notifications (id, user, library, kind, place, path, thread, seq, actor, by_user, excerpt, created, mail)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-            )
-            .bind(
-              crypto.randomUUID(),
-              i.user,
-              i.library,
-              i.kind,
-              i.place,
-              i.path ?? null,
-              i.thread ?? null,
-              i.seq ?? null,
-              i.actor,
-              i.by_user ?? null,
-              (i.excerpt ?? "").slice(0, 280),
-              now,
-              i.mail ? "pending" : null,
-            ),
-        ),
-      );
+      const values = (i: NewItem) => [
+        crypto.randomUUID(),
+        i.user,
+        i.library,
+        i.kind,
+        i.place,
+        i.path ?? null,
+        i.thread ?? null,
+        i.seq ?? null,
+        i.actor,
+        i.by_user ?? null,
+        (i.excerpt ?? "").slice(0, 280),
+        now,
+        i.mail ? "pending" : null,
+        i.key ?? null,
+        i.title ?? null,
+        i.by_agent ?? null,
+        i.count ?? null,
+        i.due ?? null,
+      ];
+      const statement = (i: NewItem) => {
+        if (!i.key) {
+          return db
+            .prepare(`INSERT INTO notifications (${COLS}) VALUES (${MARKS})`)
+            .bind(...values(i));
+        }
+        // Keyed: the open item with this key is updated rather than a second row added. A stale
+        // item is made or updated only for a new `due`: one already dismissed or read for this
+        // `due` stays as the person left it.
+        const stale = i.kind === "stale";
+        const dismissed = `NOT EXISTS (SELECT 1 FROM notifications d WHERE d.user = ?2
+          AND d.library IS ?3 AND d.key = ?14 AND d.due IS ?18 AND d.done_at IS NOT NULL)`;
+        return db
+          .prepare(
+            `INSERT INTO notifications (${COLS}) SELECT ${MARKS} WHERE ${stale ? dismissed : "1"}
+             ON CONFLICT (user, library, key) WHERE key IS NOT NULL AND done_at IS NULL
+             DO UPDATE SET excerpt = excluded.excerpt, created = excluded.created, read_at = NULL,
+               seq = excluded.seq, actor = excluded.actor, by_user = excluded.by_user,
+               by_agent = excluded.by_agent, title = excluded.title, count = excluded.count,
+               due = excluded.due
+             ${stale ? "WHERE notifications.due IS NOT excluded.due" : ""}`,
+          )
+          .bind(...values(i));
+      };
+      await db.batch(list.map(statement));
     },
     async inbox(user, opts = {}) {
       const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
-      // Newest first by insertion order (items made in the same millisecond keep theirs).
-      const before = Number(opts.before);
-      const r = await db
-        .prepare(
-          `SELECT rowid AS n, ${items.slice("SELECT ".length)} WHERE user = ?
-           ${opts.all ? "" : "AND done_at IS NULL"} ${before > 0 ? "AND rowid < ?" : ""}
-           ORDER BY rowid DESC LIMIT ?`,
-        )
-        .bind(...[user, ...(before > 0 ? [before] : []), limit + 1])
-        .all<Item & { n: number }>();
+      // Newest first by when the item was made or last updated; the cursor is (created, rowid).
+      const [at, n] = (opts.before ?? "").split("~");
+      const before = at && Number(n) > 0 ? [at, at, Number(n)] : [];
+      const state = opts.done ? "AND done_at IS NOT NULL" : opts.all ? "" : "AND done_at IS NULL";
+      const lib = opts.library ? "AND library = ?" : "";
+      const libArgs = opts.library ? [opts.library] : [];
+      const [r, open] = await Promise.all([
+        db
+          .prepare(
+            `SELECT rowid AS n, ${items.slice("SELECT ".length)} WHERE user = ? ${state} ${lib}
+             ${before.length ? "AND (created < ? OR (created = ? AND rowid < ?))" : ""}
+             ORDER BY created DESC, rowid DESC LIMIT ?`,
+          )
+          .bind(user, ...libArgs, ...before, limit + 1)
+          .all<Item & { n: number }>(),
+        db
+          .prepare(
+            `SELECT COUNT(*) AS n FROM notifications WHERE user = ? AND done_at IS NULL ${lib}`,
+          )
+          .bind(user, ...libArgs)
+          .first<{ n: number }>(),
+      ]);
       const page = r.results.slice(0, limit).map(({ n: _, ...i }) => i);
       const last = r.results[limit - 1];
-      return { items: page, next: r.results.length > limit && last ? String(last.n) : null };
+      return {
+        items: page,
+        next: r.results.length > limit && last ? `${last.created}~${last.n}` : null,
+        open: open?.n ?? 0,
+      };
+    },
+    async closeAfterWrite(library, closes) {
+      const now = new Date().toISOString();
+      const done = "done_at = ?1, read_at = COALESCE(read_at, ?1)";
+      const open = "library = ?2 AND path = ?3 AND done_at IS NULL";
+      const stmts: D1PreparedStatement[] = [];
+      for (const path of closes.verified) {
+        stmts.push(
+          db
+            .prepare(`UPDATE notifications SET ${done} WHERE ${open} AND kind = 'verify'`)
+            .bind(now, library, path),
+        );
+      }
+      for (const c of closes.changed) {
+        stmts.push(
+          c.deleted
+            ? db
+                .prepare(
+                  `UPDATE notifications SET ${done} WHERE ${open} AND kind IN ('verify', 'stale')`,
+                )
+                .bind(now, library, c.path)
+            : db
+                .prepare(
+                  `UPDATE notifications SET ${done} WHERE ${open} AND kind = 'stale' AND due IS NOT ?4`,
+                )
+                .bind(now, library, c.path, c.stale_after),
+        );
+      }
+      for (const m of closes.moved) {
+        // Open items follow the page; a keyed one that would meet an open one at the new path
+        // is closed instead, so the key stays unique.
+        stmts.push(
+          db
+            .prepare(
+              `UPDATE notifications SET ${done} WHERE ${open} AND key IS NOT NULL AND EXISTS (
+                 SELECT 1 FROM notifications o WHERE o.user = notifications.user
+                   AND o.library = notifications.library AND o.done_at IS NULL
+                   AND o.key = notifications.kind || ':' || ?4)`,
+            )
+            .bind(now, library, m.from, m.to),
+          db
+            .prepare(
+              `UPDATE notifications SET path = ?3,
+                 key = CASE WHEN key IS NULL THEN NULL ELSE kind || ':' || ?3 END
+               WHERE library = ?1 AND path = ?2 AND done_at IS NULL`,
+            )
+            .bind(library, m.from, m.to),
+        );
+      }
+      if (stmts.length) await db.batch(stmts);
+    },
+    async closeThread(library, thread) {
+      const now = new Date().toISOString();
+      await db
+        .prepare(
+          `UPDATE notifications SET done_at = ?1, read_at = COALESCE(read_at, ?1)
+           WHERE library = ?2 AND thread = ?3 AND done_at IS NULL
+             AND kind IN ('reply', 'thread', 'mention')`,
+        )
+        .bind(now, library, thread)
+        .run();
     },
     async unread(user) {
       const r = await db
@@ -497,6 +647,10 @@ export async function postComment(
   const res = await lib.comment(ctx, { ...action, mentions });
   try {
     await fanOut(d, token, ctx, action, res, people, mentions);
+    // A resolved thread's items are done for everyone; reopening does not reopen them.
+    if (action.kind === "resolve") {
+      await d.notifications?.closeThread(token.library.id, res.thread.id);
+    }
   } catch (e) {
     console.error(JSON.stringify({ notify_failed: res.request_id, error: String(e) }));
   }
@@ -547,4 +701,135 @@ async function fanOut(
     });
   }
   await d.notifications.add(items);
+}
+
+// ---------------------------------------------------------------- verify and stale (TEMPRA-116)
+
+/** The content writes whose results carry a WriteNotice for the after-commit step. */
+const NOTICED = ["apply", "import", "revert", "verify"] as const;
+
+/**
+ * The library's client as the routes and MCP tools use it: each content write, once committed,
+ * goes through `afterWrite` (verify items, and the closes it resolves), and its notice is
+ * stripped from what the caller sees. A failure there is logged, never an error on the write.
+ */
+export function notifying(d: NotifyDeps, token: TokenInfo, lib: LibraryClient): LibraryClient {
+  const out = { ...lib };
+  for (const m of NOTICED) {
+    const call = lib[m] as unknown as (
+      ctx: RequestContext,
+      ...rest: unknown[]
+    ) => Promise<{ seq: number; notify?: WriteNotice }>;
+    (out as Record<string, unknown>)[m] = async (ctx: RequestContext, ...rest: unknown[]) => {
+      const { notify, ...res } = await call(ctx, ...rest);
+      if (notify) {
+        try {
+          await afterWrite(d, token, ctx, res.seq, notify);
+        } catch (e) {
+          console.error(JSON.stringify({ notify_failed: ctx.request_id, error: String(e) }));
+        }
+      }
+      return res;
+    };
+  }
+  return out;
+}
+
+/** "3 edits since you verified". */
+export const editsSince = (n: number) => `${n} ${n === 1 ? "edit" : "edits"} since you verified`;
+
+/**
+ * After a content write commits: a `verify` item for each person whose verification it
+ * superseded (keyed, so a repeated edit updates the one item), never for the person acting in
+ * the app themselves and only for people who reach the library now; then the closes the write
+ * resolves (a verification, a new `stale_after`, a delete, a move).
+ */
+export async function afterWrite(
+  d: NotifyDeps,
+  token: TokenInfo,
+  ctx: RequestContext,
+  seq: number,
+  notice: WriteNotice,
+): Promise<void> {
+  const n = d.notifications;
+  if (!n) return;
+  const ref = token.library;
+  const items: NewItem[] = [];
+  if (notice.changed.some((c) => c.verifiers.length > 0)) {
+    const people = await libraryPeople(d.accounts, ref);
+    const byId = new Set(people.map((p) => p.id));
+    const byHandle = new Map(people.map((p) => [`human:${p.handle}`, p.id]));
+    const self = ctx.by?.person && !ctx.by.agent ? ctx.by.person : null;
+    for (const c of notice.changed) {
+      for (const v of c.verifiers) {
+        const user = v.person && byId.has(v.person) ? v.person : byHandle.get(v.actor);
+        if (!user || user === self) continue;
+        items.push({
+          user,
+          library: ref.id,
+          kind: "verify",
+          place: `${ref.owner}/${ref.slug}`,
+          path: c.path,
+          seq,
+          actor: ctx.actor,
+          by_user: ctx.by?.person ?? null,
+          by_agent: ctx.by?.agent ?? null,
+          excerpt: editsSince(v.changes),
+          key: `verify:${c.path}`,
+          title: c.title,
+          count: v.changes,
+        });
+      }
+    }
+  }
+  await n.add(items);
+  const closes: Closes = {
+    verified: notice.verified.map((v) => v.path),
+    changed: notice.changed.map(({ path, stale_after, deleted }) => ({
+      path,
+      stale_after,
+      deleted,
+    })),
+    moved: notice.moved,
+  };
+  if (closes.verified.length || closes.changed.length || closes.moved.length) {
+    await n.closeAfterWrite(ref.id, closes);
+  }
+}
+
+/** The actor stale items are made by: the staleness process (TEMPRA-63). */
+export const STALENESS_ACTOR = "process:staleness";
+
+/**
+ * The daily `stale` items (TEMPRA-116), handed over by a library's maintainer (maintain.ts) once
+ * a pass has flagged its concepts: one item per concept stale or going stale within 14 days, to
+ * the owner and each write member (the people who can ask an agent to refresh it), keyed so the
+ * next pass changes nothing unless the concept's `stale_after` did. Returns how many it handed.
+ */
+export async function notifyStale(
+  d: { accounts: Accounts; notifications: Notifications },
+  doId: string,
+  concepts: StaleConcept[],
+): Promise<number> {
+  if (concepts.length === 0) return 0;
+  const ref = await d.accounts.libraryByDoId(doId);
+  if (!ref) return 0;
+  const members = await d.accounts.members(ref.id);
+  const people = [ref.ownerId, ...members.filter((m) => m.role === "write").map((m) => m.user)];
+  const items: NewItem[] = people.flatMap((user) =>
+    concepts.map((c) => ({
+      user,
+      library: ref.id,
+      kind: "stale" as const,
+      place: `${ref.owner}/${ref.slug}`,
+      path: c.path,
+      actor: STALENESS_ACTOR,
+      excerpt: c.stale === "stale" ? "Stale" : "Going stale",
+      key: `stale:${c.path}`,
+      title: c.title,
+      due: c.stale_after,
+    })),
+  );
+  for (let i = 0; i < items.length; i += 100) await d.notifications.add(items.slice(i, i + 100));
+  return items.length;
 }

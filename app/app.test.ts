@@ -20,7 +20,10 @@ describe("routes follow the server's URLs (tempra-dev: v2/urls-and-handles)", ()
     expect(at(urls.since("a/b.md", 7))).toMatchObject({ compare: { kind: "since", seq: 7 } });
     expect(at(urls.file("a/b.md"))).toMatchObject({ page: "file", compare: undefined });
     expect(at(urls.thread("a/b.md", "t1"))).toMatchObject({ page: "file", path: "a/b.md" });
-    expect(at(urls.needs())).toMatchObject({ page: "needs" });
+    // Needs you is the Inbox filtered to the library (TEMPRA-116); its old URL redirects there.
+    expect(urls.needs()).toBe("/inbox?library=ann/notes");
+    expect(at(urls.needs())).toEqual({ page: "inbox", done: false, library: "ann/notes" });
+    expect(at("/ann/notes/-/needs")).toEqual({ page: "redirect", to: "/inbox?library=ann/notes" });
     expect(at(urls.activity())).toMatchObject({
       page: "activity",
       filters: { view: "summary", who: "everyone" },
@@ -79,9 +82,14 @@ describe("routes follow the server's URLs (tempra-dev: v2/urls-and-handles)", ()
     });
     expect(at("/ann/notes/-/connect")).toMatchObject({ page: "library-connect" });
     expect(at("/invitations")).toEqual({ page: "invitations" });
-    expect(at("/inbox")).toEqual({ page: "inbox", all: false });
-    expect(at("/inbox?all=1")).toEqual({ page: "inbox", all: true });
-    for (const p of ["needs", "activity", "transfer", "recovery", "delete", "members"]) {
+    expect(at("/inbox")).toEqual({ page: "inbox", done: false, library: null });
+    expect(at("/inbox?all=1")).toEqual({ page: "inbox", done: true, library: null });
+    expect(at("/inbox?done=1&library=ann/notes")).toEqual({
+      page: "inbox",
+      done: true,
+      library: "ann/notes",
+    });
+    for (const p of ["activity", "transfer", "recovery", "delete", "members"]) {
       expect(at(`/ann/notes/-/${p}`)).toMatchObject({ page: p, owner: "ann", slug: "notes" });
     }
   });
