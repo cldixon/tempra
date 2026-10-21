@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import type { ActivityFilters, LedgerFilters } from "./urls";
+import type { ActivityFilters, ActivityView } from "./urls";
 
 /** The pages the app draws itself; every other URL is a server page, loaded in full. */
 export type Route =
@@ -16,7 +16,7 @@ export type Route =
   | { page: "work"; owner: string; slug: string; kind?: string }
   | { page: "needs"; owner: string; slug: string }
   | { page: "settings"; owner: string; slug: string }
-  | { page: "activity"; owner: string; slug: string; filters: ActivityFilters }
+  | { page: "activity"; owner: string; slug: string; filters: ActivityFilters; done: Done }
   | { page: "transfer"; owner: string; slug: string }
   | { page: "recovery"; owner: string; slug: string }
   | { page: "library-connect"; owner: string; slug: string }
@@ -33,7 +33,6 @@ export type Route =
       /** A concept's page compares: in review mode, or against a version (`?since=`). */
       compare?: Compare;
     }
-  | { page: "ledger"; owner: string; slug: string; filters: LedgerFilters; done: Done }
   | { page: "diff"; owner: string; slug: string; path: string; from?: number; to?: number };
 
 /** What a concept's page draws its body against: the last verification, or a chosen version. */
@@ -105,21 +104,16 @@ export function match(url: URL): Route | null {
         return { page: "directory", owner, slug, dir: decodePath(tail), at };
       case "files":
         return { page: "file", owner, slug, path: decodePath(tail), at, compare: compareOf(q) };
-      case "ledger": {
+      // The ledger is Activity's Every event view at its own address (take 4, TEMPRA-115).
+      case "ledger":
+      case "activity": {
         if (tail !== "") return null;
-        const s = (k: string) => q.get(k)?.trim() || undefined;
-        const done = s("done");
+        const done = q.get("done")?.trim();
         return {
-          page: "ledger",
+          page: "activity",
           owner,
           slug,
-          filters: {
-            prefix: s("prefix"),
-            actor: s("actor"),
-            from: s("from"),
-            to: s("to"),
-            before: int(q.get("before")),
-          },
+          filters: activityFilters(q, pageName === "ledger" ? "events" : undefined),
           done: done ? { kind: done, n: int(q.get("n")) } : null,
         };
       }
@@ -134,20 +128,6 @@ export function match(url: URL): Route | null {
         };
       case "work":
         return tail === "" ? { page: "work", owner, slug, kind: q.get("kind") || undefined } : null;
-      case "activity": {
-        if (tail !== "") return null;
-        const who = q.get("who");
-        return {
-          page: "activity",
-          owner,
-          slug,
-          filters: {
-            who: who === "agents" || who === "people" ? who : "everyone",
-            prefix: q.get("prefix")?.trim() || undefined,
-            hideComments: q.get("comments") === "hide",
-          },
-        };
-      }
       case "needs":
       case "settings":
       case "transfer":
@@ -169,6 +149,24 @@ export function match(url: URL): Route | null {
   }
   if (rest.endsWith("/")) return { page: "directory", owner, slug, dir: decodePath(rest), at };
   return { page: "file", owner, slug, path: decodePath(rest), at, compare: compareOf(q) };
+}
+
+/**
+ * Activity's view and filters from its URL; `-/ledger` asks for Every event. Take 3's ledger
+ * filters map where they can (`prefix`, `actor`); its dates and `before` cursor are dropped (the
+ * table pages back in place), as are take 3 Activity's `comments=hide`.
+ */
+function activityFilters(q: URLSearchParams, view?: ActivityView): ActivityFilters {
+  const s = (k: string) => q.get(k)?.trim() || undefined;
+  const who = q.get("who");
+  return {
+    view: view ?? (q.get("view") === "events" ? "events" : "summary"),
+    who: who === "agents" || who === "people" ? who : "everyone",
+    prefix: s("prefix"),
+    actor: s("actor"),
+    kind: s("kind"),
+    q: s("q"),
+  };
 }
 
 function compareOf(q: URLSearchParams): Compare | undefined {

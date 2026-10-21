@@ -541,8 +541,8 @@ function greyPng(width: number, height: number, shade: number): Uint8Array {
  * library's home, the workspace (the tree, the quick switcher, the hidden sidebar, at phone
  * width the top bar naming the page, the home's ways in and the drawer), a folder's view, every concept in the reader (drawn from the stored tree, with no
  * Edit, a footnote card on hover), the byline's history, review mode from Properties, comments in the margin
- * (and as a bottom sheet on a phone), figures in the full-screen view, Needs you, Activity and
- * the ledger, all drawn from the API; links move within the app without reloading the page, and
+ * (and as a bottom sheet on a phone), figures in the full-screen view, Needs you, and Activity
+ * with its two views (Summary and Every event, take 4), all drawn from the API; links move within the app without reloading the page, and
  * nothing is refused by the CSP or throws. GATE_SCREENSHOTS=<dir> saves screenshots of them.
  */
 async function browserRenders(
@@ -1593,7 +1593,7 @@ async function browserRenders(
       await properties().waitFor({ state: "hidden", timeout: 5000 });
     });
     await step(
-      "Activity shows an agent's write live, and links the ledger, which tails live",
+      "Activity: the Summary follows an agent's write live with its live entry, Every event lists it by seq and tails live, -/ledger opens it, Download is the ledger as JSON lines",
       async () => {
         await markStay();
         await sidebar
@@ -1615,22 +1615,87 @@ async function browserRenders(
           .locator("article.entry", { hasText: "gate: an agent writes while Activity is open" })
           .first()
           .waitFor({ timeout: 10_000 });
-        if (!(await stayed())) throw new Error("the page reloaded");
-        await main.getByRole("link", { name: "The full ledger" }).click();
-        await page.getByRole("heading", { level: 1, name: "Ledger" }).waitFor({ timeout: 15_000 });
-        const requests = page.locator("li.request");
-        await requests.first().waitFor();
-        if (!(await stayed())) throw new Error("the link reloaded the page");
-        if (!page.url().endsWith(`/${owner}/${slug}/-/ledger`)) throw new Error(page.url());
-        const top = await requests.first().innerText();
-        await page.waitForTimeout(500);
-        await agentAppends("A sentence for the live ledger.");
-        const until = Date.now() + 10_000;
-        while ((await requests.first().innerText()) === top) {
-          if (Date.now() > until) throw new Error("the new request did not appear");
-          await page.waitForTimeout(200);
+        // The agent is writing now: the live entry heads the Summary with the pulsing dot.
+        const liveEntry = main.locator("article.entry.live");
+        await liveEntry.waitFor({ timeout: 10_000 });
+        if (!/is editing/.test(await liveEntry.innerText())) {
+          throw new Error(`live entry: ${await liveEntry.innerText()}`);
         }
+        if (!(await liveEntry.locator(".change-dot.live").count())) {
+          throw new Error("the live entry has no pulsing dot");
+        }
+        if (shots) await page.screenshot({ path: `${shots}/activity-live.png` });
         if (!(await stayed())) throw new Error("the page reloaded");
+
+        // Every event: the switch keeps the page, the table lists the agent's write by its seq,
+        // the newest row pulses, and a new write joins the top live.
+        await main.getByRole("button", { name: "Every event", exact: true }).click();
+        await page.waitForURL(`${lib}/-/activity?view=events`);
+        const rows = main.locator("table.events-table tbody tr");
+        await rows.first().waitFor({ timeout: 15_000 });
+        if (!(await stayed())) throw new Error("the switch reloaded the page");
+        const stats = await fetch(`${base}/api/v1/libraries/${owner}/${slug}/stats`, {
+          headers: auth,
+        });
+        const head = (await stats.json()) as { seq: number };
+        const firstSeq = (await rows.first().locator(".events-seq").innerText()).replace(/\D/g, "");
+        if (Number(firstSeq) !== head.seq) {
+          throw new Error(`Every event starts at seq ${firstSeq}, the ledger is at ${head.seq}`);
+        }
+        if (!(await rows.first().innerText()).includes(concept)) {
+          throw new Error(
+            `the newest row is not the agent's write: ${await rows.first().innerText()}`,
+          );
+        }
+        if (shots) await page.screenshot({ path: `${shots}/activity-events.png` });
+        await page.waitForTimeout(500);
+        await agentAppends(
+          "A sentence for the live ledger.",
+          "gate: a write while the ledger is open",
+        );
+        await main
+          .locator("table.events-table tbody tr", {
+            hasText: "gate: a write while the ledger is open",
+          })
+          .first()
+          .waitFor({ timeout: 10_000 });
+        if (!(await rows.first().locator(".change-dot.live").count())) {
+          throw new Error("the newest row does not pulse");
+        }
+        // The filters: a kind that matches nothing empties the table; Any kind brings it back.
+        await main.getByRole("combobox", { name: "Kind" }).selectOption("revert");
+        await page.waitForURL(`${lib}/-/activity?view=events&kind=revert`);
+        await main.getByText("No events match.").waitFor({ timeout: 5000 });
+        await main.getByRole("combobox", { name: "Kind" }).selectOption("");
+        await rows.first().waitFor({ timeout: 5000 });
+        if (!(await stayed())) throw new Error("the page reloaded");
+
+        // Download: the ledger as JSON lines, every event, the newest included.
+        const download = main.getByRole("link", { name: "Download" });
+        const href = await download.getAttribute("href");
+        if (href !== `/${owner}/${slug}/-/ledger.jsonl`) throw new Error(`Download: ${href}`);
+        const jsonl = await ui(`${base}${href}`);
+        const lines = (await jsonl.text()).trimEnd().split("\n");
+        if (jsonl.status !== 200 || lines.length < head.seq) {
+          throw new Error(`ledger.jsonl: ${jsonl.status}, ${lines.length} lines`);
+        }
+        const last = JSON.parse(lines.at(-1) ?? "{}") as { t?: string; seq?: number };
+        if (last.t !== "event" || (last.seq ?? 0) <= head.seq) {
+          throw new Error(`ledger.jsonl ends with ${lines.at(-1)}`);
+        }
+
+        // The ledger's address opens Every event; the switch goes back to the Summary.
+        await page.goto(`${lib}/-/ledger`);
+        await rows.first().waitFor({ timeout: 15_000 });
+        const pressed = main.getByRole("button", { name: "Every event", exact: true });
+        if ((await pressed.getAttribute("aria-pressed")) !== "true") {
+          throw new Error("-/ledger does not open Every event");
+        }
+        await markStay();
+        await main.getByRole("button", { name: "Summary", exact: true }).click();
+        await page.waitForURL(`${lib}/-/activity`);
+        await main.locator("article.entry").first().waitFor({ timeout: 10_000 });
+        if (!(await stayed())) throw new Error("the switch reloaded the page");
       },
     );
     // TEMPRA-80: normal use never comes near the session's limit. A minute of someone skimming
@@ -1779,6 +1844,7 @@ async function strangers(owner: string, slug: string, token: string): Promise<st
     "-/revert/x",
     "-/restore/a.md?to=1",
     "-/export",
+    "-/ledger.jsonl",
     "a.md",
   ]) {
     const page = await ui(`${base}/${owner}/${slug}/${p}`, {}, cookie);

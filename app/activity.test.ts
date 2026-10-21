@@ -4,9 +4,14 @@ import {
   dayLabel,
   type Entry,
   entryTime,
+  eventNote,
+  eventRows,
   groupByDay,
+  isLive,
+  kindOf,
   type LedgerEvent,
   type LedgerRequest,
+  LIVE_MS,
   momentText,
   toEntry,
   whoWorksHere,
@@ -227,6 +232,63 @@ test("who works here", () => {
   expect(whoWorksHere(true, 1, 3)).toBe("You, 1 other person and 3 agents");
   expect(whoWorksHere(false, 2, 0)).toBe("2 people");
   expect(whoWorksHere(true, 0, 0)).toBe("You");
+});
+
+describe("Every event (take 4, TEMPRA-115)", () => {
+  test("kinds: a new concept is a write, a new version an edit, the rest by their op", () => {
+    expect(kindOf({ op: "put", prev_hash: null })).toBe("write");
+    expect(kindOf({ op: "put", prev_hash: "h0" })).toBe("edit");
+    for (const op of ["move", "delete", "comment", "verify", "revert", "import"]) {
+      expect(kindOf({ op, prev_hash: "h0" })).toBe(op);
+    }
+  });
+
+  test("rows: newest first, who and when on a request's first row, filtered", () => {
+    const older = req(
+      [ev("put", "app/reader.md", { prev_hash: null }), ev("put", "app/diagrams.md")],
+      { request_id: "older", note: "Atoms count as one character" },
+    );
+    const said = req(
+      [
+        ev("comment", "app/reader.md", {
+          meta: { comment: { kind: "reply", body: "Yes:  images\nand markers" } },
+        }),
+      ],
+      { request_id: "said", actor: "human:ann", by: { person: "ann" } },
+    );
+    const rows = eventRows([said, older]);
+    expect(rows.map((r) => [r.kind, r.event.path, r.lead])).toEqual([
+      ["comment", "app/reader.md", true],
+      ["edit", "app/diagrams.md", true],
+      ["write", "app/reader.md", false],
+    ]);
+    expect(rows[0]?.note).toBe("Yes: images and markers");
+    expect(rows[1]?.note).toBe("Atoms count as one character");
+    // Filters: who, kind, and text in the path or the note (case aside).
+    expect(eventRows([said, older], { who: "people" }).map((r) => r.request.request_id)).toEqual([
+      "said",
+    ]);
+    expect(eventRows([said, older], { who: "agents" })).toHaveLength(2);
+    const writes = eventRows([said, older], { kind: "write" });
+    expect(writes.map((r) => [r.event.path, r.lead])).toEqual([["app/reader.md", true]]);
+    expect(eventRows([said, older], { q: "DIAGRAMS" })).toHaveLength(1);
+    expect(eventRows([said, older], { q: "atoms" })).toHaveLength(2);
+    // A request on two pages is listed once.
+    expect(eventRows([older, older])).toHaveLength(2);
+  });
+
+  test("a move with no note says where it came from", () => {
+    const e = ev("move", "delivery/x.md", { meta: { from_path: "decisions/x.md" } });
+    expect(eventNote(e, { note: null })).toBe("From decisions/x.md");
+    expect(eventNote(e, { note: "Filed under delivery" })).toBe("Filed under delivery");
+  });
+
+  test("an agent reads as writing now for a minute after its last write", () => {
+    const t = 1_000_000;
+    expect(isLive({ at: t }, t + 59_000)).toBe(true);
+    expect(isLive({ at: t }, t + LIVE_MS)).toBe(false);
+    expect(isLive(null, t)).toBe(false);
+  });
 });
 
 test("words changed", () => {

@@ -261,6 +261,39 @@ export function registerUiRoutes<E extends AppEnv>(
     return p.c.redirect(`/dl/${encodeURIComponent(ref.do_id)}/${token}`, 302);
   });
 
+  // The ledger as it stands, as JSON lines: Activity's Download (TEMPRA-115; tempra-dev:
+  // app/activity). Every event in sequence order, each line as the nightly ledger.jsonl writes
+  // its events (`{"t":"event",…}`); blob rows stay in the nightly dump, which restores need.
+  // Read a page at a time up to the head when the download began, so a big ledger streams.
+  get("/:owner/:lib/-/ledger.jsonl", async (p) => {
+    const { lib, ref } = await openLibrary(p);
+    const head = await lib.headSeq();
+    const lines = new TextEncoder();
+    let since = 0;
+    const body = new ReadableStream<Uint8Array>({
+      async pull(out) {
+        const page = await lib.events({ since, limit: 1000 });
+        const events = page.events.filter((e) => e.seq <= head);
+        if (events.length > 0) {
+          out.enqueue(
+            lines.encode(events.map((e) => `${JSON.stringify({ t: "event", ...e })}\n`).join("")),
+          );
+          since = events.at(-1)?.seq ?? since;
+        }
+        if (page.next === null || since >= head || events.length === 0) out.close();
+      },
+    });
+    return new Response(body, {
+      headers: {
+        "Content-Type": "application/x-ndjson",
+        "Content-Disposition": `attachment; filename="${ref.slug}-ledger.jsonl"`,
+        "Content-Security-Policy": "default-src 'none'; sandbox",
+        "X-Content-Type-Options": "nosniff",
+        "Cache-Control": "no-store",
+      },
+    });
+  });
+
   // A nightly export's files, streamed from R2 (spec: Backups and recovery).
   get("/:owner/:lib/-/exports/:date/:file", async (p) => {
     const { ref } = await openLibrary(p);
