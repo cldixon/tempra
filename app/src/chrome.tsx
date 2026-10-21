@@ -43,7 +43,15 @@ import {
 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
 import { api, useLoad } from "./api";
-import { INBOX_EVENT, inboxChanged, useUnread } from "./inbox";
+import {
+  bellLine,
+  INBOX_EVENT,
+  type InboxPage,
+  itemHref,
+  libraryLabel,
+  markRead,
+  useUnread,
+} from "./inbox";
 import { THEMES, useTheme } from "./theme";
 import { type Me, recently } from "./ui";
 
@@ -216,40 +224,15 @@ export function Menu(props: {
   );
 }
 
-/** One item of the inbox, as the bell's popover shows it (the latest few). */
-interface BellItem {
-  id: string;
-  kind: string;
-  place: string;
-  path: string | null;
-  actor: string;
-  excerpt: string;
-  created: string;
-  read_at: string | null;
-  href: string;
-}
-
-const BELL_VERBS: Record<string, string> = {
-  reply: "replied",
-  mention: "mentioned you",
-  thread: "opened a thread",
-  invitation: "invited you",
-  access: "changed your access",
-  verify: "changed a page you verified",
-  stale: "is going stale",
-};
-
-/** Who did it, as people read it. */
-const whoDid = (actor: string) => actor.replace(/^human:/, "@");
-
 /**
- * The bell (take 4, board 03): the Inbox's unread count as a badge, and a popover of the latest
- * few items with Mark all read and Open inbox. The count follows the feed, as the inbox does.
+ * The bell (take 4, board 03; TEMPRA-116): the Inbox's unread count as a badge, and a popover of
+ * the latest few items (one line each, the library, the time, an unread dot) with Mark all read
+ * and Open inbox. The count follows the feed and every action on an item, as the Inbox does.
  */
 export function Bell() {
   const unread = useUnread();
   const [open, setOpen] = useState(false);
-  const latest = useLoad("inbox-latest", () => api<{ items: BellItem[] }>("/api/v1/inbox?limit=5"));
+  const latest = useLoad("inbox-latest", () => api<InboxPage>("/api/v1/inbox?limit=5"));
   const { reload } = latest;
   useEffect(() => {
     window.addEventListener(INBOX_EVENT, reload);
@@ -257,10 +240,6 @@ export function Bell() {
   }, [reload]);
   // Read when the popover draws (it opens on a state change, so this is fresh enough).
   const now = Date.now();
-  const markAll = () =>
-    void api("/api/v1/inbox/read", { method: "POST", body: JSON.stringify({ all: true }) })
-      .then(inboxChanged)
-      .catch(() => {});
   const items = latest.state === "ready" ? latest.data.items : [];
   return (
     <Menu
@@ -284,30 +263,35 @@ export function Bell() {
       <div className="bell-pop-head">
         <span>Inbox</span>
         {unread > 0 && (
-          <button type="button" onClick={markAll}>
+          <button type="button" data-stay onClick={() => void markRead()}>
             Mark all read
           </button>
         )}
       </div>
       {open && items.length === 0 && <div className="bell-empty">Nothing for you</div>}
       {items.map((i) => {
-        const page = i.path?.replace(/\.md$/, "").split("/").pop() ?? i.place;
+        const line = bellLine(i);
         return (
-          <a key={i.id} className="bell-item" href={i.href}>
+          <a
+            key={i.id}
+            className="bell-item"
+            href={itemHref(i)}
+            onClick={() => i.read_at === null && void markRead([i.id])}
+          >
             <span className="lib-tile" aria-hidden="true">
-              {(i.place.split("/").pop()?.[0] ?? "?").toUpperCase()}
+              {(libraryLabel(i)[0] ?? "?").toUpperCase()}
             </span>
             <span className="bell-item-what">
-              <strong>{whoDid(i.actor)}</strong> {BELL_VERBS[i.kind] ?? i.kind}
-              {i.path && (
+              {line.lead}
+              {line.on && (
                 <>
                   {" "}
-                  on <strong>{page}</strong>
+                  <strong>{line.on}</strong>
                 </>
               )}
             </span>
             <span className="bell-item-where">
-              {i.place.split("/").pop()} · {recently(i.created, now)}
+              {i.library.replace("/", " / ")} · {recently(i.created, now)}
             </span>
             {i.read_at === null && (
               <>

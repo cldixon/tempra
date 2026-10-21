@@ -655,6 +655,7 @@ body.ground {
 }
 
 .bell-pop-head button {
+  width: auto;
   padding: 0;
   border: 0;
   background: none;
@@ -1548,47 +1549,7 @@ ul.events {
   font-size: var(--tempra-text-label);
 }
 
-/* ---------- Notifications (TEMPRA-72, TEMPRA-73): the inbox, mentions ---------- */
-
-.inbox-list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.inbox-list li {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 12px;
-  padding: 12px 18px;
-  border-radius: var(--tempra-radius-box);
-}
-
-.inbox-list li:hover {
-  background: var(--tempra-color-hover);
-}
-
-.inbox-list .what {
-  flex: 1 1 20rem;
-}
-
-.inbox-list .unread .what a {
-  font-weight: var(--tempra-weight-strong);
-}
-
-.inbox-list .when {
-  font-size: var(--tempra-text-meta);
-}
-
-.inbox-list .excerpt {
-  flex-basis: 100%;
-  margin: 0;
-  color: var(--tempra-color-muted);
-}
+/* ---------- Notifications (TEMPRA-72, TEMPRA-73): mentions (the Inbox is inbox.css) ---------- */
 
 /* The comment box with its @ suggestions under it. */
 .mention-box {

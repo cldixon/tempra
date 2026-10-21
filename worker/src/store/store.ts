@@ -149,6 +149,35 @@ export interface WriteResult {
   request_id: string;
   seq: number;
   results: OpResult[];
+  /** For the Worker's after-commit step (notify.ts), which strips it before answering. */
+  notify?: WriteNotice;
+}
+
+/**
+ * What a committed write means for the people of the library (TEMPRA-116; tempra-dev:
+ * v2/notifications): the concepts whose content changed, with who had verified each before the
+ * change (a person's verification only, TEMPRA-111's rule) and how many content changes came
+ * since; verifications by a person; moves. The Worker turns it into Inbox items and closes.
+ */
+export interface WriteNotice {
+  changed: {
+    path: string;
+    title: string | null;
+    stale_after: string | null;
+    deleted: boolean;
+    /** People whose latest verification this write superseded: users id when known, actor. */
+    verifiers: { person: string | null; actor: string; changes: number }[];
+  }[];
+  verified: { path: string; person: string | null; actor: string }[];
+  moved: { from: string; to: string }[];
+}
+
+/** A concept stale or going stale within 14 days, for the daily stale items (TEMPRA-116). */
+export interface StaleConcept {
+  path: string;
+  title: string | null;
+  stale_after: string;
+  stale: Staleness;
 }
 
 export type ImportFile = { path: string; markdown: string } | { path: string; blob: BlobRef };
@@ -159,6 +188,7 @@ export interface ImportResult {
   files: number;
   skipped: string[];
   warnings: { path: string; lint: LintWarning[] }[];
+  notify?: WriteNotice;
 }
 
 export interface EventRow {
@@ -453,6 +483,9 @@ function unverified(person: boolean, which: "unverified" | "changed" | "never"):
 const UNVERIFIED = unverified(false, "unverified");
 const CHANGED_SINCE_A_PERSON = unverified(true, "changed");
 const NEVER_BY_A_PERSON = unverified(true, "never");
+
+/** The most concepts one write's notice, or one day's stale items, names (TEMPRA-116). */
+const NOTICE_CONCEPTS = 500;
 
 const MARK_OPEN = "\u0002";
 const MARK_CLOSE = "\u0003";
@@ -790,8 +823,9 @@ export class LibraryStore {
   /** Applies ops as one all-or-nothing request (spec: Write path, Tier 1; POST /batch). */
   apply(ctx: RequestContext, ops: WriteOp[]): WriteResult {
     if (ops.length === 0) throw new OkfError(400, "empty_request", "No operations to apply.");
+    const before = this.headSeq();
     try {
-      return this.guard(() =>
+      const res: WriteResult = this.guard(() =>
         this.sql.transaction(() => {
           const w = this.begin(ctx);
           const n = ops.length;
@@ -804,6 +838,7 @@ export class LibraryStore {
           };
         }),
       );
+      return { ...res, notify: this.writeNotice(before) };
     } catch (e) {
       throw this.asCommitted(e, ops);
     }
@@ -836,7 +871,8 @@ export class LibraryStore {
    * discarded because the service synthesizes them.
    */
   import(ctx: RequestContext, files: ImportFile[], source?: string): ImportResult {
-    return this.guard(() =>
+    const before = this.headSeq();
+    const res: ImportResult = this.guard(() =>
       this.sql.transaction(() => {
         const w = this.begin(ctx);
         w.mode = "import";
@@ -872,11 +908,16 @@ export class LibraryStore {
         };
       }),
     );
+    return { ...res, notify: this.writeNotice(before) };
   }
 
   /** Forward-only rollback of one path to its state at `to_seq`, or of a whole request. */
-  revert(ctx: RequestContext, target: { path: string; to_seq: number } | { request_id: string }) {
-    return this.guard(() =>
+  revert(
+    ctx: RequestContext,
+    target: { path: string; to_seq: number } | { request_id: string },
+  ): WriteResult {
+    const before = this.headSeq();
+    const res: WriteResult = this.guard(() =>
       this.sql.transaction(() => {
         const w = this.begin(ctx);
         const results =
@@ -897,6 +938,98 @@ export class LibraryStore {
         };
       }),
     );
+    return { ...res, notify: this.writeNotice(before) };
+  }
+
+  /**
+   * What the write after `before` means for the library's people (WriteNotice), read once it has
+   * committed, in the same call, so the Worker needs no second trip (TEMPRA-116).
+   */
+  private writeNotice(before: number): WriteNotice {
+    const changed = this.sql
+      .all<{ concept_id: string; path: string }>(
+        `SELECT concept_id, path FROM events WHERE seq IN (
+           SELECT MAX(seq) FROM events WHERE seq > ? AND ${CONTENT_EVENT} GROUP BY concept_id)
+         ORDER BY seq LIMIT ${NOTICE_CONCEPTS}`,
+        before,
+      )
+      .flatMap((e) => {
+        const row = this.sql.all<{ path: string; kind: string }>(
+          "SELECT path, kind FROM paths WHERE concept_id = ?",
+          e.concept_id,
+        )[0];
+        if (row && row.kind !== "concept") return [];
+        if (!row && !e.path.endsWith(".md")) return [];
+        const c = this.sql.all<{ title: string | null; stale_after: string | null }>(
+          "SELECT title, stale_after FROM concepts WHERE concept_id = ?",
+          e.concept_id,
+        )[0];
+        const verifiers = row
+          ? this.sql
+              .all<{ person: string | null; actor: string; seq: number }>(
+                `SELECT json_extract(e.meta, '$.by.person') AS person, v.by AS actor, MAX(v.seq) AS seq
+                 FROM verifications v JOIN events e ON e.seq = v.seq
+                 WHERE v.concept_id = ? AND v.by LIKE 'human:%'
+                 GROUP BY COALESCE(json_extract(e.meta, '$.by.person'), v.by)`,
+                e.concept_id,
+              )
+              .flatMap((v) => {
+                const changes =
+                  this.sql.all<{ n: number }>(
+                    `SELECT COUNT(*) AS n FROM events WHERE concept_id = ? AND seq > ? AND ${CONTENT_EVENT}`,
+                    e.concept_id,
+                    v.seq,
+                  )[0]?.n ?? 0;
+                return changes > 0 ? [{ person: v.person, actor: v.actor, changes }] : [];
+              })
+          : [];
+        return [
+          {
+            path: row?.path ?? e.path,
+            title: c?.title ?? null,
+            stale_after: c?.stale_after ?? null,
+            deleted: !row,
+            verifiers,
+          },
+        ];
+      });
+    const verified = this.sql.all<{ path: string; person: string | null; actor: string }>(
+      `SELECT COALESCE(p.path, e.path) AS path, json_extract(e.meta, '$.by.person') AS person,
+              e.actor
+       FROM events e LEFT JOIN paths p ON p.concept_id = e.concept_id
+       WHERE e.seq > ? AND e.op = 'verify' AND e.actor LIKE 'human:%' LIMIT ${NOTICE_CONCEPTS}`,
+      before,
+    );
+    const moved = this.sql
+      .all<{ to: string; from: string | null }>(
+        `SELECT path AS "to", json_extract(meta, '$.from_path') AS "from" FROM events
+         WHERE seq > ? AND op = 'move' LIMIT ${NOTICE_CONCEPTS}`,
+        before,
+      )
+      .flatMap((m) => (m.from ? [{ from: m.from, to: m.to }] : []));
+    return { changed, verified, moved };
+  }
+
+  /**
+   * Concepts stale or going stale within 14 days, soonest first: what the daily maintainer hands
+   * the Worker for the owner's and write members' `stale` items (TEMPRA-116).
+   */
+  staleConcepts(): StaleConcept[] {
+    const now = this.clock().getTime();
+    return this.sql
+      .all<{ path: string; title: string | null; stale_after: string; stale_ms: number }>(
+        `SELECT DISTINCT p.path, c.title, c.stale_after, c.stale_ms FROM flags f
+         JOIN concepts c ON c.concept_id = f.concept_id
+         JOIN paths p ON p.concept_id = f.concept_id AND p.kind = 'concept'
+         WHERE f.kind IN ('stale', 'stale_soon') AND c.stale_ms IS NOT NULL
+         ORDER BY c.stale_ms, p.path LIMIT ${NOTICE_CONCEPTS}`,
+      )
+      .map((r) => ({
+        path: r.path,
+        title: r.title,
+        stale_after: r.stale_after,
+        stale: (r.stale_ms <= now ? "stale" : "stale_soon") as Staleness,
+      }));
   }
 
   private guard<T>(fn: () => T): T {
@@ -3297,7 +3430,8 @@ export class LibraryStore {
         "Only human: and process: actors may verify; agents do not claim verification.",
       );
     }
-    return this.guard(() =>
+    const before = this.headSeq();
+    const res: WriteResult = this.guard(() =>
       this.sql.transaction(() => {
         const w = this.begin(ctx);
         const p = normalizePath(input);
@@ -3314,6 +3448,7 @@ export class LibraryStore {
         };
       }),
     );
+    return { ...res, notify: this.writeNotice(before) };
   }
 
   // ---------------------------------------------------------------- comments

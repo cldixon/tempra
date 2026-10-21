@@ -16,7 +16,7 @@ import {
 import { notificationsOf, registerInboxApi } from "./inbox-api";
 import { registerLegalRoutes } from "./legal";
 import { deleteLibrary } from "./lifecycle";
-import { type Notifications, postComment } from "./notify";
+import { type Notifications, notifying, postComment } from "./notify";
 import { messagePage } from "./oauth/pages";
 import { type GrantProps, registerAppRoutes } from "./oauth/routes";
 import { splitFrontmatter } from "./okf/concept";
@@ -319,7 +319,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     await admit(d, tokenAdmission(token), write, "token" in who);
     c.set("deps", d);
     c.set("token", token);
-    c.set("lib", d.library(token));
+    c.set("lib", notifying(d, token, d.library(token)));
     await next();
   });
 

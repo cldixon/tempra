@@ -212,7 +212,6 @@ export function registerUiRoutes<E extends AppEnv>(
     "revert/:request",
     "restore/*",
     "work",
-    "needs",
     "settings",
     "activity",
     "transfer",
@@ -223,6 +222,14 @@ export function registerUiRoutes<E extends AppEnv>(
   ]) {
     get(`/:owner/:lib/-/${page}`, library);
   }
+
+  // Needs you retired into the Inbox (take 4, TEMPRA-116): its URL lands on the Inbox filtered
+  // to the library, after the same check as the library's pages.
+  get("/:owner/:lib/-/needs", async (p) => {
+    const { ref } = await openLibrary(p);
+    const library = `${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.slug)}`;
+    return p.c.redirect(`/inbox?library=${library}`, 308);
+  });
 
   // The markdown exactly as an export writes it (spec: raw-source view).
   get("/:owner/:lib/-/raw/*", async (p) => {
