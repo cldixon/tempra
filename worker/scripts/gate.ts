@@ -1310,7 +1310,10 @@ async function browserRenders(
         .click();
       await page.waitForURL(`${base}/inbox?done=1`);
       // Newest first: the one just dismissed (an earlier one, closed by verifying, is below).
-      await row.first().getByText(/^1 edit by .+ since you verified$/).waitFor({ timeout: 10_000 });
+      await row
+        .first()
+        .getByText(/^1 edit by .+ since you verified$/)
+        .waitFor({ timeout: 10_000 });
       if (shots) await page.screenshot({ path: `${shots}/inbox-done.png` });
       await page.goto(url);
       await byline.waitFor({ timeout: 15_000 });
