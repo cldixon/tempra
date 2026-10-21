@@ -3,7 +3,7 @@ import { agentLabel, type Contributor } from "../agents";
 import { ApiError, api, field, useAction, useLoad } from "../api";
 import { CONTENT_OPS } from "../concept/data";
 import { useFeed, useTrailing } from "../live";
-import { useRole } from "../role";
+import { useLibraries, useRole } from "../role";
 import { navigate } from "../router";
 import { Chip, Crumbs, type Health, healthWords, plural, Status, useTitle, when } from "../ui";
 import { baseName, type Urls } from "../urls";
@@ -696,6 +696,92 @@ export function ConnectLibrary({ urls }: { urls: Urls }) {
             )}
           </p>
         )}
+      </Status>
+    </>
+  );
+}
+
+/**
+ * General (take 4's first settings tab; TEMPRA-102): the library's title and description, which
+ * the owner edits under the limits create_library enforces; a member reads them.
+ */
+export function General({ urls }: { urls: Urls }) {
+  useTitle(`General · ${urls.slug}`);
+  const libs = useLibraries();
+  const role = useRole(urls);
+  const action = useAction();
+  const [notice, setNotice] = useState<string | null>(null);
+  const lib =
+    libs.state === "ready"
+      ? libs.data.libraries.find((l) => l.owner === urls.owner && l.slug === urls.slug)
+      : undefined;
+  const save = (e: FormEvent<HTMLFormElement>) => {
+    e.preventDefault();
+    const form = e.currentTarget;
+    const title = field(form, "title").trim();
+    const description = field(form, "description").trim();
+    void action.run(async () => {
+      await api(urls.api(""), {
+        method: "PATCH",
+        body: JSON.stringify({ title: title || null, description: description || null }),
+      });
+      setNotice("Saved.");
+      libs.reload();
+    });
+  };
+  return (
+    <>
+      <h1>General</h1>
+      {notice && <div className="notice ok">{notice}</div>}
+      {action.error && <div className="notice">{action.error}</div>}
+      <Status loaded={libs}>
+        {() =>
+          role === "owner" ? (
+            <form className="stack" onSubmit={save} key={`${lib?.title}|${lib?.description}`}>
+              <p className="field">
+                <label htmlFor="library-title">Title</label>
+                <input
+                  id="library-title"
+                  name="title"
+                  type="text"
+                  maxLength={120}
+                  defaultValue={lib?.title ?? ""}
+                  placeholder={urls.slug}
+                />
+              </p>
+              <p className="field">
+                <label htmlFor="library-description">Description</label>
+                <input
+                  id="library-description"
+                  name="description"
+                  type="text"
+                  maxLength={300}
+                  defaultValue={lib?.description ?? ""}
+                  placeholder="What this library is for, in one line"
+                />
+              </p>
+              <p className="small muted">
+                The library's address stays {urls.owner}/{urls.slug}.
+              </p>
+              <p>
+                <button type="submit" className="primary" disabled={action.busy}>
+                  Save
+                </button>
+              </p>
+            </form>
+          ) : (
+            <dl className="facts">
+              <dt>Title</dt>
+              <dd>{lib?.title ?? <span className="muted">{urls.slug}</span>}</dd>
+              <dt>Description</dt>
+              <dd>{lib?.description ?? <span className="muted">None</span>}</dd>
+              <dt>Address</dt>
+              <dd>
+                {urls.owner}/{urls.slug}
+              </dd>
+            </dl>
+          )
+        }
       </Status>
     </>
   );

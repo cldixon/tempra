@@ -1,14 +1,17 @@
 /*
- * The app's frame (TEMPRA-19; take 2 in TEMPRA-53, take 3 in TEMPRA-106). A soft ground and on it
- * two things: the sidebar (no box) and the open page as a full-height sheet with a hairline edge.
- * The sidebar can be hidden; under 900px it is a drawer behind a top bar. Account pages sit on
- * the same ground in a centred column under a header. A concept's own layout (its margins) is in
- * concept.css; the person's views (home, Needs you, Activity, a folder) in views.css.
+ * The app's frame (TEMPRA-19; take 2 in TEMPRA-53, take 3 in TEMPRA-106, take 4 in TEMPRA-113;
+ * tempra-dev: app/workspace). A docs-site layout: a top bar across the window, split at the
+ * sidebar's edge (the mark, the library switcher and search over the sidebar; the crumbs, the
+ * page's tools, the bell and the avatar over the page), a navigation sidebar with a hairline on
+ * its right, and the page as a flat column: no ground, no sheet. The sidebar can be hidden; under
+ * 900px it is a drawer behind a top bar. Library settings and the account's pages use the same
+ * frame with a sidebar of their own. A concept's own layout is in concept.css; the person's views
+ * (home, Activity, a folder) in views.css.
  */
 body:has(> #root),
 body.ground {
   padding: 0;
-  background: var(--tempra-color-ground);
+  background: var(--tempra-color-bg);
 }
 
 /* ---------- Shared pieces: menus, the avatar, icon buttons ---------- */
@@ -260,26 +263,19 @@ body.ground {
   color: inherit;
 }
 
-/* ---------- Account pages: the ground, a header, a centred column ---------- */
+/* ---------- A page's column: the account's pages, settings, the library's tools ---------- */
 
-.app-header {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  height: 52px;
-  margin: 0 10px;
-  padding: 0 20px;
-}
-
-.app-header .spacer {
-  flex: 1;
-}
-
+/* One centred column; the frame's top bar and sidebar are around it. */
+.sheet-page,
 .page {
   width: 100%;
-  max-width: 720px;
+  max-width: var(--tempra-page-width);
   margin: 0 auto;
-  padding: 72px 24px 96px;
+  padding: 72px var(--tempra-sheet-pad) 96px;
+}
+
+.sheet-page.wide {
+  max-width: 960px;
 }
 
 .page-head {
@@ -295,53 +291,16 @@ body.ground {
   margin: 0;
 }
 
-/* The New pill: an outlined white pill with a circled plus. */
+/* The New pill: an outlined pill with a plus. */
 .pill-button {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 6px 12px 6px 8px;
-  box-shadow: var(--tempra-shadow);
-}
-
-.lib-list {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.lib-list a {
-  display: block;
-  padding: 16px 18px;
-  border-radius: var(--tempra-radius-box);
-  color: var(--tempra-color-text);
-  font-size: var(--tempra-text-name);
-  font-weight: var(--tempra-weight-medium);
-  text-decoration: none;
-}
-
-.lib-list a:hover {
-  background: var(--tempra-color-hover);
-}
-
-.lib-list .owner {
-  color: var(--tempra-color-faint);
-  font-weight: var(--tempra-weight-regular);
-}
-
-/* The library's open work from the daily check (TEMPRA-66): one quiet line under its name. */
-.lib-list .lib-health {
-  display: block;
-  color: var(--tempra-color-faint);
-  font-size: var(--tempra-text-meta);
-  font-weight: var(--tempra-weight-regular);
 }
 
 .page-foot {
-  margin: 32px 18px 0;
+  margin: 32px 0 0;
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-ui);
 }
@@ -350,29 +309,519 @@ body.ground {
   color: inherit;
 }
 
-/* ---------- The workspace: the sidebar and the sheet on the ground ---------- */
+/* The library list (take 4, board 01): cards under Yours and Shared with you. Each card has a
+   quiet cover (the library's tile; an agent's latest change at the right), then its name, what
+   is for the person there, its description and one line of facts. */
+.lib-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+  margin: 0 0 var(--tempra-space-4);
+  padding: 0;
+  list-style: none;
+}
+
+.lib-card {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 1px solid var(--tempra-color-border);
+  border-radius: var(--tempra-radius-box);
+  color: var(--tempra-color-text);
+  text-decoration: none;
+  overflow: hidden;
+}
+
+.lib-card:visited {
+  color: var(--tempra-color-text);
+}
+
+.lib-card:hover {
+  border-color: var(--tempra-color-border-strong);
+}
+
+.lib-card-cover {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 112px;
+  padding: 16px;
+  background: var(--tempra-color-ground);
+}
+
+.lib-card-cover .lib-tile {
+  width: 28px;
+  height: 28px;
+}
+
+.lib-card-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+}
+
+.lib-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 14px 16px 16px;
+}
+
+.lib-card-name {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: var(--tempra-text-name);
+  font-weight: var(--tempra-weight-medium);
+}
+
+.lib-card-name .owner {
+  color: var(--tempra-color-faint);
+  font-weight: var(--tempra-weight-regular);
+}
+
+.lib-card-for {
+  flex: none;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+  font-weight: var(--tempra-weight-regular);
+}
+
+.lib-card-desc {
+  margin: 0;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-ui);
+}
+
+.lib-card-meta {
+  margin: 4px 0 0;
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-meta);
+}
+
+/* A section of the list (Yours, Shared with you). */
+.lib-section-title {
+  margin: 0 0 12px;
+  font-size: var(--tempra-text-reader);
+  font-weight: var(--tempra-weight-strong);
+}
+
+/* ---------- The workspace: the top bar, the sidebar, the page ---------- */
 
 .workspace {
   display: grid;
   grid-template-columns: var(--tempra-sidebar) minmax(0, 1fr);
-  grid-template-areas: "sidebar sheet";
-  column-gap: var(--tempra-gutter);
+  grid-template-rows: var(--tempra-topbar) minmax(0, 1fr);
+  grid-template-areas:
+    "topbar topbar"
+    "sidebar main";
   height: 100dvh;
-  padding: var(--tempra-gutter);
 }
 
 .workspace.sidebar-hidden {
   grid-template-columns: minmax(0, 1fr);
-  grid-template-areas: "sheet";
+  grid-template-areas:
+    "topbar"
+    "main";
 }
 
-/* The phone's top bar: only under 900px. */
+/* The top bar: across the whole window, a hairline under it, split at the sidebar's edge. */
 .ws-topbar {
+  grid-area: topbar;
+  display: grid;
+  grid-template-columns: var(--tempra-sidebar) minmax(0, 1fr);
+  min-width: 0;
+  border-bottom: 1px solid var(--tempra-color-border);
+  background: var(--tempra-color-bg);
+}
+
+.sidebar-hidden .ws-topbar {
+  grid-template-columns: auto minmax(0, 1fr);
+}
+
+/* Over the sidebar: the mark, the library switcher (or the frame's name), search. */
+.topbar-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 12px 0 16px;
+  border-right: 1px solid var(--tempra-color-border);
+}
+
+.topbar-brand .lib-tile {
+  width: 28px;
+  height: 28px;
+}
+
+/* A hairline between the mark and the name. */
+.topbar-brand .brand-sep {
+  width: 1px;
+  height: 20px;
+  margin: 0 2px;
+  background: var(--tempra-color-border);
+}
+
+/* The frame's name where there is no library to switch: Tempra, Settings, Library settings. */
+.topbar-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--tempra-color-text);
+  font-size: var(--tempra-text-name);
+  font-weight: var(--tempra-weight-strong);
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topbar-name:visited {
+  color: var(--tempra-color-text);
+}
+
+/* The library switcher: the library's name and a chevron, in a quiet pill. */
+.lib-switch {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: var(--tempra-radius-row);
+  background: transparent;
+  color: var(--tempra-color-text);
+  font-size: var(--tempra-text-name);
+  font-weight: var(--tempra-weight-strong);
+  text-align: left;
+}
+
+.lib-switch:hover:not(:disabled),
+.lib-switch[aria-expanded="true"] {
+  background: var(--tempra-color-hover);
+}
+
+.lib-switch .lib-name {
+  flex: 1;
+  min-width: 0;
+}
+
+.lib-switch svg {
+  flex: none;
+  color: var(--tempra-color-faint);
+}
+
+/* The round search button, at the brand's right. */
+.search-button {
+  flex: none;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--tempra-color-border);
+  border-radius: 50%;
+  background: var(--tempra-color-bg);
+}
+
+/* Over the page: the way back to the sidebar when it is hidden, the crumbs, then the page's
+   tools, the bell and the avatar. */
+.topbar-page {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 0 16px 0 20px;
+}
+
+.topbar-crumbs {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+/* The page's tools (a concept's Comments, Copy page and ⋯), from the page itself. */
+.topbar-tools {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+
+.topbar-tools:empty {
   display: none;
 }
 
-/* The sidebar sits on the ground: the library, search, the views, the files (which scroll), and
-   the inbox and the person at its foot. */
+.topbar-end {
+  display: flex;
+  flex: none;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The crumbs in the top bar: the folders, then the page, in the app's text size. */
+.crumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-font-size);
+}
+
+.crumbs a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.crumbs a:hover {
+  color: var(--tempra-color-text);
+}
+
+.crumbs .here {
+  color: var(--tempra-color-text);
+  font-weight: var(--tempra-weight-medium);
+}
+
+/* A control in the top bar that reads as a pill: Comments n, Copy page. */
+.topbar-tools .icon-button.with-count,
+.tool-pill {
+  height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--tempra-color-border);
+  border-radius: var(--tempra-radius-pill);
+  background: var(--tempra-color-bg);
+  color: var(--tempra-color-text);
+  font-size: var(--tempra-text-ui);
+}
+
+.tool-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.topbar-tools .icon-button:not(.with-count),
+.topbar-end .icon-button {
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--tempra-color-border);
+  border-radius: 50%;
+  color: var(--tempra-color-text);
+}
+
+.topbar-tools .icon-button.with-count[aria-pressed="true"],
+.topbar-tools .icon-button.with-count[aria-pressed="true"]:hover:not(:disabled) {
+  background: var(--tempra-color-selected);
+  color: var(--tempra-color-text);
+}
+
+/* The bell: the Inbox and its unread count as a small badge on the button's corner. */
+.bell .badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  display: grid;
+  place-items: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: var(--tempra-radius-pill);
+  background: var(--tempra-color-text);
+  color: var(--tempra-color-bg);
+  font-size: var(--tempra-text-initial);
+  font-weight: var(--tempra-weight-strong);
+  line-height: 1;
+}
+
+/* The bell's popover: the latest few items, Mark all read above, Open inbox below. */
+.bell-pop {
+  width: min(360px, calc(100vw - 32px));
+  padding: 0;
+}
+
+.bell-pop-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid var(--tempra-color-border);
+  font-size: var(--tempra-text-name);
+  font-weight: var(--tempra-weight-strong);
+}
+
+.bell-pop-head button {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-ui);
+  font-weight: var(--tempra-weight-regular);
+}
+
+.bell-pop-head button:hover:not(:disabled) {
+  color: var(--tempra-color-text);
+}
+
+.menu-list .bell-item {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  gap: 2px 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--tempra-color-border);
+  border-radius: 0;
+}
+
+.bell-item .lib-tile {
+  grid-row: span 2;
+  width: 20px;
+  height: 20px;
+  font-size: var(--tempra-text-label);
+}
+
+.bell-item-what {
+  color: var(--tempra-color-text);
+  font-size: var(--tempra-text-ui);
+}
+
+.bell-item-what strong {
+  font-weight: var(--tempra-weight-medium);
+}
+
+.bell-item-where {
+  grid-column: 2;
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-meta);
+}
+
+.bell-item .unread-dot {
+  grid-column: 3;
+  grid-row: span 2;
+  align-self: center;
+  width: var(--tempra-dot);
+  height: var(--tempra-dot);
+  border-radius: 50%;
+  background: var(--tempra-color-text);
+}
+
+.menu-list .bell-foot {
+  padding: 10px 16px;
+  border-radius: 0;
+  color: var(--tempra-color-muted);
+  text-align: center;
+}
+
+.menu-list .bell-empty {
+  padding: 24px 16px;
+  color: var(--tempra-color-muted);
+  text-align: center;
+}
+
+/* The avatar's menu: who, then the pages, the theme, sign out, each with its glyph. */
+.menu-list.account {
+  min-width: 15rem;
+}
+
+.menu-list .menu-person {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px 10px;
+  color: var(--tempra-color-text);
+}
+
+.menu-person .avatar-mark {
+  width: 32px;
+  height: 32px;
+  font-size: var(--tempra-text-label);
+}
+
+.menu-person-names {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  line-height: var(--tempra-leading-tight);
+}
+
+.menu-person-names .handle {
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-meta);
+}
+
+.menu-list a.menu-item,
+.menu-list button.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.menu-item svg {
+  flex: none;
+  color: var(--tempra-color-muted);
+}
+
+/* The theme row: its name, then System, Light, Dark as one small segmented control. */
+.menu-list .menu-theme {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 10px;
+  font-size: var(--tempra-text-ui);
+}
+
+.menu-theme svg {
+  flex: none;
+  color: var(--tempra-color-muted);
+}
+
+.menu-theme .segmented {
+  margin-left: auto;
+}
+
+.menu-theme .segmented button {
+  padding: 2px 8px;
+  font-size: var(--tempra-text-meta);
+}
+
+/* The library switcher's menu: libraries as rows with their tile and, when shared, the role. */
+.menu-list.libraries {
+  min-width: 17rem;
+}
+
+.menu-list a.menu-lib {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr) auto;
+  gap: 0 10px;
+  align-items: center;
+  padding: 6px 10px;
+}
+
+.menu-lib .lib-tile {
+  grid-row: span 2;
+  width: 20px;
+  height: 20px;
+  font-size: var(--tempra-text-label);
+}
+
+.menu-lib .menu-lib-role {
+  grid-column: 2;
+  color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-meta);
+}
+
+.menu-lib .menu-lib-check {
+  grid-column: 3;
+  grid-row: span 2;
+  display: inline-flex;
+  color: var(--tempra-color-muted);
+}
+
+/* The sidebar: a hairline on its right; the views, a rule, the files (which scroll), and
+   Settings at its foot. A settings frame holds a way back and its tabs instead. */
 .ws-sidebar {
   grid-area: sidebar;
   display: flex;
@@ -380,7 +829,9 @@ body.ground {
   gap: 2px;
   min-width: 0;
   min-height: 0;
-  padding: 8px 6px;
+  padding: 12px 10px;
+  border-right: 1px solid var(--tempra-color-border);
+  background: var(--tempra-color-bg);
   font-size: var(--tempra-text-ui);
 }
 
@@ -388,39 +839,93 @@ body.ground {
   display: none;
 }
 
-.sidebar-head {
-  display: flex;
-  align-items: center;
-  gap: 2px;
+.sidebar-rule {
+  margin: 10px 8px;
 }
 
-.sidebar-head .menu {
-  flex: 1;
-  min-width: 0;
-}
-
-/* The library switcher: its initial, its name over its owner, a chevron. */
-.lib-switch {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: 100%;
-  padding: 6px 8px;
-  border: 0;
-  border-radius: var(--tempra-radius-row);
-  background: transparent;
-  color: var(--tempra-color-text);
-  text-align: left;
-}
-
-.lib-switch:hover:not(:disabled) {
-  background: var(--tempra-color-hover);
-}
-
-.lib-switch svg {
-  flex: none;
-  margin-left: auto;
+.sidebar-label {
+  margin: 14px 10px 4px;
   color: var(--tempra-color-faint);
+  font-size: var(--tempra-text-meta);
+}
+
+.sidebar-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-bottom: 16px;
+}
+
+.sidebar-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding-top: 8px;
+}
+
+/* The way back at the top of a settings sidebar: "‹ Back to tempra-dev". */
+.nav-row.back {
+  margin-bottom: 14px;
+  color: var(--tempra-color-muted);
+}
+
+.nav-row.back:hover {
+  color: var(--tempra-color-text);
+}
+
+/* A library in the account's sidebar: its tile, its name, what is for the person there. */
+.nav-row .lib-tile {
+  width: 20px;
+  height: 20px;
+  font-size: var(--tempra-text-label);
+}
+
+.nav-row .lib-tile.shared {
+  border-radius: 50%;
+  background: var(--tempra-color-muted);
+}
+
+/* The page: the frame's scroller. Its width, not the window's, decides a concept's columns
+   (container queries on `sheet`, kept by that name from take 3, in concept.css), so hiding the
+   sidebar widens the reading layout. */
+.ws-main {
+  grid-area: main;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden auto;
+  background: var(--tempra-color-bg);
+  container: sheet / inline-size;
+}
+
+/* Showing the hidden sidebar: a quiet glyph at the left of the crumbs. */
+.sheet-toggle {
+  flex: none;
+  color: var(--tempra-color-faint);
+}
+
+/* The change dot's second state (take 4): pulsing while an agent writes. */
+.change-dot.live {
+  background: var(--tempra-color-agent);
+  animation: tempra-pulse var(--tempra-pulse) ease-in-out infinite;
+}
+
+@keyframes tempra-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  50% {
+    opacity: 0.45;
+    transform: scale(0.7);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .change-dot.live {
+    animation: none;
+  }
 }
 
 .lib-tile,
@@ -457,42 +962,6 @@ body.ground {
   font-size: var(--tempra-text-label);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* Hiding the sidebar: a quiet glyph beside the switcher, plain until hovered. */
-.sidebar-hide {
-  flex: none;
-  color: var(--tempra-color-faint);
-}
-
-.search-pill {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 10px 2px 8px;
-  padding: 7px 10px;
-  border: 1px solid var(--tempra-color-border);
-  background: var(--tempra-color-bg);
-  color: var(--tempra-color-faint);
-  font-size: var(--tempra-text-ui);
-  text-align: left;
-}
-
-.search-pill:hover:not(:disabled) {
-  background: var(--tempra-color-bg);
-  color: var(--tempra-color-muted);
-}
-
-.search-pill span {
-  flex: 1;
-}
-
-.search-pill kbd {
-  border: 0;
-  background: none;
-  color: inherit;
-  font-family: inherit;
-  font-size: var(--tempra-text-label);
 }
 
 .nav {
@@ -558,26 +1027,6 @@ body.ground {
 
 .nav-row.person .avatar-mark {
   margin-right: 0;
-}
-
-.sidebar-label {
-  margin: 18px 10px 4px;
-  color: var(--tempra-color-faint);
-  font-size: var(--tempra-text-label);
-}
-
-.sidebar-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  padding-bottom: 16px;
-}
-
-.sidebar-foot {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding-top: 8px;
 }
 
 /* The tree: nested lists, one row per folder or file, indented a step a level. A folder's row is
@@ -709,105 +1158,6 @@ button.tree-row[aria-current="page"] {
   font-size: var(--tempra-text-meta);
 }
 
-/* The sheet: the open page, full height, a hairline edge; the page scrolls inside it. Its width,
-   not the window's, decides a concept's columns (container queries in concept.css), so hiding the
-   sidebar widens the reading layout. */
-.ws-sheet {
-  grid-area: sheet;
-  position: relative;
-  min-width: 0;
-  min-height: 0;
-  overflow: hidden;
-  border: 1px solid var(--tempra-color-border);
-  border-radius: var(--tempra-radius-card);
-  background: var(--tempra-color-bg);
-}
-
-.ws-main {
-  height: 100%;
-  overflow: hidden auto;
-  container: sheet / inline-size;
-}
-
-/* Showing the hidden sidebar: a glyph at the sheet's top left, over its bar. */
-.sheet-toggle {
-  position: absolute;
-  top: 11px;
-  left: 12px;
-  z-index: 4;
-}
-
-/* The sheet's bar: where the page is on the left, the page's few controls on the right. It stays
-   in view while the page scrolls. */
-.sheet-bar {
-  position: sticky;
-  top: 0;
-  z-index: 3;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  min-height: var(--tempra-bar);
-  padding: 0 14px 0 20px;
-  background: var(--tempra-color-bg);
-}
-
-.sidebar-hidden .sheet-bar {
-  padding-left: 52px;
-}
-
-.sheet-bar-start {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.sheet-bar-end {
-  display: flex;
-  flex: none;
-  align-items: center;
-  gap: 4px;
-}
-
-/* On a phone the bar goes back a step instead of naming the whole path. */
-.sheet-back {
-  display: none;
-}
-
-.crumbs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  min-width: 0;
-  color: var(--tempra-color-muted);
-  font-size: var(--tempra-text-meta);
-}
-
-.crumbs a {
-  color: inherit;
-  text-decoration: none;
-}
-
-.crumbs a:hover {
-  color: var(--tempra-color-text);
-}
-
-.crumbs .here {
-  color: var(--tempra-color-text);
-}
-
-/* A page's column in the sheet: a library view, a folder, settings. */
-.sheet-page {
-  max-width: var(--tempra-page-width);
-  margin: 0 auto;
-  padding: 72px var(--tempra-sheet-pad) 96px;
-}
-
-.sheet-page.wide {
-  max-width: 960px;
-}
-
 /* ---------- The quick switcher ---------- */
 
 .switcher {
@@ -845,6 +1195,14 @@ button.tree-row[aria-current="page"] {
 
 /* ---------- Narrow screens: a top bar, the sidebar as a drawer ---------- */
 
+/* The phone's pieces of the top bar (the menu button, where the person is) and of the drawer
+   (the Inbox row at its foot) show only here. */
+.ws-menu,
+.ws-topbar-place,
+.phone-only {
+  display: none;
+}
+
 @media (max-width: 900px) {
   .workspace,
   .workspace.sidebar-hidden {
@@ -852,25 +1210,41 @@ button.tree-row[aria-current="page"] {
     grid-template-rows: var(--tempra-bar) minmax(0, 1fr);
     grid-template-areas:
       "topbar"
-      "sheet";
-    padding-top: 0;
+      "main";
   }
 
-  .ws-topbar {
-    grid-area: topbar;
+  .ws-topbar,
+  .sidebar-hidden .ws-topbar {
     display: flex;
     align-items: center;
     gap: 4px;
-    min-width: 0;
+    padding: 0 6px;
+  }
+
+  .topbar-brand,
+  .topbar-crumbs,
+  .sheet-toggle,
+  .topbar-end .bell {
+    display: none;
+  }
+
+  .topbar-page {
+    flex: 1;
+    gap: 4px;
+    padding: 0;
   }
 
   /* The way to everything else, in ink so it reads as the bar's first control. */
   .ws-menu {
+    display: inline-flex;
     color: var(--tempra-color-text);
   }
 
-  /* Where the person is: the library's tile and name, the page beneath it, as the switcher draws
-     the library's name over its owner. */
+  .nav-row.phone-only {
+    display: flex;
+  }
+
+  /* Where the person is: the library's tile and name, the page beneath it. */
   .ws-topbar-place {
     display: flex;
     flex: 1;
@@ -888,6 +1262,11 @@ button.tree-row[aria-current="page"] {
     color: var(--tempra-color-text);
   }
 
+  .ws-topbar-place .lib-tile {
+    width: 24px;
+    height: 24px;
+  }
+
   .ws-topbar-here {
     overflow: hidden;
     color: var(--tempra-color-muted);
@@ -896,18 +1275,29 @@ button.tree-row[aria-current="page"] {
     white-space: nowrap;
   }
 
+  .topbar-tools .icon-button.with-count,
+  .topbar-tools .icon-button:not(.with-count),
+  .topbar-end .icon-button {
+    height: var(--tempra-touch);
+    border: 0;
+  }
+
+  .topbar-tools .icon-button:not(.with-count),
+  .topbar-end .icon-button {
+    width: var(--tempra-touch);
+  }
+
   .ws-sidebar {
     position: fixed;
     top: var(--tempra-bar);
-    bottom: var(--tempra-gutter);
-    left: var(--tempra-gutter);
+    bottom: 0;
+    left: 0;
     z-index: 6;
     display: none;
     width: min(var(--tempra-sidebar), calc(100vw - 2 * var(--tempra-gutter)));
     padding: 8px;
-    border: 1px solid var(--tempra-color-border);
-    border-radius: var(--tempra-radius-card);
-    background: var(--tempra-color-ground);
+    border-right: 1px solid var(--tempra-color-border);
+    background: var(--tempra-color-bg);
     box-shadow: var(--tempra-shadow);
   }
 
@@ -919,9 +1309,12 @@ button.tree-row[aria-current="page"] {
     outline: none;
   }
 
-  .sidebar-hide,
-  .sheet-toggle {
-    display: none;
+  /* In the drawer, the switcher and search sit at the top. */
+  .drawer-head {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
   }
 
   /* Touch targets: every row and control at least 44px tall. */
@@ -931,35 +1324,21 @@ button.tree-row[aria-current="page"] {
     min-height: var(--tempra-touch);
   }
 
-  .icon-button.touch,
-  .sheet-bar .icon-button {
+  .icon-button.touch {
     width: var(--tempra-touch);
     height: var(--tempra-touch);
   }
 
-  .sheet-bar .icon-button.with-count {
-    width: auto;
-  }
-
-  .sheet-bar,
-  .sidebar-hidden .sheet-bar {
-    padding: 0 6px;
-  }
-
-  .sheet-back {
-    display: inline-flex;
-  }
-
-  .sheet-bar .crumbs {
-    display: none;
-  }
-
-  .sheet-page {
+  .sheet-page,
+  .page {
     padding: 32px 16px 72px;
   }
+}
 
-  .page {
-    padding-top: 40px;
+/* Outside a phone the drawer's head is not drawn: the top bar holds the switcher and search. */
+@media (min-width: 901px) {
+  .drawer-head {
+    display: none;
   }
 }
 
@@ -1035,6 +1414,13 @@ table.list td {
 
 table.list td.name a {
   font-weight: var(--tempra-weight-medium);
+}
+
+/* A setting on one line: its name, then its control (the Account page's theme). */
+.field-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
 }
 
 /* A group of related controls on a page (a form, a list with its actions). */
@@ -1162,34 +1548,7 @@ ul.events {
   font-size: var(--tempra-text-label);
 }
 
-/* ---------- Notifications (TEMPRA-72, TEMPRA-73): counts, the inbox, mentions ---------- */
-
-/* The headers' Inbox link and its unread count: a number, no colour. */
-.inbox-link {
-  display: inline-flex;
-  align-items: baseline;
-  gap: 6px;
-  color: var(--tempra-color-muted);
-  font-size: var(--tempra-text-ui);
-  text-decoration: none;
-}
-
-.inbox-link:hover {
-  color: var(--tempra-color-text);
-}
-
-.inbox-link .count,
-.lib-list .tally {
-  color: var(--tempra-color-faint);
-  font-variant-numeric: tabular-nums;
-}
-
-/* A library's tally in the list: for you, new, open threads. */
-.lib-list .tally {
-  float: right;
-  font-size: var(--tempra-text-ui);
-  font-weight: var(--tempra-weight-regular);
-}
+/* ---------- Notifications (TEMPRA-72, TEMPRA-73): the inbox, mentions ---------- */
 
 .inbox-list {
   display: flex;

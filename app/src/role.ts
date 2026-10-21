@@ -13,6 +13,9 @@ export interface ReachableLibrary {
   owner: string;
   slug: string;
   role?: Role;
+  /** Its title and description, when set (TEMPRA-102). */
+  title?: string;
+  description?: string;
 }
 
 /** The person's libraries, own and shared (one load, shared by the workspace's parts). */

@@ -7,7 +7,7 @@ const at = (path: string) => match(new URL(path, "http://localhost"));
 
 describe("routes follow the server's URLs (tempra-dev: v2/urls-and-handles)", () => {
   test("library list, directories and files at their own paths", () => {
-    expect(at("/")).toEqual({ page: "libraries" });
+    expect(at("/")).toEqual({ page: "libraries", create: false });
     expect(at("/ann/notes/")).toMatchObject({ page: "directory", dir: "", owner: "ann" });
     expect(at("/ann/notes/a/b/")).toMatchObject({ page: "directory", dir: "a/b" });
     expect(at("/ann/notes/a/b.md?at=4")).toMatchObject({ page: "file", path: "a/b.md", at: 4 });

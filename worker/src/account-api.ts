@@ -1,6 +1,6 @@
 import type { OAuthHelpers } from "@cloudflare/workers-oauth-provider";
 import type { Context, Hono } from "hono";
-import type { User } from "./accounts";
+import { checkTheme, type User } from "./accounts";
 import type { Deps } from "./app";
 import { deleteAccount } from "./lifecycle";
 import { clearedSessionCookie, readCookie, SESSION_COOKIE, sessionId } from "./session";
@@ -45,10 +45,21 @@ export function registerAccountApi(
       email: user.email,
       handle: user.handle,
       actor: user.actor,
+      theme: user.theme ?? null,
       sessions: sessions.map((s) => ({ ...s, current: s.id === current })),
       usage,
       limits,
     });
+  });
+
+  // The account's settings that are one value each (take 4): the theme, for now.
+  app.patch("/api/v1/account", async (c) => {
+    const { d, user } = await person(c);
+    const b = await body<{ theme?: unknown }>(c);
+    if (!("theme" in b)) throw new OkfError(400, "nothing_to_change", "Nothing to change.");
+    const theme = checkTheme(b.theme);
+    await d.accounts.setTheme(user.id, theme);
+    return c.json({ theme });
   });
 
   app.put("/api/v1/account/handle", async (c) => {

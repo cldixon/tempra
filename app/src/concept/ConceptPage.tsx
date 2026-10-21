@@ -18,7 +18,7 @@ import { useRole } from "../role";
 import type { Compare } from "../router";
 import { AtNotice, anchorId, Crumbs, useMe, useTitle } from "../ui";
 import { dirOf, folderName, type Urls } from "../urls";
-import { SheetBar } from "../Workspace";
+import { PageBar } from "../Workspace";
 import { Byline } from "./Byline";
 import { Contents, contentsOf } from "./Contents";
 import { useCompare } from "./compare";
@@ -258,7 +258,7 @@ export function ConceptPage(props: {
   ];
   return (
     <div ref={page} className={classes.filter(Boolean).join(" ")}>
-      <SheetBar
+      <PageBar
         back={{ href: urls.tree(dir), label: dir ? folderName(dir) : urls.slug }}
         actions={
           <>
@@ -295,7 +295,7 @@ export function ConceptPage(props: {
           {c.stale && <span className="crumb-flag">stale</span>}
           {status && status !== "stable" && <span className="crumb-flag">{status}</span>}
         </Crumbs>
-      </SheetBar>
+      </PageBar>
       {compare && (
         <ReviewBar
           urls={urls}

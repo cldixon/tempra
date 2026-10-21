@@ -898,6 +898,19 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     return person;
   };
 
+  // The library's title and description (TEMPRA-102, take 4's General settings): the owner, from
+  // the app; a field given is set (null clears it), one left out stays.
+  app.patch(BASE, async (c) => {
+    sessionOnly(c, "A library is described");
+    requireOwner(c.var.token.role, "change its title or description");
+    const b = await json<{ title?: string | null; description?: string | null }>(c);
+    const about = await c.var.deps.accounts.describeLibrary(c.var.token.library.id, {
+      ...("title" in b ? { title: b.title } : {}),
+      ...("description" in b ? { description: b.description } : {}),
+    });
+    return c.json(about);
+  });
+
   app.put(`${BASE}/members/:member`, async (c) => {
     sessionOnly(c, "Members are managed");
     requireOwner(c.var.token.role, "change members' access");
@@ -1018,7 +1031,12 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     const { d, user } = await human(c);
     const account = await d.accounts.account(user.id);
     if (!account) throw new OkfError(401, "no_account", "This account no longer exists.");
-    return c.json({ email: account.email, handle: account.handle, actor: account.actor });
+    return c.json({
+      email: account.email,
+      handle: account.handle,
+      actor: account.actor,
+      theme: account.theme ?? null,
+    });
   });
 
   app.get("/api/v1/libraries", async (c) => {
@@ -1035,8 +1053,15 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
       n ? n.unread(user.id).catch(logged("unread", null)) : null,
     ]);
     const libraries = await Promise.all(
-      refs.map(async ({ id, slug, owner, do_id, role }) => {
-        const row = { id, owner, slug, role };
+      refs.map(async ({ id, slug, owner, do_id, role, title, description }) => {
+        const row = {
+          id,
+          owner,
+          slug,
+          role,
+          ...(title ? { title } : {}),
+          ...(description ? { description } : {}),
+        };
         const since = seen[id];
         let s: Awaited<ReturnType<LibraryClient["summary"]>>;
         try {

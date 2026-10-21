@@ -69,11 +69,22 @@ export const INVITATION_DAYS = 14;
 /** Invitations a library may send a day: enough for a team, too few to spam with. */
 export const INVITATIONS_PER_DAY = 20;
 
+/** A person's theme (take 4): light or dark, or null for the system's. */
+export type Theme = "light" | "dark";
+
+export function checkTheme(v: unknown): Theme | null {
+  if (v === null || v === undefined || v === "system" || v === "") return null;
+  if (v === "light" || v === "dark") return v;
+  throw new OkfError(400, "bad_theme", "The theme is system, light or dark.");
+}
+
 export interface User {
   id: string;
   email: string;
   actor: string;
   handle: string;
+  /** The person's theme, or null for the system's (not every load carries it). */
+  theme?: Theme | null;
 }
 
 /** A bearer token as the Tokens page lists it; the secret itself is never stored. */
@@ -228,6 +239,16 @@ export interface Accounts {
    * may assign a reserved handle (`reserved: "allow"`).
    */
   setHandle(userId: string, handle: string, opts?: { reserved?: "allow" }): Promise<User>;
+  /** The person's theme: light, dark, or null for the system's (take 4). */
+  setTheme(userId: string, theme: Theme | null): Promise<void>;
+  /**
+   * Sets a library's title and description (TEMPRA-102): a field given is set (null clears it),
+   * one left out keeps its value; the same limits as createLibrary. The route checks the owner.
+   */
+  describeLibrary(
+    libraryId: string,
+    about: { title?: string | null; description?: string | null },
+  ): Promise<{ title: string | null; description: string | null }>;
   /** The current handle of the account that released `handle` within the hold, if any. */
   heldHandle(handle: string): Promise<string | null>;
   /** Removes a library's rows and its tokens. Its storage is wiped separately (lifecycle.ts). */
@@ -380,7 +401,7 @@ export function d1Accounts(db: D1Database): Accounts {
   };
   const byEmail = (email: string) =>
     db
-      .prepare("SELECT id, email, actor, handle FROM users WHERE email = ?")
+      .prepare("SELECT id, email, actor, handle, theme FROM users WHERE email = ?")
       .bind(email)
       .first<User>();
   return {
@@ -478,7 +499,9 @@ export function d1Accounts(db: D1Database): Accounts {
     },
     async account(userId) {
       return db
-        .prepare("SELECT id, email, actor, handle FROM users WHERE id = ? AND suspended IS NULL")
+        .prepare(
+          "SELECT id, email, actor, handle, theme FROM users WHERE id = ? AND suspended IS NULL",
+        )
         .bind(userId)
         .first<User>();
     },
@@ -553,7 +576,7 @@ export function d1Accounts(db: D1Database): Accounts {
           : ["email", by.email.trim().toLowerCase()];
       return db
         .prepare(
-          `SELECT id, email, actor, handle FROM users WHERE ${col} = ? AND suspended IS NULL`,
+          `SELECT id, email, actor, handle, theme FROM users WHERE ${col} = ? AND suspended IS NULL`,
         )
         .bind(value)
         .first<User>();
@@ -794,6 +817,27 @@ export function d1Accounts(db: D1Database): Accounts {
       }
       return { id, slug, do_id: id, owner: owner.handle, title, description };
     },
+    async setTheme(userId, theme) {
+      await db.prepare("UPDATE users SET theme = ?1 WHERE id = ?2").bind(theme, userId).run();
+    },
+    async describeLibrary(libraryId, about) {
+      const current = await db
+        .prepare("SELECT title, description FROM libraries WHERE id = ?")
+        .bind(libraryId)
+        .first<{ title: string | null; description: string | null }>();
+      if (!current) throw new OkfError(404, "not_found", "No such library.");
+      const title =
+        about.title === undefined ? current.title : checkLine(about.title, "title", 120);
+      const description =
+        about.description === undefined
+          ? current.description
+          : checkLine(about.description, "description", 300);
+      await db
+        .prepare("UPDATE libraries SET title = ?1, description = ?2 WHERE id = ?3")
+        .bind(title, description, libraryId)
+        .run();
+      return { title, description };
+    },
     async about(libraryId) {
       return db
         .prepare("SELECT title, description FROM libraries WHERE id = ?")
@@ -903,7 +947,7 @@ export function d1Accounts(db: D1Database): Accounts {
       const handle = checkHandle(handleInput, opts);
       const byId = () =>
         db
-          .prepare("SELECT id, email, actor, handle FROM users WHERE id = ?")
+          .prepare("SELECT id, email, actor, handle, theme FROM users WHERE id = ?")
           .bind(userId)
           .first<User>();
       const before = await byId();

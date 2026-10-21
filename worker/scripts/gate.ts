@@ -557,9 +557,9 @@ async function browserRenders(
   try {
     const enc = (p: string) => p.split("/").map(encodeURIComponent).join("/");
     const main = page.locator("main.ws-main");
-    /** The bar at the sheet's top: crumbs on the left, the page's controls on the right. */
-    const sheetBar = main.locator(".sheet-bar");
-    /** Someone else's write: the sheet bar's glyph, then Show new version in its menu. */
+    /** The top bar (take 4): the crumbs on the left, the page's tools on the right. */
+    const sheetBar = page.locator("header.ws-topbar");
+    /** Someone else's write: the top bar's glyph, then Show new version in its menu. */
     const newVersion = () => sheetBar.getByRole("button", { name: "New version" });
     const showNewVersion = async () => {
       await newVersion().click();
@@ -795,8 +795,11 @@ async function browserRenders(
       await closes("Escape", () => box.press("Escape"));
       await closes("the same keys", () => page.keyboard.press("Control+k"));
       await closes("a click outside", () => page.mouse.click(5, 5));
-      // The sidebar's Search pill opens it too.
-      await sidebar.getByRole("button", { name: /^Search/ }).click();
+      // The top bar's Search button opens it too.
+      await page
+        .locator(".topbar-brand")
+        .getByRole("button", { name: "Search", exact: true })
+        .click();
       await box.waitFor({ timeout: 5000 });
       await box.fill(word);
       const option = page.locator('.switcher [role="option"]', { hasText: first }).first();
@@ -810,7 +813,8 @@ async function browserRenders(
     await step("workspace: hiding the sidebar is remembered", async () => {
       const show = page.getByRole("button", { name: "Show sidebar" });
       if ((await show.count()) > 0) throw new Error("Show sidebar offered while it shows");
-      await sidebar.getByRole("button", { name: "Hide sidebar" }).click();
+      // Ctrl+\ hides it (take 4 has no button for it).
+      await page.keyboard.press("Control+\\");
       await sidebar.waitFor({ state: "hidden", timeout: 5000 });
       await show.waitFor({ timeout: 5000 });
       await page.reload();
@@ -824,13 +828,77 @@ async function browserRenders(
       await sidebar.getByRole("navigation", { name: "Files" }).waitFor({ timeout: 15_000 });
       if ((await show.count()) > 0) throw new Error("Show sidebar offered after showing it");
     });
+    // The frame (take 4, TEMPRA-113): the switcher's menu, the library's settings with General
+    // (TEMPRA-102), the bell, and the theme, chosen in the avatar's menu and kept on the account.
+    await step("the frame: the switcher's menu, General, the bell and the theme", async () => {
+      const brand = page.locator(".topbar-brand");
+      const switcher = () => brand.getByRole("button", { name: /^Library .*, owned by / });
+      await switcher().click();
+      const menu = page.locator(".menu-list.libraries");
+      await menu
+        .locator('a[aria-current="page"]')
+        .filter({ hasText: slug })
+        .waitFor({ timeout: 5000 });
+      await menu.getByRole("link", { name: "All libraries", exact: true }).waitFor();
+      await menu.getByRole("link", { name: "New library", exact: true }).waitFor();
+      await menu.getByRole("link", { name: `${slug} settings`, exact: true }).click();
+      await page.waitForURL(`${lib}/-/settings`);
+      await main
+        .getByRole("heading", { level: 1, name: "General", exact: true })
+        .waitFor({ timeout: 15_000 });
+      // The settings' sidebar: a way back, then the tabs.
+      for (const tab of ["General", "Members", "Connect", "Import & export", "Recovery"]) {
+        await sidebar.getByRole("link", { name: tab, exact: true }).waitFor({ timeout: 5000 });
+      }
+      await sidebar.getByRole("link", { name: "Delete library", exact: true }).waitFor();
+      // A title, saved: the switcher and the home show it; cleared again, they show the slug.
+      await page.locator("#library-title").fill("The gate's library");
+      await page.getByRole("button", { name: "Save", exact: true }).click();
+      await page.getByText("Saved.").waitFor({ timeout: 15_000 });
+      await sidebar.getByRole("link", { name: /^Back to / }).click();
+      await page.waitForURL(`${lib}/`);
+      await main
+        .getByRole("heading", { level: 1, name: "The gate's library", exact: true })
+        .waitFor({ timeout: 15_000 });
+      await switcher().filter({ hasText: "The gate's library" }).waitFor({ timeout: 5000 });
+      if (shots) await page.screenshot({ path: `${shots}/home-titled.png` });
+      await page.goto(`${lib}/-/settings`);
+      await page.locator("#library-title").waitFor({ timeout: 15_000 });
+      await page.locator("#library-title").fill("");
+      await page.getByRole("button", { name: "Save", exact: true }).click();
+      await page.getByText("Saved.").waitFor({ timeout: 15_000 });
+      await page.goto(`${lib}/`);
+      await home();
+      // The bell: the inbox's latest few, and the way to the inbox.
+      await page.getByRole("button", { name: /^Inbox/ }).click();
+      const bell = page.locator(".menu-list.bell-pop");
+      await bell.getByRole("link", { name: "Open inbox", exact: true }).waitFor({ timeout: 5000 });
+      await page.keyboard.press("Escape");
+      await bell.waitFor({ state: "detached", timeout: 5000 });
+      // The theme: applied at once, kept on the account across a reload, back to the system's.
+      const account = page.locator(".menu-list.account");
+      await page.getByRole("button", { name: "Account menu" }).click();
+      await account.getByRole("button", { name: "Dark", exact: true }).click();
+      await page.locator('html[data-theme="dark"]').waitFor({ timeout: 5000 });
+      await page.keyboard.press("Escape");
+      await account.waitFor({ state: "detached", timeout: 5000 });
+      await page.reload();
+      await page.locator('html[data-theme="dark"]').waitFor({ timeout: 15_000 });
+      await home();
+      if (shots) await page.screenshot({ path: `${shots}/home-dark.png` });
+      await page.getByRole("button", { name: "Account menu" }).click();
+      await account.getByRole("button", { name: "System", exact: true }).click();
+      await page.locator("html:not([data-theme])").waitFor({ timeout: 5000 });
+      await page.keyboard.press("Escape");
+      await account.waitFor({ state: "detached", timeout: 5000 });
+    });
     await step("workspace: at phone width the sidebar is a drawer behind the top bar", async () => {
       const topbar = page.locator("header.ws-topbar");
-      if (await topbar.isVisible()) throw new Error("the phone's top bar shows on a desktop");
-      await page.setViewportSize({ width: 420, height: 800 });
-      await topbar.waitFor({ state: "visible", timeout: 5000 });
-      if (await sidebar.isVisible()) throw new Error("the sidebar shows at phone width");
       const menu = topbar.getByRole("button", { name: "Menu", exact: true });
+      if (await menu.isVisible()) throw new Error("the phone's menu button shows on a desktop");
+      await page.setViewportSize({ width: 420, height: 800 });
+      await menu.waitFor({ state: "visible", timeout: 5000 });
+      if (await sidebar.isVisible()) throw new Error("the sidebar shows at phone width");
       await menu.click();
       await sidebar.waitFor({ state: "visible" });
       // The drawer sits below the top bar: its button stays in reach, and Escape closes it.
@@ -846,12 +914,16 @@ async function browserRenders(
       }
       await page.mouse.click(Math.round(drawn.x + drawn.width + 4), 400);
       await sidebar.waitFor({ state: "hidden" });
-      // The top bar's Search opens the quick switcher.
-      await topbar.getByRole("button", { name: "Search", exact: true }).click();
+      // The drawer's Search opens the quick switcher.
+      await menu.click();
+      await sidebar.waitFor({ state: "visible" });
+      await sidebar.getByRole("button", { name: "Search", exact: true }).click();
       const dialog = page.getByRole("dialog", { name: "Open a file" });
       await dialog.waitFor({ timeout: 5000 });
       await page.keyboard.press("Escape");
       await dialog.waitFor({ state: "hidden", timeout: 5000 });
+      await page.keyboard.press("Escape");
+      await sidebar.waitFor({ state: "hidden" });
       // A view chosen in the drawer opens, and the drawer closes.
       await menu.click();
       await sidebar.waitFor({ state: "visible" });
@@ -1441,11 +1513,14 @@ async function browserRenders(
         body: JSON.stringify({ body: "Gate: yes, it is still current." }),
       });
       if (!answered.ok) throw new Error(`agent reply: ${answered.status}`);
+      // Needs you is reached from the home until it retires into the Inbox (TEMPRA-116).
+      await page.goto(`${lib}/`);
+      await home();
       await markStay();
-      const needsLink = sidebar
-        .getByRole("navigation", { name: "Views" })
-        .getByRole("link", { name: /^Needs you/ });
-      await needsLink.click();
+      await main
+        .getByRole("link", { name: /^All \d+$/ })
+        .first()
+        .click();
       await page.waitForURL(`${lib}/-/needs`);
       await main
         .getByRole("heading", { level: 1, name: "Needs you", exact: true })
@@ -1459,16 +1534,7 @@ async function browserRenders(
       const { count } = (await (
         await apiAs(devCookie, `/api/v1/libraries/${owner}/${slug}/needs`)
       ).json()) as { count: number };
-      const shown = needsLink.locator(".nav-count");
-      const until = Date.now() + 10_000;
-      for (;;) {
-        const now = (await shown.count()) > 0 ? (await shown.innerText()).trim() : "0";
-        if (now === String(count)) break;
-        if (Date.now() > until) {
-          throw new Error(`the sidebar counts ${now}; GET …/needs counts ${count}`);
-        }
-        await page.waitForTimeout(200);
-      }
+      if (count < 1) throw new Error(`GET …/needs counts ${count} with a reply waiting`);
       if (shots) await page.screenshot({ path: `${shots}/needs.png` });
       // The row opens the concept with that thread open in the margin.
       await row.click();
@@ -1928,30 +1994,26 @@ async function freshAccountConnects(): Promise<string[]> {
       await page.locator(".menu-list").getByRole("link", { name, exact: true }).click();
     };
     /**
-     * A library view: the work queue from Needs you (its housekeeping links it, when agents have
-     * any; else by its URL), the settings in the library's menu (take 3: the sidebar's switcher).
+     * A library view: the work queue by its URL (the home's foot line links it once agents have
+     * housekeeping); a settings tab from the settings' sidebar, reached through the switcher's
+     * menu (take 4) unless the settings are already open.
      */
     const libraryLink = async (name: string) => {
       if (name === "Work queue") {
-        await page
-          .locator(".ws-sidebar")
-          .getByRole("navigation", { name: "Views" })
-          .getByRole("link", { name: /^Needs you/ })
-          .click();
-        await page.getByRole("heading", { level: 1, name: "Needs you" }).waitFor();
-        const chores = page.locator("details.needs-housekeeping");
-        await page.waitForTimeout(500);
-        if ((await chores.count()) > 0) {
-          await chores.locator("summary").click();
-          await chores.getByRole("link", { name: "The work queue" }).click();
-        } else {
-          await page.goto(`${lib}/-/work`);
-        }
+        await page.goto(`${lib}/-/work`);
         await page.waitForURL(`${lib}/-/work`);
         return;
       }
-      await page.getByRole("button", { name: /^Library .*, owned by / }).click();
-      await page.locator(".menu-list").getByRole("link", { name, exact: true }).click();
+      const tab = page.locator(".ws-sidebar").getByRole("link", { name, exact: true });
+      if ((await tab.count()) === 0) {
+        await page.getByRole("button", { name: /^Library .*, owned by / }).click();
+        await page
+          .locator(".menu-list")
+          .getByRole("link", { name: /settings$/ })
+          .click();
+        await tab.waitFor({ timeout: 15_000 });
+      }
+      await tab.click();
     };
     await step("connected apps lists the app, from the header", async () => {
       await accountLink("Connected apps");
@@ -2063,7 +2125,7 @@ async function freshAccountConnects(): Promise<string[]> {
     await step("delete the library from its Delete tab", async () => {
       await switchTo(asOwner);
       await page.goto(`${lib}/`);
-      await libraryLink("Delete");
+      await libraryLink("Delete library");
       await page.locator('input[name="confirm"]').fill("notes");
       await page.getByRole("button", { name: "Delete library" }).click();
       // The last library gone: first run again.

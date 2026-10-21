@@ -17,7 +17,7 @@ import type { Compare } from "../router";
 import { navigate } from "../router";
 import { AtNotice, Crumbs, formatSize, Status, useScrollToHash, useTitle } from "../ui";
 import { baseName, dirOf, folderName, type Urls } from "../urls";
-import { SheetBar, SheetPage } from "../Workspace";
+import { PageBar, SheetPage } from "../Workspace";
 
 /** What the last server action did, said once on the page it returns to (`?done=`). */
 const DONE: Record<string, (actor: string) => string> = {
@@ -69,9 +69,9 @@ export function File(props: {
   const dir = dirOf(path);
   return (
     <>
-      <SheetBar back={{ href: urls.tree(dir), label: dir ? folderName(dir) : urls.slug }}>
+      <PageBar back={{ href: urls.tree(dir), label: dir ? folderName(dir) : urls.slug }}>
         <Crumbs urls={urls} path={path} file />
-      </SheetBar>
+      </PageBar>
       <SheetPage>
         {notice && <div className="notice">{notice}</div>}
         {live && <LiveNotice urls={urls} live={live} />}

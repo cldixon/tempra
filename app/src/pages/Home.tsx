@@ -15,6 +15,7 @@ import { api, useLoad } from "../api";
 import { Avatar, type Glyph, Icon } from "../chrome";
 import { useFeed, useLastSeen, useTrailing } from "../live";
 import { type Needs, useNeeds } from "../needs";
+import { useLibraries } from "../role";
 import { ViewNav } from "../Sidebar";
 import { fileLabel, type OutlineFile, topLevel } from "../Tree";
 import { calendarDay, clip, plural, Status, useMe, useTitle } from "../ui";
@@ -34,7 +35,13 @@ const FACES = 4;
  * purpose. It does not move the seen cursor: Activity does.
  */
 export function Home({ urls }: { urls: Urls }) {
-  useTitle(urls.slug);
+  const libs = useLibraries();
+  const lib =
+    libs.state === "ready"
+      ? libs.data.libraries.find((l) => l.owner === urls.owner && l.slug === urls.slug)
+      : undefined;
+  const name = lib?.title || urls.slug;
+  useTitle(name);
   const me = useMe();
   const frame = useFrame();
   const loaded = useLoad(`home ${urls.base}`, async () => {
@@ -51,6 +58,8 @@ export function Home({ urls }: { urls: Urls }) {
           <>
             <HomeHead
               urls={urls}
+              name={name}
+              description={lib?.description ?? null}
               me={me?.actor ?? null}
               concepts={home.concepts}
               latest={home.requests[0]}
@@ -68,6 +77,8 @@ export function Home({ urls }: { urls: Urls }) {
 /** The title, then one quiet line: who works here, how many concepts, when it last changed. */
 function HomeHead(props: {
   urls: Urls;
+  name: string;
+  description: string | null;
   me: string | null;
   concepts: number;
   latest: LedgerRequest | undefined;
@@ -89,7 +100,8 @@ function HomeHead(props: {
   return (
     <header className="view-head home-head">
       <div className="view-head-main">
-        <h1 className="view-title">{urls.slug}</h1>
+        <h1 className="view-title">{props.name}</h1>
+        {props.description && <p className="view-lede">{props.description}</p>}
         <p className="view-meta home-who">
           {faces.length > 0 && (
             <span className="face-stack">

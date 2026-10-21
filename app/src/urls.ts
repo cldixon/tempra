@@ -81,6 +81,10 @@ export class Urls {
   nightly(date: string, file: string) {
     return this.page(`exports/${encodeURIComponent(date)}/${encodeURIComponent(file)}`);
   }
+  /** The library's settings: General (its title and description), the first tab (take 4). */
+  settings() {
+    return this.page("settings");
+  }
   transfer() {
     return this.page("transfer");
   }

@@ -427,3 +427,77 @@ describe("terms and privacy (v2 spec: A3)", () => {
     expect(signIn).toContain('<a href="https://tempra.dev/privacy">');
   });
 });
+
+describe("the account's theme (take 4, TEMPRA-113)", () => {
+  test("set on the account, read back with /me, and put on the shell's root", async () => {
+    const s = setup();
+    const before = await s.app.request("/owner/demo/");
+    expect(await before.text()).toContain('<html lang="en"><head>');
+    const dark = await call(s.app, "/api/v1/account", "PATCH", { theme: "dark" });
+    expect(dark.status).toBe(200);
+    expect((await dark.json()) as unknown).toEqual({ theme: "dark" });
+    const me = (await (await s.app.request("/api/v1/me")).json()) as { theme: string | null };
+    expect(me.theme).toBe("dark");
+    for (const path of ["/", "/owner/demo/", "/owner/demo/a.md", "/inbox"]) {
+      const r = await s.app.request(path, { redirect: "manual" });
+      expect(r.status).toBe(200);
+      expect(await r.text()).toContain('<html lang="en" data-theme="dark"><head>');
+    }
+    // Back to the system's: no attribute. A theme that is not one is refused.
+    expect((await call(s.app, "/api/v1/account", "PATCH", { theme: "system" })).status).toBe(200);
+    expect(await (await s.app.request("/owner/demo/")).text()).toContain('<html lang="en"><head>');
+    expect((await call(s.app, "/api/v1/account", "PATCH", { theme: "sepia" })).status).toBe(400);
+    expect((await call(s.app, "/api/v1/account", "PATCH", {})).status).toBe(400);
+    // Only from the app's pages, as the rest of the account.
+    const token = await s.app.request("/api/v1/account", {
+      method: "PATCH",
+      headers: { Authorization: "Bearer human", "Content-Type": "application/json" },
+      body: JSON.stringify({ theme: "dark" }),
+    });
+    expect(token.status).toBe(403);
+  });
+});
+
+describe("a library's title and description (TEMPRA-102, in take 4's General settings)", () => {
+  test("the owner sets and clears them; they show in the list; a member reads only", async () => {
+    const s = setup();
+    const patch = (body: unknown, app = s.app) =>
+      call(app, "/api/v1/libraries/owner/demo", "PATCH", body);
+    const set = await patch({ title: "The demo", description: "What it is for." });
+    expect(set.status).toBe(200);
+    expect((await set.json()) as unknown).toEqual({
+      title: "The demo",
+      description: "What it is for.",
+    });
+    // A field left out keeps its value; null clears it.
+    const keep = await patch({ description: "Changed." });
+    expect((await keep.json()) as unknown).toEqual({ title: "The demo", description: "Changed." });
+    const list = (await (await s.app.request("/api/v1/libraries")).json()) as {
+      libraries: { slug: string; title?: string; description?: string }[];
+    };
+    expect(list.libraries.find((l) => l.slug === "demo")).toMatchObject({
+      title: "The demo",
+      description: "Changed.",
+    });
+    expect((await (await patch({ title: null })).json()) as unknown).toEqual({
+      title: null,
+      description: "Changed.",
+    });
+    // Over the limit, or with control characters: refused.
+    expect((await patch({ title: "x".repeat(121) })).status).toBe(400);
+    expect((await patch({ description: "a\u0007b" })).status).toBe(400);
+    // A member cannot; a stranger sees no library.
+    const friend = await s.stranger("friend@example.com");
+    await s.accounts.share("lib-1", friend.user.id, "write", "user_1");
+    expect((await patch({ title: "Mine" }, friend.app)).status).toBe(403);
+    const other = await s.stranger("other@example.com");
+    expect((await patch({ title: "Mine" }, other.app)).status).toBe(404);
+    // Not with a token, even a human: one.
+    const token = await s.app.request("/api/v1/libraries/owner/demo", {
+      method: "PATCH",
+      headers: { Authorization: "Bearer human", "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "Mine" }),
+    });
+    expect(token.status).toBe(403);
+  });
+});

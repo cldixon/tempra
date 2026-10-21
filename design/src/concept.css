@@ -40,7 +40,7 @@
 /* The contents: a short list of headings in small grey type beside the text, kept in view. */
 .concept-contents {
   position: sticky;
-  top: calc(var(--tempra-bar) + 48px);
+  top: 48px;
   grid-row: 1;
   grid-column: contents;
   justify-self: end;

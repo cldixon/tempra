@@ -1,5 +1,7 @@
 import { type FormEvent, useState } from "react";
 import { api, field, useAction, useLoad } from "../api";
+import { ThemeChoice } from "../chrome";
+import { useTheme } from "../theme";
 import { type Me, Status, useScrollToHash, useTitle, when } from "../ui";
 import { Urls } from "../urls";
 
@@ -637,7 +639,11 @@ export function Account({ done }: { done: string | null }) {
               Libraries: {a.usage.libraries} of {a.limits.libraries}. Active tokens:{" "}
               {a.usage.tokens} of {a.limits.tokens}.
             </p>
-            <MailSettings />
+            <h2>Appearance</h2>
+            <p className="field-row">
+              <span>Theme</span>
+              <Appearance />
+            </p>
             <h2>Sessions</h2>
             <div className="table-wrap">
               <table className="list">
@@ -719,6 +725,23 @@ interface MailPrefs {
 const choice = (v: boolean | null) => (v === null ? "" : v ? "on" : "off");
 const fromChoice = (v: string) => (v === "" ? null : v === "on");
 
+/** The theme (take 4): System, Light or Dark, applied at once and saved on the account. */
+function Appearance() {
+  const [theme, setTheme] = useTheme();
+  return <ThemeChoice value={theme} onChange={setTheme} />;
+}
+
+/** The Notifications page (take 4, board 04's sidebar): what the person is mailed. */
+export function Notifications() {
+  useTitle("Notifications");
+  return (
+    <>
+      <h1>Notifications</h1>
+      <MailSettings />
+    </>
+  );
+}
+
 /**
  * What the person is mailed (TEMPRA-74): what is addressed to them, batched, and an opt-in daily
  * digest; each library can follow the account or differ. Every change saves at once.
@@ -735,7 +758,6 @@ function MailSettings() {
     });
   return (
     <>
-      <h2 id="notifications">Notifications</h2>
       {action.error && <div className="notice">{action.error}</div>}
       <Status loaded={loaded}>
         {(p) => (

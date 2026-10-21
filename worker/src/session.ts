@@ -68,6 +68,7 @@ interface SessionRow {
   email: string;
   actor: string;
   handle: string;
+  theme: string | null;
 }
 
 export function d1Sessions(db: D1Database, now = () => Date.now()): Sessions {
@@ -142,7 +143,7 @@ export function d1Sessions(db: D1Database, now = () => Date.now()): Sessions {
       const t = now();
       const row = await db
         .prepare(
-          `SELECT s.hash, s.last_seen, s.expires, u.id, u.email, u.actor, u.handle
+          `SELECT s.hash, s.last_seen, s.expires, u.id, u.email, u.actor, u.handle, u.theme
            FROM sessions s JOIN users u ON u.id = s.user
            WHERE s.hash = ?1 AND s.idle_expires > ?2 AND s.expires > ?2 AND u.suspended IS NULL`,
         )
@@ -156,7 +157,13 @@ export function d1Sessions(db: D1Database, now = () => Date.now()): Sessions {
           .bind(iso(t), iso(idle), row.hash)
           .run();
       }
-      return { id: row.id, email: row.email, actor: row.actor, handle: row.handle };
+      return {
+        id: row.id,
+        email: row.email,
+        actor: row.actor,
+        handle: row.handle,
+        theme: row.theme === "light" || row.theme === "dark" ? row.theme : null,
+      };
     },
 
     async end(secret) {

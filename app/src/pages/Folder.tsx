@@ -5,7 +5,7 @@ import { Avatar, Icon, Menu } from "../chrome";
 import { useFeed, useTrailing } from "../live";
 import { Crumbs, day, plural, recently, Status, useMe, useTitle, who } from "../ui";
 import { folderName, type Urls } from "../urls";
-import { SheetBar, SheetPage } from "../Workspace";
+import { PageBar, SheetPage } from "../Workspace";
 
 /*
  * A folder (take 3, TEMPRA-106; tempra-dev: app/workspace): its subfolders and concepts as rows,
@@ -63,7 +63,7 @@ export function Folder({ urls: pinned, dir }: { urls: Urls; dir: string }) {
   );
   return (
     <>
-      <SheetBar
+      <PageBar
         actions={
           <Menu
             label={<Icon name="more" />}
@@ -77,7 +77,7 @@ export function Folder({ urls: pinned, dir }: { urls: Urls; dir: string }) {
         }
       >
         <Crumbs urls={urls} path={dir} file={false} />
-      </SheetBar>
+      </PageBar>
       <SheetPage>
         <Status loaded={loaded}>
           {(view) => <FolderBody urls={urls} dir={dir} view={view} actor={actors.view} />}
