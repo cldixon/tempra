@@ -1194,12 +1194,17 @@ button.tree-row[aria-current="page"] {
   background: var(--tempra-color-selected);
 }
 
-/* ---------- Narrow screens: a top bar, the sidebar as a drawer ---------- */
+/* ---------- A phone: a top bar, the sidebar as a drawer (take 4, boards 33 to 36) ---------- */
 
-/* The phone's pieces of the top bar (the menu button, where the person is) and of the drawer
-   (the Inbox row at its foot) show only here. */
+/* The phone's pieces of the top bar (the menu button, where the person is, search), of the
+   drawer (its head, its search field, the Inbox row at its foot) and the dimmed page behind it
+   show only here. */
 .ws-menu,
 .ws-topbar-place,
+.phone-search,
+.drawer-head,
+.drawer-search,
+.ws-scrim,
 .phone-only {
   display: none;
 }
@@ -1214,89 +1219,92 @@ button.tree-row[aria-current="page"] {
       "main";
   }
 
+  /* The bar: the menu button, where the person is, then on a concept Comments n and ⋯, on
+     other pages search and the bell; the avatar last. */
   .ws-topbar,
   .sidebar-hidden .ws-topbar {
     display: flex;
     align-items: center;
-    gap: 4px;
-    padding: 0 6px;
+    padding: 0 12px 0 6px;
   }
 
   .topbar-brand,
   .topbar-crumbs,
   .sheet-toggle,
-  .topbar-end .bell {
+  .has-tools .topbar-end .bell,
+  .has-tools .phone-search {
     display: none;
   }
 
   .topbar-page {
     flex: 1;
-    gap: 4px;
+    gap: 8px;
     padding: 0;
   }
 
   /* The way to everything else, in ink so it reads as the bar's first control. */
   .ws-menu {
     display: inline-flex;
+    flex: none;
     color: var(--tempra-color-text);
+  }
+
+  .phone-search {
+    display: inline-flex;
   }
 
   .nav-row.phone-only {
     display: flex;
   }
 
-  /* Where the person is: the library's tile and name, the page beneath it. */
+  /* Where the person is: the library on its home, a page by its name, a concept by its title. */
   .ws-topbar-place {
-    display: flex;
+    display: block;
     flex: 1;
-    align-items: center;
-    gap: 10px;
     min-width: 0;
-    min-height: var(--tempra-touch);
-    padding: 0 8px;
-    border-radius: var(--tempra-radius-row);
-    color: var(--tempra-color-text);
-    text-decoration: none;
-  }
-
-  .ws-topbar-place:visited {
-    color: var(--tempra-color-text);
-  }
-
-  .ws-topbar-place .lib-tile {
-    width: 24px;
-    height: 24px;
-  }
-
-  .ws-topbar-here {
+    padding: 0 4px;
     overflow: hidden;
-    color: var(--tempra-color-muted);
-    font-size: var(--tempra-text-meta);
+    color: var(--tempra-color-text);
+    font-size: var(--tempra-text-name);
+    font-weight: var(--tempra-weight-medium);
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .topbar-tools .icon-button.with-count,
-  .topbar-tools .icon-button:not(.with-count),
-  .topbar-end .icon-button {
-    height: var(--tempra-touch);
-    border: 0;
+  /* The bar's controls keep their desktop shape; each answers a 44px touch around it. */
+  .topbar-page .icon-button::after,
+  .topbar-page .avatar::after {
+    content: "";
+    position: absolute;
+    inset: min(0px, calc((100% - var(--tempra-touch)) / 2));
   }
 
-  .topbar-tools .icon-button:not(.with-count),
-  .topbar-end .icon-button {
-    width: var(--tempra-touch);
+  .topbar-page .avatar {
+    position: relative;
+    width: 36px;
+    height: 36px;
+  }
+
+  /* The drawer (board 34): about four fifths of the screen, over the top bar, the page dimmed
+     behind it. At its head the mark, the switcher and ×; then search, Home, Activity, a rule,
+     the tree; Settings and the Inbox at its foot. */
+  .ws-scrim {
+    position: fixed;
+    inset: 0;
+    z-index: 7;
+    display: block;
+    background: var(--tempra-color-scrim);
   }
 
   .ws-sidebar {
     position: fixed;
-    top: var(--tempra-bar);
+    top: 0;
     bottom: 0;
     left: 0;
-    z-index: 6;
+    z-index: 8;
     display: none;
-    width: min(var(--tempra-sidebar), calc(100vw - 2 * var(--tempra-gutter)));
-    padding: 8px;
+    width: var(--tempra-drawer);
+    padding: 0 12px 8px;
     border-right: 1px solid var(--tempra-color-border);
     background: var(--tempra-color-bg);
     box-shadow: var(--tempra-shadow);
@@ -1310,12 +1318,66 @@ button.tree-row[aria-current="page"] {
     outline: none;
   }
 
-  /* In the drawer, the switcher and search sit at the top. */
   .drawer-head {
     display: flex;
+    flex: none;
     align-items: center;
-    gap: 6px;
-    margin-bottom: 6px;
+    gap: 8px;
+    min-height: var(--tempra-topbar);
+    margin: 0 -12px 12px;
+    padding: 0 8px 0 16px;
+    border-bottom: 1px solid var(--tempra-color-border);
+  }
+
+  .drawer-head .brand-sep {
+    width: 1px;
+    height: 20px;
+    margin: 0 2px;
+    background: var(--tempra-color-border);
+  }
+
+  /* Search is the field below; the head ends with ×. */
+  .drawer-head .search-button {
+    display: none;
+  }
+
+  .drawer-close {
+    flex: none;
+    color: var(--tempra-color-text);
+  }
+
+  /* Search, as a field at the drawer's top: it opens the quick switcher. */
+  .drawer-search {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 10px;
+    min-height: var(--tempra-touch);
+    margin-bottom: 12px;
+    padding: 0 16px;
+    border: 1px solid var(--tempra-color-border);
+    border-radius: var(--tempra-radius-pill);
+    background: var(--tempra-color-bg);
+    color: var(--tempra-color-faint);
+    font-size: var(--tempra-text-name);
+    text-align: left;
+  }
+
+  .drawer-search span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .ws-sidebar .nav-row,
+  .ws-sidebar .tree-row {
+    font-size: var(--tempra-text-name);
+  }
+
+  .ws-sidebar .sidebar-foot {
+    margin: 0 -12px;
+    padding: 8px 12px 0;
+    border-top: 1px solid var(--tempra-color-border);
   }
 
   /* Touch targets: every row and control at least 44px tall. */
@@ -1333,13 +1395,6 @@ button.tree-row[aria-current="page"] {
   .sheet-page,
   .page {
     padding: 32px 16px 72px;
-  }
-}
-
-/* Outside a phone the drawer's head is not drawn: the top bar holds the switcher and search. */
-@media (min-width: 901px) {
-  .drawer-head {
-    display: none;
   }
 }
 

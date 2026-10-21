@@ -33,7 +33,7 @@ import {
   useScrollToHash,
   useTitle,
 } from "../ui";
-import { baseName, dirOf, enc, folderName, type Urls } from "../urls";
+import { baseName, dirOf, enc, type Urls } from "../urls";
 import { PageBar, SheetPage, useFrame } from "../Workspace";
 
 /** What the last server action did, said once on the page it returns to (`?done=`). */
@@ -87,11 +87,10 @@ export function File(props: {
   if (loaded.state === "error" && loaded.error.status === 404) {
     return <NotFound urls={urls} path={path} />;
   }
-  const dir = dirOf(path);
   const attachment = shown?.file.kind === "attachment" ? shown.file : null;
   return (
     <>
-      <PageBar back={{ href: urls.tree(dir), label: dir ? folderName(dir) : urls.slug }}>
+      <PageBar>
         <Crumbs urls={urls} path={path} file />
       </PageBar>
       <SheetPage wide={attachment !== null}>

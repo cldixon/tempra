@@ -67,6 +67,7 @@ export function ConceptPage(props: {
   const status = typeof fm.status === "string" ? fm.status : null;
   const current = urls.at === undefined || urls.at >= head;
   const [markdown, setMarkdown] = useState(false);
+  const inlineContents = useRef<HTMLDetailsElement>(null);
 
   // Footnote markers are numbers: the sources in their order, then the body's other footnotes
   // as they are met (`numbers` fills in as the body is prepared, afresh for each body; the
@@ -205,13 +206,15 @@ export function ConceptPage(props: {
   const work = data.work.filter((w) => w.kind !== "comment" && w.kind !== "lint");
   const moved = live && (live.change.op === "move" || live.change.op === "delete");
   const dir = dirOf(c.path);
+  const folders = dir ? dir.split("/").map((_, i, all) => all.slice(0, i + 1).join("/")) : [];
   const mayVerify = role !== null && role !== "read";
   const hasContents = contents.length >= 2;
   const classes = ["concept", panel ? "panel-open" : "", markdown ? "markdown-on" : ""];
   return (
     <div className={classes.filter(Boolean).join(" ")}>
       <PageBar
-        back={{ href: urls.tree(dir), label: dir ? folderName(dir) : urls.slug }}
+        title={title}
+        phoneTools
         actions={
           <>
             {live && !moved && <NewVersion urls={urls} live={live} />}
@@ -272,15 +275,34 @@ export function ConceptPage(props: {
           {/* Kept mounted under the markdown, so comments keep their place. */}
           <div className="doc-page" hidden={markdown}>
             <header className="doc-head">
+              {/* On a phone the crumbs sit under the top bar, which names the page (board 33). */}
+              <nav className="doc-crumbs" aria-label="Folders">
+                {folders.map((f, i) => (
+                  <span key={f}>
+                    {i > 0 && <span aria-hidden="true"> / </span>}
+                    <a href={urls.tree(f)}>{folderName(f)}</a>
+                  </span>
+                ))}
+                {c.stale && <span className="crumb-flag">stale</span>}
+                {status && status !== "stable" && <span className="crumb-flag">{status}</span>}
+              </nav>
               <h1 className="doc-title">{title}</h1>
               {typeof fm.description === "string" && (
                 <p className="doc-tagline">{fm.description}</p>
               )}
               <Byline concept={c} history={data.history} name={name} live={live} />
               {hasContents && (
-                <details className="toc-inline">
-                  <summary>On this page</summary>
-                  <Contents headings={contents} />
+                <details className="toc-inline" ref={inlineContents}>
+                  <summary>
+                    On this page
+                    <Icon name="down" />
+                  </summary>
+                  <Contents
+                    headings={contents}
+                    onPick={() => {
+                      if (inlineContents.current) inlineContents.current.open = false;
+                    }}
+                  />
                 </details>
               )}
             </header>

@@ -563,16 +563,17 @@ function greyPng(width: number, height: number, shade: number): Uint8Array {
 }
 
 /**
- * The app in a real browser, signed in as the seeded user (layout take 3, TEMPRA-106; the concept
- * page, Activity, Home and Folder of take 4, TEMPRA-114, 115 and 117): the library's home (its
- * sections, the agents' line, For you here), the workspace (the tree, the quick switcher, the
- * hidden sidebar, at phone width the top bar naming the page, the home's sections and the
- * drawer), a folder's view, Not found for a moved path, an attachment's page, every concept in
- * the reader (drawn from the stored
+ * The app in a real browser, signed in as the seeded user (layout take 4, TEMPRA-113 to 118):
+ * the library's home (its sections, the agents' line, For you here), the workspace (the tree,
+ * the quick switcher, the hidden sidebar; at phone width the top bar naming the page, the
+ * drawer with the switcher, search, the views, the tree, Settings and the Inbox, the home
+ * stacked, a settings page's drawer with its tabs), a folder's view, Not found for a moved
+ * path, an attachment's page, every concept in the reader (drawn from the stored
  * tree, with no Edit, a footnote card on hover), the concept's panels (Comments, History,
  * Properties: opened from the top bar, closed by ×, Escape and the control, the contents back,
  * `?panel=`), Copy page, the byline while an agent edits, History's versions, review mode from
- * Properties, comments in the panel (and as a bottom sheet on a phone), the Markdown view,
+ * Properties, comments in the panel, a concept on a phone (its top bar with Copy page under ⋯,
+ * On this page, every panel as a bottom sheet), the Markdown view,
  * figures in the full-screen view, the Inbox (a reply waiting, a page to verify, the bell, Done,
  * filtered to the library from the home's For you here and from Needs you's old URL), and
  * Activity with its two views (Summary and
@@ -641,6 +642,12 @@ async function browserRenders(
     const lib = `${base}/${owner}/${slug}`;
     /** The home's Sections (take 4, TEMPRA-117): a row per top-level folder, with its count. */
     const sections = main.getByRole("region", { name: "Sections" });
+    /** The phone's top bar names where the person is (take 4, boards 33 and 36). */
+    const phoneNamed = (name: string) =>
+      sheetBar
+        .locator(".ws-topbar-place")
+        .filter({ hasText: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`) })
+        .waitFor({ timeout: 10_000 });
     await step(
       "the library's root is its home: sections with counts, the agents' line",
       async () => {
@@ -1006,71 +1013,145 @@ async function browserRenders(
       await page.keyboard.press("Escape");
       await account.waitFor({ state: "detached", timeout: 5000 });
     });
-    await step("workspace: at phone width the sidebar is a drawer behind the top bar", async () => {
-      const topbar = page.locator("header.ws-topbar");
-      const menu = topbar.getByRole("button", { name: "Menu", exact: true });
-      if (await menu.isVisible()) throw new Error("the phone's menu button shows on a desktop");
-      await page.setViewportSize({ width: 420, height: 800 });
-      await menu.waitFor({ state: "visible", timeout: 5000 });
-      if (await sidebar.isVisible()) throw new Error("the sidebar shows at phone width");
-      await menu.click();
-      await sidebar.waitFor({ state: "visible" });
-      // The drawer sits below the top bar: its button stays in reach, and Escape closes it.
-      if (!(await menu.isVisible())) throw new Error("the drawer covers the top bar");
-      await page.keyboard.press("Escape");
-      await sidebar.waitFor({ state: "hidden" });
-      // A tap on the page beside it closes it too.
-      await menu.click();
-      await sidebar.waitFor({ state: "visible" });
-      const drawn = await sidebar.boundingBox();
-      if (!drawn || drawn.x + drawn.width > 410) {
-        throw new Error(`the drawer leaves no page to tap: ${JSON.stringify(drawn)}`);
-      }
-      await page.mouse.click(Math.round(drawn.x + drawn.width + 4), 400);
-      await sidebar.waitFor({ state: "hidden" });
-      // The drawer's Search opens the quick switcher.
-      await menu.click();
-      await sidebar.waitFor({ state: "visible" });
-      await sidebar.getByRole("button", { name: "Search", exact: true }).click();
-      const dialog = page.getByRole("dialog", { name: "Open a file" });
-      await dialog.waitFor({ timeout: 5000 });
-      await page.keyboard.press("Escape");
-      await dialog.waitFor({ state: "hidden", timeout: 5000 });
-      await page.keyboard.press("Escape");
-      await sidebar.waitFor({ state: "hidden" });
-      // A view chosen in the drawer opens, and the drawer closes.
-      await menu.click();
-      await sidebar.waitFor({ state: "visible" });
-      await sidebar
-        .getByRole("navigation", { name: "Views" })
-        .getByRole("link", { name: /^Activity/ })
-        .click();
-      await page.waitForURL(`${lib}/-/activity`);
-      await sidebar.waitFor({ state: "hidden" });
-      // The top bar says where the person is (TEMPRA-107): the library, the page beneath it.
-      const here = (name: string) =>
-        topbar
-          .locator(".ws-topbar-here")
-          .filter({ hasText: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`) })
-          .waitFor({ timeout: 5000 });
-      await here("Activity");
-      // The library's name goes home, which stacks the same sections (take 4, board 36), a
-      // section opening its folder view.
-      await topbar.locator(".ws-topbar-place").click();
-      await page.waitForURL(`${lib}/`);
-      await here("Home");
-      const folder = sections.locator("a.home-section-row").first();
-      await folder.waitFor({ timeout: 15_000 });
-      if (shots) await page.screenshot({ path: `${shots}/home-phone.png` });
-      const wide = await page.locator("html").evaluate((el) => el.scrollWidth > el.clientWidth);
-      if (wide) throw new Error("the home scrolls sideways at phone width");
-      const folderName = (await folder.locator(".home-section-name").textContent())?.trim() ?? "";
-      await folder.click();
-      await page.waitForURL((u) => u.pathname.endsWith("/") && u.href !== `${lib}/`);
-      await page.locator(".view-title", { hasText: folderName }).waitFor({ timeout: 15_000 });
-      await here(folderName);
-      await page.setViewportSize({ width: 1280, height: 720 });
-    });
+    // The phone (take 4, TEMPRA-118, boards 34 and 36): a top bar naming the page, the sidebar as
+    // a drawer over it, the home stacked.
+    await step(
+      "workspace: at phone width the top bar names the page, the sidebar is a drawer",
+      async () => {
+        const topbar = page.locator("header.ws-topbar");
+        const menu = topbar.getByRole("button", { name: "Menu", exact: true });
+        if (await menu.isVisible()) throw new Error("the phone's menu button shows on a desktop");
+        await page.setViewportSize({ width: 390, height: 844 });
+        try {
+          await menu.waitFor({ state: "visible", timeout: 5000 });
+          if (await sidebar.isVisible()) throw new Error("the sidebar shows at phone width");
+          // The top bar on the home: the menu, the library's name, search, the bell, the avatar.
+          const libraryName = (await main.locator("h1").first().innerText()).trim();
+          await phoneNamed(libraryName);
+          for (const control of [
+            topbar.getByRole("button", { name: "Search", exact: true }),
+            topbar.getByRole("button", { name: /^Inbox/ }),
+            topbar.getByRole("button", { name: "Account menu" }),
+          ]) {
+            if (!(await control.isVisible()))
+              throw new Error("the phone's top bar lacks a control");
+          }
+          const menuBox = await menu.boundingBox();
+          if (!menuBox || menuBox.height < 44 || menuBox.width < 44) {
+            throw new Error(`the menu button is no touch target: ${JSON.stringify(menuBox)}`);
+          }
+          // The drawer: over the top bar, about four fifths of the screen, the page dimmed beside
+          // it; it takes the focus.
+          await menu.click();
+          await sidebar.waitFor({ state: "visible" });
+          const drawn = await sidebar.boundingBox();
+          if (!drawn || drawn.x > 1 || drawn.y > 1 || drawn.width < 280 || drawn.width > 340) {
+            throw new Error(
+              `the drawer is not four fifths of the screen: ${JSON.stringify(drawn)}`,
+            );
+          }
+          await page.locator(".ws-scrim").waitFor({ timeout: 2000 });
+          const focused = await page.evaluate<boolean>(
+            'Boolean(document.querySelector("section.ws-sidebar")?.contains(document.activeElement))',
+          );
+          if (!focused) throw new Error("the drawer did not take the focus");
+          // What it holds (board 34): the switcher and ×, search, Home, Activity, the tree, then
+          // Settings and the Inbox at its foot.
+          const views = sidebar.getByRole("navigation", { name: "Views" });
+          for (const part of [
+            sidebar.getByRole("button", { name: /^Library .*, owned by / }),
+            sidebar.getByRole("button", { name: "Close menu" }),
+            sidebar.getByRole("button", { name: `Search ${libraryName}`, exact: true }),
+            views.getByRole("link", { name: "Home", exact: true }),
+            views.getByRole("link", { name: /^Activity/ }),
+            sidebar.locator(".tree-row").first(),
+            sidebar.locator(".sidebar-foot").getByRole("link", { name: "Settings", exact: true }),
+            sidebar.locator(".sidebar-foot").getByRole("link", { name: /^Inbox/ }),
+          ]) {
+            if (!(await part.isVisible())) throw new Error(`the drawer lacks ${part}`);
+          }
+          if (shots) await page.screenshot({ path: `${shots}/drawer-phone.png` });
+          // Escape closes it, and the focus goes back to the menu button.
+          await page.keyboard.press("Escape");
+          await sidebar.waitFor({ state: "hidden" });
+          const back = await page.evaluate<boolean>(
+            'document.activeElement?.matches("header.ws-topbar .ws-menu") === true',
+          );
+          if (!back) {
+            throw new Error("the focus did not go back to the menu button");
+          }
+          // So do × and a tap on the dimmed page beside it.
+          await menu.click();
+          await sidebar.getByRole("button", { name: "Close menu" }).click();
+          await sidebar.waitFor({ state: "hidden" });
+          await menu.click();
+          await sidebar.waitFor({ state: "visible" });
+          await page.mouse.click(Math.round(drawn.x + drawn.width + 20), 400);
+          await sidebar.waitFor({ state: "hidden" });
+          // The drawer's search field opens the quick switcher.
+          await menu.click();
+          await sidebar.getByRole("button", { name: `Search ${libraryName}`, exact: true }).click();
+          const dialog = page.getByRole("dialog", { name: "Open a file" });
+          await dialog.waitFor({ timeout: 5000 });
+          await page.keyboard.press("Escape");
+          await dialog.waitFor({ state: "hidden", timeout: 5000 });
+          await page.keyboard.press("Escape");
+          await sidebar.waitFor({ state: "hidden" });
+          // A view chosen in the drawer opens, the drawer closes, and the top bar names it.
+          await menu.click();
+          await views.getByRole("link", { name: /^Activity/ }).click();
+          await page.waitForURL(`${lib}/-/activity`);
+          await sidebar.waitFor({ state: "hidden" });
+          await phoneNamed("Activity");
+          // Home stacks the same sections (board 36), and draws no sidebar rows itself; a
+          // section opens its folder view.
+          await menu.click();
+          await views.getByRole("link", { name: "Home", exact: true }).click();
+          await page.waitForURL(`${lib}/`);
+          await sidebar.waitFor({ state: "hidden" });
+          await phoneNamed(libraryName);
+          const folder = sections.locator("a.home-section-row").first();
+          await folder.waitFor({ timeout: 15_000 });
+          if (shots) await page.screenshot({ path: `${shots}/home-phone.png` });
+          const wide = await page.locator("html").evaluate((el) => el.scrollWidth > el.clientWidth);
+          if (wide) throw new Error("the home scrolls sideways at phone width");
+          if ((await main.locator(".nav-row").count()) > 0) {
+            throw new Error("the phone home draws the sidebar's rows");
+          }
+          const rows = await sections
+            .locator("a.home-section-row")
+            .evaluateAll((els) =>
+              els.map((el) => el.getBoundingClientRect()).map((r) => ({ x: r.x, w: r.width })),
+            );
+          if (rows.some((r) => Math.abs(r.x - (rows[0]?.x ?? 0)) > 1 || r.w < 300)) {
+            throw new Error(`the home's sections are not stacked: ${JSON.stringify(rows)}`);
+          }
+          const folderName =
+            (await folder.locator(".home-section-name").textContent())?.trim() ?? "";
+          await folder.click();
+          await page.waitForURL((u) => u.pathname.endsWith("/") && u.href !== `${lib}/`);
+          await page.locator(".view-title", { hasText: folderName }).waitFor({ timeout: 15_000 });
+          await phoneNamed(folderName);
+          // A settings page's drawer holds the settings' sidebar: back to the library, the tabs.
+          await page.goto(`${lib}/-/settings`);
+          await phoneNamed("General");
+          await menu.click();
+          await sidebar.waitFor({ state: "visible" });
+          const tabs = sidebar.getByRole("navigation", { name: "Library settings" });
+          for (const tab of [`Back to ${libraryName}`, "General", "Members", "Connect"]) {
+            await tabs.getByRole("link", { name: tab, exact: true }).waitFor({ timeout: 5000 });
+          }
+          await sidebar.getByRole("button", { name: "Close menu" }).waitFor();
+          if (shots) await page.screenshot({ path: `${shots}/settings-drawer-phone.png` });
+          await tabs.getByRole("link", { name: "Members", exact: true }).click();
+          await page.waitForURL(`${lib}/-/members`);
+          await sidebar.waitFor({ state: "hidden" });
+          await phoneNamed("Members");
+        } finally {
+          await page.setViewportSize({ width: 1280, height: 720 });
+        }
+      },
+    );
 
     // A few concepts with tables, code, footnotes and lists, as screenshots for review.
     const shotsOf = [
@@ -1792,36 +1873,113 @@ async function browserRenders(
       });
       if (!resolved.ok) throw new Error(`agent resolve: ${resolved.status}`);
     });
-    // At phone width the Comments panel is a bottom sheet, opened only from the toggle, never by
-    // itself.
-    await step("comments at phone width: a bottom sheet, only when asked", async () => {
-      await page.setViewportSize({ width: 390, height: 844 });
-      try {
-        await page.goto(url);
-        await page.locator(".body .prose").waitFor({ timeout: 15_000 });
-        const toggle = commentsToggle();
-        await toggle.waitFor({ timeout: 5000 });
-        await page.waitForTimeout(500);
-        if ((await comments.count()) > 0) throw new Error("the comments opened by themselves");
-        if ((await toggle.getAttribute("aria-pressed")) !== "false") {
-          throw new Error("the comments toggle is pressed with the comments closed");
+    // A concept at phone width (take 4, TEMPRA-118, boards 33 and 35): the top bar names it with
+    // Comments n and ⋯ (Copy page under ⋯), the crumbs under the bar, "On this page" closed
+    // until opened; Comments, History and Properties are one bottom sheet, opened only when
+    // asked, closed by × or Escape.
+    await step(
+      "a concept at phone width: its top bar, On this page, the panels as a bottom sheet",
+      async () => {
+        await page.setViewportSize({ width: 390, height: 844 });
+        try {
+          await page.goto(url);
+          await page.locator(".body .prose").waitFor({ timeout: 15_000 });
+          const title = (await main.locator("h1.doc-title").innerText()).trim();
+          await phoneNamed(title);
+          const toggle = commentsToggle();
+          await toggle.waitFor({ timeout: 5000 });
+          const moreButton = sheetBar.getByRole("button", { name: "More", exact: true });
+          if (!(await moreButton.isVisible())) throw new Error("no ⋯ in the phone's top bar");
+          for (const gone of [
+            sheetBar.getByRole("button", { name: "Search", exact: true }),
+            sheetBar.getByRole("button", { name: /^Inbox/ }),
+            sheetBar.getByRole("button", { name: /^Copy page$/ }),
+          ]) {
+            if (await gone.isVisible()) throw new Error(`the concept's phone bar shows ${gone}`);
+          }
+          if (concept.includes("/")) {
+            const crumbs = main.getByRole("navigation", { name: "Folders" });
+            if (!(await crumbs.isVisible())) throw new Error("no crumbs under the phone's top bar");
+          }
+          await page.waitForTimeout(500);
+          if ((await comments.count()) > 0) throw new Error("the comments opened by themselves");
+          if ((await toggle.getAttribute("aria-pressed")) !== "false") {
+            throw new Error("the comments toggle is pressed with the comments closed");
+          }
+          // On this page: a closed disclosure under the byline; it opens, and a heading closes it.
+          const inline = main.locator("details.toc-inline");
+          if ((await inline.count()) > 0) {
+            const isOpen = () =>
+              page.evaluate<boolean>('document.querySelector("details.toc-inline").open');
+            if (await isOpen()) {
+              throw new Error("On this page is open by itself");
+            }
+            await inline.locator("summary").click();
+            const entry = inline.locator(".toc a").first();
+            await entry.waitFor({ state: "visible", timeout: 5000 });
+            await entry.click();
+            await page.waitForFunction(
+              '!document.querySelector("details.toc-inline").open',
+              undefined,
+              {
+                timeout: 5000,
+              },
+            );
+            if (await isOpen()) throw new Error("On this page stayed open after a heading");
+          }
+          if (shots) await page.screenshot({ path: `${shots}/concept-phone.png` });
+          const sideways = await page
+            .locator("html")
+            .evaluate((el) => el.scrollWidth > el.clientWidth);
+          if (sideways) throw new Error("the concept scrolls sideways at phone width");
+          // Copy page heads ⋯ on a phone.
+          await b.context.grantPermissions(["clipboard-read", "clipboard-write"], { origin: base });
+          await moreButton.click();
+          await page.locator(".menu-list").getByRole("button", { name: "Copy page" }).click();
+          await page.locator(".menu-list").getByRole("button", { name: "Copied" }).waitFor();
+          const copied = await page.evaluate<string>("navigator.clipboard.readText()");
+          if (!copied.startsWith("---\n"))
+            throw new Error(`Copy page copied: ${copied.slice(0, 60)}`);
+          await page.keyboard.press("Escape");
+          // A sheet from the bottom: as wide as the screen, its foot at the screen's, about two
+          // thirds of it high, with a drag handle.
+          const isSheet = async (sheet: typeof comments, what: string) => {
+            await sheet.waitFor({ timeout: 5000 });
+            const box = await sheet.boundingBox();
+            if (
+              !box ||
+              box.x > 1 ||
+              Math.abs(box.y + box.height - 844) > 2 ||
+              box.width < 380 ||
+              box.height < 0.55 * 844 ||
+              box.height > 0.75 * 844
+            ) {
+              throw new Error(`${what} is not a bottom sheet: ${JSON.stringify(box)}`);
+            }
+            if (!(await sheet.locator(".panel-grip").isVisible())) {
+              throw new Error(`${what} has no drag handle`);
+            }
+          };
+          await toggle.click();
+          await isSheet(comments, "Comments");
+          await comments.getByRole("button", { name: "Comment on this concept" }).waitFor();
+          if (shots) await page.screenshot({ path: `${shots}/comments-phone.png` });
+          await comments.getByRole("button", { name: "Close comments" }).click();
+          await comments.waitFor({ state: "detached", timeout: 5000 });
+          await more("History");
+          await isSheet(historyPanel, "History");
+          if (shots) await page.screenshot({ path: `${shots}/history-phone.png` });
+          await page.keyboard.press("Escape");
+          await historyPanel.waitFor({ state: "detached", timeout: 5000 });
+          await more("Properties");
+          await isSheet(properties(), "Properties");
+          await properties().getByRole("button", { name: "Close properties" }).click();
+          await properties().waitFor({ state: "detached", timeout: 5000 });
+        } finally {
+          await wide();
         }
-        await toggle.click();
-        const sheet = comments;
-        await sheet.waitFor({ timeout: 5000 });
-        // A sheet from the bottom: as wide as the screen, its foot at the screen's.
-        const box = await sheet.boundingBox();
-        if (!box || box.x > 1 || Math.abs(box.y + box.height - 844) > 2 || box.width < 380) {
-          throw new Error(`the comments are not a bottom sheet: ${JSON.stringify(box)}`);
-        }
-        await sheet.getByRole("button", { name: "Comment on this concept" }).waitFor();
-        if (shots) await page.screenshot({ path: `${shots}/comments-phone.png` });
-        await sheet.getByRole("button", { name: "Close comments" }).click();
-        await sheet.waitFor({ state: "detached", timeout: 5000 });
-      } finally {
-        await wide();
-      }
-    });
+      },
+    );
     // View Markdown, in ⋯, shows the file as stored, frontmatter first, with line numbers, in
     // place of the page; Back to page returns.
     await step("the Markdown view shows the file as stored", async () => {

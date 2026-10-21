@@ -21,13 +21,12 @@ import {
   AccountSidebar,
   LibrarySidebar,
   LibrarySwitcher,
-  LibraryTile,
   SettingsSidebar,
 } from "./Sidebar";
 import { Switcher } from "./Switcher";
 import type { OutlineFile } from "./Tree";
 import type { Me } from "./ui";
-import { dirOf, folderName, type Urls } from "./urls";
+import { baseName, dirOf, folderName, type Urls } from "./urls";
 
 /*
  * The app's frame (take 4, TEMPRA-113; tempra-dev: app/workspace): a top bar across the window,
@@ -83,8 +82,8 @@ export const SETTINGS_VIEWS: ReadonlySet<Place["view"]> = new Set([
 ]);
 
 /**
- * Where a page is, in a few words (the phone's top bar, under the library's name): the view, a
- * folder by its readable name, or a concept's folder. Null for a file at the library's root.
+ * Where a page is, in a few words (the crumbs' default): the view, a folder by its readable
+ * name, or a concept's folder. Null for a file at the library's root.
  */
 export function placeName(place: Place): string | null {
   if (place.view) return VIEW_NAMES[place.view];
@@ -94,6 +93,17 @@ export function placeName(place: Place): string | null {
     return dir ? folderName(dir) : null;
   }
   return null;
+}
+
+/**
+ * What the phone's top bar names (take 4, boards 33 and 36): the library on its home, a view or
+ * a folder by its name, a file by its name until its page names it (a concept by its title).
+ */
+export function phoneName(place: Place, library: string): string {
+  if (place.view === "home" || (!place.view && !place.dir && !place.file)) return library;
+  if (place.view) return VIEW_NAMES[place.view];
+  if (place.dir) return folderName(place.dir);
+  return baseName(place.file ?? "");
 }
 
 /** What a page in the workspace may ask of the frame. */
@@ -111,6 +121,10 @@ interface Frame {
   slots: { crumbs: HTMLElement | null; tools: HTMLElement | null };
   /** Tells the frame a page has crumbs of its own, so the default ones step aside. */
   setOwnCrumbs(own: boolean): void;
+  /** Tells the frame a page has tools of its own (a concept's), which take the phone bar's end. */
+  setOwnTools(own: boolean): void;
+  /** Names the page in the phone's top bar (a concept's title), or null for the frame's name. */
+  setTitle(title: string | null): void;
   /** Opens the quick switcher (a library's frame; elsewhere it does nothing). */
   search(): void;
 }
@@ -123,6 +137,8 @@ const FrameContext = createContext<Frame>({
   now: 0,
   slots: { crumbs: null, tools: null },
   setOwnCrumbs: () => {},
+  setOwnTools: () => {},
+  setTitle: () => {},
   search: () => {},
 });
 
@@ -174,8 +190,8 @@ interface Chrome {
   sidebar: ReactNode;
   /** The default crumbs, when the page sets none of its own. */
   crumbs: ReactNode;
-  /** The phone's top bar: where the person is. */
-  place: ReactNode;
+  /** The phone's top bar: where the person is, until the page names itself. */
+  place: string;
   /** Opens the quick switcher (a library frame). */
   onSearch?: () => void;
   /** The sidebar can be hidden (a library frame): its state and the way to change it. */
@@ -191,16 +207,22 @@ interface Chrome {
 function Shell(props: {
   chrome: Chrome;
   me: Me | null;
-  frame: Omit<Frame, "sidebar" | "narrow" | "slots" | "setOwnCrumbs" | "search">;
+  frame: Omit<
+    Frame,
+    "sidebar" | "narrow" | "slots" | "setOwnCrumbs" | "setOwnTools" | "setTitle" | "search"
+  >;
   children: ReactNode;
 }) {
   const { chrome } = props;
   const [drawer, setDrawer] = useState(false);
   const narrow = useMedia(NARROW);
   const sidebar = useRef<HTMLElement>(null);
+  const menuButton = useRef<HTMLButtonElement>(null);
   const [crumbsSlot, setCrumbsSlot] = useState<HTMLElement | null>(null);
   const [toolsSlot, setToolsSlot] = useState<HTMLElement | null>(null);
   const [ownCrumbs, setOwnCrumbs] = useState(false);
+  const [ownTools, setOwnTools] = useState(false);
+  const [title, setTitle] = useState<string | null>(null);
 
   const main = useRef<HTMLElement>(null);
   const href = location.pathname + location.search;
@@ -238,17 +260,26 @@ function Shell(props: {
     if (!narrow) setDrawer(false);
   }, [narrow]);
   // An opened drawer takes the focus, unless something in it already has; a tap anywhere else
-  // closes it, as a tap outside a menu does.
+  // (the dimmed page beside it) closes it, as a tap outside a menu does. Once it closes, the
+  // focus it held goes back to the menu button.
+  const wasOpen = useRef(false);
   useEffect(() => {
-    if (!drawer) return;
+    if (!drawer) {
+      const focused = document.activeElement;
+      const lost = !focused || focused === document.body || sidebar.current?.contains(focused);
+      if (wasOpen.current && narrow && lost) menuButton.current?.focus();
+      wasOpen.current = false;
+      return;
+    }
+    wasOpen.current = true;
     if (!sidebar.current?.contains(document.activeElement)) sidebar.current?.focus();
     const away = (e: PointerEvent) => {
       const t = e.target instanceof Element ? e.target : null;
-      if (!sidebar.current?.contains(t) && !t?.closest(".ws-menu")) setDrawer(false);
+      if (!sidebar.current?.contains(t) && !t?.closest(".ws-menu, dialog")) setDrawer(false);
     };
     document.addEventListener("pointerdown", away);
     return () => document.removeEventListener("pointerdown", away);
-  }, [drawer]);
+  }, [drawer, narrow]);
 
   // Keys: Escape closes the drawer (not from inside a dialog or a menu, which handle their own);
   // Ctrl or Cmd+\ hides the sidebar where it can be hidden.
@@ -278,11 +309,18 @@ function Shell(props: {
       narrow,
       slots: { crumbs: crumbsSlot, tools: toolsSlot },
       setOwnCrumbs,
+      setOwnTools,
+      setTitle,
       search: chrome.onSearch ?? (() => {}),
     }),
     [props.frame, beside, narrow, crumbsSlot, toolsSlot, chrome.onSearch],
   );
-  const classes = ["workspace", showSidebar ? "" : "sidebar-hidden"].filter(Boolean);
+  const classes = [
+    "workspace",
+    showSidebar ? "" : "sidebar-hidden",
+    ownTools ? "has-tools" : "",
+    drawer ? "drawer-open" : "",
+  ].filter(Boolean);
   return (
     <FrameContext.Provider value={frame}>
       <div className={classes.join(" ")}>
@@ -290,6 +328,7 @@ function Shell(props: {
           <div className="topbar-brand">{chrome.brand}</div>
           <div className="topbar-page">
             <button
+              ref={menuButton}
               type="button"
               className="icon-button touch ws-menu"
               aria-label="Menu"
@@ -298,7 +337,7 @@ function Shell(props: {
             >
               <Icon name="menu" />
             </button>
-            {chrome.place}
+            <span className="ws-topbar-place">{title ?? chrome.place}</span>
             {!showSidebar && onHide && (
               <button
                 type="button"
@@ -315,11 +354,24 @@ function Shell(props: {
             </div>
             <div className="topbar-tools" ref={setToolsSlot} />
             <div className="topbar-end">
+              {chrome.onSearch && (
+                <button
+                  type="button"
+                  className="icon-button phone-search"
+                  aria-label="Search"
+                  title="Search"
+                  onClick={chrome.onSearch}
+                >
+                  <Icon name="search" />
+                </button>
+              )}
               <Bell />
               <AccountMenu me={props.me} />
             </div>
           </div>
         </header>
+        {/* The page dimmed behind the open drawer; a tap on it closes the drawer. */}
+        {drawer && <div className="ws-scrim" aria-hidden="true" />}
         <section
           ref={sidebar}
           tabIndex={-1}
@@ -327,6 +379,19 @@ function Shell(props: {
           aria-label="Navigation"
           hidden={!showSidebar}
         >
+          {/* On a phone the drawer's head: the mark and the switcher (or the frame's name), ×. */}
+          <div className="drawer-head">
+            {chrome.brand}
+            <button
+              type="button"
+              className="icon-button touch drawer-close"
+              aria-label="Close menu"
+              title="Close"
+              onClick={() => setDrawer(false)}
+            >
+              <Icon name="close" />
+            </button>
+          </div>
           {chrome.sidebar}
         </section>
         <main
@@ -462,15 +527,7 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
     brand,
     sidebar: sidebarContent,
     crumbs,
-    place: (
-      <a className="ws-topbar-place" href={urls.tree("")}>
-        <LibraryTile name={name} />
-        <span className="lib-names">
-          <span className="lib-name">{name}</span>
-          {here && <span className="ws-topbar-here">{here}</span>}
-        </span>
-      </a>
-    ),
+    place: phoneName(place, name),
     onSearch,
     hidden,
     onHide: hide,
@@ -553,17 +610,7 @@ export function AccountFrame(props: { page: AccountPage; me: Me | null; children
         </span>
       </nav>
     ),
-    place: (
-      <a className="ws-topbar-place" href="/">
-        <span className="wordmark-tile" aria-hidden="true">
-          T
-        </span>
-        <span className="lib-names">
-          <span className="lib-name">Tempra</span>
-          <span className="ws-topbar-here">{name}</span>
-        </span>
-      </a>
-    ),
+    place: name,
   };
   return (
     <Shell chrome={chrome} me={props.me} frame={NO_CHANGES}>
@@ -573,22 +620,36 @@ export function AccountFrame(props: { page: AccountPage; me: Me | null; children
 }
 
 /**
- * A page's part of the top bar: its crumbs (in place of the frame's default) and its tools (a
- * concept's Comments and ⋯), drawn into the bar's slots from wherever the page is. On a phone
- * `back` is kept for the page's own use; the top bar names the place itself.
+ * A page's part of the top bar: its crumbs (in place of the frame's default), its tools (a
+ * concept's Comments, Copy page and ⋯), drawn into the bar's slots from wherever the page is,
+ * and its name for the phone's top bar (`title`, a concept's), where the crumbs do not show.
  */
 export function PageBar(props: {
   children?: ReactNode;
-  back?: { href: string; label: string };
   actions?: ReactNode;
+  title?: string;
+  /** On a phone the tools take the place of search and the bell (a concept's, board 33). */
+  phoneTools?: boolean;
 }) {
-  const { slots, setOwnCrumbs } = useFrame();
+  const { slots, setOwnCrumbs, setOwnTools, setTitle } = useFrame();
   const own = props.children !== undefined && props.children !== null;
+  const tools = props.phoneTools === true && props.actions !== undefined && props.actions !== null;
   useLayoutEffect(() => {
     if (!own) return;
     setOwnCrumbs(true);
     return () => setOwnCrumbs(false);
   }, [own, setOwnCrumbs]);
+  useLayoutEffect(() => {
+    if (!tools) return;
+    setOwnTools(true);
+    return () => setOwnTools(false);
+  }, [tools, setOwnTools]);
+  const { title } = props;
+  useLayoutEffect(() => {
+    if (title === undefined) return;
+    setTitle(title);
+    return () => setTitle(null);
+  }, [title, setTitle]);
   return (
     <>
       {own && slots.crumbs && createPortal(props.children, slots.crumbs)}

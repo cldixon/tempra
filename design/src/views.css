@@ -156,10 +156,6 @@
 }
 
 @media (max-width: 900px) {
-  .view-title {
-    font-size: var(--tempra-text-h2);
-  }
-
   .view-filters button,
   .view-filters select {
     min-height: var(--tempra-touch);
