@@ -6,8 +6,9 @@ import type { Urls } from "./urls";
 
 /**
  * What only a person can do in a library (take 3, TEMPRA-106): `GET …/needs`, shared by the
- * sidebar's count, the library's home and the Needs you page. Concepts never verified and the
- * agents' housekeeping are counts.
+ * library's home (For you here and the housekeeping line, take 4, TEMPRA-117) and the Needs you
+ * page until it retires into the Inbox. Concepts never verified and the agents' housekeeping are
+ * counts.
  */
 export interface Needs {
   seq: number;

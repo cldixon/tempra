@@ -2755,12 +2755,13 @@ export class LibraryStore {
   links(input: string, opts: { at?: number } = {}) {
     const snap = this.snapshot(opts.at);
     const e = snap.lookup(normalizePath(input) ?? "");
-    if (e?.kind !== "concept") throw notFound(input);
-    const r = this.record(e.hash);
+    // A concept's links both ways; an attachment's are only inbound (the concepts that use it).
+    if (e?.kind !== "concept" && e?.kind !== "attachment") throw notFound(input);
     // `raw` is each link as `read` renders it: its target's current path, in its written form.
     const outbound: { raw: string; path: string; anchor: string | null; kind: LinkKind }[] = [];
     const broken: { raw: string; path: string; kind: LinkKind }[] = [];
-    for (const [l, kind] of linkGraph(r)) {
+    const graph = e.kind === "concept" ? linkGraph(this.record(e.hash)) : [];
+    for (const [l, kind] of graph) {
       const target = this.targetAt(snap, l);
       const raw = this.href(snap, e, l);
       if (target) outbound.push({ raw, path: target.path, anchor: l.anchor, kind });

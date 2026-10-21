@@ -1,38 +1,27 @@
-import type { ReactNode } from "react";
-import {
-  agoWords,
-  EntryRow,
-  entryTime,
-  type LedgerRequest,
-  momentText,
-  toEntry,
-  useNow,
-  useTitles,
-  whoWorksHere,
-} from "../activity";
-import { type Contributor, useActors } from "../agents";
+import { agoWords, byPerson, type LedgerRequest, useNow, whoWorksHere } from "../activity";
+import { type ActorView, useActors } from "../agents";
 import { api, useLoad } from "../api";
-import { Avatar, type Glyph, Icon } from "../chrome";
+import { Icon } from "../chrome";
 import { useFeed, useLastSeen, useTrailing } from "../live";
 import { type Needs, useNeeds } from "../needs";
 import { useLibraries } from "../role";
-import { ViewNav } from "../Sidebar";
 import { fileLabel, type OutlineFile, topLevel } from "../Tree";
-import { calendarDay, clip, plural, Status, useMe, useTitle } from "../ui";
-import { folderName, type Urls } from "../urls";
+import { calendarDay, clip, plural, Status, useCopy, useMe, useTitle } from "../ui";
+import { dirOf, folderName, type Urls } from "../urls";
 import { SheetPage, useFrame } from "../Workspace";
 
-/** How many entries "Since you last looked" shows, and how many requests it reads for them. */
-const SINCE = 5;
+/** How many cards "For you here" shows. */
+const CARDS = 3;
+
+/** The requests read for the empty library's line (the newest agent write among them). */
 const READ = 20;
 
-/** Avatars in the header before the rest are left to the words. */
-const FACES = 4;
-
 /**
- * The library's home (take 3, TEMPRA-106; tempra-dev: app/home): its name, who works here, the
- * first few things that need the person, and what happened since they last looked. Quiet on
- * purpose. It does not move the seen cursor: Activity does.
+ * The library's home (take 4, TEMPRA-117; tempra-dev: app/home): its title and description, one
+ * quiet line (who works here, the page count, the guide), up to three things for the person from
+ * `GET …/needs` with the way to the Inbox, every top-level section with its count and the solid
+ * dot, and at the foot the agents' housekeeping. An empty library shows how to connect an agent
+ * instead of the sections. Quiet on purpose; it does not move the seen cursor (Activity does).
  */
 export function Home({ urls }: { urls: Urls }) {
   const libs = useLibraries();
@@ -43,305 +32,308 @@ export function Home({ urls }: { urls: Urls }) {
   const name = lib?.title || urls.slug;
   useTitle(name);
   const me = useMe();
+  const actors = useActors(urls, me?.actor ?? null);
   const frame = useFrame();
+  const seen = useLastSeen(urls);
+  const now = useNow();
   const loaded = useLoad(`home ${urls.base}`, async () => {
-    const summary = await api<{ seq: number; concepts: number }>(urls.api("summary"));
-    const page = await api<{ requests: LedgerRequest[] }>(urls.api("requests", { limit: READ }));
-    return { head: summary.seq, concepts: summary.concepts, requests: page.requests };
+    const [summary, page, members] = await Promise.all([
+      api<{ seq: number; concepts: number }>(urls.api("summary")),
+      api<{ requests: LedgerRequest[] }>(urls.api("requests", { limit: READ })),
+      api<{ owner: string; members: { handle: string }[] }>(urls.api("members")),
+    ]);
+    return {
+      head: summary.seq,
+      concepts: summary.concepts,
+      latest: page.requests.find((r) => !byPerson(r)) ?? null,
+      people: [members.owner, ...members.members.map((m) => m.handle)],
+    };
   });
   const reload = useTrailing(loaded.reload, 1500);
   useFeed(urls, loaded.state === "ready" ? loaded.data.head : null, reload, reload);
+  const needs = useNeeds(urls);
   return (
     <SheetPage>
       <Status loaded={loaded}>
-        {(home) => (
-          <>
-            <HomeHead
-              urls={urls}
-              name={name}
-              description={lib?.description ?? null}
-              me={me?.actor ?? null}
-              concepts={home.concepts}
-              latest={home.requests[0]}
-            />
-            {!frame.sidebar && <WaysIn urls={urls} files={frame.index} />}
-            <NeedsSection urls={urls} me={me?.actor ?? null} />
-            <SinceSection urls={urls} me={me?.actor ?? null} requests={home.requests} />
-          </>
-        )}
+        {(home) => {
+          const files = frame.index;
+          // The tree's outline when it has arrived (it follows the feed), else the summary.
+          const empty = files === null ? home.concepts === 0 : files.length === 0;
+          const handle = me?.handle ?? null;
+          const you = handle !== null && home.people.includes(handle);
+          const agents = actors.contributors.filter((c) => c.agent).length;
+          const guide = files?.some((f) => f.path === "guide.md" && f.kind === "concept");
+          return (
+            <>
+              <header className="view-head home-head">
+                <div className="view-head-main">
+                  <h1 className="view-title">{name}</h1>
+                  {lib?.description && <p className="view-lede">{lib.description}</p>}
+                  {!empty && (
+                    <p className="view-meta home-who">
+                      {whoWorksHere(you, home.people.length - (you ? 1 : 0), agents)} ·{" "}
+                      {plural(home.concepts, "page")}
+                      {guide && (
+                        <>
+                          {" · "}
+                          <a href={urls.file("guide.md")}>Start with the guide</a>
+                        </>
+                      )}
+                    </p>
+                  )}
+                </div>
+              </header>
+              {empty ? (
+                <EmptyLibrary
+                  urls={urls}
+                  latest={home.latest}
+                  who={home.latest ? actors.view(home.latest.actor, home.latest.by) : null}
+                  now={now}
+                />
+              ) : (
+                <>
+                  {needs.state === "ready" && (
+                    <ForYou urls={urls} needs={needs.data} view={(a, by) => actors.view(a, by)} />
+                  )}
+                  {files !== null && <HomeSections urls={urls} files={files} seen={seen} />}
+                  {needs.state === "ready" && <HomeFoot urls={urls} needs={needs.data} />}
+                </>
+              )}
+            </>
+          );
+        }}
       </Status>
     </SheetPage>
   );
 }
 
-/** The title, then one quiet line: who works here, how many concepts, when it last changed. */
-function HomeHead(props: {
-  urls: Urls;
-  name: string;
-  description: string | null;
-  me: string | null;
-  concepts: number;
-  latest: LedgerRequest | undefined;
-}) {
-  const { urls, me } = props;
-  const actors = useActors(urls, me);
-  const now = useNow();
-  const handle = me?.replace(/^human:/, "") ?? null;
-  const people = actors.contributors.filter((c) => !c.agent && c.person);
-  const agents = actors.contributors.filter((c) => c.agent);
-  const you = people.some((c) => c.person === handle);
-  const others = people.filter((c) => c.person !== handle).length;
-  // The person first, then whoever acted most recently (the list comes newest first).
-  const faces: Contributor[] = [
-    ...people.filter((c) => c.person === handle),
-    ...actors.contributors.filter((c) => c.person !== handle || c.agent),
-  ].slice(0, FACES);
-  const changed = props.latest?.events.at(-1)?.ts ?? props.latest?.ts;
-  return (
-    <header className="view-head home-head">
-      <div className="view-head-main">
-        <h1 className="view-title">{props.name}</h1>
-        {props.description && <p className="view-lede">{props.description}</p>}
-        <p className="view-meta home-who">
-          {faces.length > 0 && (
-            <span className="face-stack">
-              {faces.map((c) => (
-                <Avatar
-                  key={`${c.person}/${c.agent?.id ?? ""}`}
-                  name={c.agent ? (c.agent.name ?? c.actor) : (c.person ?? "?")}
-                  agent={!!c.agent}
-                />
-              ))}
-            </span>
-          )}
-          <span>
-            {whoWorksHere(you, others, agents.length)} · {plural(props.concepts, "concept")}
-            {changed && ` · updated ${agoWords(changed, now)}`}
-          </span>
-        </p>
-      </div>
-    </header>
-  );
+/** The Inbox filtered to this library (TEMPRA-116 makes the filter work). */
+export const inboxHref = (urls: Urls) =>
+  `/inbox?library=${encodeURIComponent(urls.owner)}/${encodeURIComponent(urls.slug)}`;
+
+/** One thing for the person, as a card: its kind, a title and a detail line. */
+interface Card {
+  key: string;
+  kind: string;
+  title: string;
+  detail: string | null;
+  href: string;
 }
 
 /**
- * The library's ways in, when the sidebar is not beside the sheet (a phone, or the sidebar
- * hidden; TEMPRA-107): the sidebar's own rows for Needs you and Activity, then the library's top
- * level (folders to their folder views, with their counts; then files), from the outline the
- * workspace already loaded. The drawer still holds everything else.
+ * The cards from `GET …/needs`: one of each kind first (a reply, the pages to verify, a page
+ * going stale), then more of them in that order, up to three.
  */
-export function WaysIn({ urls, files }: { urls: Urls; files: OutlineFile[] | null }) {
-  const top = files ? topLevel(files) : null;
-  return (
-    <div className="home-ways">
-      <ViewNav urls={urls} view="home" />
-      <h2 className="home-ways-label" id="home-files">
-        Library
-      </h2>
-      <nav aria-labelledby="home-files">
-        {top === null ? (
-          <p className="view-empty">Loading…</p>
-        ) : top.length === 0 ? (
-          <p className="view-empty">No files yet.</p>
-        ) : (
-          <ul className="home-files">
-            {top.map(({ entry, count }) => (
-              <li key={entry.path}>
-                <a
-                  className="nav-row"
-                  href={entry.kind === "dir" ? urls.tree(entry.path) : urls.file(entry.path)}
-                >
-                  <Icon name={entry.kind === "dir" ? "folder" : "file"} />
-                  <span className="nav-label">
-                    {entry.kind === "dir" ? folderName(entry.path) : fileLabel(entry)}
-                  </span>
-                  {count > 0 && <span className="nav-count">{count}</span>}
-                </a>
-              </li>
-            ))}
-          </ul>
-        )}
-      </nav>
-    </div>
-  );
+export function forYouCards(
+  urls: Urls,
+  needs: Needs,
+  view: (actor: string, by: Needs["replies"][number]["last"]["by"]) => ActorView,
+): Card[] {
+  const replies: Card[] = needs.replies.map((r) => ({
+    key: `reply ${r.thread}`,
+    kind: "Reply",
+    title: `${view(r.last.actor, r.last.by).name} on ${r.title ?? r.path}`,
+    detail: r.last.body ? clip(r.last.body, 80) : null,
+    href: urls.thread(r.path, r.thread),
+  }));
+  const verify: Card[] = [];
+  const v = needs.verify;
+  const first = v.items[0];
+  if (v.total > 0 && first) {
+    const titles = v.items.slice(0, 2).map((i) => i.title ?? i.path);
+    const rest = v.total - titles.length;
+    verify.push({
+      key: "verify",
+      kind: "To verify",
+      title: v.total === 1 ? (first.title ?? first.path) : `${v.total} changed pages`,
+      detail:
+        v.total === 1
+          ? plural(first.changes, "change")
+          : titles.join(" and ") + (rest > 0 ? ` and ${rest} more` : ""),
+      href: v.total === 1 ? urls.review(first.path) : inboxHref(urls),
+    });
+  }
+  const stale: Card[] = needs.stale.map((s) => ({
+    key: `stale ${s.path}`,
+    kind: s.stale === "stale" ? "Stale" : "Going stale",
+    title: s.title ?? s.path,
+    detail: calendarDay(s.stale_after),
+    href: urls.file(s.path),
+  }));
+  const kinds = [replies, verify, stale];
+  const firsts = kinds.flatMap((k) => k.slice(0, 1));
+  const rest = kinds.flatMap((k) => k.slice(1));
+  return [...firsts, ...rest].slice(0, CARDS);
 }
 
-/** A section of the home: its heading, something beside it, a link to the full view. */
-function HomeSection(props: {
-  id: string;
-  title: string;
-  beside?: ReactNode;
-  link?: { href: string; label: string };
-  children: ReactNode;
+/** For you here: up to three cards and "All n in Inbox"; nothing when there is nothing. */
+export function ForYou(props: {
+  urls: Urls;
+  needs: Needs;
+  view: (actor: string, by: Needs["replies"][number]["last"]["by"]) => ActorView;
 }) {
+  const cards = forYouCards(props.urls, props.needs, props.view);
+  if (cards.length === 0) return null;
   return (
-    <section className="home-section" aria-labelledby={props.id}>
+    <section className="home-section" aria-labelledby="home-for-you">
       <div className="view-section-head">
-        <h2 id={props.id} className="view-section-title">
-          {props.title}
+        <h2 id="home-for-you" className="view-section-title">
+          For you here
         </h2>
-        {props.beside}
-        {props.link && (
-          <a className="view-aside" href={props.link.href}>
-            {props.link.label}
-          </a>
-        )}
+        <a className="view-aside" href={inboxHref(props.urls)}>
+          All {Math.max(props.needs.count, cards.length)} in Inbox
+        </a>
       </div>
-      {props.children}
+      <ul className="home-cards">
+        {cards.map((c) => (
+          <li key={c.key}>
+            <a className="home-card" href={c.href}>
+              <span className="home-card-kind">{c.kind}</span>
+              <span className="home-card-title">{c.title}</span>
+              {c.detail && <span className="home-card-detail">{c.detail}</span>}
+            </a>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }
 
-/** One thing that needs the person, as a row linking to where they do it. */
-interface NeedRow {
-  key: string;
-  icon: Glyph;
-  href: string;
-  line: ReactNode;
-  detail: string | null;
-  when: string;
-}
-
-/** A sentence's quote, on one line and kept short. */
-
-/** "goes stale in 6 days", "is stale". */
-function staleWords(iso: string, now: number): string {
-  const days = Math.ceil((Date.parse(iso) - now) / 86_400_000);
-  if (days <= 0) return "is stale";
-  return days === 1 ? "goes stale tomorrow" : `goes stale in ${days} days`;
-}
-
-/** The first three things on the Needs you page, in its order: replies, verifying, staleness. */
-function NeedsSection({ urls, me }: { urls: Urls; me: string | null }) {
-  const loaded = useNeeds(urls);
-  const actors = useActors(urls, me);
-  const now = useNow();
-  const rows = (needs: Needs): NeedRow[] => {
-    const out: NeedRow[] = needs.replies.map((r) => {
-      const by = actors.view(r.last.actor, r.last.by);
-      return {
-        key: `reply ${r.thread}`,
-        icon: "comments",
-        href: urls.thread(r.path, r.thread),
-        line: (
-          <>
-            {/* The thread may be theirs or a reply to the person's: "commented" fits both. */}
-            <b className="entry-who">{by.name}</b> commented on{" "}
-            <b className="entry-who">{r.title ?? r.path}</b>
-          </>
-        ),
-        detail: r.last.body ? `“${clip(r.last.body, 140)}”` : null,
-        when: entryTime(r.last.ts, now, true),
-      };
-    });
-    const v = needs.verify;
-    const first = v.items[0];
-    if (v.total > 0 && first) {
-      const titles = v.items.slice(0, 4).map((i) => i.title ?? i.path);
-      const rest = v.total - titles.length;
-      out.push({
-        key: "verify",
-        icon: "needs",
-        href: v.total === 1 ? urls.review(first.path) : urls.needs(),
-        line: `${plural(v.total, "change")} to verify`,
-        detail: titles.join(" · ") + (rest > 0 ? ` · ${rest} more` : ""),
-        when: entryTime(first.ts, now, true),
-      });
+/**
+ * Sections: every top-level folder in the tree's order, with its count of concepts and the solid
+ * dot when something under it changed since the person last looked; each opens its folder view.
+ * A library with no folders yet (a first library's start-here note) lists its pages instead.
+ */
+export function HomeSections(props: { urls: Urls; files: OutlineFile[]; seen: number | null }) {
+  const { urls, files, seen } = props;
+  const top = topLevel(files);
+  const folders = top.filter(({ entry }) => entry.kind === "dir");
+  const pages = folders.length === 0;
+  const rows = pages ? top.filter(({ entry }) => entry.kind === "concept") : folders;
+  if (rows.length === 0) return null;
+  const changed = new Set<string>();
+  if (seen !== null) {
+    for (const f of files) {
+      if (typeof f.seq !== "number" || f.seq <= seen) continue;
+      let top = f.path;
+      for (let d = dirOf(top); d !== ""; d = dirOf(d)) top = d;
+      changed.add(top);
     }
-    for (const s of needs.stale) {
-      out.push({
-        key: `stale ${s.path}`,
-        icon: "stale",
-        href: urls.file(s.path),
-        line: `${s.title ?? s.path} ${staleWords(s.stale_after, now)}`,
-        detail: "Ask an agent to review it.",
-        when: calendarDay(s.stale_after),
-      });
-    }
-    return out.slice(0, 3);
-  };
+  }
   return (
-    <HomeSection
-      id="home-needs"
-      title="Needs you"
-      link={
-        loaded.state === "ready" && loaded.data.count > 0
-          ? { href: urls.needs(), label: `All ${loaded.data.count}` }
-          : undefined
-      }
-    >
-      <Status loaded={loaded}>
-        {(needs) => {
-          const list = rows(needs);
-          if (list.length === 0) return <p className="view-empty">Nothing needs you here.</p>;
-          return (
-            <ul className="need-rows">
-              {list.map((r) => (
-                <li key={r.key}>
-                  <a className="need-row" href={r.href}>
-                    <Icon name={r.icon} />
-                    <span className="need-text">
-                      <span className="need-line">{r.line}</span>
-                      {r.detail && <span className="need-detail">{r.detail}</span>}
-                    </span>
-                    <span className="need-when">{r.when}</span>
-                  </a>
-                </li>
-              ))}
-            </ul>
-          );
-        }}
-      </Status>
-    </HomeSection>
+    <section className="home-section" aria-labelledby="home-sections">
+      <div className="view-section-head">
+        <h2 id="home-sections" className="view-section-title">
+          {pages ? "Pages" : "Sections"}
+        </h2>
+      </div>
+      <ul className="home-sections">
+        {rows.map(({ entry, count }) => (
+          <li key={entry.path}>
+            <a
+              className="home-section-row"
+              href={pages ? urls.file(entry.path) : urls.tree(entry.path)}
+            >
+              <span className="home-section-name">
+                {pages ? fileLabel(entry) : folderName(entry.path)}
+              </span>
+              <span className="home-section-end">
+                {!pages && <span className="home-section-count">{count}</span>}
+                {changed.has(entry.path) ? (
+                  <span className="home-section-dot" title="Changed since you last looked">
+                    <span className="change-dot warm" aria-hidden="true" />
+                    <span className="visually-hidden">changed since you last looked</span>
+                  </span>
+                ) : (
+                  <span className="home-section-dot" aria-hidden="true" />
+                )}
+              </span>
+            </a>
+          </li>
+        ))}
+      </ul>
+    </section>
   );
 }
 
-/** The latest few Activity entries after the seen cursor, with the cursor's time. */
-function SinceSection(props: { urls: Urls; me: string | null; requests: LedgerRequest[] }) {
-  const { urls } = props;
-  const seen = useLastSeen(urls);
-  const titles = useTitles(urls);
-  const actors = useActors(urls, props.me);
-  const now = useNow();
-  // When the person last looked: the time of the event at their cursor.
-  const at = useLoad(`seen-at ${urls.base} ${seen}`, async () => {
-    if (seen === null || seen < 1) return null;
-    const r = await api<{ events: { ts: string }[] }>(
-      urls.api("events", { since: seen - 1, limit: 1 }),
-    );
-    return r.events[0]?.ts ?? null;
-  });
-  const names = titles.state === "ready" ? titles.data.titles : {};
-  const fresh = props.requests
-    .filter((r) => seen === null || (r.events[0]?.seq ?? 0) > seen)
-    .slice(0, SINCE)
-    .map((r) => toEntry(r, names))
-    .filter((e) => e !== null);
-  const looked = at.state === "ready" && at.data ? momentText(at.data, now) : null;
+/** The foot, quietly: the agents' housekeeping, linking their work queue. */
+export function HomeFoot({ urls, needs }: { urls: Urls; needs: Needs }) {
+  const n = needs.housekeeping.total;
+  if (n === 0) return null;
   return (
-    <HomeSection
-      id="home-since"
-      title="Since you last looked"
-      beside={looked && <span className="view-meta">{looked}</span>}
-      link={{ href: urls.activity(), label: "Activity" }}
-    >
-      {fresh.length === 0 ? (
-        <p className="view-empty">Nothing new since you last looked.</p>
-      ) : (
-        <div className="home-entries">
-          {fresh.map((e) => (
-            <EntryRow
-              key={e.id}
-              entry={e}
-              urls={urls}
-              actor={actors.view(e.actor, e.by)}
-              now={now}
-              isNew={false}
-              compact
-            />
-          ))}
-        </div>
-      )}
-    </HomeSection>
+    <p className="home-foot">
+      <a href={urls.work()}>
+        {plural(n, "housekeeping item")} for agents
+        <Icon name="chevron" size={14} />
+      </a>
+    </p>
+  );
+}
+
+/**
+ * A library with no pages (board 31): the steps to connect an agent, the MCP URL to copy, then
+ * "Waiting for the first write" with the pulsing dot until an agent writes (the home reloads on
+ * the feed, so it fills in live), and Import a bundle.
+ */
+export function EmptyLibrary(props: {
+  urls: Urls;
+  latest: LedgerRequest | null;
+  who: ActorView | null;
+  now: number;
+}) {
+  const { urls, latest } = props;
+  const mcp = `${typeof location === "undefined" ? "" : location.origin}/mcp`;
+  const copied = useCopy();
+  return (
+    <>
+      <section className="empty-library" aria-labelledby="empty-title">
+        <h2 id="empty-title" className="view-section-title">
+          Nothing here yet
+        </h2>
+        <ol className="empty-steps">
+          <li>
+            <span>Add Tempra to your agent:</span>
+            <span className="copy-field">
+              <code>{mcp}</code>
+              <button
+                type="button"
+                className="icon-button"
+                aria-label="Copy the MCP URL"
+                title={copied.state === "copied" ? "Copied" : "Copy"}
+                onClick={() => void copied.copy(mcp)}
+              >
+                <Icon name={copied.state === "copied" ? "check" : "copy"} />
+              </button>
+            </span>
+          </li>
+          <li>
+            <span>
+              Ask it to start, for example: “In my {urls.slug} library, keep a page for each book I
+              mention.”
+            </span>
+          </li>
+        </ol>
+        <p className="empty-wait" aria-live="polite">
+          {latest ? (
+            <>
+              <span className="change-dot warm" aria-hidden="true" />
+              <span>
+                Last write by {props.who?.name ?? latest.actor}, {agoWords(latest.ts, props.now)}
+                {latest.note ? `: ${clip(latest.note, 80)}` : ""}
+              </span>
+            </>
+          ) : (
+            <>
+              <span className="change-dot live" aria-hidden="true" />
+              <span>Waiting for the first write…</span>
+            </>
+          )}
+        </p>
+      </section>
+      <p className="empty-more">
+        <a href={urls.transfer()}>Import a bundle</a> ·{" "}
+        <a href={urls.connect()}>Other ways to connect</a>
+      </p>
+    </>
   );
 }

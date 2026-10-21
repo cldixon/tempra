@@ -34,6 +34,10 @@
   /* Color: a dimmed page behind a sheet or a full-screen view */
   --tempra-color-scrim: light-dark(rgb(20 20 22 / 0.2), rgb(0 0 0 / 0.5));
 
+  /* Color: the dark frame an attachment is shown on (take 4, board 28), and a mark on it */
+  --tempra-color-frame: light-dark(#0e0e0f, #0a0a0b);
+  --tempra-color-frame-ink: light-dark(#8a8a8e, #8a8a8e);
+
   /* Color: links are text, underlined in running text (no colour until the palette) */
   --tempra-color-link: var(--tempra-color-text);
   --tempra-color-link-visited: var(--tempra-color-text);

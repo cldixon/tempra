@@ -343,8 +343,18 @@ async function openBrowser() {
     note(`dialog ${d.type()}: ${d.message()}`);
     d.dismiss().catch(() => {});
   });
+  /** Paths a step means to find missing (a Not found page): their 404s are not problems. */
+  const missing = new Set<string>();
+  const expect404 = (path: string) => missing.add(path);
   page.on("response", (r) => {
-    const path = new URL(r.url()).pathname;
+    const url = new URL(r.url());
+    const path = url.pathname;
+    const meant = [...missing].some(
+      (m) =>
+        path.replace(/^\/api\/v1\/libraries\/[^/]+\/[^/]+\/[a-z]+\//, "") === m ||
+        url.searchParams.get("path") === m,
+    );
+    if (r.status() === 404 && meant) return;
     if (r.status() >= 400 && path !== "/favicon.ico") {
       problems.push(`${r.status()} ${path}`);
     }
@@ -480,7 +490,18 @@ async function openBrowser() {
     const what = [...kinds].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${n} ${k}`);
     return { peak, from: counted[first]?.at ?? 0, what };
   };
-  return { browser, context, page, problems, step, close, signInAs, cookie, busiestMinute };
+  return {
+    browser,
+    context,
+    page,
+    problems,
+    step,
+    close,
+    signInAs,
+    cookie,
+    busiestMinute,
+    expect404,
+  };
 }
 
 /** A folder's name as the app shows it (app/src/urls.ts folderName): dashes as spaces, capitalised. */
@@ -538,14 +559,16 @@ function greyPng(width: number, height: number, shade: number): Uint8Array {
 
 /**
  * The app in a real browser, signed in as the seeded user (layout take 3, TEMPRA-106; the concept
- * page and Activity of take 4, TEMPRA-114 and 115): the library's home, the workspace (the tree,
- * the quick switcher, the hidden sidebar, at phone width the top bar naming the page, the home's
- * ways in and the drawer), a folder's view, every concept in the reader (drawn from the stored
+ * page, Activity, Home and Folder of take 4, TEMPRA-114, 115 and 117): the library's home (its
+ * sections, the agents' line, For you here), the workspace (the tree, the quick switcher, the
+ * hidden sidebar, at phone width the top bar naming the page, the home's sections and the
+ * drawer), a folder's view, Not found for a moved path, an attachment's page, every concept in
+ * the reader (drawn from the stored
  * tree, with no Edit, a footnote card on hover), the concept's panels (Comments, History,
  * Properties: opened from the top bar, closed by ×, Escape and the control, the contents back,
  * `?panel=`), Copy page, the byline while an agent edits, History's versions, review mode from
  * Properties, comments in the panel (and as a bottom sheet on a phone), the Markdown view,
- * figures in the full-screen view, Needs you, and Activity with its two views (Summary and
+ * figures in the full-screen view, and Activity with its two views (Summary and
  * Every event), all drawn from the API; links move within the app without reloading the page, and
  * nothing is refused by the CSP or throws. GATE_SCREENSHOTS=<dir> saves screenshots of them.
  */
@@ -604,19 +627,70 @@ async function browserRenders(
         .getByRole("heading", { level: 1, name: slug, exact: true })
         .waitFor({ timeout: 15_000 });
     };
-    await step("the library's root is its home", async () => {
-      // Its name, then what needs the person and what happened since they last looked.
-      await home();
-      for (const name of ["Needs you", "Since you last looked"]) {
-        await main.getByRole("region", { name }).getByRole("heading", { level: 2, name }).waitFor();
-      }
-      if (shots) await page.screenshot({ path: `${shots}/home.png` });
-    });
     // The workspace (TEMPRA-19): the tree stays while files open in the main pane.
     const nested = concepts.find((c) => c.includes("/")) ?? concepts[0] ?? "";
     const folder = nested.split("/").slice(0, -1).join("/");
     const sidebar = page.locator("section.ws-sidebar");
     const lib = `${base}/${owner}/${slug}`;
+    /** The home's Sections (take 4, TEMPRA-117): a row per top-level folder, with its count. */
+    const sections = main.getByRole("region", { name: "Sections" });
+    await step(
+      "the library's root is its home: sections with counts, the agents' line",
+      async () => {
+        await home();
+        await sections.getByRole("heading", { level: 2, name: "Sections" }).waitFor();
+        const tops = [
+          ...new Set(concepts.filter((c) => c.includes("/")).map((c) => c.split("/")[0] ?? "")),
+        ];
+        const rows = sections.locator("a.home-section-row");
+        await rows.first().waitFor({ timeout: 15_000 });
+        // (A folder holding only attachments is a section too.)
+        if ((await rows.count()) < tops.length) {
+          throw new Error(`${await rows.count()} sections for ${tops.length} top-level folders`);
+        }
+        for (const t of tops) {
+          const n = concepts.filter((c) => c.startsWith(`${t}/`)).length;
+          const count = await sections
+            .locator(`a.home-section-row[href="/${owner}/${slug}/${enc(t)}/"] .home-section-count`)
+            .innerText();
+          if (Number(count) !== n) throw new Error(`section ${t} counts ${count}, not ${n}`);
+        }
+        // Take 3's ways in and "Since you last looked" are gone.
+        if ((await main.getByText("Since you last looked").count()) > 0) {
+          throw new Error("the home still shows Since you last looked");
+        }
+        // The foot: the agents' housekeeping, linking the work queue, when there is any.
+        const { housekeeping } = (await (
+          await apiAs(devCookie, `/api/v1/libraries/${owner}/${slug}/needs`)
+        ).json()) as { housekeeping: { total: number } };
+        if (housekeeping.total > 0) {
+          const foot = main.locator(`.home-foot a[href="/${owner}/${slug}/-/work"]`);
+          await foot.waitFor({ timeout: 10_000 });
+          const text = await foot.innerText();
+          if (!text.includes(`${housekeeping.total} housekeeping item`)) {
+            throw new Error(`the foot line reads "${text}" for ${housekeeping.total} items`);
+          }
+        }
+        if (shots) await page.screenshot({ path: `${shots}/home.png` });
+        // A section opens its folder view, in place: one other than the folder the next steps
+        // open in the tree (opening a folder's view reveals it there, which they would toggle).
+        const top = tops.find((t) => t !== folder.split("/")[0]);
+        if (top) {
+          await markStay();
+          await sections
+            .locator(`a.home-section-row[href="/${owner}/${slug}/${enc(top)}/"]`)
+            .click();
+          await page.waitForURL(`${lib}/${enc(top)}/`);
+          await main
+            .getByRole("heading", { level: 1, name: folderName(top), exact: true })
+            .waitFor({ timeout: 15_000 });
+          if (!(await stayed())) throw new Error("a section reloaded the page");
+          await page.goBack();
+          await page.waitForURL(`${lib}/`);
+          await home();
+        }
+      },
+    );
     const bearer = { Authorization: `Bearer ${token}` };
     const libApi = `${base}/api/v1/libraries/${owner}/${slug}`;
     /** An agent deletes a file the gate wrote (a delete names the version it removes). */
@@ -743,6 +817,14 @@ async function browserRenders(
       if ((await main.locator(".body .prose").count()) > 0) {
         throw new Error("the folder's page shows a document in the reader");
       }
+      // Take 4: each concept by title with its one-line description, and nothing else: no sort,
+      // filters or columns (author, threads, trust).
+      const described = await rows.locator(".folder-desc").count();
+      if (described === 0) throw new Error("no concept in the folder shows its description");
+      for (const gone of [".segmented", ".pill-toggle", ".folder-by", ".folder-threads"]) {
+        if ((await main.locator(gone).count()) > 0) throw new Error(`the folder still has ${gone}`);
+      }
+      await main.locator(`.folder-foot a[href$="/-/raw/${enc(folder)}/index.md"]`).waitFor();
       if (shots) await page.screenshot({ path: `${shots}/folder.png` });
       await markStay();
       await main.locator(`a.folder-row[href="/${owner}/${slug}/${enc(nested)}"]`).click();
@@ -776,6 +858,24 @@ async function browserRenders(
       if (!moved.ok) throw new Error(`move: ${moved.status}`);
       await row.waitFor({ state: "detached", timeout: 5000 });
       if (folder) await sidebar.locator(`a[title="${target}"]`).waitFor({ timeout: 5000 });
+      // Not found (take 4, board 32): the old path says where the file moved, with Open, then
+      // Home and Search (the quick switcher).
+      b.expect404("gate-live.md");
+      await page.goto(`${lib}/gate-live.md`);
+      await main
+        .getByRole("heading", { level: 1, name: "This page isn't here", exact: true })
+        .waitFor({ timeout: 15_000 });
+      const fate = main.locator(".not-found-fate");
+      await fate.filter({ hasText: `Moved to ${target} by ` }).waitFor({ timeout: 10_000 });
+      const open = await fate.getByRole("link", { name: "Open", exact: true }).getAttribute("href");
+      if (open !== `/${owner}/${slug}/${enc(target)}`) throw new Error(`Open: ${open}`);
+      await main.getByRole("link", { name: "Home", exact: true }).waitFor();
+      if (shots) await page.screenshot({ path: `${shots}/not-found.png` });
+      await main.getByRole("button", { name: "Search", exact: true }).click();
+      const dialog = page.getByRole("dialog", { name: "Open a file" });
+      await dialog.waitFor({ timeout: 5000 });
+      await page.keyboard.press("Escape");
+      await dialog.waitFor({ state: "hidden", timeout: 5000 });
       await agentDeletes(target);
     });
     await step("workspace: the quick switcher opens a concept", async () => {
@@ -947,29 +1047,22 @@ async function browserRenders(
           .filter({ hasText: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`) })
           .waitFor({ timeout: 5000 });
       await here("Activity");
-      // The library's name goes home, and the home shows the ways in without the drawer:
-      // Needs you, Activity and the library's top level, a folder opening its folder view.
+      // The library's name goes home, which stacks the same sections (take 4, board 36), a
+      // section opening its folder view.
       await topbar.locator(".ws-topbar-place").click();
       await page.waitForURL(`${lib}/`);
       await here("Home");
-      const ways = page.locator(".home-ways");
-      await ways.getByRole("link", { name: /^Needs you/ }).waitFor({ timeout: 15_000 });
-      await ways.getByRole("link", { name: /^Activity/ }).waitFor();
-      if (shots) await page.screenshot({ path: `${shots}/home-phone.png` });
-      const folder = ways.locator('.home-files a[href$="/"]').first();
+      const folder = sections.locator("a.home-section-row").first();
       await folder.waitFor({ timeout: 15_000 });
-      const folderName = (await folder.locator(".nav-label").textContent())?.trim() ?? "";
+      if (shots) await page.screenshot({ path: `${shots}/home-phone.png` });
+      const wide = await page.locator("html").evaluate((el) => el.scrollWidth > el.clientWidth);
+      if (wide) throw new Error("the home scrolls sideways at phone width");
+      const folderName = (await folder.locator(".home-section-name").textContent())?.trim() ?? "";
       await folder.click();
       await page.waitForURL((u) => u.pathname.endsWith("/") && u.href !== `${lib}/`);
       await page.locator(".view-title", { hasText: folderName }).waitFor({ timeout: 15_000 });
       await here(folderName);
       await page.setViewportSize({ width: 1280, height: 720 });
-      // With the sidebar beside the sheet the home leaves the ways in to it.
-      await page.goto(`${lib}/`);
-      await page.locator(".home-head").waitFor({ timeout: 15_000 });
-      if ((await page.locator(".home-ways").count()) > 0) {
-        throw new Error("the home repeats the sidebar's ways in on a desktop");
-      }
     });
 
     // A few concepts with tables, code, footnotes and lists, as screenshots for review.
@@ -1133,6 +1226,28 @@ async function browserRenders(
       if (shots) await page.screenshot({ path: `${shots}/lightbox.png` });
       await page.keyboard.press("Escape");
       await view.waitFor({ state: "hidden", timeout: 5000 });
+      // The attachment's page (take 4, board 28): the image on its frame, Download, Copy link,
+      // Type, Size, Added and Used in (the concept that shows it).
+      await page.goto(`${lib}/gate-figure-2.png`);
+      const side = main.locator(".attachment-side");
+      await side
+        .getByRole("heading", { level: 1, name: "gate-figure-2.png", exact: true })
+        .waitFor({ timeout: 15_000 });
+      await main.locator(".attachment-frame img").waitFor({ timeout: 10_000 });
+      const download = await side.getByRole("link", { name: "Download" }).getAttribute("href");
+      if (download !== `/${owner}/${slug}/-/download/gate-figure-2.png`) {
+        throw new Error(`Download: ${download}`);
+      }
+      await side.getByRole("button", { name: "Copy link", exact: true }).waitFor();
+      const facts = side.locator(".attachment-facts");
+      await facts.locator("dd", { hasText: /^PNG image$/ }).waitFor({ timeout: 5000 });
+      await facts.locator("div", { has: page.locator("dt", { hasText: "Size" }) }).waitFor();
+      await facts.locator("div", { has: page.locator("dt", { hasText: "Added" }) }).waitFor();
+      await facts
+        .locator("dd")
+        .getByRole("link", { name: "Gate figures", exact: true })
+        .waitFor({ timeout: 10_000 });
+      if (shots) await page.screenshot({ path: `${shots}/attachment.png` });
       for (const path of ["gate-figures.md", "gate-figure-1.png", "gate-figure-2.png"]) {
         await agentDeletes(path);
       }
@@ -1544,9 +1659,9 @@ async function browserRenders(
         }
       },
     );
-    // Needs you (TEMPRA-106): an agent's reply on a thread the person opened waits on them,
-    // and the sidebar counts what the page lists.
-    await step("Needs you: an agent's reply on the person's thread waits on them", async () => {
+    // For you here (take 4, TEMPRA-117): an agent's reply on a thread the person opened waits on
+    // them on the library's home, from `GET …/needs`.
+    await step("For you here: an agent's reply on the person's thread waits on them", async () => {
       const target = concepts.find((c) => c !== concept) ?? concept;
       const posted = await apiAs(devCookie, `/api/v1/libraries/${owner}/${slug}/comments`, "POST", {
         path: target,
@@ -1561,30 +1676,25 @@ async function browserRenders(
         body: JSON.stringify({ body: "Gate: yes, it is still current." }),
       });
       if (!answered.ok) throw new Error(`agent reply: ${answered.status}`);
-      // Needs you is reached from the home until it retires into the Inbox (TEMPRA-116).
+      // The home's For you here (take 4, TEMPRA-117): the reply as a card, and "All n in Inbox"
+      // to the Inbox filtered to this library.
       await page.goto(`${lib}/`);
       await home();
       await markStay();
-      await main
-        .getByRole("link", { name: /^All \d+$/ })
-        .first()
-        .click();
-      await page.waitForURL(`${lib}/-/needs`);
-      await main
-        .getByRole("heading", { level: 1, name: "Needs you", exact: true })
-        .waitFor({ timeout: 15_000 });
-      const row = main
-        .getByRole("region", { name: /^Waiting on your reply/ })
-        .getByRole("link")
+      const forYou = main.getByRole("region", { name: "For you here" });
+      const row = forYou
+        .locator("a.home-card")
         .filter({ hasText: "Gate: yes, it is still current." });
-      await row.waitFor({ timeout: 10_000 });
-      if (!(await stayed())) throw new Error("the link reloaded the page");
+      await row.waitFor({ timeout: 15_000 });
       const { count } = (await (
         await apiAs(devCookie, `/api/v1/libraries/${owner}/${slug}/needs`)
       ).json()) as { count: number };
       if (count < 1) throw new Error(`GET …/needs counts ${count} with a reply waiting`);
-      if (shots) await page.screenshot({ path: `${shots}/needs.png` });
-      // The row opens the concept with that thread open in the Comments panel.
+      const all = forYou.getByRole("link", { name: /^All \d+ in Inbox$/ });
+      const allHref = await all.getAttribute("href");
+      if (allHref !== `/inbox?library=${owner}/${slug}`) throw new Error(`All n: ${allHref}`);
+      if (shots) await page.screenshot({ path: `${shots}/home-for-you.png` });
+      // The card opens the concept with that thread open in the Comments panel.
       await row.click();
       await page.waitForURL(`${lib}/${enc(target)}#thread-${encodeURIComponent(id)}`);
       await comments.locator(`section.thread.open[id="thread-${id}"]`).waitFor({ timeout: 15_000 });
@@ -2197,11 +2307,31 @@ async function freshAccountConnects(): Promise<string[]> {
     await page.getByRole("heading", { level: 1, name: "Welcome" }).waitFor({ timeout: 15_000 });
     await page.locator('input[name="handle"]').fill("newcomer");
     await page.locator('input[name="library"]').fill("notes");
+    // No start-here note: the library starts empty, so its home shows how to connect an agent.
+    await page.locator('input[name="starter"]').uncheck();
     await page.getByRole("button", { name: "Create" }).click();
     const lib = `${base}/newcomer/notes`;
     await page.waitForURL(`${lib}/-/connect`);
     await page.getByText("No agent has written yet").waitFor({ timeout: 15_000 });
     const cookie = await b.cookie();
+    // The empty library's home (take 4, board 31), open in a second tab while the agent
+    // connects: the steps with the MCP URL, waiting for the first write, Import a bundle.
+    const homeTab = await b.context.newPage();
+    const waiting = homeTab.locator("main.ws-main .empty-library");
+    await step("an empty library's home shows how to connect an agent", async () => {
+      await homeTab.goto(`${lib}/`);
+      await waiting.getByRole("heading", { name: "Nothing here yet" }).waitFor({ timeout: 15_000 });
+      await waiting.locator(".copy-field code", { hasText: `${base}/mcp` }).waitFor();
+      await waiting.locator(".empty-wait .change-dot.live").waitFor();
+      await waiting.getByText("Waiting for the first write").waitFor();
+      const imp = await homeTab
+        .getByRole("link", { name: "Import a bundle", exact: true })
+        .getAttribute("href");
+      if (imp !== "/newcomer/notes/-/transfer") throw new Error(`Import a bundle: ${imp}`);
+      if (process.env.GATE_SCREENSHOTS) {
+        await homeTab.screenshot({ path: `${process.env.GATE_SCREENSHOTS}/empty.png` });
+      }
+    });
 
     const connected = await oauthConnect(cookie, {
       library: "notes",
@@ -2218,6 +2348,17 @@ async function freshAccountConnects(): Promise<string[]> {
     await step("the open Connect page shows the agent's write, live", () =>
       page.getByText("Last agent write: claude-code/gate").waitFor({ timeout: 5000 }),
     );
+    await step("the empty library's home fills in live after the first write", async () => {
+      // The smoke flow writes and tidies away its note, so the library is empty again: the
+      // waiting line has become the agent's last write.
+      await waiting.locator(".empty-wait", { hasText: /^Last write by / }).waitFor({
+        timeout: 10_000,
+      });
+      if ((await waiting.locator(".change-dot.live").count()) > 0) {
+        throw new Error("the home still waits for the first write");
+      }
+      await homeTab.close();
+    });
     /** A link in the avatar's menu (take 2: the account's pages live there). */
     const accountLink = async (name: string) => {
       await page.getByRole("button", { name: "Account menu" }).click();

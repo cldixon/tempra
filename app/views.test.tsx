@@ -2,8 +2,16 @@ import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { actorView } from "./src/agents";
 import type { Needs } from "./src/needs";
+import { fateOf, typeName } from "./src/pages/File";
 import { FolderBody, type FolderView } from "./src/pages/Folder";
-import { WaysIn } from "./src/pages/Home";
+import {
+  EmptyLibrary,
+  ForYou,
+  forYouCards,
+  HomeFoot,
+  HomeSections,
+  inboxHref,
+} from "./src/pages/Home";
 import { NeedsBody } from "./src/pages/NeedsYou";
 import { type OutlineFile, topLevel } from "./src/Tree";
 import { day } from "./src/ui";
@@ -157,35 +165,248 @@ const folder: FolderView = {
   counts: { concepts: 2, unverified: 1, newest: { path: "decisions/z.md", ts: hour(2) } },
 };
 
-describe("a folder (take 3)", () => {
+describe("a folder (take 4)", () => {
   const html = renderToStaticMarkup(
-    <FolderBody urls={urls} dir="decisions" view={folder} actor={view} />,
+    <FolderBody
+      urls={urls}
+      dir="decisions"
+      view={folder}
+      seen={20}
+      live={(p) => (p === "decisions/z.md" ? "Claude Code for @cl_dixon" : null)}
+    />,
   );
 
-  test("its name and one line of counts", () => {
+  test("its name, then subfolders with counts, then concepts by title, each a link", () => {
     expect(html).toContain(`<h1 class="view-title">Decisions</h1>`);
-    expect(html).toContain("2 concepts · 1 not verified · newest change 2 h ago");
-  });
-
-  test("subfolders first, then concepts, newest first, each a link", () => {
     const sub = html.indexOf("Old ones");
-    const newest = html.indexOf("Diagram styles");
-    const older = html.indexOf("Agents act for a person");
+    const a = html.indexOf("Agents act for a person");
+    const z = html.indexOf("Diagram styles");
     expect(sub).toBeGreaterThan(-1);
-    expect(sub).toBeLessThan(newest);
-    expect(newest).toBeLessThan(older);
+    expect(sub).toBeLessThan(a);
+    expect(a).toBeLessThan(z);
     expect(html).toContain(`href="${urls.tree("decisions/old-ones")}"`);
     expect(html).toContain(`href="${urls.file("decisions/a.md")}"`);
-    expect(html).toContain("3 concepts");
+    expect(html).toContain("3 pages");
+    expect(html).toContain("An outside agent always acts for one person.");
   });
 
-  test("who wrote each, open threads when there are any, and trust as a dot", () => {
-    expect(html).toContain("You · ");
-    expect(html).toContain("Claude Code · 2 h");
-    expect(html.match(/class="folder-threads"/g)?.length).toBe(1);
-    expect(html).toContain('class="folder-dot verified" title="Verified"');
-    expect(html).toContain('class="folder-dot" title="Not verified"');
-    expect(html).toContain('aria-pressed="true">Recent');
+  test("the dot: solid for changed since the cursor, pulsing while an agent writes", () => {
+    // a.md (seq 10) is older than the cursor: no dot. z.md is being written now.
+    expect(html.match(/change-dot/g)?.length).toBe(1);
+    expect(html).toContain('class="change-dot live"');
+    expect(html).toContain("Claude Code for @cl_dixon is editing");
+    const changed = renderToStaticMarkup(
+      <FolderBody urls={urls} dir="decisions" view={folder} seen={20} />,
+    );
+    expect(changed).toContain('class="change-dot warm"');
+    expect(changed).not.toContain("is editing");
+  });
+
+  test("nothing else: no author, threads, trust or sort; index.md linked for agents", () => {
+    expect(html).not.toContain("folder-threads");
+    expect(html).not.toContain("verified");
+    expect(html).not.toContain("aria-pressed");
+    expect(html).not.toContain("You · ");
+    expect(html).toContain(`href="${urls.raw("decisions/index.md")}"`);
+  });
+});
+
+describe("the library's home (take 4)", () => {
+  const files: OutlineFile[] = [
+    { path: "guide.md", kind: "concept", title: "Guide", seq: 1 },
+    { path: "decisions/a.md", kind: "concept", title: "A", seq: 5 },
+    { path: "decisions/old/b.md", kind: "concept", title: "B", seq: 30 },
+    { path: "app/reader.md", kind: "concept", title: "Reader", seq: 6 },
+    { path: "app/shot.png", kind: "attachment", seq: 7 },
+  ];
+
+  test("the top level: folders first with their concepts at any depth, then files", () => {
+    expect(topLevel(files).map(({ entry, count }) => [entry.path, count])).toEqual([
+      ["app", 1],
+      ["decisions", 2],
+      ["guide.md", 0],
+    ]);
+  });
+
+  test("sections: every top-level folder in the tree's order, its count, the solid dot", () => {
+    const html = renderToStaticMarkup(<HomeSections urls={urls} files={files} seen={10} />);
+    const app = html.indexOf(`href="${urls.tree("app")}"`);
+    const decisions = html.indexOf(`href="${urls.tree("decisions")}"`);
+    expect(app).toBeGreaterThan(-1);
+    expect(app).toBeLessThan(decisions);
+    expect(html).not.toContain("guide.md");
+    expect(html).toContain('<span class="home-section-name">Decisions</span>');
+    expect(html).toContain('<span class="home-section-count">2</span>');
+    // Only decisions changed after the cursor (b.md at seq 30).
+    expect(html.match(/change-dot warm/g)?.length).toBe(1);
+    expect(html.indexOf("change-dot")).toBeGreaterThan(decisions);
+    expect(
+      renderToStaticMarkup(<HomeSections urls={urls} files={files} seen={null} />),
+    ).not.toContain("change-dot");
+  });
+
+  test("a library with no folders yet lists its pages instead", () => {
+    const html = renderToStaticMarkup(
+      <HomeSections
+        urls={urls}
+        files={[{ path: "start-here.md", kind: "concept", title: "Start here", seq: 1 }]}
+        seen={null}
+      />,
+    );
+    expect(html).toContain(">Pages</h2>");
+    expect(html).toContain(`href="${urls.file("start-here.md")}"`);
+    expect(html).toContain(">Start here</span>");
+    expect(renderToStaticMarkup(<HomeSections urls={urls} files={[]} seen={null} />)).toBe("");
+  });
+
+  const reply = {
+    thread: "t1",
+    path: "app/reader.md",
+    title: "Reader",
+    quote: null,
+    last: {
+      actor: "claude-code/dev",
+      by: { person: "cl_dixon", agent: "a1" },
+      body: "Atoms count as one character.",
+      ts: hour(1),
+      seq: 31,
+    },
+  };
+
+  test("for you here: one card of each kind first, up to three, and All n in Inbox", () => {
+    const n = needs({
+      replies: [reply, { ...reply, thread: "t2" }],
+      verify: {
+        total: 2,
+        items: [
+          {
+            path: "app/diagrams.md",
+            title: "Diagrams",
+            seq: 20,
+            ts: hour(2),
+            actor: "claude-code/dev",
+            by: null,
+            verified: { actor: me, seq: 10, ts: hour(30) },
+            changes: 2,
+          },
+          {
+            path: "app/reader.md",
+            title: "Reader",
+            seq: 21,
+            ts: hour(3),
+            actor: "claude-code/dev",
+            by: null,
+            verified: { actor: me, seq: 10, ts: hour(30) },
+            changes: 1,
+          },
+        ],
+        next_offset: null,
+      },
+      stale: [
+        {
+          path: "v2/limits.md",
+          title: "Limits",
+          stale_after: "2026-10-24T00:00:00Z",
+          stale: "stale_soon",
+        },
+      ],
+      count: 5,
+    });
+    const cards = forYouCards(urls, n, view);
+    expect(cards.map((c) => c.kind)).toEqual(["Reply", "To verify", "Going stale"]);
+    expect(cards[0]?.title).toBe("Claude Code on Reader");
+    expect(cards[0]?.href).toBe(urls.thread("app/reader.md", "t1"));
+    expect(cards[1]?.title).toBe("2 changed pages");
+    expect(cards[1]?.detail).toBe("Diagrams and Reader");
+    expect(cards[2]?.detail).toBe("Oct 24");
+    const html = renderToStaticMarkup(<ForYou urls={urls} needs={n} view={view} />);
+    expect(html).toContain("For you here");
+    expect(html).toContain(`href="${inboxHref(urls)}"`);
+    expect(inboxHref(urls)).toBe("/inbox?library=cl_dixon/tempra-dev");
+    expect(html).toContain("All 5 in Inbox");
+    expect(renderToStaticMarkup(<ForYou urls={urls} needs={needs()} view={view} />)).toBe("");
+  });
+
+  test("the foot: the agents' housekeeping, to their work queue; absent when none", () => {
+    const html = renderToStaticMarkup(
+      <HomeFoot
+        urls={urls}
+        needs={needs({ housekeeping: { lint: 1, structure: 11, broken_link: 0, total: 12 } })}
+      />,
+    );
+    expect(html).toContain("12 housekeeping items for agents");
+    expect(html).toContain(`href="${urls.work()}"`);
+    expect(renderToStaticMarkup(<HomeFoot urls={urls} needs={needs()} />)).toBe("");
+  });
+
+  test("an empty library: the connect steps, waiting with the pulsing dot, Import a bundle", () => {
+    const waiting = renderToStaticMarkup(
+      <EmptyLibrary urls={urls} latest={null} who={null} now={Date.now()} />,
+    );
+    expect(waiting).toContain("Nothing here yet");
+    expect(waiting).toContain("/mcp</code>");
+    expect(waiting).toContain('class="change-dot live"');
+    expect(waiting).toContain("Waiting for the first write");
+    expect(waiting).toContain(`href="${urls.transfer()}"`);
+    const written = renderToStaticMarkup(
+      <EmptyLibrary
+        urls={urls}
+        latest={{
+          request_id: "r1",
+          ts: new Date().toISOString(),
+          actor: "claude-code/dev",
+          by: null,
+          note: "mcp smoke cleanup",
+          events: [],
+        }}
+        who={view("claude-code/dev")}
+        now={Date.now()}
+      />,
+    );
+    expect(written).toContain("Last write by claude-code/dev, just now: mcp smoke cleanup");
+    expect(written).not.toContain("Waiting");
+  });
+});
+
+describe("an attachment and Not found (take 4)", () => {
+  test("a file's type in words", () => {
+    expect(typeName("image/png", "a.png")).toBe("PNG image");
+    expect(typeName("image/svg+xml", "a.svg")).toBe("SVG image");
+    expect(typeName("application/pdf", "a.pdf")).toBe("PDF document");
+    expect(typeName(null, "a.csv")).toBe("CSV file");
+    expect(typeName(null, "README")).toBe("File");
+  });
+
+  const ev = (
+    seq: number,
+    op: string,
+    path: string,
+    meta: Record<string, string> | null = null,
+  ) => ({
+    seq,
+    ts: hour(48 - seq),
+    actor: "claude-code/dev",
+    op,
+    path,
+    hash: null,
+    meta,
+  });
+
+  test("what became of a path: moved (to where it is now), deleted, or nothing known", () => {
+    const moved = fateOf("decisions/x.md", {
+      path: "delivery/x.md",
+      events: [
+        ev(1, "put", "decisions/x.md"),
+        ev(2, "move", "delivery/x.md", { from_path: "decisions/x.md" }),
+      ],
+    });
+    expect(moved).toMatchObject({ kind: "moved", to: "delivery/x.md", actor: "claude-code/dev" });
+    const deleted = fateOf("a.md", {
+      path: "a.md",
+      events: [ev(1, "put", "a.md"), ev(2, "delete", "a.md")],
+    });
+    expect(deleted?.kind).toBe("deleted");
+    expect(fateOf("a.md", { path: "a.md", events: [ev(1, "put", "a.md")] })).toBeNull();
   });
 });
 
@@ -199,41 +420,5 @@ describe("entering a library on a phone (TEMPRA-107)", () => {
     expect(at({ dir: "app/style-guide" })).toBe("Style guide");
     expect(at({ file: "decisions/margins-not-panels.md" })).toBe("Decisions");
     expect(at({ file: "guide.md" })).toBeNull();
-  });
-
-  const files: OutlineFile[] = [
-    { path: "guide.md", kind: "concept", title: "Guide" },
-    { path: "decisions/a.md", kind: "concept", title: "A" },
-    { path: "decisions/old/b.md", kind: "concept", title: "B" },
-    { path: "app/reader.md", kind: "concept", title: "Reader" },
-    { path: "app/shot.png", kind: "attachment" },
-  ];
-
-  test("the library's top level: folders first with their concepts at any depth, then files", () => {
-    expect(topLevel(files).map(({ entry, count }) => [entry.path, count])).toEqual([
-      ["app", 1],
-      ["decisions", 2],
-      ["guide.md", 0],
-    ]);
-  });
-
-  test("the home's ways in: Needs you, Activity, then the top level as links", () => {
-    const html = renderToStaticMarkup(<WaysIn urls={urls} files={files} />);
-    const needsAt = html.indexOf(`href="${urls.needs()}"`);
-    const activityAt = html.indexOf(`href="${urls.activity()}"`);
-    const folderAt = html.indexOf(`href="${urls.tree("decisions")}"`);
-    expect(needsAt).toBeGreaterThan(-1);
-    expect(needsAt).toBeLessThan(activityAt);
-    expect(activityAt).toBeLessThan(folderAt);
-    // Home is where the person is: no row for it here.
-    expect(html).not.toContain(">Home<");
-    expect(html).toContain('>Decisions</span><span class="nav-count">2</span>');
-    expect(html).toContain(`href="${urls.file("guide.md")}"`);
-    expect(html).toContain(">Guide</span>");
-  });
-
-  test("before the outline arrives, and in an empty library, one quiet line", () => {
-    expect(renderToStaticMarkup(<WaysIn urls={urls} files={null} />)).toContain("Loading…");
-    expect(renderToStaticMarkup(<WaysIn urls={urls} files={[]} />)).toContain("No files yet.");
   });
 });

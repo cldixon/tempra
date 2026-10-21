@@ -1,7 +1,6 @@
 import { type AgentChange, warmth } from "./changes";
 import { Icon, Menu } from "./chrome";
 import { useUnread } from "./inbox";
-import { useNeeds } from "./needs";
 import { libraryName, type ReachableLibrary, useLibraries, useRole } from "./role";
 import { type OutlineFile, Tree } from "./Tree";
 import { switcherKey } from "./ui";
@@ -120,43 +119,6 @@ export function LibrarySidebar(props: {
         <Row href={urls.settings()} icon="settings" label="Settings" />
       </div>
     </>
-  );
-}
-
-/**
- * The person's views as rows (Needs you with its count, Activity): the home's ways in on a phone
- * (TEMPRA-107) until Needs you retires into the Inbox (TEMPRA-116).
- */
-export function ViewNav(props: { urls: Urls; view: Place["view"] }) {
-  const { urls, view } = props;
-  const needs = useNeeds(urls);
-  const { latest, now } = useFrame();
-  const count = needs.state === "ready" ? needs.data.count : 0;
-  const recent = warmth(latest, now);
-  return (
-    <nav className="nav" aria-label="Views">
-      <Row
-        href={urls.needs()}
-        current={view === "needs"}
-        icon="needs"
-        label="Needs you"
-        end={count > 0 ? <span className="nav-count">{count}</span> : undefined}
-      />
-      <Row
-        href={urls.activity()}
-        current={view === "activity"}
-        icon="activity"
-        label="Activity"
-        end={
-          recent ? (
-            <span className="nav-count" title="An agent changed something lately">
-              <span className={`change-dot ${recent}`} aria-hidden="true" />
-              <span className="visually-hidden">An agent changed something lately</span>
-            </span>
-          ) : undefined
-        }
-      />
-    </nav>
   );
 }
 
