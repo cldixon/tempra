@@ -9,6 +9,7 @@ import type { LintWarning } from "../okf/types";
 import type { CommentAction, CommentResult } from "../store/comments";
 import { OkfError } from "../store/errors";
 import type { LibraryHealth, RequestContext, WriteOp, WriteResult } from "../store/store";
+import { requireOwner } from "../tenancy";
 
 export interface McpContext {
   /** The ledger actor, access and tool tier: the same in every library the caller reaches. */
@@ -853,7 +854,7 @@ export function buildServer(ctx: McpContext): McpServer {
       "revert",
       {
         title: "Undo",
-        description: `${BEYOND}undo safely, forward-only: revert one path to its state at \`to_seq\`, or a whole request by \`request_id\` (from log). Adds new ledger events; nothing is erased.`,
+        description: `${BEYOND}undo safely, forward-only: revert one path to its state at \`to_seq\`, or a whole request by \`request_id\` (from log). Adds new ledger events; nothing is erased. Only for the library's owner and their agents (403 \`owner_only\` in a library shared with you).`,
         inputSchema: {
           path: z.string().optional(),
           to_seq: z.number().int().optional(),
@@ -865,6 +866,8 @@ export function buildServer(ctx: McpContext): McpServer {
       },
       guarded(async ({ path, to_seq, request_id, note, library }) => {
         const { token, lib } = pick(library);
+        // The owner's recovery tool (TEMPRA-124), as REST's revert: the owner's agents alone.
+        requireOwner(token.role, "revert changes");
         if (request_id) {
           if (token.prefix !== null) {
             throw new OkfError(
