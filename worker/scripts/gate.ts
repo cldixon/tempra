@@ -2590,7 +2590,7 @@ async function freshAccountConnects(): Promise<string[]> {
     if (!(await mcpSmoke({ url: base, token: access_token }))) return ["MCP over OAuth"];
 
     await step("the open Connect page shows the agent's write, live", () =>
-      page.getByText("Last agent write: claude-code/gate").waitFor({ timeout: 5000 }),
+      page.locator("#status", { hasText: /^Last agent write: / }).waitFor({ timeout: 5000 }),
     );
     await step("the empty library's home fills in live after the first write", async () => {
       // The smoke flow writes and tidies away its note, so the library is empty again: the
@@ -2614,7 +2614,7 @@ async function freshAccountConnects(): Promise<string[]> {
      * menu (take 4) unless the settings are already open.
      */
     const libraryLink = async (name: string) => {
-      if (name === "Work queue") {
+      if (name === "For agents") {
         await page.goto(`${lib}/-/work`);
         await page.waitForURL(`${lib}/-/work`);
         return;
@@ -2641,7 +2641,9 @@ async function freshAccountConnects(): Promise<string[]> {
       await page.getByRole("button", { name: "Create token" }).click();
       await page.locator("#token-secret").waitFor({ timeout: 15_000 });
       await page.getByRole("button", { name: "Back to tokens" }).click();
-      await page.getByRole("button", { name: "Revoke" }).click();
+      // Revoking asks first (S-4).
+      await page.getByRole("button", { name: "Revoke…" }).click();
+      await page.locator("dialog").getByRole("button", { name: "Revoke", exact: true }).click();
       await page.getByText("revoked").waitFor({ timeout: 15_000 });
     });
     await step("account page", async () => {
@@ -2649,7 +2651,7 @@ async function freshAccountConnects(): Promise<string[]> {
       await page.getByText("this device").waitFor({ timeout: 15_000 });
     });
     for (const [tab, text] of [
-      ["Work queue", "Work queue"],
+      ["For agents", "For agents"],
       ["Import & export", "Nightly exports"],
       ["Recovery", "Past restores"],
     ] as const) {
@@ -2663,7 +2665,7 @@ async function freshAccountConnects(): Promise<string[]> {
     await step("export now, from Import & export", async () => {
       await libraryLink("Import & export");
       await page.getByRole("button", { name: "Export now" }).click();
-      await page.getByText("Exported to R2").waitFor({ timeout: 15_000 });
+      await page.getByText("Export saved").waitFor({ timeout: 15_000 });
     });
 
     // Sharing in the app (tempra-dev: v2/sharing): invite from the Members tab; the invitee
@@ -2731,6 +2733,8 @@ async function freshAccountConnects(): Promise<string[]> {
       await switchTo(asOwner);
       await page.goto(`${lib}/-/members`);
       await page.getByLabel("Access for @stranger").selectOption("write");
+      // A change of access asks first (S-4).
+      await page.locator("dialog").getByRole("button", { name: "Change access" }).click();
       await page.getByText("@stranger now has write access").waitFor({ timeout: 15_000 });
     });
     await step("a writer is offered Verify", async () => {

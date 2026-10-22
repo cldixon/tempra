@@ -1,5 +1,48 @@
-import { type ReactNode, useEffect, useId, useRef } from "react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { Icon } from "./chrome";
+
+/** What a confirmation asks: a title, a line or two on what happens, and the action's label. */
+export interface Ask {
+  title: string;
+  body: ReactNode;
+  action: string;
+  run(): unknown;
+}
+
+/**
+ * A confirmation before something that cannot be taken back (removing a member, leaving,
+ * revoking a token): `confirm(ask)` opens the dialog, and the action runs only from its button.
+ * The page renders `dialog` once.
+ */
+export function useConfirm() {
+  const [ask, setAsk] = useState<Ask | null>(null);
+  const close = () => setAsk(null);
+  const dialog = (
+    <Dialog title={ask?.title ?? ""} open={ask !== null} onClose={close}>
+      {ask && (
+        <>
+          <div className="confirm-body">{ask.body}</div>
+          <p className="actions">
+            <button
+              type="button"
+              className="primary"
+              onClick={() => {
+                close();
+                ask.run();
+              }}
+            >
+              {ask.action}
+            </button>
+            <button type="button" onClick={close}>
+              Cancel
+            </button>
+          </p>
+        </>
+      )}
+    </Dialog>
+  );
+  return { confirm: setAsk, dialog };
+}
 
 /**
  * A small modal dialog in the top layer (a concept's properties, its agent notes, all its

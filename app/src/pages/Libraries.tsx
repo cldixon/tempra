@@ -69,7 +69,7 @@ export function Libraries({ create }: { create: boolean }) {
       {creating && <NewLibrary onCancel={() => setCreating(false)} />}
       {waiting > 0 && (
         <p>
-          <a href="/invitations">
+          <a href="/inbox">
             {waiting === 1 ? "An invitation" : `${waiting} invitations`} to a library
           </a>{" "}
           {waiting === 1 ? "is" : "are"} waiting for you.

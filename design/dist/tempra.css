@@ -1617,6 +1617,11 @@ body.ground {
   font-size: var(--tempra-text-ui);
 }
 
+/* A confirmation: what happens, then the action and Cancel. */
+.confirm-body p {
+  margin: 0 0 var(--tempra-space-2);
+}
+
 .dialog-foot {
   display: flex;
   flex-wrap: wrap;
@@ -2765,7 +2770,7 @@ button.tree-row[aria-current="page"] {
   }
 }
 
-/* ---------- Page pieces: lists, tables, forms, the ledger, diffs ---------- */
+/* ---------- Page pieces: lists, tables, forms ---------- */
 
 .new-library {
   display: flex;
@@ -2799,8 +2804,7 @@ button.tree-row[aria-current="page"] {
 }
 
 .sheet-page pre,
-.sheet-page pre.src,
-.sheet-page pre.diff {
+.sheet-page pre.src {
   background: var(--tempra-color-ground);
 }
 
@@ -2903,8 +2907,7 @@ form.token {
   flex-direction: column;
 }
 
-pre.src,
-pre.diff {
+pre.src {
   overflow-x: auto;
   padding: 12px 14px;
   border-radius: var(--tempra-radius-box);
@@ -2913,62 +2916,12 @@ pre.diff {
   line-height: var(--tempra-line-height);
 }
 
-pre.src.wrap {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-pre.diff .add {
-  font-weight: var(--tempra-weight-strong);
-}
-
-pre.diff .del {
-  color: var(--tempra-color-faint);
-  text-decoration: line-through;
-}
-
-pre.diff .hunk,
-pre.diff .meta {
-  color: var(--tempra-color-muted);
-}
-
-ol.ledger {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.request {
-  padding: 12px 0;
-  border-top: 1px solid var(--tempra-color-border);
-  font-size: var(--tempra-text-ui);
-}
-
-.req-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 8px;
-}
-
-.request .note {
-  margin: 4px 0;
-  color: var(--tempra-color-muted);
-}
-
 ul.events {
   margin: 4px 0 0;
   padding: 0;
   list-style: none;
-  font-size: var(--tempra-text-meta);
-}
-
-.op {
-  display: inline-block;
-  min-width: 3.5em;
-  color: var(--tempra-color-muted);
-  font-family: var(--tempra-font-mono);
-  font-size: var(--tempra-text-label);
+  font-size: var(--tempra-text-ui);
+  line-height: var(--tempra-line-height);
 }
 
 /* ---------- Notifications (TEMPRA-72, TEMPRA-73): mentions (the Inbox is inbox.css) ---------- */
@@ -4870,6 +4823,74 @@ a.activity-download {
   .inbox-actions button {
     min-height: var(--tempra-touch);
   }
+}
+
+/* ---------- An invitation (take 4, board 30; TEMPRA-135) ---------- */
+
+/* Who invited and when, the library as a card, the access offered, Accept and Decline. */
+.invitations {
+  display: flex;
+  flex-direction: column;
+  gap: var(--tempra-space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.invitation {
+  display: flex;
+  flex-direction: column;
+  gap: var(--tempra-space-3);
+  max-width: 32rem;
+}
+
+.invitation p {
+  margin: 0;
+}
+
+.invitation-from {
+  display: flex;
+  align-items: center;
+  gap: var(--tempra-space-2);
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-ui);
+}
+
+.invitation-card {
+  display: flex;
+  align-items: center;
+  gap: var(--tempra-space-3);
+  padding: var(--tempra-space-3);
+  border: 1px solid var(--tempra-color-border);
+  border-radius: var(--tempra-radius-box);
+}
+
+.invitation-card .lib-tile {
+  width: 36px;
+  height: 36px;
+}
+
+.invitation-library {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.invitation-library span {
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+}
+
+.invitation-access {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--tempra-space-3);
+  font-size: var(--tempra-text-ui);
+}
+
+.invitation-access span {
+  color: var(--tempra-color-muted);
 }
 
 /*

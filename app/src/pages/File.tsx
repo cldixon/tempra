@@ -38,7 +38,7 @@ import { PageBar, SheetPage, useFrame } from "../Workspace";
 
 /** What the last server action did, said once on the page it returns to (`?done=`). */
 const DONE: Record<string, (actor: string) => string> = {
-  restore: (actor) => `Restored. The ledger records it as a revert by ${actor}.`,
+  restore: () => "Restored, as a new change by you.",
   verify: (actor) => `Verified as ${actor}. The trust tier is human-reviewed until the next edit.`,
 };
 

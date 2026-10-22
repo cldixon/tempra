@@ -46,8 +46,14 @@ export class Urls {
   download(path: string) {
     return `${this.base}-/download/${enc(path)}${this.q()}`;
   }
+  /**
+   * What changed in a concept, on its own page (take 4, TEMPRA-124): the changes since `from`
+   * drawn in its text (`?since=`), or with only `to`, that version as History opens it. The old
+   * Diff page's address (`-/diff/…?from=&to=`) is sent here.
+   */
   diff(path: string, from?: number, to?: number) {
-    return `${this.base}-/diff/${enc(path)}${query({ from, to })}`;
+    const seq = from ?? to;
+    return seq === undefined ? this.pinned(undefined).file(path) : this.since(path, seq);
   }
   /**
    * Activity's Every event view at the ledger's own address (take 4, TEMPRA-115): `-/ledger`
