@@ -320,8 +320,15 @@ describe("tenancy (v2 spec: Tenancy and authorization)", () => {
       expect(await got.text()).toContain("owner_only");
     }
     expect((await as("/restores")).status).toBe(403);
+    // Nightly exports, the list and the downloads, are the owner's too.
+    expect((await as("/exports")).status).toBe(403);
+    const date = new Date().toISOString().slice(0, 10);
+    const download = await friend.app.request(`/owner/demo/-/exports/${date}/bundle.tar`);
+    expect(download.status).toBe(403);
+    expect(await download.text()).toContain("Only the library&#39;s owner");
     // The owner still can.
     expect((await s.req("/restores", { token: "human" })).status).toBe(200);
+    expect((await s.req("/exports", { token: "human" })).status).toBe(200);
   });
 
   // The owner's recovery tools (TEMPRA-124, tempra-dev: decisions/read-and-comment-only):

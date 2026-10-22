@@ -1278,7 +1278,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   });
 
   // Nightly exports and running the maintainers now (spec: Backups and recovery), as the app's
-  // Import & export page. People only, like restore.
+  // Import & export page. The owner's, and people only, like restore.
   const peopleOnly = (c: C) => {
     if (!c.var.token.actor.startsWith("human:")) {
       throw new OkfError(403, "human_only", "This needs a human: token, or the app.");
@@ -1288,6 +1288,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
 
   app.get(`${BASE}/exports`, async (c) => {
     const ref = peopleOnly(c);
+    requireOwner(c.var.token.role, "see its exports");
     const list = c.var.deps.exports ? await c.var.deps.exports.list(ref.do_id) : [];
     return c.json({
       exports: list.map((e) => ({
