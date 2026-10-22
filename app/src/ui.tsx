@@ -235,7 +235,7 @@ export const anchorId = (prefix: string, label: string) =>
   `${prefix}-${label.replace(/[^\w.-]/g, "_")}`;
 
 /**
- * Where a page is in its library (the sheet's bar): its folders by name, each a link, then the
+ * Where a page is in its library (the top bar's crumbs): its folders by name, each a link, then the
  * file itself (by `title` when it has one), and after them what the page adds (a concept's
  * staleness or status). The library itself is in the sidebar, so the crumbs start below it.
  */

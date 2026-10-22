@@ -12,7 +12,7 @@
   color-scheme: light dark;
 
   /* Color: surfaces */
-  --tempra-color-bg: light-dark(#ffffff, #1b1b1d); /* the sheet, panels, pills */
+  --tempra-color-bg: light-dark(#ffffff, #1b1b1d); /* the page, panels, pills */
   --tempra-color-ground: light-dark(#f3f3f1, #121214); /* the page under them, inset fills */
   --tempra-color-hover: light-dark(#e9e9e6, #222225);
   --tempra-color-selected: light-dark(#e1e1dd, #2a2a2e);
@@ -88,7 +88,7 @@
   --tempra-space-3: 1rem;
   --tempra-space-4: 2rem;
   --tempra-gutter: 8px; /* the frame's gutter */
-  --tempra-sheet-pad: 40px; /* a page's side padding in the sheet */
+  --tempra-page-pad: 40px; /* a page's side padding in its column */
 
   /* The frame (take 4): a top bar across the window, the sidebar, one panel beside a concept.
      The breakpoints are 1100px (the panel overlays the page) and 900px (the phone layout); a
@@ -108,14 +108,14 @@
   /* A concept's columns (take 4): the text, centred; on the right its contents, or a panel */
   --tempra-column-text: 620px;
   --tempra-contents: 200px;
-  --tempra-page-width: 760px; /* home, Needs you, Activity, a folder */
+  --tempra-page-width: 760px; /* home, Activity, a folder, the Inbox */
 
   /* Shape: squarer than take 2 */
   --tempra-radius: 5px; /* code */
   --tempra-radius-mark: 3px;
   --tempra-radius-row: 7px; /* sidebar rows, inputs */
   --tempra-radius-box: 10px; /* cards, list boxes, threads */
-  --tempra-radius-card: 10px; /* the sheet, dialogs */
+  --tempra-radius-card: 10px; /* the public pages' sheet, dialogs */
   --tempra-radius-tile: 6px; /* the library's initial */
   --tempra-radius-pill: 999px;
 
@@ -414,14 +414,6 @@ details > summary {
   border-radius: var(--tempra-radius-box);
   background: var(--tempra-color-ground);
   font-size: var(--tempra-text-ui);
-}
-
-/* A row of short labels (type, trust tier, status): kept apart, wrapping on narrow screens. */
-.chips {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--tempra-space-1) var(--tempra-space-2);
 }
 
 .chip {
@@ -967,7 +959,7 @@ details > summary {
 
 /*
  * Comments (TEMPRA-13). A thread's quote is underlined in the body (dotted); the one whose thread
- * is open in the margin is filled grey and underlined solid (take 3); a comment being written
+ * is open in the Comments panel is filled grey and underlined solid; a comment being written
  * fills its text with the selection grey. Drawn as
  * highlights, so the body's DOM never changes for them.
  */
@@ -1383,10 +1375,6 @@ body.ground {
 
 /* ---------- Shared pieces: menus, the avatar, icon buttons ---------- */
 
-.header-sep {
-  color: var(--tempra-color-faint);
-}
-
 /* A menu: a button that opens a card of links below it. */
 .menu {
   position: relative;
@@ -1467,14 +1455,6 @@ body.ground {
   font-size: var(--tempra-text-label);
   letter-spacing: 0.04em;
   text-transform: uppercase;
-}
-
-/* Who is signed in, at the top of the avatar's menu. */
-.menu-list .menu-who {
-  padding: 6px 10px 4px;
-  color: var(--tempra-color-faint);
-  font-size: var(--tempra-text-meta);
-  overflow-wrap: anywhere;
 }
 
 .menu-list hr {
@@ -1617,45 +1597,19 @@ body.ground {
   font-size: var(--tempra-text-ui);
 }
 
-.dialog-foot {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin: 12px 0 0;
-  color: var(--tempra-color-muted);
-  font-size: var(--tempra-text-meta);
-}
-
-.dialog-foot a {
-  color: inherit;
-}
-
 /* ---------- A page's column: the account's pages, settings, the library's tools ---------- */
 
 /* One centred column; the frame's top bar and sidebar are around it. */
-.sheet-page,
+.page-column,
 .page {
   width: 100%;
   max-width: var(--tempra-page-width);
   margin: 0 auto;
-  padding: 72px var(--tempra-sheet-pad) 96px;
+  padding: 72px var(--tempra-page-pad) 96px;
 }
 
-.sheet-page.wide {
+.page-column.wide {
   max-width: 960px;
-}
-
-.page-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 28px;
-}
-
-.page-head h1 {
-  margin: 0;
 }
 
 /* The New pill: an outlined pill with a plus. */
@@ -2115,8 +2069,9 @@ body.ground {
   line-height: var(--tempra-leading-tight);
 }
 
-.menu-person-names .handle {
-  color: var(--tempra-color-faint);
+.menu-person-names .email {
+  overflow-wrap: anywhere;
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
 }
 
@@ -2254,7 +2209,7 @@ body.ground {
 }
 
 /* The page: the frame's scroller. Its width, not the window's, decides a concept's columns
-   (container queries on `sheet`, kept by that name from take 3, in concept.css), so hiding the
+   (container queries on `page`, in concept.css), so hiding the
    sidebar widens the reading layout. */
 .ws-main {
   grid-area: main;
@@ -2262,11 +2217,11 @@ body.ground {
   min-height: 0;
   overflow: hidden auto;
   background: var(--tempra-color-bg);
-  container: sheet / inline-size;
+  container: page / inline-size;
 }
 
 /* Showing the hidden sidebar: a quiet glyph at the left of the crumbs. */
-.sheet-toggle {
+.show-sidebar {
   flex: none;
   color: var(--tempra-color-faint);
 }
@@ -2310,24 +2265,9 @@ body.ground {
   font-weight: var(--tempra-weight-strong);
 }
 
-.lib-names {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  line-height: var(--tempra-leading-tight);
-}
-
 .lib-name {
   overflow: hidden;
   font-weight: var(--tempra-weight-strong);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.lib-owner {
-  overflow: hidden;
-  color: var(--tempra-color-faint);
-  font-size: var(--tempra-text-label);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -2398,8 +2338,8 @@ body.ground {
 }
 
 /* The tree: nested lists, one row per folder or file, indented a step a level. A folder's row is
-   a button that opens and closes it (a chevron turns) with its count of concepts; a file's row is
-   a link. */
+   its chevron (a button that opens and closes it, turning), its name (a link to its folder view)
+   and its count of concepts; a page's or a file's row is a link, a file's with a small icon. */
 .tree,
 .tree ul {
   margin: 0;
@@ -2431,43 +2371,37 @@ body.ground {
   background: var(--tempra-color-hover);
 }
 
-button.tree-row {
-  width: 100%;
-  border: 0;
-  background: none;
-  color: var(--tempra-color-text);
-  font: inherit;
-  font-size: var(--tempra-text-ui);
-  text-align: left;
-}
-
-button.tree-row:hover:not(:disabled) {
-  background: var(--tempra-color-hover);
-}
-
-button.tree-row[aria-current="page"] {
-  background: var(--tempra-color-selected);
-}
-
 .tree-chevron {
   flex: none;
   display: flex;
+  align-self: stretch;
+  align-items: center;
+  justify-content: center;
   width: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--tempra-radius-row);
+  background: none;
   color: var(--tempra-color-faint);
-  transition: transform 0.15s ease;
+  cursor: pointer;
+}
+
+.tree-chevron:hover {
+  color: var(--tempra-color-text);
 }
 
 .tree-chevron svg {
   width: 12px;
   height: 12px;
+  transition: transform 0.15s ease;
 }
 
-.tree-row[aria-expanded="true"] .tree-chevron {
+.tree-chevron[aria-expanded="true"] svg {
   transform: rotate(90deg);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tree-chevron {
+  .tree-chevron svg {
     transition: none;
   }
 }
@@ -2499,6 +2433,10 @@ button.tree-row[aria-current="page"] {
   background: var(--tempra-color-selected);
 }
 
+.tree-row.dir > a {
+  color: var(--tempra-color-text);
+}
+
 .tree-row > a[aria-current="page"] {
   color: var(--tempra-color-text);
   font-weight: var(--tempra-weight-medium);
@@ -2506,7 +2444,10 @@ button.tree-row[aria-current="page"] {
 
 .tree-leaf {
   flex: none;
+  display: flex;
+  justify-content: center;
   width: 16px;
+  color: var(--tempra-color-faint);
 }
 
 /* Marks: an agent's change (a dot), open comments (a count), a clock (stale) or an hourglass
@@ -2597,7 +2538,7 @@ button.tree-row[aria-current="page"] {
 
   .topbar-brand,
   .topbar-crumbs,
-  .sheet-toggle,
+  .show-sidebar,
   .has-tools .topbar-end .bell,
   .has-tools .phone-search {
     display: none;
@@ -2759,7 +2700,7 @@ button.tree-row[aria-current="page"] {
     height: var(--tempra-touch);
   }
 
-  .sheet-page,
+  .page-column,
   .page {
     padding: 32px 16px 72px;
   }
@@ -2787,7 +2728,7 @@ button.tree-row[aria-current="page"] {
 
 /* A command or URL to copy (the connect pages): an inset that wraps rather than widening the page. */
 .page pre,
-.sheet-page pre {
+.page-column pre {
   margin: 0 0 var(--tempra-space-3);
   padding: 10px 14px;
   border-radius: var(--tempra-radius-row);
@@ -2798,9 +2739,9 @@ button.tree-row[aria-current="page"] {
   overflow-wrap: anywhere;
 }
 
-.sheet-page pre,
-.sheet-page pre.src,
-.sheet-page pre.diff {
+.page-column pre,
+.page-column pre.src,
+.page-column pre.diff {
   background: var(--tempra-color-ground);
 }
 
@@ -2986,7 +2927,7 @@ ul.events {
  * A concept's page (take 4, TEMPRA-114; tempra-dev: app/reader, decisions/one-panel-from-the-top-
  * bar): the text (title, description, byline, body, sources) centred in its column, and on the
  * right its contents, or one panel in their place (Comments, History, Properties). The page's
- * width decides what fits (container queries on `sheet`, the page's scroller): under 1100px the
+ * width decides what fits (container queries on `page`, the page's scroller): under 1100px the
  * contents hide and a panel overlays the page; on a phone (900px and under, the window's call)
  * a panel is a sheet from the bottom.
  */
@@ -3006,14 +2947,14 @@ ul.events {
   grid-column: text;
   justify-self: center;
   width: 100%;
-  max-width: calc(var(--tempra-column-text) + 2 * var(--tempra-sheet-pad));
+  max-width: calc(var(--tempra-column-text) + 2 * var(--tempra-page-pad));
   min-width: 0;
-  padding: 40px var(--tempra-sheet-pad) 140px;
+  padding: 40px var(--tempra-page-pad) 140px;
 }
 
 /* The Markdown view is wider than the text: the file's lines are long. */
 .concept.markdown-on .doc {
-  max-width: calc(var(--tempra-measure) + 2 * var(--tempra-sheet-pad) + 200px);
+  max-width: calc(var(--tempra-measure) + 2 * var(--tempra-page-pad) + 200px);
 }
 
 .concept-side {
@@ -3506,7 +3447,7 @@ ul.events {
 /* ---------- What fits: the page's width decides ---------- */
 
 /* No room beside the text: the contents move under the byline, and a panel overlays the page. */
-@container sheet (width < 1100px) {
+@container page (width < 1100px) {
   .concept-grid,
   .concept.panel-open .concept-grid {
     grid-template-columns: [text] minmax(0, 1fr);
@@ -3901,22 +3842,6 @@ section.thread.open {
   line-height: var(--tempra-line-height);
 }
 
-/* "Live": a small ink dot before the line. */
-.view-live {
-  display: flex;
-  align-items: center;
-  gap: var(--tempra-space-2);
-}
-
-.view-live::before {
-  content: "";
-  flex: none;
-  width: var(--tempra-dot);
-  height: var(--tempra-dot);
-  border-radius: 50%;
-  background: var(--tempra-color-text);
-}
-
 /* A link beside a header or a section's heading: "The full ledger", "All 5", "Activity". */
 .view-aside {
   margin-left: auto;
@@ -3995,18 +3920,6 @@ section.thread.open {
   border-radius: var(--tempra-radius-pill);
   color: var(--tempra-color-muted);
   cursor: pointer;
-}
-
-/* An outlined pill that stays pressed: ink edge and a grey fill when on. */
-.pill-toggle {
-  color: var(--tempra-color-muted);
-}
-
-.pill-toggle[aria-pressed="true"],
-.pill-toggle[aria-pressed="true"]:hover:not(:disabled) {
-  border-color: var(--tempra-color-text);
-  background: var(--tempra-color-selected);
-  color: var(--tempra-color-text);
 }
 
 @media (max-width: 900px) {
@@ -4289,14 +4202,6 @@ section.thread.open {
   overflow-wrap: anywhere;
 }
 
-.entry-titles {
-  margin: 0;
-  overflow: hidden;
-  color: var(--tempra-color-muted);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* The concepts it touched: what happened, the title, the words changed. */
 .entry-touched {
   display: flex;
@@ -4463,36 +4368,10 @@ a.activity-download {
   font-size: var(--tempra-text-meta);
 }
 
-/* On the home: smaller marks, no fill, the note in the body's face. */
-.entry.compact {
-  padding: 6px 0;
-  background: none;
-}
-
-.entry.compact > .avatar-mark {
-  width: var(--tempra-avatar-small);
-  height: var(--tempra-avatar-small);
-  font-size: var(--tempra-text-initial);
-}
-
-.entry.compact .entry-line {
-  font-size: var(--tempra-text-ui);
-}
-
-.entry.compact .entry-note {
-  font-family: inherit;
-  font-size: var(--tempra-text-ui);
-}
-
 @media (max-width: 900px) {
   .entry {
     gap: 10px;
     padding: 12px 8px;
-  }
-
-  .entry.compact .entry-note,
-  .entry.compact .entry-titles {
-    display: none;
   }
 }
 
@@ -4939,7 +4818,7 @@ a.activity-download {
 }
 
 .public-sheet {
-  padding: 48px var(--tempra-sheet-pad) 56px;
+  padding: 48px var(--tempra-page-pad) 56px;
   border: 1px solid var(--tempra-color-border);
   border-radius: var(--tempra-radius-card);
   background: var(--tempra-color-bg);

@@ -163,7 +163,7 @@ export function ConceptPage(props: {
     () => highlightsOf(placed, active, draft.draft),
     [placed, active, draft.draft],
   );
-  // A link that asks for a panel or a thread (Needs you, the inbox, `?panel=`) opens it when the
+  // A link that asks for a panel or a thread (the Inbox, the home, `?panel=`) opens it when the
   // URL changes to it, and again when the #fragment changes; never on its own otherwise.
   const asked = panelInUrl();
   const where = `${location.search}${location.hash}`;

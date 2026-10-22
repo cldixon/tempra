@@ -8,7 +8,7 @@ import { useLibraries } from "../role";
 import { fileLabel, type OutlineFile, topLevel } from "../Tree";
 import { calendarDay, clip, plural, Status, useCopy, useMe, useTitle } from "../ui";
 import { dirOf, folderName, type Urls } from "../urls";
-import { SheetPage, useFrame } from "../Workspace";
+import { PageColumn, useFrame } from "../Workspace";
 
 /** How many cards "For you here" shows. */
 const CARDS = 3;
@@ -53,7 +53,7 @@ export function Home({ urls }: { urls: Urls }) {
   useFeed(urls, loaded.state === "ready" ? loaded.data.head : null, reload, reload);
   const needs = useNeeds(urls);
   return (
-    <SheetPage>
+    <PageColumn>
       <Status loaded={loaded}>
         {(home) => {
           const files = frame.index;
@@ -103,7 +103,7 @@ export function Home({ urls }: { urls: Urls }) {
           );
         }}
       </Status>
-    </SheetPage>
+    </PageColumn>
   );
 }
 
@@ -256,7 +256,7 @@ export function HomeSections(props: { urls: Urls; files: OutlineFile[]; seen: nu
   );
 }
 
-/** The foot, quietly: the agents' housekeeping, linking their work queue. */
+/** The foot, quietly: the agents' housekeeping, linking For agents. */
 export function HomeFoot({ urls, needs }: { urls: Urls; needs: Needs }) {
   const n = needs.housekeeping.total;
   if (n === 0) return null;

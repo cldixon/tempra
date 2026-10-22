@@ -65,7 +65,7 @@
 }
 
 .public-sheet {
-  padding: 48px var(--tempra-sheet-pad) 56px;
+  padding: 48px var(--tempra-page-pad) 56px;
   border: 1px solid var(--tempra-color-border);
   border-radius: var(--tempra-radius-card);
   background: var(--tempra-color-bg);

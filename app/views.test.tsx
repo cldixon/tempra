@@ -322,7 +322,7 @@ describe("entering a library on a phone (TEMPRA-107)", () => {
   test("the top bar names the page under the library", () => {
     const at = (p: Partial<Place>) => placeName({ file: null, dir: null, view: null, ...p });
     expect(at({ view: "home" })).toBe("Home");
-    expect(at({ view: "needs" })).toBe("Needs you");
+    expect(at({ view: "work" })).toBe("For agents");
     expect(at({ view: "activity" })).toBe("Activity");
     expect(at({ view: "transfer" })).toBe("Import & export");
     expect(at({ dir: "app/style-guide" })).toBe("Style guide");

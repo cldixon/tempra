@@ -34,7 +34,7 @@ import {
   useTitle,
 } from "../ui";
 import { baseName, dirOf, enc, type Urls } from "../urls";
-import { PageBar, SheetPage, useFrame } from "../Workspace";
+import { PageBar, PageColumn, useFrame } from "../Workspace";
 
 /** What the last server action did, said once on the page it returns to (`?done=`). */
 const DONE: Record<string, (actor: string) => string> = {
@@ -93,7 +93,7 @@ export function File(props: {
       <PageBar>
         <Crumbs urls={urls} path={path} file />
       </PageBar>
-      <SheetPage wide={attachment !== null}>
+      <PageColumn wide={attachment !== null}>
         {notice && <div className="notice">{notice}</div>}
         {live && <LiveNotice urls={urls} live={live} />}
         <Status loaded={loaded}>
@@ -105,7 +105,7 @@ export function File(props: {
             ) : null
           }
         </Status>
-      </SheetPage>
+      </PageColumn>
     </>
   );
 }
@@ -309,7 +309,7 @@ export function NotFound({ urls, path }: { urls: Urls; path: string }) {
       <PageBar>
         <Crumbs urls={urls} path={path} file />
       </PageBar>
-      <SheetPage>
+      <PageColumn>
         <div className="not-found">
           <p className="not-found-code">404</p>
           <h1 className="view-title">This page isn't here</h1>
@@ -338,7 +338,7 @@ export function NotFound({ urls, path }: { urls: Urls; path: string }) {
             </button>
           </p>
         </div>
-      </SheetPage>
+      </PageColumn>
     </>
   );
 }

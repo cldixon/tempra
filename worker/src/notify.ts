@@ -30,7 +30,6 @@ export type ItemKind =
   | "thread"
   | "invitation"
   | "access"
-  | "report"
   | "verify"
   | "stale";
 

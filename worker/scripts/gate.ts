@@ -729,18 +729,75 @@ async function browserRenders(
           if (/\/(tree|outline)(\?|$)/.test(new URL(r.url()).pathname)) asked++;
         };
         page.on("request", count);
-        // Folders read as names ("Computations"), with their count beside them.
+        // Folders read as names ("Computations"), with their count beside them. The chevron
+        // only opens and closes the folder in place (TEMPRA-123): the page stays where it is.
+        const files = sidebar.getByRole("navigation", { name: "Files" });
+        const chevron = files.getByRole("button", {
+          name: `${folderName(folder)} folder`,
+          exact: true,
+        });
+        const at = page.url();
+        await chevron.click();
+        await sidebar.locator(`a[data-path="${nested}"]`).waitFor({ timeout: 1000 });
+        if ((await chevron.getAttribute("aria-expanded")) !== "true") {
+          throw new Error("the chevron does not say the folder is open");
+        }
+        await chevron.click();
         await sidebar
-          .getByRole("button", { name: new RegExp(`^${literal(folderName(folder))}( \\d+)?$`) })
-          .click();
-        await sidebar.locator(`a[title="${nested}"]`).waitFor({ timeout: 1000 });
+          .locator(`a[data-path="${nested}"]`)
+          .waitFor({ state: "detached", timeout: 1000 });
+        if (page.url() !== at) throw new Error(`the chevron moved the page to ${page.url()}`);
+        // The folder's name opens its folder view and expands it, in place.
+        await markStay();
+        await files.getByRole("link", { name: folderName(folder), exact: true }).click();
+        await page.waitForURL(`${lib}/${enc(folder)}/`);
+        await main
+          .getByRole("heading", { level: 1, name: folderName(folder), exact: true })
+          .waitFor({ timeout: 15_000 });
+        await sidebar.locator(`a[data-path="${nested}"]`).waitFor({ timeout: 1000 });
+        if (!(await stayed())) throw new Error("the folder's name reloaded the page");
         page.off("request", count);
         if (asked > 0) throw new Error(`opening a folder made ${asked} request(s)`);
+        // Files come after the pages in each folder, with a file icon; at the root after the
+        // folders and the root pages.
+        const file = `${folder}/gate-tree-file.png`;
+        const put = await fetch(`${libApi}/files/${enc(file)}`, {
+          method: "PUT",
+          headers: { ...bearer, "Content-Type": "image/png", "X-Note": "gate: a file in the tree" },
+          body: greyPng(8, 8, 0x99),
+        });
+        if (!put.ok) throw new Error(`upload ${file}: ${put.status} ${await put.text()}`);
+        const fileRow = sidebar.locator(`.tree-row.file:has(a[data-path="${file}"])`);
+        await fileRow.waitFor({ timeout: 10_000 });
+        if ((await fileRow.locator("svg").count()) !== 1)
+          throw new Error("no icon on a file's row");
+        const misplaced = await page.evaluate<string[]>(`(() => {
+          const bad = [];
+          for (const ul of document.querySelectorAll('nav[aria-label="Files"] ul')) {
+            let rank = 0;
+            for (const li of ul.children) {
+              const row = li.querySelector(":scope > .tree-row");
+              if (!row) continue;
+              const r = row.classList.contains("dir") ? 0 : row.classList.contains("file") ? 2 : 1;
+              if (r < rank) bad.push(row.textContent);
+              rank = Math.max(rank, r);
+            }
+          }
+          return bad;
+        })()`);
+        if (misplaced.length > 0) {
+          throw new Error(`rows out of order (folders, pages, files): ${misplaced.join(", ")}`);
+        }
+        await agentDeletes(file);
+        await fileRow.waitFor({ state: "detached", timeout: 10_000 });
+        await page.goBack();
+        await page.waitForURL(`${lib}/`);
+        await home();
       }
-      await sidebar.locator(`a[title="${nested}"]`).click();
+      await sidebar.locator(`a[data-path="${nested}"]`).click();
       await page.waitForURL(`${lib}/${enc(nested)}`);
       await page.locator(".body .prose").waitFor({ timeout: 15_000 });
-      if ((await sidebar.locator(`a[aria-current="page"][title="${nested}"]`).count()) !== 1) {
+      if ((await sidebar.locator(`a[aria-current="page"][data-path="${nested}"]`).count()) !== 1) {
         throw new Error("the open file is not marked in the tree");
       }
       // ⋯ → History opens the History panel; Escape closes it.
@@ -775,7 +832,7 @@ async function browserRenders(
         });
         const before = await main.evaluate((el) => el.scrollTop);
         const title = await main.locator("h1").first().innerText();
-        const link = sidebar.locator(`a[title="${other}"]`);
+        const link = sidebar.locator(`a[data-path="${other}"]`);
         await link.hover();
         await page.waitForTimeout(1500); // the hover's prefetch lands in the cache
         await link.click();
@@ -853,7 +910,7 @@ async function browserRenders(
         body: "---\ntype: Note\ntitle: Gate live\ndescription: Written while the tree was open.\n---\nLive.\n",
       });
       if (!put.ok) throw new Error(`write: ${put.status}`);
-      const row = sidebar.locator('a[title="gate-live.md"]');
+      const row = sidebar.locator('a[data-path="gate-live.md"]');
       await row.waitFor({ timeout: 5000 });
       if ((await sidebar.locator('.tree-mark[title*="changed this just now"]').count()) === 0) {
         throw new Error("no activity mark on the agent's file");
@@ -871,7 +928,7 @@ async function browserRenders(
       });
       if (!moved.ok) throw new Error(`move: ${moved.status}`);
       await row.waitFor({ state: "detached", timeout: 5000 });
-      if (folder) await sidebar.locator(`a[title="${target}"]`).waitFor({ timeout: 5000 });
+      if (folder) await sidebar.locator(`a[data-path="${target}"]`).waitFor({ timeout: 5000 });
       // Not found (take 4, board 32): the old path says where the file moved, with Open, then
       // Home and Search (the quick switcher).
       b.expect404("gate-live.md");
@@ -886,7 +943,7 @@ async function browserRenders(
       await main.getByRole("link", { name: "Home", exact: true }).waitFor();
       if (shots) await page.screenshot({ path: `${shots}/not-found.png` });
       await main.getByRole("button", { name: "Search", exact: true }).click();
-      const dialog = page.getByRole("dialog", { name: "Open a file" });
+      const dialog = page.getByRole("dialog", { name: /^Search / });
       await dialog.waitFor({ timeout: 5000 });
       await page.keyboard.press("Escape");
       await dialog.waitFor({ state: "hidden", timeout: 5000 });
@@ -900,7 +957,7 @@ async function browserRenders(
         })
       ).json()) as { frontmatter?: { title?: string } };
       const word = String(meta.frontmatter?.title ?? "").split(/\s+/)[0] ?? "";
-      const dialog = page.getByRole("dialog", { name: "Open a file" });
+      const dialog = page.getByRole("dialog", { name: /^Search / });
       const box = dialog.getByRole("combobox");
       // It closes every way a person tries: Escape, the same keys, a click outside.
       const closes = async (how: string, close: () => Promise<void>) => {
@@ -1091,7 +1148,7 @@ async function browserRenders(
           // The drawer's search field opens the quick switcher.
           await menu.click();
           await sidebar.getByRole("button", { name: `Search ${libraryName}`, exact: true }).click();
-          const dialog = page.getByRole("dialog", { name: "Open a file" });
+          const dialog = page.getByRole("dialog", { name: /^Search / });
           await dialog.waitFor({ timeout: 5000 });
           await page.keyboard.press("Escape");
           await dialog.waitFor({ state: "hidden", timeout: 5000 });
@@ -1386,7 +1443,7 @@ async function browserRenders(
       if (ms > 3000) throw new Error(`the new-version glyph took ${ms} ms`);
       if (shots) await page.screenshot({ path: `${shots}/live.png` });
       // The open file prefetched again (a hover on its own row) must not hide the new version.
-      await page.locator(`.ws-sidebar a[title="${concept}"]`).hover();
+      await page.locator(`.ws-sidebar a[data-path="${concept}"]`).hover();
       await page.waitForTimeout(500);
       await newVersion().click();
       await page.getByRole("status").filter({ hasText: "changed this" }).waitFor();
@@ -2235,17 +2292,19 @@ async function browserRenders(
           if (n === 0) break;
           for (let i = n - 1; i >= 0; i--) await closed.nth(i).click();
         }
-        const files = sidebar.locator("a[title$='.md']");
-        const titles = await files.evaluateAll((els) => els.map((e) => e.getAttribute("title")));
+        const files = sidebar.locator("a[data-path$='.md']");
+        const titles = await files.evaluateAll((els) =>
+          els.map((e) => e.getAttribute("data-path")),
+        );
         let opened = 0;
         while (Date.now() - t0 < 60_000) {
           for (const title of titles) {
-            await sidebar.locator(`a[title="${title}"]`).hover();
+            await sidebar.locator(`a[data-path="${title}"]`).hover();
             await page.waitForTimeout(80);
           }
           for (const title of titles) {
             if (Date.now() - t0 >= 60_000) break;
-            await sidebar.locator(`a[title="${title}"]`).click();
+            await sidebar.locator(`a[data-path="${title}"]`).click();
             await page.locator(".body .prose").first().waitFor({ timeout: 15_000 });
             // Skimming: a glance at each (someone reading opens one every several seconds).
             await page.waitForTimeout(1500);
@@ -2609,12 +2668,12 @@ async function freshAccountConnects(): Promise<string[]> {
       await page.locator(".menu-list").getByRole("link", { name, exact: true }).click();
     };
     /**
-     * A library view: the work queue by its URL (the home's foot line links it once agents have
+     * A library view: For agents by its URL (the home's foot line links it once agents have
      * housekeeping); a settings tab from the settings' sidebar, reached through the switcher's
      * menu (take 4) unless the settings are already open.
      */
     const libraryLink = async (name: string) => {
-      if (name === "Work queue") {
+      if (name === "For agents") {
         await page.goto(`${lib}/-/work`);
         await page.waitForURL(`${lib}/-/work`);
         return;
@@ -2648,15 +2707,32 @@ async function freshAccountConnects(): Promise<string[]> {
       await accountLink("Account");
       await page.getByText("this device").waitFor({ timeout: 15_000 });
     });
+    // Off a library, Ctrl/Cmd+K searches the person's libraries (TEMPRA-127); Ctrl/Cmd+\ leaves
+    // the account's sidebar alone (only a library's own sidebar hides).
+    await step("account pages: Ctrl+K finds a library, Ctrl+\\ keeps the sidebar", async () => {
+      await page.keyboard.press("Control+\\");
+      await page.waitForTimeout(200);
+      if (!(await page.locator("section.ws-sidebar").isVisible())) {
+        throw new Error("Ctrl+\\ hid the account's sidebar");
+      }
+      await page.keyboard.press("Control+k");
+      const dialog = page.getByRole("dialog", { name: "Search libraries" });
+      const box = dialog.getByRole("combobox");
+      await box.waitFor({ timeout: 5000 });
+      await box.fill("notes");
+      await dialog.locator('[role="option"]').first().waitFor({ timeout: 5000 });
+      await box.press("Enter");
+      await page.waitForURL(`${lib}/`);
+    });
     for (const [tab, text] of [
-      ["Work queue", "Work queue"],
+      ["For agents", "For agents"],
       ["Import & export", "Nightly exports"],
       ["Recovery", "Past restores"],
     ] as const) {
       await step(`library tab ${tab}`, async () => {
         await page.goto(`${lib}/`);
         await libraryLink(tab);
-        // In the sheet: the phone's top bar (hidden here) names the page too.
+        // On the page: the phone's top bar (hidden here) names the page too.
         await page.locator(".ws-main").getByText(text).first().waitFor({ timeout: 15_000 });
       });
     }

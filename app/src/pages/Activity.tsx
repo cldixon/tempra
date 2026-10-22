@@ -27,7 +27,7 @@ import { useRole } from "../role";
 import { type Done, navigate } from "../router";
 import { plural, Status, useTitle } from "../ui";
 import type { ActivityFilters, Urls, Who } from "../urls";
-import { SheetPage } from "../Workspace";
+import { PageColumn } from "../Workspace";
 
 /** Requests per page, as the ledger pages them. */
 const PAGE = 30;
@@ -138,7 +138,7 @@ export function Activity(props: {
   }, [newest, urls]);
 
   return (
-    <SheetPage>
+    <PageColumn>
       <header className="view-head">
         <div className="view-head-main">
           <h1 className="view-title">Activity</h1>
@@ -221,7 +221,7 @@ export function Activity(props: {
           </Older>
         )}
       </Status>
-    </SheetPage>
+    </PageColumn>
   );
 }
 
