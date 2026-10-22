@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { api, useLoad } from "./api";
-import { day } from "./ui";
+import { clip, day } from "./ui";
+import { Urls } from "./urls";
 
 /*
  * The Inbox's items and count (TEMPRA-72; take 4, TEMPRA-116), shared by the bell and the Inbox
@@ -61,14 +62,26 @@ export const inboxChanged = (): void => {
   window.dispatchEvent(new Event(INBOX_EVENT));
 };
 
-/** Marks items read (these ids, or all of them), then tells every count to reload. */
-export function markRead(ids?: string[]): Promise<void> {
+/**
+ * Marks items read (these ids, or all of them, or all of one library's: `owner/slug`), then
+ * tells every count to reload.
+ */
+export function markRead(ids?: string[], library?: string | null): Promise<void> {
   return api("/api/v1/inbox/read", {
     method: "POST",
-    body: JSON.stringify(ids ? { ids } : {}),
+    body: JSON.stringify(markReadBody(ids, library)),
   })
     .then(inboxChanged)
     .catch(() => {});
+}
+
+/** What Mark all read asks for: these items, or all of one library's, or all of them. */
+export function markReadBody(
+  ids?: string[],
+  library?: string | null,
+): { ids?: string[]; library?: string } {
+  if (ids) return { ids };
+  return library ? { library } : {};
 }
 
 /** The unread count, for the bell and the sidebar's Inbox row: reloads when told it changed. */
@@ -94,9 +107,92 @@ export const libraryLabel = (i: Pick<InboxItem, "library" | "library_title">) =>
   i.library_title || (i.library.split("/").pop() ?? i.library);
 
 /** What the item is about: the page, or the library for an invitation or an access change. */
-export function itemTitle(i: InboxItem): string {
-  if (i.path) return i.title || pageName(i.path);
-  return i.library.replace("/", " / ");
+export function itemTitle(i: InboxItem, titles: PageTitles = {}): string {
+  if (i.path) return i.title || titles[`${i.library} ${i.path}`] || pageName(i.path);
+  return i.library_title || i.library.replace("/", " / ");
+}
+
+/** Pages' titles by "owner/slug path", for items the server names by path only (replies). */
+export type PageTitles = Record<string, string>;
+
+/**
+ * The titles of the pages items are on, where an item has none of its own (a reply or a
+ * mention carries only the path): read from each such library's outline, the index the tree
+ * loads (`GET …/outline`), so a row always names a page by its title.
+ */
+export function usePageTitles(items: InboxItem[] | null): PageTitles {
+  const want = [
+    ...new Set((items ?? []).filter((i) => i.path && !i.title).map((i) => i.library)),
+  ].sort();
+  const loaded = useLoad(`inbox titles ${want.join(" ")}`, async () => {
+    const out: PageTitles = {};
+    await Promise.all(
+      want.map(async (library) => {
+        const [owner = "", slug = ""] = library.split("/");
+        try {
+          const r = await api<{ files: { path: string; title?: string | null }[] }>(
+            new Urls(owner, slug).api("outline"),
+          );
+          for (const f of r.files) if (f.title) out[`${library} ${f.path}`] = f.title;
+        } catch {
+          // A library out of reach names its pages by path, as before.
+        }
+      }),
+    );
+    return out;
+  });
+  return loaded.state === "ready" ? loaded.data : {};
+}
+
+/** The library's open items (`GET /api/v1/inbox?library=`), for its home's For you here. */
+export function useLibraryInbox(library: string, limit = 20) {
+  const q = new URLSearchParams({ limit: String(limit), library });
+  const loaded = useLoad(`inbox ${q}`, () => api<InboxPage>(`/api/v1/inbox?${q}`));
+  const { reload } = loaded;
+  useEffect(() => {
+    window.addEventListener(INBOX_EVENT, reload);
+    window.addEventListener("focus", reload);
+    return () => {
+      window.removeEventListener(INBOX_EVENT, reload);
+      window.removeEventListener("focus", reload);
+    };
+  }, [reload]);
+  return loaded;
+}
+
+/** One thing for the person on a library's home, as a card: its kind, a title and a detail. */
+export interface Card {
+  key: string;
+  kind: string;
+  title: string;
+  detail: string | null;
+  href: string;
+}
+
+/**
+ * The home's cards from the library's open Inbox items (the same items the Inbox lists, so
+ * what is done there leaves the home too): one of each kind first (something said to the person,
+ * a page to verify, a page going stale), then more in that order, up to `max`.
+ */
+export function forYouCards(items: InboxItem[], titles: PageTitles = {}, max = 3): Card[] {
+  const card = (i: InboxItem): Card => {
+    const page = itemTitle(i, titles);
+    const said = i.kind === "reply" || i.kind === "mention" || i.kind === "thread";
+    return {
+      key: i.id,
+      kind: kindLabel(i),
+      title: said ? `${i.who} on ${page}` : page,
+      detail: said ? (i.excerpt ? clip(i.excerpt, 80) : null) : itemDetail(i),
+      href: itemHref(i),
+    };
+  };
+  const group = (i: InboxItem) =>
+    i.kind === "verify" ? 1 : i.kind === "stale" ? 2 : i.path ? 0 : 3;
+  const kinds: InboxItem[][] = [[], [], [], []];
+  for (const i of items) kinds[group(i)]?.push(i);
+  const firsts = kinds.flatMap((k) => k.slice(0, 1));
+  const rest = kinds.flatMap((k) => k.slice(1));
+  return [...firsts, ...rest].slice(0, max).map(card);
 }
 
 /** The kind, as the row's meta line says it. */
@@ -155,8 +251,11 @@ export function itemQuote(i: InboxItem): string | null {
 }
 
 /** The bell's one line: "Claude Code replied on Reader". */
-export function bellLine(i: InboxItem): { lead: string; on: string | null } {
-  const page = i.path ? itemTitle(i) : null;
+export function bellLine(
+  i: InboxItem,
+  titles: PageTitles = {},
+): { lead: string; on: string | null } {
+  const page = i.path ? itemTitle(i, titles) : null;
   switch (i.kind) {
     case "reply":
       return { lead: `${i.who} replied on`, on: page };

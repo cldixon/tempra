@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAgentNames } from "./agents";
 import { api } from "./api";
-import { type AgentChange, warmth } from "./changes";
+import { type AgentChange, isLive } from "./changes";
 import { Icon } from "./chrome";
 import { useFeed, useLastSeen } from "./live";
 import { prefetchFile } from "./prefetch";
@@ -112,8 +112,9 @@ export function topLevel(files: OutlineFile[]): { entry: OutlineFile; count: num
  * sequences; no bodies) arrives in one small request when the workspace opens, so opening a
  * folder never waits. A folder (named for people, with its count of concepts) opens and closes in
  * place; it is not a page. Open folders are remembered on this browser, the open file is revealed
- * and marked, and the change feed refreshes the index once per burst of writes. A dot marks a file
- * an agent changed (warm, then cooling) or that changed since the person last looked.
+ * and marked, and the change feed refreshes the index once per burst of writes. The change dot
+ * marks a file: pulsing while an agent writes it now, solid when it changed since the person last
+ * looked.
  */
 export function Tree(props: {
   urls: Urls;
@@ -272,21 +273,21 @@ export function Tree(props: {
   );
   const change = (e: Entry) => {
     const a = changes.get(e.path);
-    const warm = warmth(a, now);
-    if (a && warm) {
-      const by = actorName(a.actor, a.by);
-      const said = warm === "warm" ? `${by} changed this just now` : `${by} changed this lately`;
+    if (a && isLive(a, now)) {
+      const said = `${actorName(a.actor, a.by)} is editing this now`;
       return (
         <span className="tree-mark" title={said}>
-          <span className={`change-dot ${warm}`} aria-hidden="true" />
+          <span className="change-dot live" aria-hidden="true" />
           <span className="visually-hidden">{said}</span>
         </span>
       );
     }
-    if (seen !== null && typeof e.seq === "number" && e.seq > seen) {
+    // Solid past the seen cursor (an agent's write seen live counts before the index reloads).
+    const at = Math.max(typeof e.seq === "number" ? e.seq : 0, a?.seq ?? 0);
+    if (seen !== null && at > seen) {
       return (
         <span className="tree-mark" title="Changed since you last looked">
-          <span className="change-dot cool" aria-hidden="true" />
+          <span className="change-dot" aria-hidden="true" />
           <span className="visually-hidden">changed since you last looked</span>
         </span>
       );

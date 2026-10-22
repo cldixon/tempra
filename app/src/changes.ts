@@ -4,9 +4,10 @@ import { type FeedEvent, useFeed } from "./live";
 import type { Urls } from "./urls";
 
 /**
- * Agents' recent changes, as the change feed brings them (take 3, TEMPRA-106): the one colour the
- * app allows is a small dot for an agent's change, warm while it is fresh and cooling to grey as
- * it ages. The tree marks each file, the sidebar marks Activity, the byline its author.
+ * Agents' recent changes, as the change feed brings them (take 4, tempra-dev: app/workspace). The
+ * one colour the app allows is the change dot, in two states: solid for changed since the person's
+ * seen cursor, pulsing for an agent writing now (a write on the feed within the last minute). The
+ * tree marks each file, the sidebar marks Activity, the byline its author.
  */
 
 /** An agent's latest change to one path, seen live. */
@@ -18,18 +19,12 @@ export interface AgentChange {
   at: number;
 }
 
-/** How long a change stays warm (the coloured dot). */
-export const WARM_MS = 5 * 60_000;
-/** How long it shows at all (a grey dot after it cools). */
-export const SHOWN_MS = 60 * 60_000;
+/** How long an agent's write counts as writing now (the pulsing dot). */
+export const LIVE_MS = 60_000;
 
-/** How a change reads now: warm, cooled, or gone. */
-export type Warmth = "warm" | "cool" | null;
-
-export function warmth(change: Pick<AgentChange, "at"> | undefined, now: number): Warmth {
-  if (!change) return null;
-  const age = now - change.at;
-  return age < WARM_MS ? "warm" : age < SHOWN_MS ? "cool" : null;
+/** Whether a change is an agent writing now: it arrived within the last minute. */
+export function isLive(change: Pick<AgentChange, "at"> | undefined, now: number): boolean {
+  return change !== undefined && now - change.at < LIVE_MS;
 }
 
 /** Whether an event is an agent's change to a file (not a person's, not a comment). */
@@ -38,7 +33,7 @@ export const isAgentChange = (e: FeedEvent) =>
 
 /**
  * Agents' changes in this library since the workspace opened, by path, and the clock they are
- * read against (it ticks so dots cool without another event).
+ * read against (it moves on when a pulsing dot is due to settle, without another event).
  */
 export function useAgentChanges(urls: Urls, from: number | null) {
   const [changes, setChanges] = useState<Map<string, AgentChange>>(new Map());
@@ -60,10 +55,14 @@ export function useAgentChanges(urls: Urls, from: number | null) {
     // The ledger went back (a restore): what was marked may no longer be there.
     () => setChanges(new Map()),
   );
+  // The next pulsing dot to settle moves the clock on; nothing ticks while none pulses.
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 30_000);
-    return () => clearInterval(t);
-  }, []);
+    let next = Number.POSITIVE_INFINITY;
+    for (const c of changes.values()) if (isLive(c, now)) next = Math.min(next, c.at + LIVE_MS);
+    if (next === Number.POSITIVE_INFINITY) return;
+    const t = setTimeout(() => setNow(Date.now()), Math.max(0, next - Date.now()) + 50);
+    return () => clearTimeout(t);
+  }, [changes, now]);
   // The latest change of all, for the sidebar's Activity row.
   const latest = useMemo(() => {
     let last: AgentChange | undefined;

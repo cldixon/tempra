@@ -1,17 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { actorView } from "./src/agents";
+import { forYouCards, type InboxItem, type InboxPage } from "./src/inbox";
 import type { Needs } from "./src/needs";
 import { fateOf, typeName } from "./src/pages/File";
 import { FolderBody, type FolderView } from "./src/pages/Folder";
-import {
-  EmptyLibrary,
-  ForYou,
-  forYouCards,
-  HomeFoot,
-  HomeSections,
-  inboxHref,
-} from "./src/pages/Home";
+import { EmptyLibrary, ForYou, HomeFoot, HomeSections, inboxHref } from "./src/pages/Home";
 import { type OutlineFile, topLevel } from "./src/Tree";
 import { Urls } from "./src/urls";
 import { type Place, placeName } from "./src/Workspace";
@@ -106,7 +100,7 @@ describe("a folder (take 4)", () => {
     const changed = renderToStaticMarkup(
       <FolderBody urls={urls} dir="decisions" view={folder} seen={20} />,
     );
-    expect(changed).toContain('class="change-dot warm"');
+    expect(changed).toContain('class="change-dot"');
     expect(changed).not.toContain("is editing");
   });
 
@@ -146,7 +140,7 @@ describe("the library's home (take 4)", () => {
     expect(html).toContain('<span class="home-section-name">Decisions</span>');
     expect(html).toContain('<span class="home-section-count">2</span>');
     // Only decisions changed after the cursor (b.md at seq 30).
-    expect(html.match(/change-dot warm/g)?.length).toBe(1);
+    expect(html.match(/class="change-dot"/g)?.length).toBe(1);
     expect(html.indexOf("change-dot")).toBeGreaterThan(decisions);
     expect(
       renderToStaticMarkup(<HomeSections urls={urls} files={files} seen={null} />),
@@ -167,72 +161,81 @@ describe("the library's home (take 4)", () => {
     expect(renderToStaticMarkup(<HomeSections urls={urls} files={[]} seen={null} />)).toBe("");
   });
 
-  const reply = {
-    thread: "t1",
+  const item = (over: Partial<InboxItem>): InboxItem => ({
+    id: "i1",
+    kind: "reply",
+    library: "cl_dixon/tempra-dev",
+    library_title: "Tempra",
     path: "app/reader.md",
-    title: "Reader",
-    quote: null,
-    last: {
-      actor: "claude-code/dev",
-      by: { person: "cl_dixon", agent: "a1" },
-      body: "Atoms count as one character.",
-      ts: hour(1),
-      seq: 31,
-    },
-  };
+    thread: "t1",
+    title: null,
+    actor: "claude-code/dev",
+    who: "Claude Code",
+    agent: true,
+    excerpt: "Atoms count as one character.",
+    count: null,
+    due: null,
+    invitation: null,
+    created: hour(1),
+    read_at: null,
+    done_at: null,
+    actions: ["reply", "resolve"],
+    href: "/cl_dixon/tempra-dev/app/reader.md#comments",
+    ...over,
+  });
+  const page = (items: InboxItem[], open = items.length): InboxPage => ({
+    items,
+    next: null,
+    unread: items.length,
+    open,
+  });
 
-  test("for you here: one card of each kind first, up to three, and All n in Inbox", () => {
-    const n = needs({
-      replies: [reply, { ...reply, thread: "t2" }],
-      verify: {
-        total: 2,
-        items: [
-          {
-            path: "app/diagrams.md",
-            title: "Diagrams",
-            seq: 20,
-            ts: hour(2),
-            actor: "claude-code/dev",
-            by: null,
-            verified: { actor: me, seq: 10, ts: hour(30) },
-            changes: 2,
-          },
-          {
-            path: "app/reader.md",
-            title: "Reader",
-            seq: 21,
-            ts: hour(3),
-            actor: "claude-code/dev",
-            by: null,
-            verified: { actor: me, seq: 10, ts: hour(30) },
-            changes: 1,
-          },
-        ],
-        next_offset: null,
-      },
-      stale: [
-        {
-          path: "v2/limits.md",
-          title: "Limits",
-          stale_after: "2026-10-24T00:00:00Z",
-          stale: "stale_soon",
-        },
-      ],
-      count: 5,
-    });
-    const cards = forYouCards(urls, n, view);
+  test("for you here: the library's open Inbox items, one of each kind first, up to three", () => {
+    const items = [
+      item({}),
+      item({ id: "i2", thread: "t2" }),
+      item({
+        id: "i3",
+        kind: "verify",
+        path: "app/diagrams.md",
+        title: "Diagrams",
+        thread: null,
+        count: 2,
+        actions: ["review", "dismiss"],
+        href: "/cl_dixon/tempra-dev/app/diagrams.md?review=1",
+      }),
+      item({
+        id: "i4",
+        kind: "stale",
+        path: "v2/limits.md",
+        title: "Limits",
+        thread: null,
+        due: "2026-12-24T00:00:00Z",
+        actions: ["open", "dismiss"],
+        href: "/cl_dixon/tempra-dev/v2/limits.md",
+      }),
+    ];
+    // A reply names its page by path only: the title comes from the tree's outline.
+    const titles = { "cl_dixon/tempra-dev app/reader.md": "Reader" };
+    const cards = forYouCards(items, titles);
     expect(cards.map((c) => c.kind)).toEqual(["Reply", "To verify", "Going stale"]);
     expect(cards[0]?.title).toBe("Claude Code on Reader");
-    expect(cards[0]?.href).toBe(urls.thread("app/reader.md", "t1"));
-    expect(cards[1]?.title).toBe("2 changed pages");
-    expect(cards[1]?.detail).toBe("Diagrams and Reader");
-    expect(cards[2]?.detail).toBe("Oct 24");
-    const html = renderToStaticMarkup(<ForYou urls={urls} needs={n} view={view} />);
+    expect(cards[0]?.detail).toBe("Atoms count as one character.");
+    expect(cards[0]?.href).toBe("/cl_dixon/tempra-dev/app/reader.md#thread-t1");
+    expect(cards[1]?.title).toBe("Diagrams");
+    expect(cards[1]?.detail).toBe("2 edits by Claude Code since you verified");
+    expect(cards[2]?.detail).toContain("Dec 24");
+    // Without the outline, the page's name stands in, never the raw path.
+    expect(forYouCards([item({})])[0]?.title).toBe("Claude Code on reader");
+    const html = renderToStaticMarkup(
+      <ForYou urls={urls} inbox={page(items, 5)} titles={titles} />,
+    );
     expect(html).toContain("For you here");
     expect(html).toContain(`href="${inboxHref(urls)}"`);
     expect(inboxHref(urls)).toBe("/inbox?library=cl_dixon/tempra-dev");
     expect(html).toContain("All 5 in Inbox");
-    expect(renderToStaticMarkup(<ForYou urls={urls} needs={needs()} view={view} />)).toBe("");
+    // Done in the Inbox, gone from the home: nothing open, nothing shown.
+    expect(renderToStaticMarkup(<ForYou urls={urls} inbox={page([])} />)).toBe("");
   });
 
   test("the foot: the agents' housekeeping, to their work queue; absent when none", () => {

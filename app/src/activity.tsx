@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
 import type { ActedBy, ActorView } from "./agents";
 import { api, useLoad } from "./api";
-import { warmth } from "./changes";
 import { Avatar } from "./chrome";
-import { ago, plural, who } from "./ui";
+import { ago, plural } from "./ui";
 import { baseName, folderName, type Urls } from "./urls";
 
 /*
@@ -592,8 +591,8 @@ function TouchedList({ touched, urls }: { touched: Touched[]; urls: Urls }) {
 
 /**
  * One Activity entry: who (avatar, name, whom an agent acts for), what they did, the note, the
- * concepts touched (unless compact), when, and a dot when it is new since the person looked:
- * warm while an agent's change is fresh, grey after (the one colour).
+ * concepts touched (unless compact), when, and the solid change dot when it is new since the
+ * person looked.
  */
 export function EntryRow(props: {
   entry: Entry;
@@ -604,16 +603,12 @@ export function EntryRow(props: {
   compact?: boolean;
 }) {
   const { entry: e, urls, actor, now, isNew, compact = false } = props;
-  // Activity's entries (take 4): the solid dot, new since the person looked. The home's compact
-  // entries keep take 3's warmth until the home is redrawn (TEMPRA-117).
-  const warm =
-    isNew && (!compact || (actor.agent && warmth({ at: Date.parse(e.ts) }, now) === "warm"));
   // A compact entry that names its changes by count lists their titles on a second line.
   const titles = !e.named && compact ? e.touched.slice(0, 3).map((t) => t.title) : [];
   const classes = ["entry", compact ? "compact" : "", isNew ? "new" : ""].filter(Boolean);
   return (
     <article className={classes.join(" ")}>
-      <Avatar name={actor.agent ? actor.name : who(e.actor)} agent={actor.agent} />
+      <Avatar name={actor.mark} agent={actor.agent} />
       <div className="entry-body">
         <p className="entry-line">
           <b className="entry-who">{actor.name}</b>
@@ -635,7 +630,7 @@ export function EntryRow(props: {
       <span className="entry-side">
         <time dateTime={e.ts}>{entryTime(e.ts, now, compact)}</time>
         {isNew && (
-          <span className={warm ? "change-dot warm" : "change-dot"}>
+          <span className="change-dot">
             <span className="visually-hidden">New since you looked</span>
           </span>
         )}
@@ -657,7 +652,7 @@ export function LiveEntry(props: {
   const { write: w, urls, actor } = props;
   return (
     <article className="entry live" aria-live="polite">
-      <Avatar name={actor.name} agent={actor.agent} />
+      <Avatar name={actor.mark} agent={actor.agent} />
       <div className="entry-body">
         <p className="entry-line">
           <b className="entry-who">{actor.name}</b>

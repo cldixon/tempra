@@ -282,6 +282,75 @@ describe("the inbox (TEMPRA-72)", () => {
     ]);
   });
 
+  // The Inbox page's calls (TEMPRA-130): Mark all read on a filtered list, Accept from a row,
+  // and the library's open items, which its home's For you here draws.
+  test("Mark all read on one library's items leaves another library's unread", async () => {
+    const { s, friend } = await shared();
+    // The friend's thread on the owner's library, answered by the owner: a reply in owner/demo.
+    await write(s.app, "a.md");
+    const id = await open(friend.app, "a.md", "A question");
+    await call(s.app, `${API}/comments/${id}`, "POST", { body: "An answer" });
+    // The owner opens a thread on the friend's own library: a new thread in friend/demo.
+    await s.accounts.share(friend.lib.id, OWNER.id, "read", friend.user.id);
+    const theirs = "/api/v1/libraries/friend/demo";
+    const put = await friend.app.request(`${theirs}/files/b.md`, {
+      method: "PUT",
+      headers: { Origin: ORIGIN, "Content-Type": "text/markdown", "X-Note": "test" },
+      body: doc("b"),
+    });
+    expect(put.status).toBeLessThan(300);
+    expect(
+      (await call(s.app, `${theirs}/comments`, "POST", { path: "b.md", body: "Hello" })).status,
+    ).toBe(201);
+    const before = (await inbox(friend.app)).items;
+    expect(before.map((i) => i.kind).sort()).toEqual(["reply", "thread"]);
+
+    const r = await call(friend.app, "/api/v1/inbox/read", "POST", { library: "owner/demo" });
+    expect((await r.json()) as unknown).toEqual({ read: 1 });
+    const after = await inbox(friend.app);
+    const byKind = Object.fromEntries(after.items.map((i) => [i.kind, i.read_at]));
+    expect(byKind.reply).not.toBeNull();
+    expect(byKind.thread).toBeNull();
+    expect(after.unread).toBe(1);
+  });
+
+  test("accepting from the Inbox row adds the library; a dismissed item leaves the library's list", async () => {
+    const s = setup();
+    const friend = await s.stranger("friend@example.com");
+    await call(s.app, `${API}/invitations`, "POST", { to: "@friend", role: "write" });
+    const row = (await (await call(friend.app, "/api/v1/inbox")).json()) as {
+      items: { kind: string; invitation: string | null; actions: string[] }[];
+    };
+    const item = row.items.find((i) => i.kind === "invitation");
+    expect(item?.actions).toEqual(["accept", "decline"]);
+    expect(
+      (await call(friend.app, `/api/v1/invitations/${item?.invitation}/accept`, "POST")).status,
+    ).toBe(200);
+    // The switcher's list (GET /api/v1/libraries) now has it, with the role.
+    const libs = (await (await call(friend.app, "/api/v1/libraries")).json()) as {
+      libraries: { owner: string; slug: string; role?: string }[];
+    };
+    expect(libs.libraries).toContainEqual(
+      expect.objectContaining({ owner: "owner", slug: "demo", role: "write" }),
+    );
+    // Done in the Inbox, gone from the library's open items (the home's For you here).
+    await write(s.app, "c.md");
+    await open(s.app, "c.md", "On c");
+    await call(friend.app, `${API}/comments`, "POST", { path: "c.md", body: "@owner look" });
+    const mine = async () =>
+      (await (await call(s.app, "/api/v1/inbox?library=owner/demo")).json()) as {
+        items: { id: string }[];
+        open: number;
+      };
+    const listed = await mine();
+    expect(listed.items.length).toBeGreaterThan(0);
+    const first = listed.items[0]?.id;
+    expect((await call(s.app, `/api/v1/inbox/${first}/done`, "POST")).status).toBe(200);
+    const left = await mine();
+    expect(left.items.map((i) => i.id)).not.toContain(first);
+    expect(left.open).toBe(listed.open - 1);
+  });
+
   test("the tally: changes by others since the cursor, and items for you", async () => {
     const { s, friend, agent } = await shared();
     await write(s.app, "a.md");

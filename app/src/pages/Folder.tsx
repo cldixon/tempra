@@ -173,10 +173,7 @@ function ConceptRow(props: {
                 className="folder-dot"
                 title={writing ? `${writing} is editing` : "Changed since you last looked"}
               >
-                <span
-                  className={writing ? "change-dot live" : "change-dot warm"}
-                  aria-hidden="true"
-                />
+                <span className={writing ? "change-dot live" : "change-dot"} aria-hidden="true" />
                 <span className="visually-hidden">
                   {writing ? "being written now" : "changed since you last looked"}
                 </span>

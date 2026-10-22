@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useAgentNames } from "../agents";
 import { Icon, Menu } from "../chrome";
+import { composing } from "../comments/composing";
 import { type FeedEvent, useFeed } from "../live";
 import { useAgo } from "../ui";
 import { dirOf, type Urls } from "../urls";
@@ -9,7 +10,8 @@ import { CONTENT_OPS, type FileData } from "./data";
 /*
  * Live (tempra-dev: app/live): someone else's change to the open file shows as a pulsing glyph
  * beside the page's controls, and the new version swaps in by itself only while the reader is
- * idle. A move or a delete is a notice in the sheet instead. Pinned versions stay put.
+ * idle and not writing a comment. A move or a delete is a notice instead. Pinned versions stay
+ * put.
  */
 
 /**
@@ -68,8 +70,9 @@ export interface Live {
 }
 
 /**
- * True once the person has not scrolled, typed, clicked or selected text for `ms`: the moment a
- * new version may replace what they are reading without pulling it from under them.
+ * True once the person has not scrolled, typed, clicked or selected text for `ms`, and is not
+ * writing a comment (a draft, a comment or a reply with text): the moment a new version may
+ * replace what they are reading without pulling it from under them.
  */
 export function useIdle(ms: number): boolean {
   const [idle, setIdle] = useState(false);
@@ -83,7 +86,7 @@ export function useIdle(ms: number): boolean {
     for (const k of kinds) document.addEventListener(k, busy, { passive: true, capture: true });
     const timer = setInterval(() => {
       const selecting = !(document.getSelection()?.isCollapsed ?? true);
-      setIdle(!selecting && Date.now() - last >= ms);
+      setIdle(!selecting && !composing() && Date.now() - last >= ms);
     }, 1000);
     return () => {
       clearInterval(timer);
@@ -93,7 +96,7 @@ export function useIdle(ms: number): boolean {
   return idle;
 }
 
-/** "Claude for @ann changed this 4 s ago, seq 41: the note." */
+/** "Claude for @ann changed this 4 s ago: the note." */
 function changeLine(e: FeedEvent, by: string, since: string): string {
   const what =
     e.op === "delete"
@@ -103,7 +106,7 @@ function changeLine(e: FeedEvent, by: string, since: string): string {
         : e.op === "verify"
           ? "verified this"
           : "changed this";
-  return `${by} ${what} ${since} ago, seq ${e.seq}${e.note ? `: ${e.note}` : ""}.`;
+  return `${by} ${what} ${since} ago${e.note ? `: ${e.note}` : ""}.`;
 }
 
 /**

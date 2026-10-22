@@ -164,7 +164,7 @@ function Facts({ concept: c }: { concept: Concept }) {
   rows.push([
     "Sources",
     sources > 0 ? (
-      <a key="s" href="#sources">
+      <a key="s" href="#doc-sources">
         {plural(sources, "source")}
       </a>
     ) : (

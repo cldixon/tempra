@@ -2,16 +2,17 @@ import { type FormEvent, useState } from "react";
 import { ApiError, api } from "../api";
 import type { Compare } from "../router";
 import { navigate } from "../router";
-import { day, recently } from "../ui";
+import { day } from "../ui";
 import { enc, type Urls } from "../urls";
 import type { Namer } from "./Byline";
 import { actedBy, type Concept, type Standing } from "./data";
+import { versionTime } from "./History";
 
 /**
  * The slim bar over the text while it shows changes (tempra-dev: app/reader, Review mode, The
  * panels): in review mode, what the diff is against, a note and Verify this version (not for a
- * read member); against a version chosen in History, "v16 · note · who · when", a way to read
- * it as it was (`?at=`), and Back to latest.
+ * read member); on a version chosen in History, "v16 · note · who · when" (the version on screen,
+ * whose changes from the one before are drawn) and Back to latest.
  */
 export function ReviewBar(props: {
   urls: Urls;
@@ -26,27 +27,30 @@ export function ReviewBar(props: {
   const { urls, concept: c, compare, standing: s, name } = props;
   const plain = urls.pinned(undefined).file(c.path);
   if (compare.kind === "since") {
-    const version = s.versions.find((v) => v.event.seq === compare.seq);
-    const label = version ? `v${version.n}` : `seq ${compare.seq}`;
-    const by = version ? name(version.event.actor, actedBy(version.event)).name : null;
+    // The version on screen, and what its changes are drawn from: the version before it, from
+    // History; any other base says so.
+    const version = s.current;
+    const i = version ? s.versions.indexOf(version) : -1;
+    const base = s.versions.find((v) => v.event.seq === compare.seq);
+    const fromBefore = i > 0 && s.versions[i - 1] === base;
+    const by = version ? name(version.event.actor, actedBy(version.event)) : null;
     const note = typeof version?.event.meta?.note === "string" ? version.event.meta.note : "";
     return (
       <section className="review-bar" aria-label="Changes">
         <span className="review-what">
-          <span className="version-n">{label}</span>
+          {version && <span className="version-n">v{version.n}</span>}
           {note && <span className="review-note"> {note}</span>}
           {by && version && (
             <span className="muted">
               {" "}
-              · {by} · {recently(version.event.ts, Date.now())}
+              · {by.name}
+              {by.for && ` for ${by.for}`} · {versionTime(version.event.ts, Date.now())}
             </span>
           )}
+          {!fromBefore && base && <span className="muted"> · changes since v{base.n}</span>}
         </span>
         {props.error && <span className="warn">{props.error}</span>}
         <span className="review-actions">
-          <a href={urls.pinned(compare.seq).file(c.path)} title="Read this version as it was">
-            Read {label}
-          </a>
           <a className="button" href={plain}>
             Back to latest
           </a>

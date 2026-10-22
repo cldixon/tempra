@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { threadElementId } from "../concept/Panel";
 import type { Urls } from "../urls";
 import { type Draft, type Placed, panelOrder } from "./data";
 import { NewComment, ThreadView } from "./Thread";
@@ -46,7 +47,7 @@ export function CommentsList(props: {
   // biome-ignore lint/correctness/useExhaustiveDependencies: `placed` changes as threads load.
   useEffect(() => {
     if (!active || shown.current === active) return;
-    const el = list.current?.querySelector(`[id="thread-${CSS.escape(active)}"]`);
+    const el = list.current?.querySelector(`[id="${CSS.escape(threadElementId(active))}"]`);
     if (!el) return;
     shown.current = active;
     el.scrollIntoView({ block: "nearest" });
