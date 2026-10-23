@@ -3,7 +3,6 @@ import { createRoot } from "react-dom/client";
 import { Account, Agents, Invitations, Notifications, Welcome } from "./pages/Account";
 import { Activity } from "./pages/Activity";
 import { File } from "./pages/File";
-import { Folder } from "./pages/Folder";
 import { Home } from "./pages/Home";
 import { Inbox } from "./pages/Inbox";
 import { Libraries } from "./pages/Libraries";
@@ -29,6 +28,16 @@ const OWN_COLUMN = new Set(["file", "directory", "activity"]);
 /** A page that moved (`-/needs`, into the Inbox): the URL is replaced, as the server's 308 does. */
 function Redirect({ to }: { to: string }) {
   useEffect(() => navigate(to, { replace: true }), [to]);
+  return null;
+}
+
+/**
+ * A folder's address (TEMPRA-138; tempra-dev: decisions/folders-are-not-pages): a folder is a
+ * group in the tree, not a page, so its address opens the home. The workspace hands the folder
+ * to the tree (`place.dir`), which opens it and scrolls to it, and the address becomes the home's.
+ */
+function RevealFolder({ urls }: { urls: Urls }) {
+  useEffect(() => navigate(urls.pinned(undefined).tree(""), { replace: true }), [urls]);
   return null;
 }
 
@@ -109,7 +118,7 @@ function App() {
     library = { urls: urlsFor(route.owner, route.slug, undefined), place };
     switch (route.page) {
       case "directory":
-        page = route.dir === "" ? <Home urls={urls} /> : <Folder urls={urls} dir={route.dir} />;
+        page = route.dir === "" ? <Home urls={urls} /> : <RevealFolder urls={urls} />;
         break;
       case "activity":
         page = <Activity urls={urls} actor={actor} filters={route.filters} done={route.done} />;

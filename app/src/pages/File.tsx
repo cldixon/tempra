@@ -92,7 +92,7 @@ export function File(props: {
   return (
     <>
       <PageBar>
-        <Crumbs urls={urls} path={path} file />
+        <Crumbs path={path} />
       </PageBar>
       <PageColumn wide={attachment !== null}>
         {notice && <div className="notice">{notice}</div>}
@@ -308,7 +308,7 @@ export function NotFound({ urls, path }: { urls: Urls; path: string }) {
   return (
     <>
       <PageBar>
-        <Crumbs urls={urls} path={path} file />
+        <Crumbs path={path} />
       </PageBar>
       <PageColumn>
         <div className="not-found">

@@ -299,7 +299,7 @@ export function ConceptPage(props: {
           </>
         }
       >
-        <Crumbs urls={urls} path={c.path} file title={title}>
+        <Crumbs path={c.path} title={title}>
           {c.stale && <span className="crumb-flag">stale</span>}
           {status && status !== "stable" && <span className="crumb-flag">{status}</span>}
         </Crumbs>
@@ -338,7 +338,7 @@ export function ConceptPage(props: {
                 {folders.map((f, i) => (
                   <span key={f}>
                     {i > 0 && <span aria-hidden="true"> / </span>}
-                    <a href={urls.tree(f)}>{folderName(f)}</a>
+                    {folderName(f)}
                   </span>
                 ))}
                 {c.stale && <span className="crumb-flag">stale</span>}

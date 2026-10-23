@@ -241,6 +241,9 @@ export function useLocation(): URL {
     };
     window.addEventListener(NAVIGATE, update);
     window.addEventListener("popstate", back);
+    // A page's effect may navigate before this one listens (a redirect on a full load: children's
+    // effects run first), so catch up with where the address is now.
+    setUrl((u) => (u.href === location.href ? u : new URL(location.href)));
     return () => {
       window.removeEventListener(NAVIGATE, update);
       window.removeEventListener("popstate", back);

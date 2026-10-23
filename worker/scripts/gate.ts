@@ -564,10 +564,10 @@ function greyPng(width: number, height: number, shade: number): Uint8Array {
 
 /**
  * The app in a real browser, signed in as the seeded user (layout take 4, TEMPRA-113 to 118):
- * the library's home (its sections, the agents' line, For you here), the workspace (the tree,
+ * the library's home (no sections, the agents' line, For you here), the workspace (the tree,
  * the quick switcher, the hidden sidebar; at phone width the top bar naming the page, the
  * drawer with the switcher, search, the views, the tree, Settings and the Inbox, the home
- * stacked, a settings page's drawer with its tabs), a folder's view, Not found for a moved
+ * stacked, a settings page's drawer with its tabs), a folder's address revealing it, Not found for a moved
  * path, an attachment's page, every concept in the reader (drawn from the stored
  * tree, with no Edit, a footnote card on hover), the concept's panels (Comments, History,
  * Properties: opened from the top bar, closed by ×, Escape and the control, the contents back,
@@ -638,67 +638,33 @@ async function browserRenders(
     const folder = nested.split("/").slice(0, -1).join("/");
     const sidebar = page.locator("section.ws-sidebar");
     const lib = `${base}/${owner}/${slug}`;
-    /** The home's Sections (take 4, TEMPRA-117): a row per top-level folder, with its count. */
-    const sections = main.getByRole("region", { name: "Sections" });
     /** The phone's top bar names where the person is (take 4, boards 33 and 36). */
     const phoneNamed = (name: string) =>
       sheetBar
         .locator(".ws-topbar-place")
         .filter({ hasText: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`) })
         .waitFor({ timeout: 10_000 });
-    await step(
-      "the library's root is its home: sections with counts, the agents' line",
-      async () => {
-        await home();
-        await sections.getByRole("heading", { level: 2, name: "Sections" }).waitFor();
-        const tops = [
-          ...new Set(concepts.filter((c) => c.includes("/")).map((c) => c.split("/")[0] ?? "")),
-        ];
-        const rows = sections.locator("a.home-section-row");
-        await rows.first().waitFor({ timeout: 15_000 });
-        // (A folder holding only attachments is a section too.)
-        if ((await rows.count()) < tops.length) {
-          throw new Error(`${await rows.count()} sections for ${tops.length} top-level folders`);
+    await step("the library's root is its home: no sections, the agents' line", async () => {
+      await home();
+      // No sections: the tree beside it lists the folders (TEMPRA-138).
+      await main.locator(".home-section").first().waitFor({ timeout: 15_000 });
+      if ((await main.getByRole("heading", { level: 2, name: "Sections" }).count()) > 0) {
+        throw new Error("the home still lists sections");
+      }
+      // The foot: the agents' housekeeping, linking the work queue, when there is any.
+      const { housekeeping } = (await (
+        await apiAs(devCookie, `/api/v1/libraries/${owner}/${slug}/needs`)
+      ).json()) as { housekeeping: { total: number } };
+      if (housekeeping.total > 0) {
+        const foot = main.locator(`.home-foot a[href="/${owner}/${slug}/-/work"]`);
+        await foot.waitFor({ timeout: 10_000 });
+        const text = await foot.innerText();
+        if (!text.includes(`${housekeeping.total} housekeeping item`)) {
+          throw new Error(`the foot line reads "${text}" for ${housekeeping.total} items`);
         }
-        for (const t of tops) {
-          const n = concepts.filter((c) => c.startsWith(`${t}/`)).length;
-          const count = await sections
-            .locator(`a.home-section-row[href="/${owner}/${slug}/${enc(t)}/"] .home-section-count`)
-            .innerText();
-          if (Number(count) !== n) throw new Error(`section ${t} counts ${count}, not ${n}`);
-        }
-        // The foot: the agents' housekeeping, linking the work queue, when there is any.
-        const { housekeeping } = (await (
-          await apiAs(devCookie, `/api/v1/libraries/${owner}/${slug}/needs`)
-        ).json()) as { housekeeping: { total: number } };
-        if (housekeeping.total > 0) {
-          const foot = main.locator(`.home-foot a[href="/${owner}/${slug}/-/work"]`);
-          await foot.waitFor({ timeout: 10_000 });
-          const text = await foot.innerText();
-          if (!text.includes(`${housekeeping.total} housekeeping item`)) {
-            throw new Error(`the foot line reads "${text}" for ${housekeeping.total} items`);
-          }
-        }
-        if (shots) await page.screenshot({ path: `${shots}/home.png` });
-        // A section opens its folder view, in place: one other than the folder the next steps
-        // open in the tree (opening a folder's view reveals it there, which they would toggle).
-        const top = tops.find((t) => t !== folder.split("/")[0]);
-        if (top) {
-          await markStay();
-          await sections
-            .locator(`a.home-section-row[href="/${owner}/${slug}/${enc(top)}/"]`)
-            .click();
-          await page.waitForURL(`${lib}/${enc(top)}/`);
-          await main
-            .getByRole("heading", { level: 1, name: folderName(top), exact: true })
-            .waitFor({ timeout: 15_000 });
-          if (!(await stayed())) throw new Error("a section reloaded the page");
-          await page.goBack();
-          await page.waitForURL(`${lib}/`);
-          await home();
-        }
-      },
-    );
+      }
+      if (shots) await page.screenshot({ path: `${shots}/home.png` });
+    });
     const bearer = { Authorization: `Bearer ${token}` };
     const libApi = `${base}/api/v1/libraries/${owner}/${slug}`;
     /** An agent deletes a file the gate wrote (a delete names the version it removes). */
@@ -723,33 +689,28 @@ async function browserRenders(
           if (/\/(tree|outline)(\?|$)/.test(new URL(r.url()).pathname)) asked++;
         };
         page.on("request", count);
-        // Folders read as names ("Computations"), with their count beside them. The chevron
-        // only opens and closes the folder in place (TEMPRA-123): the page stays where it is.
+        // Folders read as names ("Computations"), with their count beside them. A folder is a
+        // group, not a page (TEMPRA-138): its whole row opens and closes it, in place.
         const files = sidebar.getByRole("navigation", { name: "Files" });
-        const chevron = files.getByRole("button", {
-          name: `${folderName(folder)} folder`,
-          exact: true,
-        });
+        const row = files.locator(`button.tree-name[title="${folderName(folder)}"]`).first();
         const at = page.url();
-        await chevron.click();
-        await sidebar.locator(`a[data-path="${nested}"]`).waitFor({ timeout: 1000 });
-        if ((await chevron.getAttribute("aria-expanded")) !== "true") {
-          throw new Error("the chevron does not say the folder is open");
-        }
-        await chevron.click();
+        const open = (await row.getAttribute("aria-expanded")) === "true";
+        if (open) await row.click();
         await sidebar
           .locator(`a[data-path="${nested}"]`)
           .waitFor({ state: "detached", timeout: 1000 });
-        if (page.url() !== at) throw new Error(`the chevron moved the page to ${page.url()}`);
-        // The folder's name opens its folder view and expands it, in place.
         await markStay();
-        await files.getByRole("link", { name: folderName(folder), exact: true }).click();
-        await page.waitForURL(`${lib}/${enc(folder)}/`);
-        await main
-          .getByRole("heading", { level: 1, name: folderName(folder), exact: true })
-          .waitFor({ timeout: 15_000 });
+        await row.click();
         await sidebar.locator(`a[data-path="${nested}"]`).waitFor({ timeout: 1000 });
-        if (!(await stayed())) throw new Error("the folder's name reloaded the page");
+        if ((await row.getAttribute("aria-expanded")) !== "true") {
+          throw new Error("the folder's row does not say it is open");
+        }
+        if (page.url() !== at) throw new Error(`opening a folder moved the page to ${page.url()}`);
+        if (!(await stayed())) throw new Error("opening a folder reloaded the page");
+        // Only pages and files are ever the current row.
+        if ((await files.locator(".tree-row.dir [aria-current]").count()) > 0) {
+          throw new Error("a folder is the current row");
+        }
         page.off("request", count);
         if (asked > 0) throw new Error(`opening a folder made ${asked} request(s)`);
         // Files come after the pages in each folder, with a file icon; at the root after the
@@ -784,9 +745,6 @@ async function browserRenders(
         }
         await agentDeletes(file);
         await fileRow.waitFor({ state: "detached", timeout: 10_000 });
-        await page.goBack();
-        await page.waitForURL(`${lib}/`);
-        await home();
       }
       await sidebar.locator(`a[data-path="${nested}"]`).click();
       await page.waitForURL(`${lib}/${enc(nested)}`);
@@ -854,48 +812,31 @@ async function browserRenders(
         }
       },
     );
-    await step("a folder, reached from the crumbs, shows the folder view", async () => {
+    await step("a folder is not a page: named in the crumbs, its address reveals it", async () => {
       if (!folder) throw new Error("no concept in a folder");
       await page.locator(".body .prose").waitFor({ timeout: 15_000 });
-      await sheetBar
-        .getByRole("navigation", { name: "Path" })
-        .getByRole("link", { name: folderName(folder), exact: true })
-        .click();
-      await page.waitForURL(`${lib}/${enc(folder)}/`);
-      await main
-        .getByRole("heading", { level: 1, name: folderName(folder), exact: true })
-        .waitFor({ timeout: 15_000 });
-      // A row per concept in it, linking to the concept; not index.md in the reader.
-      const inFolder = concepts.filter((c) => c.split("/").slice(0, -1).join("/") === folder);
-      const rows = main.locator(".folder-list a.folder-row:not(.folder-sub):not(.folder-file)");
-      await rows.first().waitFor({ timeout: 10_000 });
-      if ((await rows.count()) !== inFolder.length) {
-        throw new Error(`${await rows.count()} rows for ${inFolder.length} concepts`);
+      // The crumbs name the page's folders as text (TEMPRA-138): there is no folder page to open.
+      const path = sheetBar.getByRole("navigation", { name: "Path" });
+      await path.getByText(folderName(folder), { exact: true }).first().waitFor();
+      if ((await path.getByRole("link").count()) > 0) {
+        throw new Error("the crumbs link a folder");
       }
-      for (const c of inFolder) {
-        if (
-          (await main.locator(`a.folder-row[href="/${owner}/${slug}/${enc(c)}"]`).count()) !== 1
-        ) {
-          throw new Error(`no row for ${c}`);
-        }
+      // A folder's address (an old link, a link to it in a page's body) opens the home, with the
+      // folder open in the tree, and the address becomes the home's.
+      await page.goto(`${lib}/${enc(folder)}/`);
+      await page.waitForURL(`${lib}/`);
+      await home();
+      const row = sidebar.locator(`button.tree-name[title="${folderName(folder)}"]`);
+      if ((await row.first().getAttribute("aria-expanded")) !== "true") {
+        throw new Error("a folder's address did not open it in the tree");
       }
-      if ((await main.locator(".body .prose").count()) > 0) {
-        throw new Error("the folder's page shows a document in the reader");
-      }
-      // Take 4: each concept by title with its one-line description, and nothing else: no sort,
-      // filters or columns (author, threads, trust).
-      const described = await rows.locator(".folder-desc").count();
-      if (described === 0) throw new Error("no concept in the folder shows its description");
-      for (const gone of [".segmented", ".pill-toggle", ".folder-by", ".folder-threads"]) {
-        if ((await main.locator(gone).count()) > 0) throw new Error(`the folder still has ${gone}`);
-      }
-      await main.locator(`.folder-foot a[href$="/-/raw/${enc(folder)}/index.md"]`).waitFor();
+      await sidebar.locator(`a[data-path="${nested}"]`).waitFor({ timeout: 10_000 });
       if (shots) await page.screenshot({ path: `${shots}/folder.png` });
       await markStay();
-      await main.locator(`a.folder-row[href="/${owner}/${slug}/${enc(nested)}"]`).click();
+      await sidebar.locator(`a[data-path="${nested}"]`).click();
       await page.waitForURL(`${lib}/${enc(nested)}`);
       await page.locator(".body .prose").waitFor({ timeout: 15_000 });
-      if (!(await stayed())) throw new Error("the folder's row reloaded the page");
+      if (!(await stayed())) throw new Error("the tree's row reloaded the page");
     });
     await step("workspace: the tree follows an agent's write and move, live", async () => {
       // The person has seen everything so far: no solid dot until an agent writes.
@@ -974,7 +915,6 @@ async function browserRenders(
       };
       const put = await apiAs(devCookie, `${libPath}/seen`, "PUT", { seq: head });
       if (!put.ok) throw new Error(`PUT …/seen: ${put.status}`);
-      const top = folder.split("/")[0] || "";
       const path = folder ? `${folder}/gate-since.md` : "gate-since.md";
       const wrote = await fetch(`${libApi}/files/${enc(path)}`, {
         method: "PUT",
@@ -997,12 +937,8 @@ async function browserRenders(
         .waitFor({ timeout: 10_000 });
       const meta = await recent.locator(".home-recent-meta").first().innerText();
       if (!/ · just now$/.test(meta)) throw new Error(`Recently changed says "${meta}"`);
-      const sectionDot = sections.locator(
-        `a.home-section-row[href="/${owner}/${slug}/${enc(top)}/"] .change-dot`,
-      );
       // The tree's solid dot: on the file, or rolled up on a closed folder that holds it.
       const treeDot = sidebar.locator('nav[aria-label="Files"] .change-dot');
-      if (top) await sectionDot.waitFor({ timeout: 5000 });
       await treeDot.first().waitFor({ timeout: 5000 });
       if (shots) await page.screenshot({ path: `${shots}/home-since.png` });
       await markStay();
@@ -1039,7 +975,6 @@ async function browserRenders(
       await page.waitForURL(`${lib}/`);
       await home();
       await since.waitFor({ state: "detached", timeout: 10_000 });
-      if (top) await sectionDot.waitFor({ state: "detached", timeout: 10_000 });
       await treeDot.first().waitFor({ state: "detached", timeout: 10_000 });
       if (!(await stayed())) throw new Error("moving between home and Activity reloaded the page");
       await agentDeletes(path);
@@ -1293,35 +1228,40 @@ async function browserRenders(
           await page.waitForURL(`${lib}/-/activity`);
           await sidebar.waitFor({ state: "hidden" });
           await phoneNamed("Activity");
-          // Home stacks the same sections (board 36), and draws no sidebar rows itself; a
-          // section opens its folder view.
+          // Home stacks its parts (board 36), with no sections and no sidebar rows of its own:
+          // the drawer is the tree, and a folder opens there, in place (TEMPRA-138).
           await menu.click();
           await views.getByRole("link", { name: "Home", exact: true }).click();
           await page.waitForURL(`${lib}/`);
           await sidebar.waitFor({ state: "hidden" });
           await phoneNamed(libraryName);
-          const folder = sections.locator("a.home-section-row").first();
-          await folder.waitFor({ timeout: 15_000 });
+          const parts = main.locator(".home-section");
+          await parts.first().waitFor({ timeout: 15_000 });
           if (shots) await page.screenshot({ path: `${shots}/home-phone.png` });
           const wide = await page.locator("html").evaluate((el) => el.scrollWidth > el.clientWidth);
           if (wide) throw new Error("the home scrolls sideways at phone width");
-          if ((await main.locator(".nav-row").count()) > 0) {
+          if ((await main.locator(".nav-row, .tree-row").count()) > 0) {
             throw new Error("the phone home draws the sidebar's rows");
           }
-          const rows = await sections
-            .locator("a.home-section-row")
-            .evaluateAll((els) =>
-              els.map((el) => el.getBoundingClientRect()).map((r) => ({ x: r.x, w: r.width })),
-            );
-          if (rows.some((r) => Math.abs(r.x - (rows[0]?.x ?? 0)) > 1 || r.w < 300)) {
-            throw new Error(`the home's sections are not stacked: ${JSON.stringify(rows)}`);
+          const boxes = await parts.evaluateAll((els) =>
+            els.map((el) => el.getBoundingClientRect()).map((r) => ({ x: r.x, w: r.width })),
+          );
+          if (boxes.some((r) => Math.abs(r.x - (boxes[0]?.x ?? 0)) > 1 || r.w < 300)) {
+            throw new Error(`the home's parts are not stacked: ${JSON.stringify(boxes)}`);
           }
-          const folderName =
-            (await folder.locator(".home-section-name").textContent())?.trim() ?? "";
-          await folder.click();
-          await page.waitForURL((u) => u.pathname.endsWith("/") && u.href !== `${lib}/`);
-          await page.locator(".view-title", { hasText: folderName }).waitFor({ timeout: 15_000 });
-          await phoneNamed(folderName);
+          await menu.click();
+          await sidebar.waitFor({ state: "visible" });
+          const folderRow = sidebar.locator("button.tree-name").first();
+          const was = await folderRow.getAttribute("aria-expanded");
+          await folderRow.click();
+          if ((await folderRow.getAttribute("aria-expanded")) === was) {
+            throw new Error("a folder's row in the drawer did not open or close it");
+          }
+          if (page.url() !== `${lib}/`) throw new Error(`a folder's row moved to ${page.url()}`);
+          await sidebar.waitFor({ state: "visible" });
+          await folderRow.click();
+          await page.keyboard.press("Escape");
+          await sidebar.waitFor({ state: "hidden" });
           // A settings page's drawer holds the settings' sidebar: back to the library, the tabs.
           await page.goto(`${lib}/-/settings`);
           await phoneNamed("General");
@@ -2871,11 +2811,6 @@ async function browserRenders(
     await step("axe: no serious or critical issues on the app's pages", async () => {
       const found = await axePages(page, [
         { name: "home", url: `${lib}/`, ready: () => home() },
-        {
-          name: "folder",
-          url: `${lib}/${folder}/`,
-          ready: () => main.locator("h1").first().waitFor({ timeout: 15_000 }),
-        },
         {
           name: "page",
           url: `${lib}/gate-keys.md`,

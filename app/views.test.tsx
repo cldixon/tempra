@@ -5,18 +5,16 @@ import { actorView } from "./src/agents";
 import { forYouCards, type InboxItem, type InboxPage } from "./src/inbox";
 import type { Needs } from "./src/needs";
 import { fateOf, typeName } from "./src/pages/File";
-import { FolderBody, type FolderView } from "./src/pages/Folder";
 import {
   EmptyLibrary,
   ForYou,
   HomeFoot,
-  HomeSections,
   inboxHref,
   recentlyChanged,
   SinceLine,
   sinceYouLooked,
 } from "./src/pages/Home";
-import { type OutlineFile, topLevel } from "./src/Tree";
+import type { OutlineFile } from "./src/Tree";
 import { Urls } from "./src/urls";
 import { type Place, placeName } from "./src/Workspace";
 
@@ -46,107 +44,6 @@ const needs = (over: Partial<Needs> = {}): Needs => ({
   ...over,
 });
 
-const folder: FolderView = {
-  seq: 50,
-  dir: "decisions",
-  folders: [{ path: "decisions/old-ones", concepts: 3, newest_ts: hour(30) }],
-  concepts: [
-    {
-      path: "decisions/a.md",
-      title: "Agents act for a person",
-      description: "An outside agent always acts for one person.",
-      seq: 10,
-      ts: hour(48),
-      actor: me,
-      by: { person: "cl_dixon" },
-      verified: true,
-      comments: 2,
-    },
-    {
-      path: "decisions/z.md",
-      title: "Diagram styles go through the CSSOM",
-      description: null,
-      seq: 40,
-      ts: hour(2),
-      actor: "claude-code/dev",
-      by: { person: "cl_dixon", agent: "a1" },
-      verified: false,
-      comments: 0,
-    },
-  ],
-  counts: { concepts: 2, unverified: 1, newest: { path: "decisions/z.md", ts: hour(2) } },
-};
-
-describe("a folder (take 4)", () => {
-  const html = renderToStaticMarkup(
-    <FolderBody
-      urls={urls}
-      dir="decisions"
-      view={folder}
-      seen={20}
-      live={(p) => (p === "decisions/z.md" ? "Claude Code for @cl_dixon" : null)}
-    />,
-  );
-
-  test("its name, then subfolders with counts, then concepts by title, each a link", () => {
-    expect(html).toContain(`<h1 class="view-title">Decisions</h1>`);
-    const sub = html.indexOf("Old ones");
-    const a = html.indexOf("Agents act for a person");
-    const z = html.indexOf("Diagram styles");
-    expect(sub).toBeGreaterThan(-1);
-    expect(sub).toBeLessThan(a);
-    expect(a).toBeLessThan(z);
-    expect(html).toContain(`href="${urls.tree("decisions/old-ones")}"`);
-    expect(html).toContain(`href="${urls.file("decisions/a.md")}"`);
-    expect(html).toContain("3 pages");
-    expect(html).toContain("An outside agent always acts for one person.");
-  });
-
-  test("the dot: solid for changed since the cursor, pulsing while an agent writes", () => {
-    // a.md (seq 10) is older than the cursor: no dot. z.md is being written now.
-    expect(html.match(/change-dot/g)?.length).toBe(1);
-    expect(html).toContain('class="change-dot live"');
-    expect(html).toContain("Claude Code for @cl_dixon is editing");
-    const changed = renderToStaticMarkup(
-      <FolderBody urls={urls} dir="decisions" view={folder} seen={20} />,
-    );
-    expect(changed).toContain('class="change-dot"');
-    expect(changed).not.toContain("is editing");
-  });
-
-  test("nothing else: no author, threads, trust or sort; index.md linked for agents", () => {
-    expect(html).not.toContain("folder-threads");
-    expect(html).not.toContain("verified");
-    expect(html).not.toContain("aria-pressed");
-    expect(html).not.toContain("You · ");
-    expect(html).toContain(`href="${urls.raw("decisions/index.md")}"`);
-  });
-
-  test("its files after its pages, and a subfolder of files only counts them (H-2)", () => {
-    const view: FolderView = {
-      ...folder,
-      folders: [{ path: "decisions/attesters", concepts: 0, newest_ts: null }],
-    };
-    const files = renderToStaticMarkup(
-      <FolderBody
-        urls={urls}
-        dir="decisions"
-        view={view}
-        seen={null}
-        index={[
-          { path: "decisions/a.md", kind: "concept", title: "A", seq: 10 },
-          { path: "decisions/chart.png", kind: "attachment", seq: 11 },
-          { path: "decisions/attesters/sql_equality.py", kind: "attachment", seq: 12 },
-        ]}
-      />,
-    );
-    expect(files).toContain("1 file");
-    expect(files).toContain(`href="${urls.file("decisions/chart.png")}"`);
-    expect(files.indexOf("chart.png")).toBeGreaterThan(files.indexOf("Diagram styles"));
-    expect(files).not.toContain("sql_equality.py</");
-  });
-});
-
 describe("the library's home (take 4)", () => {
   const files: OutlineFile[] = [
     { path: "guide.md", kind: "concept", title: "Guide", seq: 1 },
@@ -155,45 +52,6 @@ describe("the library's home (take 4)", () => {
     { path: "app/reader.md", kind: "concept", title: "Reader", seq: 6 },
     { path: "app/shot.png", kind: "attachment", seq: 7 },
   ];
-
-  test("the top level: folders first with their concepts at any depth, then files", () => {
-    expect(topLevel(files).map(({ entry, count }) => [entry.path, count])).toEqual([
-      ["app", 1],
-      ["decisions", 2],
-      ["guide.md", 0],
-    ]);
-  });
-
-  test("sections: every top-level folder in the tree's order, its count, the solid dot", () => {
-    const html = renderToStaticMarkup(<HomeSections urls={urls} files={files} seen={10} />);
-    const app = html.indexOf(`href="${urls.tree("app")}"`);
-    const decisions = html.indexOf(`href="${urls.tree("decisions")}"`);
-    expect(app).toBeGreaterThan(-1);
-    expect(app).toBeLessThan(decisions);
-    expect(html).not.toContain("guide.md");
-    expect(html).toContain('<span class="home-section-name">Decisions</span>');
-    expect(html).toContain('<span class="home-section-count">2</span>');
-    // Only decisions changed after the cursor (b.md at seq 30).
-    expect(html.match(/class="change-dot"/g)?.length).toBe(1);
-    expect(html.indexOf("change-dot")).toBeGreaterThan(decisions);
-    expect(
-      renderToStaticMarkup(<HomeSections urls={urls} files={files} seen={null} />),
-    ).not.toContain("change-dot");
-  });
-
-  test("a library with no folders yet lists its pages instead", () => {
-    const html = renderToStaticMarkup(
-      <HomeSections
-        urls={urls}
-        files={[{ path: "start-here.md", kind: "concept", title: "Start here", seq: 1 }]}
-        seen={null}
-      />,
-    );
-    expect(html).toContain(">Pages</h2>");
-    expect(html).toContain(`href="${urls.file("start-here.md")}"`);
-    expect(html).toContain(">Start here</span>");
-    expect(renderToStaticMarkup(<HomeSections urls={urls} files={[]} seen={null} />)).toBe("");
-  });
 
   const item = (over: Partial<InboxItem>): InboxItem => ({
     id: "i1",
@@ -329,18 +187,6 @@ describe("the library's home (take 4)", () => {
     expect(reader).not.toContain("Add Tempra");
     expect(reader).not.toContain(urls.transfer());
     expect(reader).not.toContain(urls.connect());
-  });
-
-  test("a section holding only files counts its files, not 0", () => {
-    const html = renderToStaticMarkup(
-      <HomeSections
-        urls={urls}
-        files={[...files, { path: "attesters/sql_equality.py", kind: "attachment", seq: 3 }]}
-        seen={null}
-      />,
-    );
-    expect(html).toContain('<span class="home-section-count">1 file</span>');
-    expect(html).toContain('<span class="home-section-count">2</span>');
   });
 
   const event = (seq: number, over: Partial<LedgerEvent> = {}): LedgerEvent => ({
