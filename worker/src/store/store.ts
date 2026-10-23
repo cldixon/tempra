@@ -4462,96 +4462,6 @@ export class LibraryStore {
     };
   }
 
-  /**
-   * GET /folder (the folder view, layout take 3): a directory at head in one call. Its immediate
-   * subfolders, with how many concepts are under each and their newest change; the concepts
-   * directly in it, each with who wrote the version on screen (its latest content event), whether
-   * a person has verified that version, its open threads and staleness; and counts over those.
-   * Attachments are not concepts: they only make a folder exist. "" is the root, even when empty.
-   */
-  folder(dirInput: string): FolderView {
-    const dir = dirInput.replace(/^\/+|\/+$/g, "") === "" ? "" : normalizePath(dirInput);
-    const files =
-      dir === null
-        ? []
-        : this.sql.all<{
-            path: string;
-            kind: Kind;
-            concept_id: string;
-            hash: string;
-            seq: number;
-            title: string | null;
-            description: string | null;
-            ts: string | null;
-            actor: string | null;
-            by_person: string | null;
-            by_agent: string | null;
-          }>(
-            `SELECT p.path, p.kind, p.concept_id, p.hash, p.last_seq AS seq, c.title, c.description,
-                    e.ts, e.actor, json_extract(e.meta, '$.by.person') AS by_person,
-                    json_extract(e.meta, '$.by.agent') AS by_agent
-             FROM paths p LEFT JOIN concepts c ON c.concept_id = p.concept_id
-             LEFT JOIN events e ON e.seq = (
-               SELECT MAX(seq) FROM events WHERE concept_id = p.concept_id AND ${CONTENT_EVENT})
-             WHERE ? = '' OR p.path LIKE ? ESCAPE '\\'
-             ORDER BY p.path`,
-            dir,
-            `${escapeLike(dir)}/%`,
-          );
-    if (dir === null || (dir !== "" && files.length === 0)) {
-      throw new OkfError(404, "not_found", `No folder at ${dirInput}.`);
-    }
-    const head = this.headSeq();
-    const open = this.openThreadCounts();
-    const stale = this.staleFlags();
-    const folders = new Map<string, FolderView["folders"][number]>();
-    const concepts: FolderView["concepts"] = [];
-    for (const f of files) {
-      const rest = dir === "" ? f.path : f.path.slice(dir.length + 1);
-      const slash = rest.indexOf("/");
-      if (slash !== -1) {
-        const path = dir === "" ? rest.slice(0, slash) : `${dir}/${rest.slice(0, slash)}`;
-        const sub = folders.get(path) ?? { path, concepts: 0, newest_ts: null };
-        if (f.kind === "concept") {
-          sub.concepts++;
-          if (f.ts && (sub.newest_ts === null || f.ts > sub.newest_ts)) sub.newest_ts = f.ts;
-        }
-        folders.set(path, sub);
-        continue;
-      }
-      if (f.kind !== "concept") continue;
-      const tier = trustTier(this.record(f.hash).generated, this.verifiedAt(f.concept_id, head));
-      const flag = stale.get(f.concept_id);
-      concepts.push({
-        path: f.path,
-        title: f.title,
-        description: f.description,
-        seq: f.seq,
-        ts: f.ts ?? "",
-        actor: f.actor ?? "",
-        by: byOf(f.by_person, f.by_agent),
-        verified: tier === "human-reviewed",
-        comments: open.get(f.concept_id) ?? 0,
-        ...(flag ? { stale: flag } : {}),
-      });
-    }
-    let newest: { path: string; ts: string } | null = null;
-    for (const c of concepts) {
-      if (c.ts && (newest === null || c.ts > newest.ts)) newest = { path: c.path, ts: c.ts };
-    }
-    return {
-      seq: head,
-      dir,
-      folders: [...folders.values()],
-      concepts,
-      counts: {
-        concepts: concepts.length,
-        unverified: concepts.filter((c) => !c.verified).length,
-        newest,
-      },
-    };
-  }
-
   // ---------------------------------------------------------------- signed download URLs
 
   /** A per-library HMAC key, created on first use; it never leaves the object. */
@@ -4683,31 +4593,6 @@ export interface Needs {
   housekeeping: { lint: number; structure: number; broken_link: number; total: number };
   /** replies + verify.total + stale: the sidebar's number. */
   count: number;
-}
-
-/** One folder for the app's folder view (layout take 3). */
-export interface FolderView {
-  seq: number;
-  dir: string;
-  /** Immediate subfolders: concepts under each (at any depth) and their newest change. */
-  folders: { path: string; concepts: number; newest_ts: string | null }[];
-  /** The concepts directly in the folder. */
-  concepts: {
-    path: string;
-    title: string | null;
-    description: string | null;
-    seq: number;
-    /** The version on screen: when, by whom (its latest content event). */
-    ts: string;
-    actor: string;
-    by: ActionBy | null;
-    /** A person verified the current version (trust tier human-reviewed). */
-    verified: boolean;
-    /** Open comment threads. */
-    comments: number;
-    stale?: Staleness;
-  }[];
-  counts: { concepts: number; unverified: number; newest: { path: string; ts: string } | null };
 }
 
 /** What one run of the staleness process found: counts now, and paths that changed state. */

@@ -715,9 +715,6 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     );
   });
 
-  // One folder for the app's folder view: its subfolders, its concepts' rows and counts.
-  app.get(`${BASE}/folder`, async (c) => c.json(await c.var.lib.folder(c.req.query("dir") ?? "")));
-
   app.get(`${BASE}/work`, async (c) =>
     c.json(
       await c.var.lib.work({
