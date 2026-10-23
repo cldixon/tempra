@@ -11,9 +11,9 @@ import { ConnectSteps } from "./Account";
 import { DiffLines } from "./Diff";
 
 /**
- * A library's management pages (TEMPRA-14): work queue, import and export, recovery, revert
- * and restore, connecting an agent, deleting it. Each acts through the REST API as the
- * signed-in person.
+ * A library's management pages (TEMPRA-14): For agents (the work queue), import and export,
+ * recovery, revert and restore, connecting an agent, deleting it. Each acts through the REST API
+ * as the signed-in person.
  */
 
 interface LedgerEvent {
@@ -67,7 +67,7 @@ const KINDS: [string | undefined, string][] = [
  * shows agents), under a quiet line from the daily check (TEMPRA-66).
  */
 export function Work({ urls, kind }: { urls: Urls; kind?: string }) {
-  useTitle(`Work queue · ${urls.slug}`);
+  useTitle(`For agents · ${urls.slug}`);
   const loaded = useLoad(`work ${urls.work(kind)}`, async () => {
     const [w, stats, health] = await Promise.all([
       api<{ items: WorkItem[]; total: number }>(urls.api("work", { kind, limit: 200 })),
@@ -79,7 +79,7 @@ export function Work({ urls, kind }: { urls: Urls; kind?: string }) {
   useLive(urls, loaded.state === "ready" ? loaded.data.head : null, loaded.reload);
   return (
     <>
-      <h1>Work queue</h1>
+      <h1>For agents</h1>
       <p className="small">
         {KINDS.map(([k, label], i) => (
           <span key={label}>
@@ -230,7 +230,7 @@ export function Transfer({ urls }: { urls: Urls }) {
           Imported {plural(res.files, "file")} from {file.name} as one request (up to seq {res.seq})
           {linted > 0 && (
             <>
-              ; {plural(linted, "file")} with lint, see the <a href={urls.work()}>work queue</a>
+              ; {plural(linted, "file")} with lint, see <a href={urls.work()}>For agents</a>
             </>
           )}
           . <a href={urls.ledger()}>See it in the ledger</a>.

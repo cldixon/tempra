@@ -1,46 +1,179 @@
-import { type KeyboardEvent, useEffect, useId, useMemo, useRef, useState } from "react";
+import {
+  type KeyboardEvent,
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { api } from "./api";
 import { prefetchFile } from "./prefetch";
 import { readRecent } from "./recent";
+import { libraryName, useLibraries } from "./role";
 import { navigate } from "./router";
 import type { OutlineFile } from "./Tree";
-import type { Urls } from "./urls";
+import { Urls } from "./urls";
 
 interface Hit {
   path: string;
   title: string;
 }
 
+/** One row of a quick search: what it reads as, a quiet detail beside it, where it goes. */
+interface Option {
+  key: string;
+  title: string;
+  detail: string;
+  href: string;
+}
+
 const MAX = 12;
 
 /**
- * The quick switcher (tempra-dev: app/workspace): Ctrl or Cmd+K, type a title or path, Enter.
- * Recent files first, then titles and paths from the library's index (instant), then the
- * library's search inside files. Escape, the same keys or a click outside the box closes it.
+ * The quick search's dialog (tempra-dev: app/workspace): a box, the options under it, the
+ * keyboard on the box (Up, Down, Enter, Escape); a click outside closes it. What it searches is
+ * its caller's: a library's files (Switcher) or the person's libraries (LibrarySearch).
  */
-export function Switcher(props: {
-  urls: Urls;
-  index: OutlineFile[];
+function QuickSearch(props: {
   open: boolean;
   onClose(): void;
+  /** "Search <library>", or "Search libraries". */
+  label: string;
+  q: string;
+  onQuery(q: string): void;
+  options: Option[];
+  /** The option under the cursor (a library's file starts loading). */
+  onSelect?(o: Option): void;
+  empty: string;
 }) {
-  const { urls, open, onClose } = props;
+  const { open, onClose, options, onSelect } = props;
   const dialog = useRef<HTMLDialogElement>(null);
   const listId = useId();
-  const [q, setQ] = useState("");
-  const [found, setFound] = useState<Hit[]>([]);
   const [index, setIndex] = useState(0);
 
   useEffect(() => {
     const d = dialog.current;
     if (!d) return;
     if (open && !d.open) {
-      setQ("");
-      setFound([]);
       setIndex(0);
       d.showModal();
     } else if (!open && d.open) {
       d.close();
+    }
+  }, [open]);
+
+  const selected = Math.min(index, Math.max(options.length - 1, 0));
+  const pick = options[selected];
+  useEffect(() => {
+    if (open && pick) onSelect?.(pick);
+  }, [open, pick, onSelect]);
+
+  const go = (o: Option | undefined) => {
+    if (!o) return;
+    onClose();
+    navigate(o.href);
+  };
+  const keys = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      setIndex((i) => Math.max(0, Math.min(i + 1, options.length - 1)));
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      setIndex((i) => Math.max(i - 1, 0));
+    } else if (e.key === "Enter") {
+      e.preventDefault();
+      go(options[selected]);
+    } else if (e.key === "Escape") {
+      // A search box would only clear itself on the first Escape; this one closes.
+      e.preventDefault();
+      onClose();
+    }
+  };
+  const optionId = (i: number) => `${listId}-${i}`;
+
+  return (
+    // biome-ignore lint/a11y/useKeyWithClickEvents: Escape closes it from the keyboard.
+    <dialog
+      ref={dialog}
+      className="switcher"
+      aria-label={props.label}
+      // The close event comes a moment after the dialog closes; if it opened again meanwhile
+      // (the keys pressed twice quickly), the late event must not close it.
+      onClose={(e) => {
+        if (!e.currentTarget.open) onClose();
+      }}
+      onClick={(e) => {
+        // A click on the backdrop lands on the dialog itself, outside its box.
+        const r = e.currentTarget.getBoundingClientRect();
+        const inside =
+          e.clientX >= r.left &&
+          e.clientX <= r.right &&
+          e.clientY >= r.top &&
+          e.clientY <= r.bottom;
+        if (e.target === e.currentTarget && !inside) onClose();
+      }}
+    >
+      <div className="switcher-head">
+        <input
+          type="search"
+          role="combobox"
+          aria-expanded={options.length > 0}
+          aria-controls={listId}
+          aria-activedescendant={options.length > 0 ? optionId(selected) : undefined}
+          aria-autocomplete="list"
+          placeholder={props.label}
+          aria-label={props.label}
+          value={props.q}
+          onChange={(e) => {
+            props.onQuery(e.target.value);
+            setIndex(0);
+          }}
+          onKeyDown={keys}
+        />
+      </div>
+      <div id={listId} role="listbox" aria-label="Results">
+        {options.map((o, i) => (
+          // The input keeps the keyboard (combobox); a click opens the option too.
+          // biome-ignore lint/a11y/useKeyWithClickEvents: keys go to the combobox input above.
+          <div
+            key={o.key}
+            id={optionId(i)}
+            role="option"
+            tabIndex={-1}
+            aria-selected={i === selected}
+            onClick={() => go(o)}
+          >
+            {o.title} <span className="muted small">{o.detail}</span>
+          </div>
+        ))}
+      </div>
+      {options.length === 0 && <p className="muted small">{props.empty}</p>}
+    </dialog>
+  );
+}
+
+/**
+ * The quick switcher in a library (tempra-dev: app/workspace): Ctrl or Cmd+K, type a title or
+ * path, Enter. Recent files first, then titles and paths from the library's index (instant), then
+ * the library's search inside files.
+ */
+export function Switcher(props: {
+  urls: Urls;
+  /** The library's title (else its slug), as search names itself. */
+  name: string;
+  index: OutlineFile[];
+  open: boolean;
+  onClose(): void;
+}) {
+  const { urls, open } = props;
+  const [q, setQ] = useState("");
+  const [found, setFound] = useState<Hit[]>([]);
+
+  useEffect(() => {
+    if (open) {
+      setQ("");
+      setFound([]);
     }
   }, [open]);
 
@@ -65,7 +198,7 @@ export function Switcher(props: {
   }, [q, urls]);
 
   const needle = q.trim().toLowerCase();
-  const hits = useMemo(() => {
+  const options = useMemo(() => {
     const matches = (h: Hit) =>
       !needle || h.title.toLowerCase().includes(needle) || h.path.toLowerCase().includes(needle);
     const recent = readRecent(urls).filter(matches);
@@ -81,103 +214,76 @@ export function Switcher(props: {
               a.path.localeCompare(b.path),
           )
       : [];
-    const out: Hit[] = [];
+    const out: Option[] = [];
     for (const h of [...recent, ...named, ...found]) {
       if (out.length === MAX) break;
-      if (!out.some((o) => o.path === h.path)) out.push(h);
+      if (!out.some((o) => o.key === h.path)) {
+        out.push({
+          key: h.path,
+          title: h.title || h.path,
+          detail: h.path,
+          href: urls.file(h.path),
+        });
+      }
     }
     return out;
   }, [needle, urls, props.index, found]);
-  const selected = Math.min(index, Math.max(hits.length - 1, 0));
 
   // The selected file starts loading, so Enter opens a page that is already here.
-  const pick = hits[selected]?.path;
-  useEffect(() => {
-    if (open && pick) prefetchFile(urls, pick);
-  }, [open, pick, urls]);
-
-  const go = (hit: Hit | undefined) => {
-    if (!hit) return;
-    onClose();
-    navigate(urls.file(hit.path));
-  };
-  const keys = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "ArrowDown") {
-      e.preventDefault();
-      setIndex((i) => Math.max(0, Math.min(i + 1, hits.length - 1)));
-    } else if (e.key === "ArrowUp") {
-      e.preventDefault();
-      setIndex((i) => Math.max(i - 1, 0));
-    } else if (e.key === "Enter") {
-      e.preventDefault();
-      go(hits[selected]);
-    } else if (e.key === "Escape") {
-      // A search box would only clear itself on the first Escape; this one closes.
-      e.preventDefault();
-      onClose();
-    }
-  };
-  const optionId = (i: number) => `${listId}-${i}`;
+  const select = useCallback((o: Option) => prefetchFile(urls, o.key), [urls]);
 
   return (
-    // biome-ignore lint/a11y/useKeyWithClickEvents: Escape closes it from the keyboard.
-    <dialog
-      ref={dialog}
-      className="switcher"
-      aria-label="Open a file"
-      // The close event comes a moment after the dialog closes; if it opened again meanwhile
-      // (the keys pressed twice quickly), the late event must not close it.
-      onClose={(e) => {
-        if (!e.currentTarget.open) onClose();
-      }}
-      onClick={(e) => {
-        // A click on the backdrop lands on the dialog itself, outside its box.
-        const r = e.currentTarget.getBoundingClientRect();
-        const inside =
-          e.clientX >= r.left &&
-          e.clientX <= r.right &&
-          e.clientY >= r.top &&
-          e.clientY <= r.bottom;
-        if (e.target === e.currentTarget && !inside) onClose();
-      }}
-    >
-      <div className="switcher-head">
-        <input
-          type="search"
-          role="combobox"
-          aria-expanded={hits.length > 0}
-          aria-controls={listId}
-          aria-activedescendant={hits.length > 0 ? optionId(selected) : undefined}
-          aria-autocomplete="list"
-          placeholder={`Open a file in ${urls.slug}`}
-          aria-label="File title or path"
-          value={q}
-          onChange={(e) => {
-            setQ(e.target.value);
-            setIndex(0);
-          }}
-          onKeyDown={keys}
-        />
-      </div>
-      <div id={listId} role="listbox" aria-label="Files">
-        {hits.map((h, i) => (
-          // The input keeps the keyboard (combobox); a click opens the file too.
-          // biome-ignore lint/a11y/useKeyWithClickEvents: keys go to the combobox input above.
-          <div
-            key={h.path}
-            id={optionId(i)}
-            role="option"
-            tabIndex={-1}
-            aria-selected={i === selected}
-            onClick={() => go(h)}
-          >
-            {h.title || h.path} <span className="muted small">{h.path}</span>
-          </div>
-        ))}
-      </div>
-      {hits.length === 0 && (
-        <p className="muted small">{needle ? "No file matches." : "Type a title or path."}</p>
-      )}
-    </dialog>
+    <QuickSearch
+      open={open}
+      onClose={props.onClose}
+      label={`Search ${props.name}`}
+      q={q}
+      onQuery={setQ}
+      options={options}
+      onSelect={select}
+      empty={needle ? "No page matches." : "Type a title or path."}
+    />
+  );
+}
+
+/**
+ * Search off a library (the account's pages, TEMPRA-127): the person's libraries by title or
+ * owner/slug, from the list the app already has; Enter opens the library's home.
+ */
+export function LibrarySearch(props: { open: boolean; onClose(): void }) {
+  const { open } = props;
+  const libs = useLibraries();
+  const [q, setQ] = useState("");
+  useEffect(() => {
+    if (open) setQ("");
+  }, [open]);
+  const needle = q.trim().toLowerCase();
+  const options = useMemo(() => {
+    const list = libs.state === "ready" ? libs.data.libraries : [];
+    return list
+      .filter(
+        (l) =>
+          !needle ||
+          (l.title ?? "").toLowerCase().includes(needle) ||
+          `${l.owner}/${l.slug}`.toLowerCase().includes(needle),
+      )
+      .slice(0, MAX)
+      .map((l) => ({
+        key: `${l.owner}/${l.slug}`,
+        title: l.title || libraryName(l),
+        detail: l.title ? libraryName(l) : "",
+        href: new Urls(l.owner, l.slug).tree(""),
+      }));
+  }, [libs, needle]);
+  return (
+    <QuickSearch
+      open={open}
+      onClose={props.onClose}
+      label="Search libraries"
+      q={q}
+      onQuery={setQ}
+      options={options}
+      empty={libs.state !== "ready" ? "Loading libraries…" : "No library matches."}
+    />
   );
 }

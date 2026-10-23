@@ -30,14 +30,14 @@ import {
 import { interceptLinks, match, navigate, useLocation } from "./router";
 import { PageBoundary, useMe } from "./ui";
 import { Urls } from "./urls";
-import { AccountFrame, type AccountPage, type Place, SheetPage, Workspace } from "./Workspace";
+import { AccountFrame, type AccountPage, PageColumn, type Place, Workspace } from "./Workspace";
 
 let handle: string | null = null;
 
 /** The pages that lay out their column themselves (a concept's columns, the person's views). */
-const OWN_SHEET = new Set(["file", "directory", "activity"]);
+const OWN_COLUMN = new Set(["file", "directory", "activity"]);
 
-/** A page that moved (Needs you, into the Inbox): the URL is replaced, as the server's 308 does. */
+/** A page that moved (`-/needs`, into the Inbox): the URL is replaced, as the server's 308 does. */
 function Redirect({ to }: { to: string }) {
   useEffect(() => navigate(to, { replace: true }), [to]);
   return null;
@@ -192,17 +192,17 @@ function App() {
   if (library) {
     const { urls, place } = library;
     // The library's own views lay out their column; its settings and tools share one.
-    const own = route && OWN_SHEET.has(route.page);
+    const own = route && OWN_COLUMN.has(route.page);
     return (
       <Workspace key={`${urls.owner}/${urls.slug}`} urls={urls} place={place} me={who}>
-        {own ? boundary : <SheetPage>{boundary}</SheetPage>}
+        {own ? boundary : <PageColumn>{boundary}</PageColumn>}
       </Workspace>
     );
   }
   // The account's pages share its frame.
   return (
     <AccountFrame page={account ?? "libraries"} me={who}>
-      <SheetPage>{boundary}</SheetPage>
+      <PageColumn>{boundary}</PageColumn>
     </AccountFrame>
   );
 }

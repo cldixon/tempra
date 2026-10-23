@@ -80,7 +80,6 @@ const ICONS = {
   down: ChevronDown,
   updown: ChevronsUpDown,
   home: Home,
-  needs: CircleCheck,
   activity: Activity,
   inbox: Inbox,
   search: Search,
@@ -310,8 +309,6 @@ export function Bell() {
 }
 
 /** The person's name as the app has it: their handle, until accounts carry a name (TEMPRA-54). */
-const displayName = (me: Me | null) => me?.handle ?? "";
-
 /**
  * The avatar and its menu (take 4, board 08): who, then Account, Notifications, Connect an agent,
  * Tokens, Connected apps; the theme; Sign out.
@@ -331,8 +328,9 @@ export function AccountMenu({ me }: { me: Me | null }) {
       <div className="menu-person">
         <Avatar name={handle} />
         <span className="menu-person-names">
-          <span>{displayName(me)}</span>
-          <span className="handle">{me ? `@${handle}` : ""}</span>
+          {/* The handle once (no names on accounts yet, TEMPRA-54), then the email. */}
+          <span>{me ? `@${handle}` : ""}</span>
+          <span className="email">{me?.email ?? ""}</span>
         </span>
       </div>
       <hr />

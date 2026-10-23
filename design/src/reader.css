@@ -44,7 +44,7 @@
 
 /*
  * Comments (TEMPRA-13). A thread's quote is underlined in the body (dotted); the one whose thread
- * is open in the margin is filled grey and underlined solid (take 3); a comment being written
+ * is open in the Comments panel is filled grey and underlined solid; a comment being written
  * fills its text with the selection grey. Drawn as
  * highlights, so the body's DOM never changes for them.
  */
