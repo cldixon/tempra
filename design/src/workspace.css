@@ -264,16 +264,6 @@ a.button.pill-button {
   padding: 6px 12px 6px 8px;
 }
 
-.page-foot {
-  margin: 32px 0 0;
-  color: var(--tempra-color-muted);
-  font-size: var(--tempra-text-ui);
-}
-
-.page-foot a {
-  color: inherit;
-}
-
 /* The library list (take 4, board 01): cards under Yours and Shared with you. Each card has a
    quiet cover (the library's tile; an agent's latest change at the right), then its name, what
    is for the person there, its description and one line of facts. */

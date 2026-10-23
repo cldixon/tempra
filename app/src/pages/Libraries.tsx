@@ -77,10 +77,6 @@ export function Libraries({ create }: { create: boolean }) {
               {libs.length === 0 && <p className="muted">No libraries yet.</p>}
               {yours.length > 0 && <Cards title="Yours" libraries={yours} />}
               {shared.length > 0 && <Cards title="Shared with you" libraries={shared} />}
-              <p className="page-foot">
-                Agents write to a library over MCP. <a href="/connect">Connect an agent</a> or{" "}
-                <a href="/tokens">mint a token</a>.
-              </p>
             </>
           );
         }}
