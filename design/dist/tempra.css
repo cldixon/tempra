@@ -1697,11 +1697,11 @@ body.ground {
   color: var(--tempra-color-muted);
 }
 
-/* The focus ring stays (TEMPRA-132), rounded and clear of the text, since the fields have no box. */
+/* The main fields have no box, so no ring either: the caret is where the focus is, in a dialog
+   that holds the focus (the one exception to TEMPRA-132's ring on every field). */
 .compose-body .compose-title:focus-visible,
 .compose-body .compose-text:focus-visible {
-  border-radius: var(--tempra-radius-row);
-  outline-offset: 6px;
+  outline: none;
 }
 
 .compose-fields {
