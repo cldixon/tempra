@@ -110,6 +110,22 @@ function changeLine(e: FeedEvent, by: string, since: string): string {
 }
 
 /**
+ * Someone else's change, said once in a polite live region (C-27, TEMPRA-133): "New version:
+ * Claude Code for @dev changed this: the note." Kept mounted, so the words are announced when
+ * they change; no time in them, so they do not change again as it passes.
+ */
+export function LiveAnnouncer({ urls, live }: { urls: Urls; live: Live | null }) {
+  const e = live?.change;
+  const by = useAgentNames(urls, [e?.by?.agent])(e?.actor ?? "", e?.by);
+  const said = e ? changeLine(e, by, "").replace(/ +\./, ".").replace(/ +:/, ":") : "";
+  return (
+    <div className="visually-hidden" role="status" aria-live="polite">
+      {e && (e.op === "move" || e.op === "delete" ? said : `New version: ${said}`)}
+    </div>
+  );
+}
+
+/**
  * A newer version, in the cluster: a pulsing glyph that opens who wrote it, Show diff and Show
  * new version.
  */
@@ -126,7 +142,7 @@ export function NewVersion({ urls, live }: { urls: Urls; live: Live }) {
         align="end"
         label={<Icon name="refresh" />}
       >
-        <p role="status">{changeLine(e, by, since)}</p>
+        <p>{changeLine(e, by, since)}</p>
         {CONTENT_OPS.has(e.op) && <a href={urls.diff(e.path, live.shownSeq, e.seq)}>Show diff</a>}
         <button type="button" onClick={live.onSwap}>
           Show new version
@@ -145,7 +161,7 @@ export function LiveNotice({ urls, live }: { urls: Urls; live: Live }) {
   const since = relativeTime(e.ts, useNow(5000));
   const by = useAgentNames(urls, [e.by?.agent])(e.actor, e.by);
   return (
-    <div className="notice" role="status">
+    <div className="notice">
       {changeLine(e, by, since)}{" "}
       {e.op === "move" ? (
         <a href={urls.pinned(undefined).file(e.path)}>Open it where it is now</a>

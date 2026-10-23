@@ -9,7 +9,7 @@
  * under it.
  */
 import type { Code } from "mdast";
-import { type RefObject, useContext, useEffect, useRef, useState } from "react";
+import { type RefObject, useContext, useEffect, useId, useRef, useState } from "react";
 import { Icon } from "../chrome";
 import { Caption, OpenFigure } from "./Figure";
 import type { BlockProps } from "./registry";
@@ -82,7 +82,8 @@ export function Diagram({ node, id, offset, text, figure }: BlockProps<Code>) {
   const open = useContext(OpenFigure);
   const [showSource, setShowSource] = useState(false);
   const failure = useDiagram(host, node.value, `d${id ?? ""}-`, !showSource);
-  const caption = figure && <Caption figure={figure} />;
+  const captionId = useId();
+  const caption = figure && <Caption figure={figure} id={captionId} />;
 
   if (failure !== null) {
     return (
@@ -105,7 +106,14 @@ export function Diagram({ node, id, offset, text, figure }: BlockProps<Code>) {
             <code>{node.value}</code>
           </pre>
         ) : (
-          <div ref={host} className="diagram-svg" />
+          // One image to a screen reader, named by its caption ("Figure 2. The flow"; C-28).
+          <div
+            ref={host}
+            className="diagram-svg"
+            role="img"
+            aria-labelledby={figure ? captionId : undefined}
+            aria-label={figure ? undefined : "Diagram"}
+          />
         )}
         <span className="figure-tools" data-skip="">
           <button

@@ -96,7 +96,8 @@ export function Panel(props: {
         }}
       >
         <span className="panel-grip" aria-hidden="true" />
-        <h2>{title}</h2>
+        {/* Takes the focus when the person opens the panel (C-25). */}
+        <h2 tabIndex={-1}>{title}</h2>
         {props.count && <span className="count">{props.count}</span>}
         <button
           type="button"

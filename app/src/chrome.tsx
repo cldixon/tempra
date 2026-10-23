@@ -142,9 +142,22 @@ export function Avatar({ name, agent = false }: { name: string; agent?: boolean 
   );
 }
 
+/** The choices in a menu's list that take the keys: its links and enabled buttons, as shown. */
+function choicesOf(list: Element | null): HTMLElement[] {
+  if (!list) return [];
+  return Array.from(list.querySelectorAll<HTMLElement>("a[href], button:not([disabled])")).filter(
+    (el) => el.getClientRects().length > 0,
+  );
+}
+
+/** The arrow keys, Home and End: the keys that move between a menu's choices. */
+const MENU_KEYS: ReadonlySet<string> = new Set(["ArrowDown", "ArrowUp", "Home", "End"]);
+
 /**
- * A button that opens a list of links under it. It closes on a choice, a click elsewhere or
- * Escape, and gives the focus back to its button.
+ * A button that opens a list of links under it. It closes on a choice, a click elsewhere,
+ * Escape or the focus leaving it, and gives the focus back to its button. Down (or Up) on the
+ * button opens it at its first (or last) choice; in the list Up, Down, Home and End move between
+ * the choices (F-16, TEMPRA-133).
  */
 export function Menu(props: {
   /** The button's content. */
@@ -177,6 +190,49 @@ export function Menu(props: {
   const box = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
   const id = useId();
+  // Opened from the keyboard: the focus goes to the first (or last) choice once it draws.
+  const focusOnOpen = useRef<"first" | "last" | null>(null);
+  const focusChoice = useCallback(
+    (which: "first" | "last") => {
+      const items = choicesOf(document.getElementById(id));
+      (which === "first" ? items[0] : items[items.length - 1])?.focus();
+    },
+    [id],
+  );
+  useEffect(() => {
+    if (!open || !focusOnOpen.current) return;
+    focusChoice(focusOnOpen.current);
+    focusOnOpen.current = null;
+  }, [open, focusChoice]);
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (!MENU_KEYS.has(e.key) || e.altKey || e.ctrlKey || e.metaKey) return;
+    const t = e.target as Element;
+    if (t.closest("input, textarea, select")) return;
+    if (t === button.current) {
+      if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+      e.preventDefault();
+      const which = e.key === "ArrowDown" ? "first" : "last";
+      if (open) focusChoice(which);
+      else {
+        focusOnOpen.current = which;
+        setOpen(true);
+      }
+      return;
+    }
+    const items = choicesOf(document.getElementById(id));
+    if (items.length === 0) return;
+    e.preventDefault();
+    const at = items.indexOf(document.activeElement as HTMLElement);
+    const next =
+      e.key === "Home"
+        ? 0
+        : e.key === "End"
+          ? items.length - 1
+          : e.key === "ArrowDown"
+            ? (at + 1) % items.length
+            : (at - 1 + items.length) % items.length;
+    items[next]?.focus();
+  };
   useEffect(() => {
     if (!open) return;
     const away = (e: PointerEvent) => {
@@ -196,7 +252,18 @@ export function Menu(props: {
     };
   }, [open, setOpen]);
   return (
-    <div className="menu" ref={box}>
+    // biome-ignore lint/a11y/noStaticElementInteractions: the keys of the button and choices inside.
+    <div
+      className="menu"
+      ref={box}
+      onKeyDown={onKeyDown}
+      onBlur={(e) => {
+        // The focus moving to something outside (Tab, a click on a control) closes it; a click on
+        // the list's own ground, which leaves the focus nowhere, does not.
+        const to = e.relatedTarget;
+        if (open && to instanceof Node && !box.current?.contains(to)) setOpen(false);
+      }}
+    >
       <button
         ref={button}
         type="button"
@@ -335,8 +402,13 @@ export function AccountMenu({ me }: { me: Me | null }) {
   const [theme, setTheme] = useTheme();
   return (
     <Menu
-      label={initials(handle)}
-      name="Account menu"
+      // Named by its own words, not an aria-label over the initials (WCAG 2.5.3).
+      label={
+        <>
+          <span aria-hidden="true">{initials(handle)}</span>
+          <span className="visually-hidden">Account menu</span>
+        </>
+      }
       title={me ? `${handle} · ${me.email}` : "Account"}
       buttonClass="avatar"
       listClass="account"

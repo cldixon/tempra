@@ -46,6 +46,7 @@ class Run {
       const r = this.removed[this.next++];
       out.push(
         <del key={this.ctx.key++} className="diff-removed" data-skip="">
+          <span className="visually-hidden">removed: </span>
           {`${r?.text} `}
         </del>,
       );
@@ -73,6 +74,10 @@ class Run {
       out.push(
         inside ? (
           <ins key={this.ctx.key++} className="diff-added">
+            {/* Spoken, not counted: outside the text (C-28). */}
+            <span className="visually-hidden" data-skip="">
+              added:{" "}
+            </span>
             {piece}
           </ins>
         ) : (
@@ -185,7 +190,14 @@ function inline(ctx: Ctx, r: Run, nodes: readonly PhrasingContent[]): ReactNode[
         r.atom(
           out,
           <sup key={k} className="fnref" data-atom="" data-label={n.label ?? n.identifier}>
-            {m.href === null ? m.mark : <a href={m.href}>{m.mark}</a>}
+            {m.href === null ? (
+              m.mark
+            ) : (
+              // Spoken as "footnote 2" (C-28); the atom counts one whatever it says.
+              <a href={m.href} aria-label={`footnote ${m.mark}`}>
+                {m.mark}
+              </a>
+            )}
           </sup>,
         );
         break;

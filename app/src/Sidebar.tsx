@@ -35,20 +35,35 @@ function Row(props: {
   label: string;
   end?: React.ReactNode;
   className?: string;
-  ariaLabel?: string;
 }) {
   return (
     <a
       className={props.className ? `nav-row ${props.className}` : "nav-row"}
       href={props.href}
       aria-current={props.current ? "page" : undefined}
-      aria-label={props.ariaLabel}
     >
       {props.icon && <Icon name={props.icon} />}
       {props.tile && <LibraryTile name={props.tile.name} shared={props.tile.shared} />}
       <span className="nav-label">{props.label}</span>
       {props.end}
     </a>
+  );
+}
+
+/**
+ * The Inbox's unread count at a row's end, read as "Inbox 2 unread": the name is the row's own
+ * words, so it starts with what it shows (WCAG 2.5.3).
+ */
+function UnreadCount({ unread }: { unread: number }) {
+  if (unread <= 0) return null;
+  return (
+    <>
+      {" "}
+      <span className="nav-count">
+        {unread}
+        <span className="visually-hidden"> unread</span>
+      </span>
+    </>
   );
 }
 
@@ -113,8 +128,7 @@ export function LibrarySidebar(props: {
           icon="inbox"
           label="Inbox"
           className="phone-only"
-          ariaLabel={unread > 0 ? `Inbox, ${unread} unread` : "Inbox"}
-          end={unread > 0 ? <span className="nav-count">{unread}</span> : undefined}
+          end={<UnreadCount unread={unread} />}
         />
       </div>
     </>
@@ -177,8 +191,7 @@ export function AccountSidebar({ page }: { page: AccountPage }) {
           current={page === "inbox" || page === "invitations"}
           icon="inbox"
           label="Inbox"
-          ariaLabel={unread > 0 ? `Inbox, ${unread} unread` : "Inbox"}
-          end={unread > 0 ? <span className="nav-count">{unread}</span> : undefined}
+          end={<UnreadCount unread={unread} />}
         />
       </nav>
       <div className="sidebar-scroll">

@@ -2421,6 +2421,24 @@ a.button.pill-button {
   background: var(--tempra-color-hover);
 }
 
+/* The whole row takes a click or a tap (P-2, TEMPRA-133): its link reaches over the row, and a
+   folder's chevron sits above that. */
+.tree-row {
+  position: relative;
+}
+
+.tree-row > a::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+
+.tree-row > .tree-chevron {
+  position: relative;
+  z-index: 1;
+}
+
 .tree-chevron {
   flex: none;
   display: flex;
@@ -3528,6 +3546,15 @@ ul.events {
   }
 }
 
+/* What an overlaid panel dims: the page, the top bar and the sidebar, which are inert while it
+   is open (TEMPRA-133). The app draws it only then; a tap on it closes the panel. */
+.panel-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 4;
+  background: var(--tempra-color-scrim);
+}
+
 /* Room for the text and a panel, not the contents as well (a laptop of about 1280px with the
    sidebar shown): an open panel takes a column again and the text moves over for it, so nothing
    (On this page included) runs under it. Narrower than this, it overlays. */
@@ -3615,8 +3642,12 @@ ul.events {
     border-top: 1px solid var(--tempra-color-border);
     border-left: 0;
     border-radius: var(--tempra-radius-card) var(--tempra-radius-card) 0 0;
-    /* The page dimmed behind the sheet, the top bar too; taps still reach the page (a quote). */
-    box-shadow: 0 0 0 100vmax var(--tempra-color-scrim);
+    box-shadow: none;
+  }
+
+  /* The page dimmed behind the sheet, the top bar too (.panel-scrim). */
+  .panel-scrim {
+    z-index: 6;
   }
 
   .panel-head {

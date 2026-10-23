@@ -59,6 +59,15 @@ export function ThreadView(props: {
     props.onActive(t.id);
     if (t.at) revealOffset(t.at.from);
   };
+  // A compact thread expanded from the panel hands the focus to its card (C-25), which replaces
+  // the button that had it.
+  const card = useRef<HTMLElement>(null);
+  const expanding = useRef(false);
+  useEffect(() => {
+    if (!active || !expanding.current) return;
+    expanding.current = false;
+    card.current?.focus();
+  }, [active]);
   if (!active) {
     return (
       <button
@@ -66,7 +75,10 @@ export function ThreadView(props: {
         id={threadElementId(t.id)}
         className={t.status === "open" ? "thread collapsed" : "thread collapsed resolved"}
         aria-expanded="false"
-        onClick={select}
+        onClick={() => {
+          expanding.current = true;
+          select();
+        }}
       >
         {outdated && <Outdated />}
         {t.anchor && <span className="quote thread-quote">{clip(t.anchor.quote, 120)}</span>}
@@ -81,6 +93,8 @@ export function ThreadView(props: {
   }
   return (
     <section
+      ref={card}
+      tabIndex={-1}
       id={threadElementId(t.id)}
       className={t.status === "open" ? "thread open" : "thread open resolved"}
       aria-label="Comment thread"

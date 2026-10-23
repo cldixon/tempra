@@ -123,6 +123,8 @@ interface Frame {
   setOwnTools(own: boolean): void;
   /** Names the page in the phone's top bar (a concept's title), or null for the frame's name. */
   setTitle(title: string | null): void;
+  /** A page's overlay (a concept's panel over the page) is modal: the top bar and sidebar go inert. */
+  setModal(on: boolean): void;
   /** Opens search: a library's quick switcher, or the search of the person's libraries. */
   search(): void;
 }
@@ -137,6 +139,7 @@ const FrameContext = createContext<Frame>({
   setOwnCrumbs: () => {},
   setOwnTools: () => {},
   setTitle: () => {},
+  setModal: () => {},
   search: () => {},
 });
 
@@ -219,7 +222,14 @@ function Shell(props: {
   me: Me | null;
   frame: Omit<
     Frame,
-    "sidebar" | "narrow" | "slots" | "setOwnCrumbs" | "setOwnTools" | "setTitle" | "search"
+    | "sidebar"
+    | "narrow"
+    | "slots"
+    | "setOwnCrumbs"
+    | "setOwnTools"
+    | "setTitle"
+    | "setModal"
+    | "search"
   >;
   children: ReactNode;
 }) {
@@ -235,6 +245,29 @@ function Shell(props: {
   const [title, setTitle] = useState<string | null>(null);
 
   const main = useRef<HTMLElement>(null);
+  const topbar = useRef<HTMLElement>(null);
+  // Modality (C-26, P-1; TEMPRA-133): what the open drawer dims (the top bar and the page), and
+  // what a page's overlay dims (the top bar and the sidebar), is inert, so Tab and a screen reader
+  // stay in the drawer or the overlay. Set on the elements at once, not on the next render, so
+  // the focus can go back to a control in the bar as soon as either closes.
+  const modal = useRef(false);
+  const drawerOpen = useRef(false);
+  const applyInert = useCallback(() => {
+    if (topbar.current) topbar.current.inert = drawerOpen.current || modal.current;
+    if (main.current) main.current.inert = drawerOpen.current;
+    if (sidebar.current) sidebar.current.inert = modal.current;
+  }, []);
+  const setModal = useCallback(
+    (on: boolean) => {
+      modal.current = on;
+      applyInert();
+    },
+    [applyInert],
+  );
+  useLayoutEffect(() => {
+    drawerOpen.current = drawer;
+    applyInert();
+  }, [drawer, applyInert]);
   const href = location.pathname + location.search;
   const shownHref = useRef(href);
   useLayoutEffect(() => {
@@ -322,9 +355,10 @@ function Shell(props: {
       setOwnCrumbs,
       setOwnTools,
       setTitle,
+      setModal,
       search: chrome.onSearch ?? (() => {}),
     }),
-    [props.frame, beside, narrow, crumbsSlot, toolsSlot, chrome.onSearch],
+    [props.frame, beside, narrow, crumbsSlot, toolsSlot, chrome.onSearch, setModal],
   );
   const classes = [
     "workspace",
@@ -335,7 +369,7 @@ function Shell(props: {
   return (
     <FrameContext.Provider value={frame}>
       <div className={classes.join(" ")}>
-        <header className="ws-topbar">
+        <header className="ws-topbar" ref={topbar}>
           <div className="topbar-brand">{chrome.brand}</div>
           <div className="topbar-page">
             <button
