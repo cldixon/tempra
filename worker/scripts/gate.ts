@@ -1649,7 +1649,11 @@ async function browserRenders(
       await bellButton.click();
       const bell = page.locator(".menu-list.bell-pop");
       await bell.locator(`a.bell-item[href="${reviewHref}"]`).waitFor({ timeout: 5000 });
-      await bell.getByText("changed a page you verified").first().waitFor({ timeout: 5000 });
+      // In the Inbox row's words (F-14): the page, then the detail line.
+      await bell
+        .getByText(/^1 edit by .+ since you verified$/)
+        .first()
+        .waitFor({ timeout: 5000 });
       if (shots) await page.screenshot({ path: `${shots}/bell.png` });
       await bell.getByRole("button", { name: "Mark all read" }).click();
       await page.getByRole("button", { name: "Inbox", exact: true }).waitFor({ timeout: 10_000 });

@@ -69,7 +69,7 @@ export function Home({ urls }: { urls: Urls }) {
     };
   });
   // Who works here: only the header's quiet line needs it, so a failure drops only that line.
-  const members = useLoad(`members ${urls.base}`, () =>
+  const members = useLoad(`home people ${urls.base}`, () =>
     api<{ owner: string; members: { handle: string }[] }>(urls.api("members")).then((m) => [
       m.owner,
       ...m.members.map((x) => x.handle),
