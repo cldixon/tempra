@@ -1,20 +1,20 @@
 /*
  * How a rendered concept reads (tempra-dev: app/reader, Reading typography): the body of a
  * concept, in the app now and wherever concepts are shown later (the site, inline MCP Apps views).
- * Scoped to .prose. A serif at 17px, about 66 characters to the line, spacing in em so the rhythm
+ * Scoped to .prose. The app's sans at 17px, about 66 characters to the line, spacing in em so the rhythm
  * scales with the text. Greys, type, spacing and rules only until the palette (TEMPRA-1).
  */
 .prose {
   max-width: var(--tempra-measure-reader);
   color: var(--tempra-color-text);
-  font-family: var(--tempra-font-reader);
+  font-family: var(--tempra-font-body);
   font-size: var(--tempra-text-reader);
   line-height: var(--tempra-leading-reader);
   font-kerning: normal;
   font-optical-sizing: auto;
   font-variant-ligatures: common-ligatures;
-  /* Figures that sit in running text; tables and markers switch to lining, tabular ones. */
-  font-variant-numeric: oldstyle-nums proportional-nums;
+  /* Lining figures in running text; tables and markers switch to tabular ones. */
+  font-variant-numeric: lining-nums proportional-nums;
   /* Quotes and stops hang into the margin where the browser can (Safari). */
   hanging-punctuation: first allow-end;
   /* A long URL or identifier wraps rather than pushing the column wider; words never break. */
@@ -65,7 +65,6 @@
 .prose h5,
 .prose h6 {
   margin: 1.9em 0 0.5em;
-  font-family: var(--tempra-font-reader);
   font-variant-numeric: lining-nums proportional-nums;
   line-height: var(--tempra-leading-tight);
   letter-spacing: -0.005em;

@@ -1,7 +1,6 @@
 /*
  * Tempra design tokens: the one place values live (TEMPRA-8). Take 2 of the design (TEMPRA-53,
- * design/handoff/layout-take-2) set structure and type: neutral greys, a serif for concept bodies,
- * a type scale, radii and one soft shadow. Take 3 (TEMPRA-106, design/handoff/layout-take-3) set
+ * design/handoff/layout-take-2) set structure and type: neutral greys, a type scale, radii and one soft shadow. Take 3 (TEMPRA-106, design/handoff/layout-take-3) set
  * the frame's sizes, squarer corners and the one colour allowed before the palette: a small warm
  * dot for an agent's recent change. Take 4 (TEMPRA-113, design/handoff/layout-take-4) set the top
  * bar, the wider sidebar and the panel, and gave the dot a second, pulsing state. The palette
@@ -54,18 +53,16 @@
     0 1px 2px light-dark(rgb(0 0 0 / 0.04), rgb(0 0 0 / 0.4)),
     0 6px 24px light-dark(rgb(0 0 0 / 0.04), rgb(0 0 0 / 0.35));
 
-  /* Type (TEMPRA-108): the serif is the document; everything else is the app's sans.
-     body: all of the app and the site (chrome, view titles, the byline, comments, public pages).
-     reader: a concept's own text only (its title, description and .prose body).
+  /* Type (TEMPRA-108; one face since 2026-10-23, tempra-dev decisions/one-face.md): one sans for
+     everything people read, a concept's own text included; the mono for code.
+     body: all of the app and the site (chrome, view titles, a concept's title and body, comments).
      mono: code, fences, the Markdown view, paths and hashes. */
   --tempra-font-body:
     -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", Helvetica, sans-serif;
-  --tempra-font-reader:
-    "Iowan Old Style", "Palatino Linotype", Charter, Georgia, "Times New Roman", serif;
   --tempra-font-mono: ui-monospace, "SF Mono", Menlo, monospace;
   --tempra-font-size: 14px; /* the app's base text */
   --tempra-measure: 680px; /* the reader's column, with its padding */
-  --tempra-measure-reader: 34em; /* concept text: about 66 characters of the reader's serif */
+  --tempra-measure-reader: 34em; /* concept text: about 66 characters at the reading size */
 
   /* Type scale: the only pixel sizes in the CSS (inside .prose, sizes are em of the reading size) */
   --tempra-text-initial: 9px; /* an avatar's initials */
