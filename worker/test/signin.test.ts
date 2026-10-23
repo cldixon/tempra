@@ -242,7 +242,7 @@ describe("who may sign up: SIGNUP (v2 spec: A4)", () => {
       body: new URLSearchParams({ email, next: "/" }),
     });
 
-  test("invite: existing accounts and invited emails get links; others join the waitlist", async () => {
+  test("invite: existing accounts and invited emails get links; others are sent nothing", async () => {
     const s = setup();
     Object.assign(s.env, { SIGNUP: "invite" });
     s.db.run("INSERT INTO invites (email, created) VALUES ('friend@example.com', 'now')");
@@ -255,9 +255,8 @@ describe("who may sign up: SIGNUP (v2 spec: A4)", () => {
     // One answer for all three: the page tells nothing about lists or accounts.
     expect(answers.size).toBe(1);
     expect(s.outbox.map((m) => m.to)).toEqual(["owner@example.com", "friend@example.com"]);
-    expect(s.db.query("SELECT email FROM waitlist").all()).toEqual([
-      { email: "stranger@example.com" },
-    ]);
+    // Joining the waitlist is Request access, never sign-in (TEMPRA-125).
+    expect(s.db.query("SELECT email FROM waitlist").all()).toEqual([]);
   });
 
   test("an invite withdrawn after the link was sent stops the account being created", async () => {
@@ -275,6 +274,8 @@ describe("who may sign up: SIGNUP (v2 spec: A4)", () => {
       body: new URLSearchParams({ t: t ?? "", next: "/" }),
     });
     expect(r.status).toBe(403);
+    // A dead end with a way onward (TEMPRA-125).
+    expect(await r.text()).toContain('href="/request-access"');
     expect(
       s.db.query("SELECT COUNT(*) AS n FROM users WHERE email = 'friend@example.com'").get(),
     ).toEqual({ n: 0 });
