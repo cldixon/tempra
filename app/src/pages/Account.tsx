@@ -2,7 +2,7 @@ import { type FormEvent, useState } from "react";
 import { api, field, useAction, useLoad } from "../api";
 import { CopyField } from "../CopyField";
 import { Avatar, ThemeChoice } from "../chrome";
-import { useConfirm } from "../Dialog";
+import { ComposeDialog, Dialog, useConfirm } from "../Dialog";
 import { Moment } from "../Moment";
 import { LibraryTile } from "../Sidebar";
 import { useTheme } from "../theme";
@@ -105,7 +105,13 @@ export function Welcome({ me }: { me: Me | null }) {
  * How to connect each kind of client; `slug` names the library when the page is about one, and
  * `library` (owner/slug) picks it in the token form.
  */
-export function ConnectSteps({ slug, library }: { slug?: string; library?: string }) {
+export function ConnectSteps(props: {
+  slug?: string;
+  library?: string;
+  /** On the Agents page, New token opens its dialog there. */
+  onNewToken?: () => void;
+}) {
+  const { slug, library } = props;
   const mcp = `${location.origin}/mcp`;
   return (
     <>
@@ -128,33 +134,213 @@ export function ConnectSteps({ slug, library }: { slug?: string; library?: strin
         />
       </p>
       <p>Then run /mcp in Claude Code to sign in.</p>
-      <h2>Other clients</h2>
+      <h2>Other clients and scripts</h2>
       <p>
-        <a href={library ? `/tokens?library=${encodeURIComponent(library)}` : "/tokens"}>
-          Create a token
-        </a>
+        {props.onNewToken ? (
+          <button type="button" onClick={props.onNewToken}>
+            New token
+          </button>
+        ) : (
+          <a
+            href={
+              library
+                ? `/agents?new=token&library=${encodeURIComponent(library)}`
+                : "/agents?new=token"
+            }
+          >
+            New token
+          </a>
+        )}
       </p>
     </>
   );
 }
 
-/** /connect: connecting an agent to the account (connections reach all or selected libraries). */
-export function ConnectAccount() {
-  useTitle("Connect an agent");
+/**
+ * /agents: how agents get into the person's libraries, in one place (2026-10-23; it replaced
+ * Connect an agent, Tokens and Connected apps): the steps to connect, then everything that can act
+ * in their libraries, apps connected over OAuth and tokens alike, each with Revoke; New token
+ * opens the compose dialog (`?new=token`, with `?library=` picking its library).
+ */
+export function Agents(props: { me: Me | null; newToken: boolean; library: string | null }) {
+  useTitle("Agents");
+  const { me } = props;
+  const loaded = useLoad("agents", async () => {
+    const [a, t, l] = await Promise.all([
+      api<{ apps: AppGrant[] }>("/api/v1/apps"),
+      api<{ tokens: TokenRow[] }>("/api/v1/tokens"),
+      api<{ libraries: { owner: string; slug: string; role?: string }[] }>("/api/v1/libraries"),
+    ]);
+    // An own library by its slug; one shared with the person as owner/slug, the name the
+    // server mints on (a member's token is held to their role there).
+    const names = l.libraries.map((x) =>
+      (x.role ?? "owner") === "owner" ? x.slug : `${x.owner}/${x.slug}`,
+    );
+    return { apps: a.apps, tokens: t.tokens, libraries: names };
+  });
+  const [creating, setCreating] = useState(props.newToken);
+  const [minted, setMinted] = useState<Minted | null>(null);
+  const action = useAction();
+  const [notice, setNotice] = useState<string | null>(null);
+  const { confirm, dialog } = useConfirm();
+  const revokeApp = (a: AppGrant) =>
+    confirm({
+      title: `Revoke ${a.app}?`,
+      body: <p>Its agents are cut off at once. To use it again, connect it again.</p>,
+      action: "Revoke",
+      run: () =>
+        action.run(async () => {
+          await api(`/api/v1/apps/${encodeURIComponent(a.id)}`, { method: "DELETE" });
+          setNotice(`${a.app} revoked.`);
+          loaded.reload();
+        }),
+    });
+  const revokeToken = (t: TokenRow) =>
+    confirm({
+      title: "Revoke this token?",
+      body: <p>Whatever uses it as {t.actor} is cut off at once. This cannot be undone.</p>,
+      action: "Revoke",
+      run: () =>
+        action.run(async () => {
+          await api(`/api/v1/tokens/${encodeURIComponent(t.id)}`, { method: "DELETE" });
+          setNotice(`${t.actor} revoked.`);
+          loaded.reload();
+        }),
+    });
+  const now = Date.now();
   return (
     <>
-      <h1>Connect an agent</h1>
+      <h1>Agents</h1>
+      {dialog}
       <p>One connection can reach all your libraries, or the ones you select.</p>
-      <ConnectSteps />
-      <h2>Connected apps</h2>
-      <p>
-        <a href="/apps">See and revoke connections</a>
-      </p>
+      <ConnectSteps onNewToken={() => setCreating(true)} />
+      <h2>Connected</h2>
+      {notice && <div className="notice ok">{notice}</div>}
+      {action.error && <div className="notice">{action.error}</div>}
+      <Status loaded={loaded}>
+        {({ apps, tokens, libraries }) => {
+          const live = (t: TokenRow) =>
+            !t.revoked && (t.expires === null || Date.parse(t.expires) > now);
+          // What can act now first (apps, then tokens), then the tokens that no longer can.
+          const ordered = [...tokens.filter(live), ...tokens.filter((t) => !live(t))];
+          return (
+            <>
+              {apps.length === 0 && tokens.length === 0 ? (
+                <p className="muted">Nothing connected yet.</p>
+              ) : (
+                <div className="table-wrap">
+                  <table className="list">
+                    <thead>
+                      <tr>
+                        <th>Agent</th>
+                        <th>Libraries</th>
+                        <th>Access</th>
+                        <th>
+                          <span className="visually-hidden">Actions</span>
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {apps.map((a) => (
+                        <tr key={`app ${a.id}`}>
+                          <td className="name">
+                            <strong>{a.app}</strong>
+                            <div className="small muted">App · connected {day(a.created)}</div>
+                          </td>
+                          <td>
+                            {a.libraries === "all"
+                              ? "All libraries"
+                              : a.libraries.length > 0
+                                ? a.libraries.join(", ")
+                                : "None (deleted)"}
+                            {a.prefix && <div className="small muted">under {a.prefix}/</div>}
+                          </td>
+                          <td>
+                            {a.access === "write" ? "Read and write" : "Read only"}
+                            {a.tiers === "files" && (
+                              <div className="small muted">file tools only</div>
+                            )}
+                            {a.create_libraries && (
+                              <div className="small muted">can create libraries</div>
+                            )}
+                          </td>
+                          <td>
+                            <button
+                              type="button"
+                              disabled={action.busy}
+                              onClick={() => revokeApp(a)}
+                            >
+                              Revoke…
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                      {ordered.map((t) => (
+                        <tr key={`token ${t.id}`}>
+                          <td className="name">
+                            <strong>{t.actor}</strong>
+                            <div className="small muted">
+                              Token ·{" "}
+                              {t.revoked ? (
+                                <span className="chip bad">revoked</span>
+                              ) : !live(t) ? (
+                                <span className="chip warn">expired</span>
+                              ) : t.expires ? (
+                                `expires ${day(t.expires)}`
+                              ) : (
+                                "no expiry"
+                              )}
+                            </div>
+                          </td>
+                          <td>
+                            {t.library}
+                            {t.prefix && <div className="small muted">under {t.prefix}/</div>}
+                          </td>
+                          <td>
+                            {t.scope === "read" ? "Read only" : "Read and write"}
+                            {t.mcp_tiers === "files" && (
+                              <div className="small muted">file tools only</div>
+                            )}
+                          </td>
+                          <td>
+                            {live(t) && (
+                              <button
+                                type="button"
+                                disabled={action.busy}
+                                onClick={() => revokeToken(t)}
+                              >
+                                Revoke…
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              <NewToken
+                open={creating}
+                me={me}
+                libraries={libraries}
+                library={props.library}
+                onClose={() => setCreating(false)}
+                onCreated={(m) => {
+                  setCreating(false);
+                  setMinted(m);
+                  loaded.reload();
+                }}
+              />
+            </>
+          );
+        }}
+      </Status>
+      <Dialog title="Token created" open={minted !== null} onClose={() => setMinted(null)} wide>
+        {minted && <TokenCreated minted={minted} onDone={() => setMinted(null)} />}
+      </Dialog>
     </>
   );
 }
-
-// ---------------------------------------------------------------- tokens
 
 interface TokenRow {
   id: string;
@@ -174,33 +360,42 @@ interface Minted {
   library: string;
 }
 
-/** Tokens for agents and scripts (spec: Auth, identity and actors). */
-export function Tokens({ me, library }: { me: Me | null; library: string | null }) {
-  useTitle("Tokens");
-  const loaded = useLoad("tokens", async () => {
-    const [t, l] = await Promise.all([
-      api<{ tokens: TokenRow[] }>("/api/v1/tokens"),
-      api<{ libraries: { owner: string; slug: string; role?: string }[] }>("/api/v1/libraries"),
-    ]);
-    // An own library by its slug; one shared with the person as owner/slug, the name the
-    // server mints on (a member's token is held to their role there).
-    const names = l.libraries.map((x) =>
-      (x.role ?? "owner") === "owner" ? x.slug : `${x.owner}/${x.slug}`,
-    );
-    return { tokens: t.tokens, libraries: names };
-  });
-  const [minted, setMinted] = useState<Minted | null>(null);
+/** Apps connected over OAuth (claude.ai, Claude Code) and what each may reach. */
+interface AppGrant {
+  id: string;
+  app: string;
+  actor: string | null;
+  libraries: "all" | string[];
+  access: "read" | "write";
+  prefix: string | null;
+  tiers: "all" | "files";
+  /** May create libraries owned by the person (TEMPRA-100). */
+  create_libraries?: boolean;
+  created: string;
+}
+
+/**
+ * New token, as a compose dialog (spec: Auth, identity and actors): its name, which its changes
+ * show as, then the library, access, directory, expiry and tools as small fields.
+ */
+function NewToken(props: {
+  open: boolean;
+  me: Me | null;
+  libraries: string[];
+  /** `?library=`, as owner/slug; the form knows the person's own libraries by slug alone. */
+  library: string | null;
+  onClose(): void;
+  onCreated(m: Minted): void;
+}) {
+  const { me, libraries, library } = props;
   const action = useAction();
-  const { confirm, dialog } = useConfirm();
-  if (minted) return <TokenCreated minted={minted} onDone={() => setMinted(null)} />;
-  // `?library=` names a library as owner/slug; the form knows the person's own by slug alone.
-  const chosen = (libraries: string[]) => {
+  const chosen = (() => {
     if (!library) return libraries[0];
     if (libraries.includes(library)) return library;
     const own =
       me && library.startsWith(`${me.handle}/`) ? library.slice(me.handle.length + 1) : null;
     return own && libraries.includes(own) ? own : libraries[0];
-  };
+  })();
   const create = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const form = e.currentTarget;
@@ -217,164 +412,83 @@ export function Tokens({ me, library }: { me: Me | null; library: string | null 
           mcp_tiers: f("tiers") === "files" ? "files" : "all",
         }),
       });
-      loaded.reload();
-      setMinted(res);
+      props.onCreated(res);
     });
   };
-  const revoke = (t: TokenRow) =>
-    confirm({
-      title: "Revoke this token?",
-      body: <p>Whatever uses it as {t.actor} is cut off at once. This cannot be undone.</p>,
-      action: "Revoke",
-      run: () =>
-        action.run(async () => {
-          await api(`/api/v1/tokens/${encodeURIComponent(t.id)}`, { method: "DELETE" });
-          loaded.reload();
-        }),
-    });
-  const now = Date.now();
   return (
-    <>
-      <h1>Tokens</h1>
-      {dialog}
-      <Status loaded={loaded}>
-        {({ tokens, libraries }) => (
-          <>
-            {tokens.length === 0 ? (
-              <p className="muted">No tokens yet.</p>
-            ) : (
-              <div className="table-wrap">
-                <table className="list">
-                  <thead>
-                    <tr>
-                      <th>Name</th>
-                      <th>Access</th>
-                      <th>Expires</th>
-                      <th>Status</th>
-                      <th>
-                        <span className="visually-hidden">Actions</span>
-                      </th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {tokens.map((t) => {
-                      const expired = t.expires !== null && Date.parse(t.expires) <= now;
-                      return (
-                        <tr key={t.id}>
-                          <td className="name">
-                            <strong>{t.actor}</strong>
-                            <div className="small muted">
-                              {t.library}
-                              {t.prefix ? ` · ${t.prefix}/ only` : ""}
-                              {t.mcp_tiers === "files" ? " · file tools only" : ""}
-                            </div>
-                          </td>
-                          <td>{t.scope === "read" ? "Read only" : "Read and write"}</td>
-                          <td className="small muted nowrap">
-                            {t.expires ? day(t.expires) : "Never"}
-                          </td>
-                          <td>
-                            {t.revoked ? (
-                              <span className="chip bad">revoked</span>
-                            ) : expired ? (
-                              <span className="chip warn">expired</span>
-                            ) : (
-                              <span className="chip ok">active</span>
-                            )}
-                          </td>
-                          <td>
-                            {!t.revoked && !expired && (
-                              <button
-                                type="button"
-                                disabled={action.busy}
-                                onClick={() => revoke(t)}
-                              >
-                                Revoke…
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )}
-            <div className="panel-box">
-              <h2>New token</h2>
-              {action.error && <div className="notice">{action.error}</div>}
-              {libraries.length === 0 ? (
-                <p className="muted">Create a library first.</p>
-              ) : (
-                <form className="token" onSubmit={create}>
-                  <p>
-                    <label>
-                      Library{" "}
-                      <select name="library" defaultValue={chosen(libraries)}>
-                        {libraries.map((l) => (
-                          <option key={l} value={l}>
-                            {l}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </p>
-                  <p>
-                    <label>
-                      Name{" "}
-                      <input type="text" name="actor" placeholder="claude-code/laptop" required />
-                    </label>
-                  </p>
-                  <p className="small muted">
-                    What its changes show as: the agent, then where it runs.
-                  </p>
-                  <p>
-                    <label className="choice">
-                      <input type="radio" name="scope" value="write" defaultChecked /> Read and
-                      write
-                    </label>{" "}
-                    <label className="choice">
-                      <input type="radio" name="scope" value="read" /> Read only
-                    </label>
-                  </p>
-                  <p>
-                    <label>
-                      Directory <input type="text" name="prefix" placeholder="whole library" />
-                    </label>{" "}
-                    <label>
-                      Expires <input type="date" name="expires" />
-                    </label>
-                  </p>
-                  <p>
-                    <label className="choice">
-                      <input type="radio" name="tiers" value="all" defaultChecked /> All MCP tools
-                    </label>{" "}
-                    <label className="choice">
-                      <input type="radio" name="tiers" value="files" /> File tools only
-                    </label>
-                  </p>
-                  <button className="primary" type="submit" disabled={action.busy}>
-                    Create token
-                  </button>
-                </form>
-              )}
-            </div>
-          </>
-        )}
-      </Status>
-    </>
+    <ComposeDialog
+      open={props.open}
+      onClose={props.onClose}
+      context={me ? `@${me.handle}` : "You"}
+      title="New token"
+      action="Create token"
+      busy={action.busy || libraries.length === 0}
+      error={libraries.length === 0 ? "Create a library first." : action.error}
+      onSubmit={create}
+      fields={
+        <>
+          <label className="compose-field">
+            <span>Library</span>
+            <select name="library" defaultValue={chosen}>
+              {libraries.map((l) => (
+                <option key={l} value={l}>
+                  {l}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="compose-field">
+            <span>Access</span>
+            <select name="scope" defaultValue="write">
+              <option value="write">Read and write</option>
+              <option value="read">Read only</option>
+            </select>
+          </label>
+          <label className="compose-field">
+            <span>Directory</span>
+            <input type="text" name="prefix" placeholder="whole library" />
+          </label>
+          <label className="compose-field">
+            <span>Expires</span>
+            <input type="date" name="expires" />
+          </label>
+          <label className="compose-field">
+            <span>Tools</span>
+            <select name="tiers" defaultValue="all">
+              <option value="all">All MCP tools</option>
+              <option value="files">File tools only</option>
+            </select>
+          </label>
+        </>
+      }
+    >
+      <input
+        className="compose-title"
+        name="actor"
+        type="text"
+        aria-label="Name"
+        aria-describedby="token-name-hint"
+        placeholder="Name, like claude-code/laptop"
+        required
+        autoComplete="off"
+        spellCheck={false}
+        data-autofocus
+      />
+      <p id="token-name-hint" className="compose-hint">
+        What its changes show as: the agent, then where it runs.
+      </p>
+    </ComposeDialog>
   );
 }
 
+/** The new token's secret, shown once, with the command that uses it. */
 function TokenCreated({ minted, onDone }: { minted: Minted; onDone(): void }) {
-  useTitle("Token created");
   const cmd = `claude mcp add --transport http ${minted.library} ${location.origin}/mcp --header "Authorization: Bearer ${minted.secret}"`;
   return (
     <>
-      <h1>Token created</h1>
-      <p>Shown once. Copy it now.</p>
       <p>
-        For <strong>{minted.actor}</strong> on <strong>{minted.library}</strong>:
+        For <strong>{minted.actor}</strong> on <strong>{minted.library}</strong>. Shown once: copy
+        it now.
       </p>
       <p>
         <CopyField value={minted.secret} label="the token" id="token-secret" />
@@ -383,108 +497,11 @@ function TokenCreated({ minted, onDone }: { minted: Minted; onDone(): void }) {
       <p>
         <CopyField value={cmd} label="the Claude Code command" />
       </p>
-      <p>
-        <button type="button" onClick={onDone}>
-          Back to tokens
+      <p className="actions">
+        <button type="button" className="primary" onClick={onDone}>
+          Done
         </button>
       </p>
-    </>
-  );
-}
-
-// ---------------------------------------------------------------- connected apps
-
-interface AppGrant {
-  id: string;
-  app: string;
-  actor: string | null;
-  libraries: "all" | string[];
-  access: "read" | "write";
-  prefix: string | null;
-  tiers: "all" | "files";
-  /** May create libraries owned by the person (TEMPRA-100). */
-  create_libraries?: boolean;
-  created: string;
-}
-
-/** Apps connected over OAuth (claude.ai, Claude Code) and what each may reach. */
-export function Apps() {
-  useTitle("Connected apps");
-  const loaded = useLoad("apps", () => api<{ apps: AppGrant[] }>("/api/v1/apps"));
-  const action = useAction();
-  const [notice, setNotice] = useState<string | null>(null);
-  const { confirm, dialog } = useConfirm();
-  const revoke = (a: AppGrant) =>
-    confirm({
-      title: `Revoke ${a.app}?`,
-      body: <p>Its agents are cut off at once. To use it again, connect it again.</p>,
-      action: "Revoke",
-      run: () =>
-        action.run(async () => {
-          await api(`/api/v1/apps/${encodeURIComponent(a.id)}`, { method: "DELETE" });
-          setNotice("Connection revoked.");
-          loaded.reload();
-        }),
-    });
-  return (
-    <>
-      <h1>Connected apps</h1>
-      {dialog}
-      {notice && <div className="notice ok">{notice}</div>}
-      {action.error && <div className="notice">{action.error}</div>}
-      <Status loaded={loaded}>
-        {({ apps }) =>
-          apps.length === 0 ? (
-            <p>None.</p>
-          ) : (
-            <div className="table-wrap">
-              <table className="list">
-                <thead>
-                  <tr>
-                    <th>App</th>
-                    <th>Libraries</th>
-                    <th>Access</th>
-                    <th>Since</th>
-                    <th>
-                      <span className="visually-hidden">Actions</span>
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {apps.map((a) => (
-                    <tr key={a.id}>
-                      <td className="name">
-                        <strong>{a.app}</strong>
-                      </td>
-                      <td>
-                        {a.libraries === "all"
-                          ? "All libraries"
-                          : a.libraries.length > 0
-                            ? a.libraries.join(", ")
-                            : "None (deleted)"}
-                        {a.prefix && <div className="small muted">under {a.prefix}/</div>}
-                      </td>
-                      <td>
-                        {a.access === "write" ? "Read and write" : "Read only"}
-                        {a.tiers === "files" && <div className="small muted">file tools only</div>}
-                        {a.create_libraries && (
-                          <div className="small muted">can create libraries</div>
-                        )}
-                      </td>
-                      <td className="small muted">{day(a.created)}</td>
-                      <td>
-                        <button type="button" disabled={action.busy} onClick={() => revoke(a)}>
-                          Revoke…
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )
-        }
-      </Status>
     </>
   );
 }

@@ -196,7 +196,9 @@ function NewLibrary({ open, onClose }: { open: boolean; onClose(): void }) {
       onSubmit={submit}
       fields={
         <label className="compose-field">
-          <span>{me ? `${me.handle}/` : "Address"}</span>
+          <span className={me ? "compose-prefix" : undefined}>
+            {me ? `${me.handle}/` : "Address"}
+          </span>
           <input
             name="slug"
             type="text"

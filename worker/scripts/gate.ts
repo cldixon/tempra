@@ -2922,8 +2922,8 @@ async function browserRenders(
           ready: () => main.locator("h1").first().waitFor({ timeout: 15_000 }),
         },
         {
-          name: "Tokens",
-          url: `${base}/tokens`,
+          name: "Agents",
+          url: `${base}/agents`,
           ready: () => main.locator("h1").first().waitFor({ timeout: 15_000 }),
         },
         {
@@ -3227,7 +3227,7 @@ async function oauthConnect(
  * A fresh account's first run (v2 spec: Phases and gates, A2), in the browser: sign up, the
  * welcome page, then connect an MCP client through OAuth with PKCE, as Claude Code would, and
  * write through MCP; the open Connect page turns to the agent's write live. Then the account's
- * pages (connected apps, tokens, account, work queue, import and export, recovery) work, and
+ * pages (Agents: the connected app and tokens, account, work queue, import and export, recovery) work, and
  * the library is deleted from its Delete tab, which ends the connection.
  */
 /**
@@ -3371,21 +3371,31 @@ async function freshAccountConnects(): Promise<string[]> {
       }
       await tab.click();
     };
-    await step("connected apps lists the app, from the header", async () => {
-      await accountLink("Connected apps");
-      await page.waitForURL(`${base}/apps`);
+    // Agents (2026-10-23): the connected app and tokens in one list, New token in the compose
+    // dialog, the secret shown once in a dialog after.
+    await step("Agents lists the connected app, from the avatar menu", async () => {
+      await accountLink("Agents");
+      await page.waitForURL(`${base}/agents`);
       await page.getByRole("cell", { name: /Gate/ }).waitFor({ timeout: 15_000 });
+      await page
+        .getByText(/^App · connected/)
+        .first()
+        .waitFor();
     });
-    await step("tokens: create one, see it once, revoke it", async () => {
-      await accountLink("Tokens");
-      await page.locator('input[name="actor"]').fill("process:gate");
-      await page.getByRole("button", { name: "Create token" }).click();
-      await page.locator("#token-secret").waitFor({ timeout: 15_000 });
-      await page.getByRole("button", { name: "Back to tokens" }).click();
+    await step("tokens: create one from New token, see it once, revoke it", async () => {
+      await page.getByRole("button", { name: "New token", exact: true }).click();
+      const compose = page.getByRole("dialog", { name: "New token" });
+      await compose.getByRole("textbox", { name: "Name", exact: true }).fill("process:gate");
+      await compose.getByRole("button", { name: "Create token" }).click();
+      const created = page.getByRole("dialog", { name: "Token created" });
+      await created.locator("#token-secret").waitFor({ timeout: 15_000 });
+      await created.getByRole("button", { name: "Done" }).click();
+      await created.waitFor({ state: "hidden", timeout: 5000 });
       // Revoking asks first (S-4).
-      await page.getByRole("button", { name: "Revoke…" }).click();
+      const row = page.getByRole("row", { name: /process:gate/ });
+      await row.getByRole("button", { name: "Revoke…" }).click();
       await page.locator("dialog").getByRole("button", { name: "Revoke", exact: true }).click();
-      await page.getByText("revoked").waitFor({ timeout: 15_000 });
+      await row.getByText("revoked").waitFor({ timeout: 15_000 });
     });
     await step("account page", async () => {
       await accountLink("Account");

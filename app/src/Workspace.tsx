@@ -632,9 +632,7 @@ export type AccountPage =
   | "welcome"
   | "account"
   | "notifications"
-  | "connect"
-  | "tokens"
-  | "apps"
+  | "agents"
   | "invitations";
 
 const ACCOUNT_NAMES: Record<AccountPage, string> = {
@@ -643,9 +641,7 @@ const ACCOUNT_NAMES: Record<AccountPage, string> = {
   welcome: "Welcome",
   account: "Account",
   notifications: "Notifications",
-  connect: "Connect an agent",
-  tokens: "Tokens",
-  apps: "Connected apps",
+  agents: "Agents",
   invitations: "Invitations",
 };
 

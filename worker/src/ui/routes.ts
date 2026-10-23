@@ -109,7 +109,7 @@ function ui(deps: (env: Cloudflare.Env) => Deps, handler: (p: Page) => Promise<R
 export function legacyUrl(path: string): string {
   const rest = path.replace(/^\/app\/?/, "");
   if (rest === "" || rest === "libraries" || rest === "libraries/") return "/";
-  if (rest === "grants" || rest.startsWith("grants/")) return `/apps${rest.slice(6)}`;
+  if (rest === "grants" || rest.startsWith("grants/")) return "/agents";
   const m = rest.match(/^libraries\/([^/]+)\/([^/]+)(?:\/(.*))?$/);
   if (!m) return `/${rest}`;
   const [, owner, lib, page = ""] = m;
@@ -215,15 +215,25 @@ export function registerUiRoutes<E extends AppEnv>(
   });
   for (const path of [
     "/welcome",
-    "/connect",
-    "/tokens",
+    "/agents",
     "/account",
     "/notifications",
-    "/apps",
     "/invitations",
     "/inbox",
   ]) {
     get(path, shell);
+  }
+  // Agents (2026-10-23) took the place of Connect an agent, Tokens and Connected apps; a link to
+  // a library's tokens opens New token for it.
+  for (const path of ["/connect", "/tokens", "/apps"]) {
+    app.get(path, (c) => {
+      const library = c.req.query("library");
+      const to =
+        path === "/tokens" && library
+          ? `/agents?new=token&library=${encodeURIComponent(library)}`
+          : "/agents";
+      return c.redirect(to, 301);
+    });
   }
 
   // The UI lived under /app until it moved to the root (v2 spec: URLs). 308 keeps a form post's

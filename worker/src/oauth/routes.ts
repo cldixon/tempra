@@ -162,7 +162,7 @@ function authError(e: unknown): Response {
 }
 
 /**
- * /authorize and /apps, for the signed-in person (spec: Apps under Auth). Consent lists their
+ * /authorize and the Agents page, for the signed-in person (spec: Apps under Auth). Consent lists their
  * own libraries and those shared with them, and a grant belongs to their account (v2 spec:
  * Tenancy); a shared library is reached at most at the person's role there (v2/sharing).
  */
@@ -289,7 +289,7 @@ export function registerAppRoutes<E extends AppEnv>(
         request: approved.request,
         userId: user.id,
         metadata: {
-          // The props' grant id, so /apps and deleting a library can find what it created.
+          // The props' grant id, so the Agents page and deleting a library can find what it created.
           grant: grantId,
           libraries,
           create,

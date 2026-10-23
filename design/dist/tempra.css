@@ -1728,13 +1728,37 @@ body.ground {
   outline-offset: 1px;
 }
 
-.compose-field input:not([type="checkbox"], [type="radio"], [type="file"]) {
+.compose-field input:not([type="checkbox"], [type="radio"], [type="file"]),
+.compose-field select {
   width: 18ch;
   min-width: 0;
   padding: 5px 8px 5px 1px;
   border: 0;
   background: transparent;
   outline: none;
+}
+
+/* A pill's label, a space, its field ("Library notes"); a prefix of the value itself ("ann/" before a
+   library's address) runs straight into it. */
+.compose-field > span:not(.compose-prefix) + input,
+.compose-field > span:not(.compose-prefix) + select {
+  margin-left: 6px;
+}
+
+.compose-field select {
+  width: auto;
+  cursor: pointer;
+}
+
+.compose-field input[type="date"] {
+  width: auto;
+}
+
+/* A line under the name: what it is for. */
+.compose-body .compose-hint {
+  margin: 0;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-ui);
 }
 
 .compose-form > .notice {

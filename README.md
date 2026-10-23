@@ -132,10 +132,10 @@ The Worker serves an MCP server at `/mcp` (Streamable HTTP). Each connection rea
 connector. The app sends you to `/authorize`, where you sign in and choose what the app may do:
 which of your libraries (or a new one), read only or read and write, an optional
 directory, the name its changes carry in the ledger (e.g. `claude-ai/connector`), and all tools or
-file tools only. `/apps` lists connected apps and revokes them.
+file tools only. The **Agents** page (`/agents`) lists connected apps beside tokens and revokes them.
 
-**Claude Code, scripts and scheduled tasks (bearer token).** Mint a token on the **Tokens** page
-(`/tokens`): pick the library, an actor such as `claude-code/laptop` (or `process:<name>` for a
+**Claude Code, scripts and scheduled tasks (bearer token).** Mint a token from **New token** on
+the **Agents** page (`/agents`): pick the library, an actor such as `claude-code/laptop` (or `process:<name>` for a
 scheduled job that may verify), read or write, and optionally a directory, an expiry and file tools
 only. The secret is shown once, with the command to paste:
 

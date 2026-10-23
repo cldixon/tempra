@@ -5,9 +5,7 @@ import { type ActivityFilters, type ActivityView, inboxUrl } from "./urls";
 export type Route =
   | { page: "libraries"; create: boolean }
   | { page: "welcome" }
-  | { page: "connect" }
-  | { page: "tokens"; library: string | null }
-  | { page: "apps" }
+  | { page: "agents"; newToken: boolean; library: string | null }
   | { page: "account"; done: string | null }
   | { page: "notifications" }
   | { page: "invitations" }
@@ -59,6 +57,7 @@ function int(v: string | null): number | undefined {
 
 const SERVER_ROOTS = new Set([
   "account",
+  "agents",
   "api",
   "app",
   "apps",
@@ -82,9 +81,18 @@ export function match(url: URL): Route | null {
   if (path === "/") return { page: "libraries", create: q.get("new") === "1" };
   // The account's pages; sign-in, consent and the email-change link are server pages.
   if (path === "/welcome") return { page: "welcome" };
-  if (path === "/connect") return { page: "connect" };
-  if (path === "/tokens") return { page: "tokens", library: q.get("library") };
-  if (path === "/apps") return { page: "apps" };
+  // Agents (2026-10-23) took the place of Connect an agent, Tokens and Connected apps.
+  if (path === "/agents") {
+    return { page: "agents", newToken: q.get("new") === "token", library: q.get("library") };
+  }
+  if (path === "/connect" || path === "/apps") return { page: "redirect", to: "/agents" };
+  if (path === "/tokens") {
+    const library = q.get("library");
+    return {
+      page: "redirect",
+      to: library ? `/agents?new=token&library=${encodeURIComponent(library)}` : "/agents",
+    };
+  }
   if (path === "/account") return { page: "account", done: q.get("done") };
   if (path === "/notifications") return { page: "notifications" };
   if (path === "/invitations") return { page: "invitations" };
