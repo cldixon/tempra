@@ -121,14 +121,19 @@ export function LibrarySidebar(props: {
   );
 }
 
-/** The library's settings pages by role (tempra-dev: v2/sharing). */
+/**
+ * The library's settings pages by role (tempra-dev: v2/sharing): a read member has Members (and
+ * Leave on it), a write member also General and Connect, the owner also the recovery tools and
+ * Delete. Nothing until the role is known, so no tab shows and then goes.
+ */
 export function settingsTabs(urls: Urls, role: string | null) {
   const owner = role === "owner";
+  const writer = owner || role === "write";
   const all: [string, string, Place["view"], boolean][] = [
-    ["General", urls.settings(), "settings", true],
-    ["Members", urls.members(), "members", true],
-    ["Connect", urls.connect(), "connect", true],
-    ["Import & export", urls.transfer(), "transfer", true],
+    ["General", urls.settings(), "settings", writer],
+    ["Members", urls.members(), "members", role !== null],
+    ["Connect", urls.connect(), "connect", writer],
+    ["Import & export", urls.transfer(), "transfer", owner],
     ["Recovery", urls.recovery(), "recovery", owner],
     ["Delete library", urls.remove(), "delete", owner],
   ];
@@ -169,7 +174,7 @@ export function AccountSidebar({ page }: { page: AccountPage }) {
         <Row href="/" current={page === "libraries"} icon="libraries" label="Libraries" />
         <Row
           href="/inbox"
-          current={page === "inbox"}
+          current={page === "inbox" || page === "invitations"}
           icon="inbox"
           label="Inbox"
           ariaLabel={unread > 0 ? `Inbox, ${unread} unread` : "Inbox"}

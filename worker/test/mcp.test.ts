@@ -140,6 +140,33 @@ describe("MCP server", () => {
     expect(start).toContain("Health (checked ");
   });
 
+  test("revert is the owner's: a write member's agent is refused and nothing lands", async () => {
+    const s = setup();
+    const owner = await connect(s.app);
+    await owner.call("write", { path: "x.md", content: doc("X", "Alpha.\n") });
+    const friend = await s.stranger("friend@example.com");
+    await s.accounts.share("lib-1", friend.user.id, "write", "user_1");
+    const { secret } = await s.accounts.createToken({
+      libraryId: "lib-1",
+      actor: "claude-code/friend",
+      scope: "write",
+      prefix: null,
+      expires: null,
+      mcpTiers: "all",
+      createdBy: friend.user.id,
+    });
+    const member = await connect(s.app, secret);
+    const head = s.store().headSeq();
+    // The member's agent writes content, but does not revert (TEMPRA-124).
+    const r = await member.call("revert", { path: "x.md", to_seq: 1, note: "undo" });
+    expect(r.isError).toBe(true);
+    expect(r.text).toContain("owner_only");
+    expect(s.store().headSeq()).toBe(head);
+    expect(
+      (await member.call("edit", { path: "x.md", edits: [{ old: "Alpha", new: "Beta" }] })).isError,
+    ).toBe(false);
+  });
+
   test("beyond files: search, query, links, log, history, diff, revert, work", async () => {
     const { app } = setup();
     const { call } = await connect(app);

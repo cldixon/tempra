@@ -40,14 +40,30 @@ export function useLibraries() {
   return loaded;
 }
 
-/** The person's role in this library; null while it loads. */
+/** Libraries the list was loaded again for because it lacked them, each once per page load. */
+const reloadedFor = new Set<string>();
+
+/**
+ * The person's role in this library; null while it is unknown: while the list loads, and when
+ * the list does not have the library yet (just made, or an invitation just accepted) until the
+ * list, loaded again once, does. Never a guess: owner items show only to the owner (S-2).
+ */
 export function useRole(lib: { owner: string; slug: string }): Role | null {
   const libs = useLibraries();
-  if (libs.state !== "ready") return null;
-  const found = libs.data.libraries.find((l) => l.owner === lib.owner && l.slug === lib.slug);
-  return found?.role ?? "owner";
+  const found =
+    libs.state === "ready"
+      ? libs.data.libraries.find((l) => l.owner === lib.owner && l.slug === lib.slug)
+      : undefined;
+  const missing = libs.state === "ready" && !found;
+  const key = `${lib.owner}/${lib.slug}`;
+  const { reload } = libs;
+  useEffect(() => {
+    if (!missing || reloadedFor.has(key)) return;
+    reloadedFor.add(key);
+    reload();
+  }, [missing, key, reload]);
+  return found ? (found.role ?? "owner") : null;
 }
-
 /** How a library is named to this person: its slug when theirs, owner/slug when shared. */
 export const libraryName = (l: ReachableLibrary) =>
   (l.role ?? "owner") === "owner" ? l.slug : `${l.owner}/${l.slug}`;

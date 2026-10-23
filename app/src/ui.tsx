@@ -119,7 +119,7 @@ export function useAgo(ts: string): string {
 /** A time as "3 min" with the full timestamp on hover. */
 export function Ago({ ts, now }: { ts: string; now: number }) {
   return (
-    <time dateTime={ts} title={`${when(ts)} UTC`}>
+    <time dateTime={ts} title={localTime(ts)}>
       {ago(ts, now)}
     </time>
   );
@@ -131,6 +131,13 @@ export function when(iso: string): string {
     .replace("T", " ")
     .replace(/:\d\d(\.\d+)?Z$/, "")
     .replace(/Z$/, "");
+}
+
+/** A moment in the reader's own time zone, as people write it: "Oct 21, 2026, 4:52 PM". */
+export function localTime(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
 }
 
 /**

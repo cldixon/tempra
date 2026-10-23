@@ -109,3 +109,71 @@
     min-height: var(--tempra-touch);
   }
 }
+
+/* ---------- An invitation (take 4, board 30; TEMPRA-135) ---------- */
+
+/* Who invited and when, the library as a card, the access offered, Accept and Decline. */
+.invitations {
+  display: flex;
+  flex-direction: column;
+  gap: var(--tempra-space-4);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.invitation {
+  display: flex;
+  flex-direction: column;
+  gap: var(--tempra-space-3);
+  max-width: 32rem;
+}
+
+.invitation p {
+  margin: 0;
+}
+
+.invitation-from {
+  display: flex;
+  align-items: center;
+  gap: var(--tempra-space-2);
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-ui);
+}
+
+.invitation-card {
+  display: flex;
+  align-items: center;
+  gap: var(--tempra-space-3);
+  padding: var(--tempra-space-3);
+  border: 1px solid var(--tempra-color-border);
+  border-radius: var(--tempra-radius-box);
+}
+
+.invitation-card .lib-tile {
+  width: 36px;
+  height: 36px;
+}
+
+.invitation-library {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.invitation-library span {
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+}
+
+.invitation-access {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--tempra-space-3);
+  font-size: var(--tempra-text-ui);
+}
+
+.invitation-access span {
+  color: var(--tempra-color-muted);
+}

@@ -235,6 +235,11 @@ body.ground {
   font-size: var(--tempra-text-ui);
 }
 
+/* A confirmation: what happens, then the action and Cancel. */
+.confirm-body p {
+  margin: 0 0 var(--tempra-space-2);
+}
+
 /* ---------- A page's column: the account's pages, settings, the library's tools ---------- */
 
 /* One centred column; the frame's top bar and sidebar are around it. */
@@ -1344,7 +1349,7 @@ body.ground {
   }
 }
 
-/* ---------- Page pieces: lists, tables, forms, the ledger, diffs ---------- */
+/* ---------- Page pieces: lists, tables, forms ---------- */
 
 .new-library {
   display: flex;
@@ -1378,8 +1383,7 @@ body.ground {
 }
 
 .page-column pre,
-.page-column pre.src,
-.page-column pre.diff {
+.page-column pre.src {
   background: var(--tempra-color-ground);
 }
 
@@ -1482,8 +1486,7 @@ form.token {
   flex-direction: column;
 }
 
-pre.src,
-pre.diff {
+pre.src {
   overflow-x: auto;
   padding: 12px 14px;
   border-radius: var(--tempra-radius-box);
@@ -1492,62 +1495,12 @@ pre.diff {
   line-height: var(--tempra-line-height);
 }
 
-pre.src.wrap {
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-pre.diff .add {
-  font-weight: var(--tempra-weight-strong);
-}
-
-pre.diff .del {
-  color: var(--tempra-color-faint);
-  text-decoration: line-through;
-}
-
-pre.diff .hunk,
-pre.diff .meta {
-  color: var(--tempra-color-muted);
-}
-
-ol.ledger {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.request {
-  padding: 12px 0;
-  border-top: 1px solid var(--tempra-color-border);
-  font-size: var(--tempra-text-ui);
-}
-
-.req-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: 4px 8px;
-}
-
-.request .note {
-  margin: 4px 0;
-  color: var(--tempra-color-muted);
-}
-
 ul.events {
   margin: 4px 0 0;
   padding: 0;
   list-style: none;
-  font-size: var(--tempra-text-meta);
-}
-
-.op {
-  display: inline-block;
-  min-width: 3.5em;
-  color: var(--tempra-color-muted);
-  font-family: var(--tempra-font-mono);
-  font-size: var(--tempra-text-label);
+  font-size: var(--tempra-text-ui);
+  line-height: var(--tempra-line-height);
 }
 
 /* ---------- Notifications (TEMPRA-72, TEMPRA-73): mentions (the Inbox is inbox.css) ---------- */

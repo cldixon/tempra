@@ -588,14 +588,23 @@ const ACCOUNT_NAMES: Record<AccountPage, string> = {
   invitations: "Invitations",
 };
 
+/** The account's pages under its own sidebar; Welcome and Invitations are not settings (S-14). */
+const ACCOUNT_OWN: ReadonlySet<AccountPage> = new Set([
+  "libraries",
+  "inbox",
+  "welcome",
+  "invitations",
+]);
+
 /**
- * The account's frame (take 4, boards 01 to 05): Tempra over the sidebar; the library list and
- * the Inbox under the account's sidebar (Libraries, Inbox, the person's libraries), the rest
- * under the settings' (Back to libraries, then each page).
+ * The account's frame (take 4, boards 01 to 05): Tempra over the sidebar; the library list, the
+ * Inbox (an invitation is answered from it), and first run under the account's sidebar
+ * (Libraries, Inbox, the person's libraries), the rest under the settings' (Back to libraries,
+ * then each page).
  */
 export function AccountFrame(props: { page: AccountPage; me: Me | null; children: ReactNode }) {
   const { page } = props;
-  const settings = page !== "libraries" && page !== "inbox";
+  const settings = !ACCOUNT_OWN.has(page);
   const name = ACCOUNT_NAMES[page];
   // Off a library, search finds a library (TEMPRA-127).
   const [searching, setSearching] = useState(false);
@@ -620,6 +629,12 @@ export function AccountFrame(props: { page: AccountPage; me: Me | null; children
         {settings && (
           <>
             <a href="/account">Settings</a>
+            <span aria-hidden="true">/</span>
+          </>
+        )}
+        {page === "invitations" && (
+          <>
+            <a href="/inbox">Inbox</a>
             <span aria-hidden="true">/</span>
           </>
         )}

@@ -10,7 +10,6 @@ import {
   Welcome,
 } from "./pages/Account";
 import { Activity } from "./pages/Activity";
-import { Diff } from "./pages/Diff";
 import { File } from "./pages/File";
 import { Folder } from "./pages/Folder";
 import { Home } from "./pages/Home";
@@ -144,7 +143,9 @@ function App() {
         );
         break;
       case "diff":
-        page = <Diff urls={urls} path={route.path} from={route.from} to={route.to} />;
+        // The take 3 Diff page is retired (TEMPRA-124): its address opens the concept's own
+        // version view.
+        page = <Redirect to={urls.diff(route.path, route.from, route.to)} />;
         break;
       case "work":
         page = <Work urls={urls} kind={route.kind} />;

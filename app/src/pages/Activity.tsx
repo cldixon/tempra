@@ -146,7 +146,7 @@ export function Activity(props: {
       </header>
       {props.done?.kind === "revert" && (
         <div className="notice ok">
-          Reverted: {plural(props.done.n ?? 0, "change")}, recorded as a new request by {actor}.
+          Reverted: {plural(props.done.n ?? 0, "change")}, recorded as a new change by you.
         </div>
       )}
       <div className="view-filters activity-filters">
@@ -493,8 +493,9 @@ function EveryEvent(props: {
                       : null
                 }
                 revert={
+                  // Revert is one of the owner's recovery tools (TEMPRA-124).
                   row.lead &&
-                  (role === "owner" || role === "write") &&
+                  role === "owner" &&
                   row.request.events.some((e) => e.op !== "verify" && e.op !== "comment")
                 }
                 now={now}
@@ -554,9 +555,10 @@ function EventLine(props: {
           <code>{e.path}</code>
         </a>
         {row.note && <span className="events-note">{row.note}</span>}
-        {DIFFABLE.has(e.op) && (
+        {DIFFABLE.has(e.op) && e.path.endsWith(".md") && (
+          // This version as it was, on the concept's own page (History marks it there).
           <a className="events-aside" href={urls.diff(e.path, undefined, e.seq)}>
-            diff
+            Version
           </a>
         )}
         {props.revert && (

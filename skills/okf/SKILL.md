@@ -89,7 +89,7 @@ These tools have no equivalent in a folder of files. Use them instead of greppin
 | What links here, and what this links to | `links` |
 | Which sources back which claims | `sources` |
 | A concept's past versions | `history`, `read(path, at)`, `diff` |
-| Undo a change or a whole request | `revert` |
+| Undo a change or a whole request (the library's owner only) | `revert` |
 | The whole bundle as files | `export` |
 
 A good maintenance session: `start`, `log` to see what changed, `work` to pick an item, fix it, repeat.

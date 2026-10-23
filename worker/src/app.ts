@@ -545,6 +545,9 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     const body = await json<{ path?: string; to_seq?: number; request_id?: string; note?: string }>(
       c,
     );
+    // Revert is one of the owner's recovery tools (TEMPRA-124, tempra-dev:
+    // decisions/read-and-comment-only), as restore is: the owner and their agents alone.
+    requireOwner(c.var.token.role, "revert changes");
     let target: { path: string; to_seq: number } | { request_id: string };
     if (typeof body.request_id === "string") {
       if (c.var.token.prefix !== null) {
@@ -568,6 +571,8 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   // ------------------------------------------------------------------ import and export
 
   app.post(`${BASE}/import`, async (c) => {
+    // Import is one of the owner's recovery tools (TEMPRA-124), checked before the body is read.
+    requireOwner(c.var.token.role, "import a bundle");
     const strip = num(c, "strip") ?? 0;
     const type = (c.req.header("Content-Type") ?? "").toLowerCase();
     let raw: { path: string; bytes: Uint8Array }[];
@@ -1273,7 +1278,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   });
 
   // Nightly exports and running the maintainers now (spec: Backups and recovery), as the app's
-  // Import & export page. People only, like restore.
+  // Import & export page. The owner's, and people only, like restore.
   const peopleOnly = (c: C) => {
     if (!c.var.token.actor.startsWith("human:")) {
       throw new OkfError(403, "human_only", "This needs a human: token, or the app.");
@@ -1283,6 +1288,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
 
   app.get(`${BASE}/exports`, async (c) => {
     const ref = peopleOnly(c);
+    requireOwner(c.var.token.role, "see its exports");
     const list = c.var.deps.exports ? await c.var.deps.exports.list(ref.do_id) : [];
     return c.json({
       exports: list.map((e) => ({

@@ -89,6 +89,19 @@ async function kvId(title: string): Promise<string | null> {
   return (await kvNamespaces()).find((n) => n.title === title)?.id ?? null;
 }
 
+/**
+ * A create that Cloudflare answers with "already exists, and you own it" (a listing that missed
+ * it, or another run for the same PR) found what `up` wanted: carry on.
+ */
+async function alreadyOurs(create: Promise<unknown>): Promise<void> {
+  try {
+    await create;
+  } catch (e) {
+    if (!/already exists, and you own it/i.test(String(e))) throw e;
+    console.log("  (it already exists)");
+  }
+}
+
 async function buckets(): Promise<string[]> {
   const r = await json<{ buckets?: { name: string }[] }>(["r2", "buckets", "list"]);
   return (r.buckets ?? []).map((b) => b.name);
@@ -128,7 +141,7 @@ async function up(
   }
   if (!(await buckets()).includes(names.r2)) {
     console.log(`Creating R2 ${names.r2}`);
-    await cf(["r2", "buckets", "create", "--name", names.r2]);
+    await alreadyOurs(cf(["r2", "buckets", "create", "--name", names.r2]));
   }
   const kvTitle = `tempra-oauth-pr-${pr}`;
   let kv = await kvId(kvTitle);

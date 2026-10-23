@@ -1,8 +1,12 @@
 import { type FormEvent, useState } from "react";
 import { api, field, useAction, useLoad } from "../api";
-import { ThemeChoice } from "../chrome";
+import { CopyField } from "../CopyField";
+import { Avatar, ThemeChoice } from "../chrome";
+import { useConfirm } from "../Dialog";
+import { Moment } from "../Moment";
+import { LibraryTile } from "../Sidebar";
 import { useTheme } from "../theme";
-import { type Me, Status, useScrollToHash, useTitle, when } from "../ui";
+import { day, localTime, type Me, Status, useScrollToHash, useTitle } from "../ui";
 import { Urls } from "../urls";
 
 /** The landing page's legal pages (TEMPRA-14). */
@@ -67,8 +71,11 @@ export function Welcome({ me }: { me: Me | null }) {
 
 // ---------------------------------------------------------------- connecting an agent
 
-/** How to connect each kind of client; `slug` names the library when the page is about one. */
-export function ConnectSteps({ slug }: { slug?: string }) {
+/**
+ * How to connect each kind of client; `slug` names the library when the page is about one, and
+ * `library` (owner/slug) picks it in the token form.
+ */
+export function ConnectSteps({ slug, library }: { slug?: string; library?: string }) {
   const mcp = `${location.origin}/mcp`;
   return (
     <>
@@ -80,13 +87,20 @@ export function ConnectSteps({ slug }: { slug?: string }) {
           : "choose All libraries, or select the ones it may use"}
         .
       </p>
-      <pre>{mcp}</pre>
+      <p>
+        <CopyField value={mcp} label="the MCP URL" />
+      </p>
       <h2>Claude Code</h2>
-      <pre>claude mcp add --transport http tempra {mcp}</pre>
+      <p>
+        <CopyField
+          value={`claude mcp add --transport http tempra ${mcp}`}
+          label="the Claude Code command"
+        />
+      </p>
       <p>Then run /mcp in Claude Code to sign in.</p>
       <h2>Other clients</h2>
       <p>
-        <a href={slug ? `/tokens?library=${encodeURIComponent(slug)}` : "/tokens"}>
+        <a href={library ? `/tokens?library=${encodeURIComponent(library)}` : "/tokens"}>
           Create a token
         </a>
       </p>
@@ -147,7 +161,16 @@ export function Tokens({ me, library }: { me: Me | null; library: string | null 
   });
   const [minted, setMinted] = useState<Minted | null>(null);
   const action = useAction();
+  const { confirm, dialog } = useConfirm();
   if (minted) return <TokenCreated minted={minted} onDone={() => setMinted(null)} />;
+  // `?library=` names a library as owner/slug; the form knows the person's own by slug alone.
+  const chosen = (libraries: string[]) => {
+    if (!library) return libraries[0];
+    if (libraries.includes(library)) return library;
+    const own =
+      me && library.startsWith(`${me.handle}/`) ? library.slice(me.handle.length + 1) : null;
+    return own && libraries.includes(own) ? own : libraries[0];
+  };
   const create = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     const form = e.currentTarget;
@@ -168,15 +191,22 @@ export function Tokens({ me, library }: { me: Me | null; library: string | null 
       setMinted(res);
     });
   };
-  const revoke = (id: string) =>
-    action.run(async () => {
-      await api(`/api/v1/tokens/${encodeURIComponent(id)}`, { method: "DELETE" });
-      loaded.reload();
+  const revoke = (t: TokenRow) =>
+    confirm({
+      title: "Revoke this token?",
+      body: <p>Whatever uses it as {t.actor} is cut off at once. This cannot be undone.</p>,
+      action: "Revoke",
+      run: () =>
+        action.run(async () => {
+          await api(`/api/v1/tokens/${encodeURIComponent(t.id)}`, { method: "DELETE" });
+          loaded.reload();
+        }),
     });
   const now = Date.now();
   return (
     <>
       <h1>Tokens</h1>
+      {dialog}
       <Status loaded={loaded}>
         {({ tokens, libraries }) => (
           <>
@@ -187,11 +217,13 @@ export function Tokens({ me, library }: { me: Me | null; library: string | null 
                 <table className="list">
                   <thead>
                     <tr>
-                      <th>Actor</th>
+                      <th>Name</th>
                       <th>Access</th>
-                      <th />
+                      <th>Expires</th>
                       <th>Status</th>
-                      <th />
+                      <th>
+                        <span className="visually-hidden">Actions</span>
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -207,15 +239,9 @@ export function Tokens({ me, library }: { me: Me | null; library: string | null 
                               {t.mcp_tiers === "files" ? " · file tools only" : ""}
                             </div>
                           </td>
-                          <td>{t.scope}</td>
+                          <td>{t.scope === "read" ? "Read only" : "Read and write"}</td>
                           <td className="small muted nowrap">
-                            {t.expires ? `expires ${when(t.expires)}` : "no expiry"}
-                            {t.created_by && (
-                              <>
-                                <br />
-                                by {t.created_by}
-                              </>
-                            )}
+                            {t.expires ? day(t.expires) : "Never"}
                           </td>
                           <td>
                             {t.revoked ? (
@@ -231,9 +257,9 @@ export function Tokens({ me, library }: { me: Me | null; library: string | null 
                               <button
                                 type="button"
                                 disabled={action.busy}
-                                onClick={() => void revoke(t.id)}
+                                onClick={() => revoke(t)}
                               >
-                                Revoke
+                                Revoke…
                               </button>
                             )}
                           </td>
@@ -254,7 +280,7 @@ export function Tokens({ me, library }: { me: Me | null; library: string | null 
                   <p>
                     <label>
                       Library{" "}
-                      <select name="library" defaultValue={library ?? libraries[0]}>
+                      <select name="library" defaultValue={chosen(libraries)}>
                         {libraries.map((l) => (
                           <option key={l} value={l}>
                             {l}
@@ -265,10 +291,12 @@ export function Tokens({ me, library }: { me: Me | null; library: string | null 
                   </p>
                   <p>
                     <label>
-                      Actor{" "}
+                      Name{" "}
                       <input type="text" name="actor" placeholder="claude-code/laptop" required />
-                    </label>{" "}
-                    app/label, process:name, or {me?.actor ?? "human:you"}
+                    </label>
+                  </p>
+                  <p className="small muted">
+                    What its changes show as: the agent, then where it runs.
                   </p>
                   <p>
                     <label className="choice">
@@ -318,11 +346,13 @@ function TokenCreated({ minted, onDone }: { minted: Minted; onDone(): void }) {
       <p>
         For <strong>{minted.actor}</strong> on <strong>{minted.library}</strong>:
       </p>
-      <pre className="src wrap" id="token-secret">
-        {minted.secret}
-      </pre>
+      <p>
+        <CopyField value={minted.secret} label="the token" id="token-secret" />
+      </p>
       <p className="small muted">Claude Code:</p>
-      <pre className="src wrap">{cmd}</pre>
+      <p>
+        <CopyField value={cmd} label="the Claude Code command" />
+      </p>
       <p>
         <button type="button" onClick={onDone}>
           Back to tokens
@@ -353,15 +383,23 @@ export function Apps() {
   const loaded = useLoad("apps", () => api<{ apps: AppGrant[] }>("/api/v1/apps"));
   const action = useAction();
   const [notice, setNotice] = useState<string | null>(null);
-  const revoke = (id: string) =>
-    action.run(async () => {
-      await api(`/api/v1/apps/${encodeURIComponent(id)}`, { method: "DELETE" });
-      setNotice("Connection revoked.");
-      loaded.reload();
+  const { confirm, dialog } = useConfirm();
+  const revoke = (a: AppGrant) =>
+    confirm({
+      title: `Revoke ${a.app}?`,
+      body: <p>Its agents are cut off at once. To use it again, connect it again.</p>,
+      action: "Revoke",
+      run: () =>
+        action.run(async () => {
+          await api(`/api/v1/apps/${encodeURIComponent(a.id)}`, { method: "DELETE" });
+          setNotice("Connection revoked.");
+          loaded.reload();
+        }),
     });
   return (
     <>
       <h1>Connected apps</h1>
+      {dialog}
       {notice && <div className="notice ok">{notice}</div>}
       {action.error && <div className="notice">{action.error}</div>}
       <Status loaded={loaded}>
@@ -377,7 +415,9 @@ export function Apps() {
                     <th>Libraries</th>
                     <th>Access</th>
                     <th>Since</th>
-                    <th />
+                    <th>
+                      <span className="visually-hidden">Actions</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -385,7 +425,6 @@ export function Apps() {
                     <tr key={a.id}>
                       <td className="name">
                         <strong>{a.app}</strong>
-                        {a.actor && <div className="small muted">{a.actor}</div>}
                       </td>
                       <td>
                         {a.libraries === "all"
@@ -402,14 +441,10 @@ export function Apps() {
                           <div className="small muted">can create libraries</div>
                         )}
                       </td>
-                      <td className="small muted">{a.created.slice(0, 10)}</td>
+                      <td className="small muted">{day(a.created)}</td>
                       <td>
-                        <button
-                          type="button"
-                          disabled={action.busy}
-                          onClick={() => void revoke(a.id)}
-                        >
-                          Revoke
+                        <button type="button" disabled={action.busy} onClick={() => revoke(a)}>
+                          Revoke…
                         </button>
                       </td>
                     </tr>
@@ -433,6 +468,7 @@ interface PendingInvitation {
   role: "read" | "write";
   /** Who invited. */
   handle: string;
+  created?: string;
   expires: string;
 }
 
@@ -467,49 +503,54 @@ export function Invitations() {
           invitations.length === 0 ? (
             <p>None waiting.</p>
           ) : (
-            <div className="table-wrap">
-              <table className="list">
-                <thead>
-                  <tr>
-                    <th>Library</th>
-                    <th>Access</th>
-                    <th>From</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {invitations.map((i) => (
-                    <tr key={i.id}>
-                      <td className="name">
-                        <strong>
-                          {i.owner}/{i.slug}
-                        </strong>
-                        <div className="small muted">open until {i.expires.slice(0, 10)}</div>
-                      </td>
-                      <td>{i.role === "write" ? "Read and write" : "Read and comment"}</td>
-                      <td>@{i.handle}</td>
-                      <td>
-                        <button
-                          type="button"
-                          className="primary"
-                          disabled={action.busy}
-                          onClick={() => void answer(i, true)}
-                        >
-                          Accept
-                        </button>{" "}
-                        <button
-                          type="button"
-                          disabled={action.busy}
-                          onClick={() => void answer(i, false)}
-                        >
-                          Decline
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <ul className="invitations">
+              {invitations.map((i) => (
+                <li key={i.id} className="invitation">
+                  <p className="invitation-from">
+                    <Avatar name={i.handle} />
+                    <span>
+                      @{i.handle} invited you
+                      {i.created && (
+                        <>
+                          {" · "}
+                          <Moment ts={i.created} />
+                        </>
+                      )}
+                    </span>
+                  </p>
+                  <div className="invitation-card">
+                    <LibraryTile name={i.slug} shared />
+                    <div className="invitation-library">
+                      <strong>
+                        {i.owner}/{i.slug}
+                      </strong>
+                      <span>Open until {day(i.expires)}</span>
+                    </div>
+                  </div>
+                  <p className="invitation-access">
+                    <span>Your access</span>
+                    {i.role === "write" ? "Can read and write" : "Can read and comment"}
+                  </p>
+                  <p className="actions">
+                    <button
+                      type="button"
+                      className="primary"
+                      disabled={action.busy}
+                      onClick={() => void answer(i, true)}
+                    >
+                      Accept
+                    </button>
+                    <button
+                      type="button"
+                      disabled={action.busy}
+                      onClick={() => void answer(i, false)}
+                    >
+                      Decline
+                    </button>
+                  </p>
+                </li>
+              ))}
+            </ul>
           )
         }
       </Status>
@@ -546,6 +587,7 @@ export function Account({ done }: { done: string | null }) {
   const [notice, setNotice] = useState<string | null>(done ? (DONE[done] ?? null) : null);
   const [devLink, setDevLink] = useState<string | null>(null);
   const [deleted, setDeleted] = useState(false);
+  const { confirm, dialog } = useConfirm();
   if (deleted) {
     return (
       <>
@@ -568,13 +610,28 @@ export function Account({ done }: { done: string | null }) {
       setDevLink(res.dev_link ?? null);
     });
   };
-  const changeHandle = (e: FormEvent<HTMLFormElement>) => {
+  const changeHandle = (e: FormEvent<HTMLFormElement>, current: string) => {
     e.preventDefault();
-    const handle = field(e.currentTarget, "handle");
-    void action.run(async () => {
-      await post("/api/v1/account/handle", { handle }, "PUT");
-      // A full load: the header and every library link follow the new handle.
-      location.assign("/account");
+    const handle = field(e.currentTarget, "handle").replace(/^@/, "");
+    if (handle.toLowerCase() === current.toLowerCase()) return;
+    confirm({
+      title: `Change your handle to @${handle}?`,
+      body: (
+        <>
+          <p>
+            Every one of your libraries moves to a new address under /{handle}/, and links to the
+            old ones stop working.
+          </p>
+          <p>@{current} is held for 90 days, then anyone may take it.</p>
+        </>
+      ),
+      action: "Change handle",
+      run: () =>
+        action.run(async () => {
+          await post("/api/v1/account/handle", { handle }, "PUT");
+          // A full load: the header and every library link follow the new handle.
+          location.assign("/account");
+        }),
     });
   };
   const endSession = (id: string) =>
@@ -593,6 +650,7 @@ export function Account({ done }: { done: string | null }) {
   return (
     <>
       <h1>Account</h1>
+      {dialog}
       {notice && <div className="notice ok">{notice}</div>}
       {devLink && (
         <p>
@@ -609,14 +667,21 @@ export function Account({ done }: { done: string | null }) {
             <form onSubmit={changeEmail}>
               <p>
                 <label>
-                  Email <input type="text" name="email" defaultValue={a.email} required />
+                  Email{" "}
+                  <input
+                    type="email"
+                    name="email"
+                    autoComplete="email"
+                    defaultValue={a.email}
+                    required
+                  />
                 </label>{" "}
                 <button type="submit" disabled={action.busy}>
                   Change
                 </button>
               </p>
             </form>
-            <form onSubmit={changeHandle}>
+            <form onSubmit={(e) => changeHandle(e, a.handle)}>
               <p>
                 <label>
                   Handle <input type="text" name="handle" defaultValue={a.handle} required />
@@ -626,7 +691,7 @@ export function Account({ done }: { done: string | null }) {
                 </button>
               </p>
             </form>
-            <p>Actor: {a.actor}</p>
+            <p className="small muted">Your handle is in every library's address.</p>
             <h2>Limits</h2>
             <p>
               Libraries: {a.usage.libraries} of {a.limits.libraries}. Active tokens:{" "}
@@ -645,14 +710,18 @@ export function Account({ done }: { done: string | null }) {
                     <th>Started</th>
                     <th>Last seen</th>
                     <th>Device</th>
-                    <th />
+                    <th>
+                      <span className="visually-hidden">Actions</span>
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
                   {a.sessions.map((s) => (
                     <tr key={s.id}>
-                      <td className="when">{when(s.created)}</td>
-                      <td className="when">{when(s.last_seen)}</td>
+                      <td className="when">{localTime(s.created)}</td>
+                      <td className="when">
+                        <Moment ts={s.last_seen} />
+                      </td>
                       <td className="small muted">{s.user_agent ?? ""}</td>
                       <td>
                         {s.current ? (

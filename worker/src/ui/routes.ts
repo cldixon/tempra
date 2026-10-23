@@ -1,5 +1,5 @@
 import type { Context, Hono } from "hono";
-import type { LibraryRef, User } from "../accounts";
+import type { User } from "../accounts";
 import type { Deps } from "../app";
 import type { LibraryClient } from "../client";
 import { isRouteName } from "../handles";
@@ -8,7 +8,7 @@ import { fromThisSite } from "../origin";
 
 import { signedIn } from "../signin";
 import { OkfError } from "../store/errors";
-import { authorizeLibrary } from "../tenancy";
+import { type Authorized, authorizeLibrary, requireOwner } from "../tenancy";
 import { esc, htmlResponse, layout } from "./layout";
 import { spaShell } from "./spa";
 import { Urls } from "./urls";
@@ -127,7 +127,7 @@ export function legacyUrl(path: string): string {
 }
 
 /** The library at /{owner}/{slug}/, if the signed-in person may open it. */
-async function openLibrary(p: Page): Promise<{ urls: Urls; lib: LibraryClient; ref: LibraryRef }> {
+async function openLibrary(p: Page): Promise<{ urls: Urls; lib: LibraryClient; ref: Authorized }> {
   const owner = p.c.req.param("owner") ?? "";
   const slug = p.c.req.param("lib") ?? "";
   const ref = await authorizeLibrary(p.deps.accounts, { user: p.user }, owner, slug);
@@ -301,9 +301,10 @@ export function registerUiRoutes<E extends AppEnv>(
     });
   });
 
-  // A nightly export's files, streamed from R2 (spec: Backups and recovery).
+  // A nightly export's files, streamed from R2 (spec: Backups and recovery); the owner's alone.
   get("/:owner/:lib/-/exports/:date/:file", async (p) => {
     const { ref } = await openLibrary(p);
+    requireOwner(ref.role, "download its exports");
     const date = p.c.req.param("date") ?? "";
     const file = p.c.req.param("file") ?? "";
     const types: Record<string, string> = {

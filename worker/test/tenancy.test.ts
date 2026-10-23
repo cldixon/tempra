@@ -320,8 +320,73 @@ describe("tenancy (v2 spec: Tenancy and authorization)", () => {
       expect(await got.text()).toContain("owner_only");
     }
     expect((await as("/restores")).status).toBe(403);
+    // Nightly exports, the list and the downloads, are the owner's too.
+    expect((await as("/exports")).status).toBe(403);
+    const date = new Date().toISOString().slice(0, 10);
+    const download = await friend.app.request(`/owner/demo/-/exports/${date}/bundle.tar`);
+    expect(download.status).toBe(403);
+    expect(await download.text()).toContain("Only the library&#39;s owner");
     // The owner still can.
     expect((await s.req("/restores", { token: "human" })).status).toBe(200);
+    expect((await s.req("/exports", { token: "human" })).status).toBe(200);
+  });
+
+  // The owner's recovery tools (TEMPRA-124, tempra-dev: decisions/read-and-comment-only):
+  // point-in-time restore, Revert (a request, or one path to an earlier version) and Import are
+  // the owner's alone, though a write member writes content: nothing a write member sends lands.
+  test("recovery tools are the owner's: a write member's restore, revert and import land nothing", async () => {
+    const s = setup();
+    await seedOwnerContent(s);
+    const friend = await s.stranger("friend@example.com");
+    await s.accounts.share("lib-1", friend.user.id, "write", "user_1");
+    const post = (path: string, body: BodyInit, headers: Record<string, string> = {}) =>
+      friend.app.request(`${API}${path}`, {
+        method: "POST",
+        headers: { Origin: ORIGIN, "Content-Type": "application/json", ...headers },
+        body,
+      });
+    const log = (await (await friend.app.request(`${API}/requests`)).json()) as {
+      requests: { request_id: string; events: { seq: number }[] }[];
+    };
+    const first = log.requests.at(-1);
+    expect(first).toBeDefined();
+    const head = s.store().headSeq();
+
+    const form = new FormData();
+    form.append("imported.md", new Blob(["---\ntype: Note\n---\nImported.\n"]), "imported.md");
+    for (const [path, got] of [
+      ["restore", await post("/restore", JSON.stringify({ to: new Date().toISOString() }))],
+      [
+        "revert a request",
+        await post("/revert", JSON.stringify({ request_id: first?.request_id })),
+      ],
+      [
+        "revert a path",
+        await post("/revert", JSON.stringify({ path: "a.md", to_seq: first?.events[0]?.seq ?? 1 })),
+      ],
+      [
+        "import",
+        await friend.app.request(`${API}/import`, {
+          method: "POST",
+          headers: { Origin: ORIGIN },
+          body: form,
+        }),
+      ],
+    ] as const) {
+      expect(`${path}: ${got.status}`).toBe(`${path}: 403`);
+      expect(await got.text()).toContain("owner_only");
+    }
+    expect(s.store().headSeq()).toBe(head);
+
+    // The owner still can.
+    const own = await s.req("/revert", {
+      method: "POST",
+      token: "human",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: "a.md", to_seq: first?.events[0]?.seq ?? 1 }),
+    });
+    expect(own.status).toBeLessThan(500);
+    expect(await own.text()).not.toContain("owner_only");
   });
 
   test("shared libraries are listed with the role; removing a member cuts them off at once", async () => {
