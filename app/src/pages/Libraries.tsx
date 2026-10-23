@@ -27,14 +27,6 @@ interface Library {
   unavailable?: boolean;
 }
 
-/** A library's tally as a few words: "2 for you · 5 new"; empty for none. */
-export function tallyText(l: Pick<Library, "tally">): string {
-  const parts: string[] = [];
-  if (l.tally?.for_you) parts.push(`${l.tally.for_you} for you`);
-  if (l.tally?.changes) parts.push(`${l.tally.changes} new`);
-  return parts.join(" · ");
-}
-
 /**
  * The account's libraries (take 4, board 01): cards under Yours and Shared with you, each with
  * its title, what is for the person there, its description and one line of facts; New library

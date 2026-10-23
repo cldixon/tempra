@@ -137,7 +137,7 @@ export function match(url: URL): Route | null {
         };
       case "work":
         return tail === "" ? { page: "work", owner, slug, kind: q.get("kind") || undefined } : null;
-      // Needs you retired into the Inbox, filtered to the library (TEMPRA-116).
+      // The old `-/needs` URL: the Inbox, filtered to the library (TEMPRA-116).
       case "needs":
         return tail === ""
           ? { page: "redirect", to: inboxUrl({ library: `${owner}/${slug}` }) }

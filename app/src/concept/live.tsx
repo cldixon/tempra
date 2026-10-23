@@ -10,8 +10,8 @@ import { CONTENT_OPS, type FileData } from "./data";
 /*
  * Live (tempra-dev: app/live): someone else's change to the open file shows as a pulsing glyph
  * beside the page's controls, and the new version swaps in by itself only while the reader is
- * idle and not writing a comment. A move or a delete is a notice instead. Pinned versions stay
- * put.
+ * idle and not writing a comment. A move or a delete is a notice on the page instead. Pinned
+ * versions stay put.
  */
 
 /**
@@ -138,7 +138,7 @@ export function NewVersion({ urls, live }: { urls: Urls; live: Live }) {
 
 /**
  * A change the cluster cannot show: the open file was moved or deleted (or it is not a concept).
- * A notice in the sheet, with the way to where it went.
+ * A notice on the page, with the way to where it went.
  */
 export function LiveNotice({ urls, live }: { urls: Urls; live: Live }) {
   const e = live.change;

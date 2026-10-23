@@ -25,9 +25,9 @@ describe("routes follow the server's URLs (tempra-dev: v2/urls-and-handles)", ()
     expect(at(urls.since("a/b.md", 7))).toMatchObject({ compare: { kind: "since", seq: 7 } });
     expect(at(urls.file("a/b.md"))).toMatchObject({ page: "file", compare: undefined });
     expect(at(urls.thread("a/b.md", "t1"))).toMatchObject({ page: "file", path: "a/b.md" });
-    // Needs you is the Inbox filtered to the library (TEMPRA-116); its old URL redirects there.
-    expect(urls.needs()).toBe("/inbox?library=ann/notes");
-    expect(at(urls.needs())).toEqual({ page: "inbox", done: false, library: "ann/notes" });
+    // The old `-/needs` URL redirects to the Inbox filtered to the library (TEMPRA-116).
+    expect(urls.inbox()).toBe("/inbox?library=ann/notes");
+    expect(at(urls.inbox())).toEqual({ page: "inbox", done: false, library: "ann/notes" });
     expect(at("/ann/notes/-/needs")).toEqual({ page: "redirect", to: "/inbox?library=ann/notes" });
     expect(at(urls.activity())).toMatchObject({
       page: "activity",

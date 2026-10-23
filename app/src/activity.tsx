@@ -6,10 +6,9 @@ import { ago, plural } from "./ui";
 import { baseName, folderName, type Urls } from "./urls";
 
 /*
- * Activity (take 3, TEMPRA-106; tempra-dev: app/activity): the ledger for people. One entry per
+ * Activity (take 4, TEMPRA-115; tempra-dev: app/activity): the ledger for people. One entry per
  * request, told as a sentence of what it did ("Claude Code changed 3 concepts in The app"), with
- * its note and the concepts it touched. The Activity page draws them grouped by day; the
- * library's home draws the latest few after the seen cursor in a compact form.
+ * its note and the concepts it touched. The Activity page draws them grouped by day.
  */
 
 /** One ledger event as `GET …/requests` returns it (worker/src/store/store.ts `EventRow`). */
@@ -553,11 +552,11 @@ export function useTitles(urls: Urls) {
 const LISTED = 8;
 
 /** A piece of the sentence: text, or a link to a concept (as it was, when gone) or a folder. */
-function PartView({ part, urls, compact }: { part: Part; urls: Urls; compact: boolean }) {
+function PartView({ part, urls }: { part: Part; urls: Urls }) {
   if (typeof part === "string") return <>{part}</>;
   if ("folder" in part) return <a href={urls.tree(part.folder)}>{folderName(part.folder)}</a>;
   const href = part.gone ? urls.pinned(part.seq - 1).file(part.concept) : urls.file(part.concept);
-  const words = compact ? null : wordsText(part.words);
+  const words = wordsText(part.words);
   return (
     <>
       <a href={href}>{part.title}</a>
@@ -591,8 +590,7 @@ function TouchedList({ touched, urls }: { touched: Touched[]; urls: Urls }) {
 
 /**
  * One Activity entry: who (avatar, name, whom an agent acts for), what they did, the note, the
- * concepts touched (unless compact), when, and the solid change dot when it is new since the
- * person looked.
+ * concepts touched, when, and the solid dot when it is new since the person looked.
  */
 export function EntryRow(props: {
   entry: Entry;
@@ -600,14 +598,10 @@ export function EntryRow(props: {
   actor: ActorView;
   now: number;
   isNew: boolean;
-  compact?: boolean;
 }) {
-  const { entry: e, urls, actor, now, isNew, compact = false } = props;
-  // A compact entry that names its changes by count lists their titles on a second line.
-  const titles = !e.named && compact ? e.touched.slice(0, 3).map((t) => t.title) : [];
-  const classes = ["entry", compact ? "compact" : "", isNew ? "new" : ""].filter(Boolean);
+  const { entry: e, urls, actor, now, isNew } = props;
   return (
-    <article className={classes.join(" ")}>
+    <article className={isNew ? "entry new" : "entry"}>
       <Avatar name={actor.mark} agent={actor.agent} />
       <div className="entry-body">
         <p className="entry-line">
@@ -615,20 +609,14 @@ export function EntryRow(props: {
           {actor.for && <span className="entry-for"> for {actor.for}</span>}{" "}
           {e.parts.map((p, i) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: the parts of one sentence, fixed.
-            <PartView key={i} part={p} urls={urls} compact={compact} />
+            <PartView key={i} part={p} urls={urls} />
           ))}
         </p>
         {e.quote && <q className="entry-note">{e.quote}</q>}
-        {titles.length > 0 && (
-          <p className="entry-titles">
-            {titles.join(" · ")}
-            {e.touched.length > titles.length ? ` · ${e.touched.length - titles.length} more` : ""}
-          </p>
-        )}
-        {!compact && !e.named && <TouchedList touched={e.touched} urls={urls} />}
+        {!e.named && <TouchedList touched={e.touched} urls={urls} />}
       </div>
       <span className="entry-side">
-        <time dateTime={e.ts}>{entryTime(e.ts, now, compact)}</time>
+        <time dateTime={e.ts}>{entryTime(e.ts, now)}</time>
         {isNew && (
           <span className="change-dot">
             <span className="visually-hidden">New since you looked</span>

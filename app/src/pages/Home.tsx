@@ -10,7 +10,7 @@ import { useLibraries } from "../role";
 import { fileLabel, type OutlineFile, topLevel } from "../Tree";
 import { clip, plural, Status, useCopy, useMe, useTitle } from "../ui";
 import { dirOf, folderName, type Urls } from "../urls";
-import { SheetPage, useFrame } from "../Workspace";
+import { PageColumn, useFrame } from "../Workspace";
 
 /** The requests read for the empty library's line (the newest agent write among them). */
 const READ = 20;
@@ -63,7 +63,7 @@ export function Home({ urls }: { urls: Urls }) {
     return out;
   }, [frame.index, urls]);
   return (
-    <SheetPage>
+    <PageColumn>
       <Status loaded={loaded}>
         {(home) => {
           const files = frame.index;
@@ -113,7 +113,7 @@ export function Home({ urls }: { urls: Urls }) {
           );
         }}
       </Status>
-    </SheetPage>
+    </PageColumn>
   );
 }
 
@@ -210,7 +210,7 @@ export function HomeSections(props: { urls: Urls; files: OutlineFile[]; seen: nu
   );
 }
 
-/** The foot, quietly: the agents' housekeeping, linking their work queue. */
+/** The foot, quietly: the agents' housekeeping, linking For agents. */
 export function HomeFoot({ urls, needs }: { urls: Urls; needs: Needs }) {
   const n = needs.housekeeping.total;
   if (n === 0) return null;

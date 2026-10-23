@@ -62,7 +62,21 @@ function countConcepts(files: Entry[]): Map<string, number> {
   return counts;
 }
 
-/** Every folder's children from the flat list of files: folders first, then files, by name. */
+/** A file as the tree names it: a concept by its title, anything else by its file name. */
+export function fileLabel(e: OutlineFile): string {
+  return e.kind === "concept" && e.title ? e.title : baseName(e.path);
+}
+
+/** Where a row sorts within its folder: folders, then pages, then files (TEMPRA-123). */
+const RANK: Record<Entry["kind"], number> = { dir: 0, concept: 1, attachment: 2 };
+
+/** A row as the tree names it, for sorting by what the person sees. */
+const shown = (e: Entry) => (e.kind === "dir" ? folderName(e.path) : fileLabel(e));
+
+/**
+ * Every folder's children from the flat list of files: folders first, then pages, then files,
+ * each by the name the tree shows.
+ */
 function buildDirs(files: Entry[]): Record<string, Entry[]> {
   const dirs = new Map<string, Map<string, Entry>>([["", new Map()]]);
   const at = (d: string) => {
@@ -79,24 +93,31 @@ function buildDirs(files: Entry[]): Record<string, Entry[]> {
   }
   const out: Record<string, Entry[]> = {};
   for (const [d, m] of dirs) {
-    out[d] = [...m.values()].sort((a, b) =>
-      a.kind === "dir" && b.kind !== "dir"
-        ? -1
-        : b.kind === "dir" && a.kind !== "dir"
-          ? 1
-          : a.path.localeCompare(b.path),
+    out[d] = [...m.values()].sort(
+      (a, b) =>
+        RANK[a.kind] - RANK[b.kind] ||
+        shown(a).localeCompare(shown(b), undefined, { numeric: true, sensitivity: "base" }) ||
+        a.path.localeCompare(b.path),
     );
   }
   return out;
 }
 
-/** A file as the tree names it: a concept by its title, anything else by its file name. */
-export function fileLabel(e: OutlineFile): string {
-  return e.kind === "concept" && e.title ? e.title : baseName(e.path);
+/** Every file under each folder, at any depth: what a closed folder rolls up. */
+function insideDirs(files: Entry[]): Map<string, Entry[]> {
+  const inside = new Map<string, Entry[]>();
+  for (const f of files) {
+    for (const d of ancestors(f.path)) {
+      const list = inside.get(d);
+      if (list) list.push(f);
+      else inside.set(d, [f]);
+    }
+  }
+  return inside;
 }
 
 /**
- * The library's top level, as the tree lists it (folders first, then files, by name), each
+ * The library's top level, as the tree lists it (folders, then pages, then files), each
  * folder with its count of concepts at any depth: the home's way into the files (TEMPRA-107).
  */
 export function topLevel(files: OutlineFile[]): { entry: OutlineFile; count: number }[] {
@@ -110,11 +131,12 @@ export function topLevel(files: OutlineFile[]): { entry: OutlineFile; count: num
 /**
  * The library's file tree (tempra-dev: app/workspace). The whole index (paths, titles,
  * sequences; no bodies) arrives in one small request when the workspace opens, so opening a
- * folder never waits. A folder (named for people, with its count of concepts) opens and closes in
- * place; it is not a page. Open folders are remembered on this browser, the open file is revealed
- * and marked, and the change feed refreshes the index once per burst of writes. The change dot
- * marks a file: pulsing while an agent writes it now, solid when it changed since the person last
- * looked.
+ * folder never waits. A folder (named for people, with its count of concepts): its name opens its
+ * folder view and expands it, its chevron only expands and collapses (TEMPRA-123). Open folders
+ * are remembered on this browser, the open file is revealed and marked, and the change feed
+ * refreshes the index once per burst of writes. The change dot marks a file: pulsing while an
+ * agent writes it now, solid when it changed since the person last looked; a closed folder rolls
+ * up the marks of what is inside it.
  */
 export function Tree(props: {
   urls: Urls;
@@ -138,6 +160,7 @@ export function Tree(props: {
   const seen = useLastSeen(urls);
   const dirs = useMemo(() => (files ? buildDirs(files) : null), [files]);
   const counts = useMemo(() => (files ? countConcepts(files) : new Map<string, number>()), [files]);
+  const inside = useMemo(() => (files ? insideDirs(files) : new Map<string, Entry[]>()), [files]);
 
   // Only the latest request's answer is kept (two loads may cross).
   const asked = useRef(0);
@@ -201,6 +224,13 @@ export function Tree(props: {
       void load();
     },
   );
+  const expand = (dir: string) =>
+    setExpanded((e) => {
+      if (e.has(dir)) return e;
+      const next = new Set(e).add(dir);
+      saveExpanded(urls, next);
+      return next;
+    });
   const toggle = (dir: string) =>
     setExpanded((e) => {
       const next = new Set(e);
@@ -244,37 +274,52 @@ export function Tree(props: {
     },
   });
 
-  const mark = (e: Entry) => (
+  const mark = (e: Entry, comments = e.comments, stale = e.stale, dot = change(e)) => (
     <>
-      {change(e)}
-      {e.comments ? (
-        <span
-          className="tree-mark"
-          title={`${e.comments} open comment${e.comments === 1 ? "" : "s"}`}
-        >
-          <span aria-hidden="true">{e.comments}</span>
+      {dot}
+      {comments ? (
+        <span className="tree-mark" title={`${comments} open comment${comments === 1 ? "" : "s"}`}>
+          <span aria-hidden="true">{comments}</span>
           <span className="visually-hidden">
-            {e.comments} open comment{e.comments === 1 ? "" : "s"}
+            {comments} open comment{comments === 1 ? "" : "s"}
           </span>
         </span>
       ) : null}
-      {e.stale ? (
-        <span
-          className="tree-mark"
-          title={e.stale === "stale" ? "Stale: stale_after has passed" : "Stale soon"}
-        >
+      {stale ? (
+        <span className="tree-mark" title={stale === "stale" ? "Stale" : "Stale soon"}>
           <span aria-hidden="true">
-            <Icon name={e.stale === "stale" ? "stale" : "soon"} size={12} />
+            <Icon name={stale === "stale" ? "stale" : "soon"} size={12} />
           </span>
-          <span className="visually-hidden">{e.stale === "stale" ? "stale" : "stale soon"}</span>
+          <span className="visually-hidden">{stale === "stale" ? "stale" : "stale soon"}</span>
         </span>
       ) : null}
     </>
   );
-  const change = (e: Entry) => {
+  /**
+   * A closed folder's marks: the dot of the newest file inside that has one, the open comments
+   * added up, and stale if anything inside is (else stale soon).
+   */
+  const rolledUp = (dir: string) => {
+    const all = inside.get(dir) ?? [];
+    let comments = 0;
+    let stale: Entry["stale"];
+    for (const f of all) {
+      comments += f.comments ?? 0;
+      if (f.stale === "stale" || (f.stale && !stale)) stale = f.stale;
+    }
+    let dot: React.ReactNode = null;
+    for (const f of [...all].sort((a, b) => (b.seq ?? 0) - (a.seq ?? 0))) {
+      dot = change(f, true);
+      if (dot) break;
+    }
+    return mark({ path: dir, kind: "dir" }, comments, stale, dot);
+  };
+  /** A file's change dot; `inner` words it for the closed folder that holds the file. */
+  const change = (e: Entry, inner = false) => {
+    const what = inner ? "something in here" : "this";
     const a = changes.get(e.path);
     if (a && isLive(a, now)) {
-      const said = `${actorName(a.actor, a.by)} is editing this now`;
+      const said = `${actorName(a.actor, a.by)} is editing ${what} now`;
       return (
         <span className="tree-mark" title={said}>
           <span className="change-dot live" aria-hidden="true" />
@@ -286,9 +331,14 @@ export function Tree(props: {
     const at = Math.max(typeof e.seq === "number" ? e.seq : 0, a?.seq ?? 0);
     if (seen !== null && at > seen) {
       return (
-        <span className="tree-mark" title="Changed since you last looked">
+        <span
+          className="tree-mark"
+          title={inner ? "Changed inside since you last looked" : "Changed since you last looked"}
+        >
           <span className="change-dot" aria-hidden="true" />
-          <span className="visually-hidden">changed since you last looked</span>
+          <span className="visually-hidden">
+            {inner ? "changed inside since you last looked" : "changed since you last looked"}
+          </span>
         </span>
       );
     }
@@ -312,34 +362,45 @@ export function Tree(props: {
     return entries.map((e) =>
       e.kind === "dir" ? (
         <li key={e.path}>
-          {/* A folder opens and closes here; its index.md is a page only by its URL. */}
-          <button
-            type="button"
-            className="tree-row dir"
-            aria-expanded={expanded.has(e.path)}
-            aria-current={props.dir === e.path ? "page" : undefined}
-            ref={props.dir === e.path ? setCurrentRow : undefined}
-            onClick={() => toggle(e.path)}
-          >
-            <span className="tree-chevron">
+          {/* The chevron opens and closes the folder here; its name opens its folder view, which
+              reveals it (TEMPRA-123). */}
+          <div className="tree-row dir">
+            <button
+              type="button"
+              className="tree-chevron"
+              aria-expanded={expanded.has(e.path)}
+              aria-label={`${folderName(e.path)} folder`}
+              onClick={() => toggle(e.path)}
+            >
               <Icon name="chevron" />
-            </span>
-            <span className="tree-name" title={e.path}>
+            </button>
+            <a
+              className="tree-name"
+              href={urls.tree(e.path)}
+              title={folderName(e.path)}
+              aria-current={props.dir === e.path ? "page" : undefined}
+              ref={props.dir === e.path ? setCurrentRow : undefined}
+              onClick={() => expand(e.path)}
+            >
               {folderName(e.path)}
-            </span>
+            </a>
             {(counts.get(e.path) ?? 0) > 0 && (
               <span className="tree-count">{counts.get(e.path)}</span>
             )}
-          </button>
+            {!expanded.has(e.path) && rolledUp(e.path)}
+          </div>
           {expanded.has(e.path) && <ul>{rows(e.path)}</ul>}
         </li>
       ) : (
         <li key={e.path}>
-          <div className="tree-row">
-            <span className="tree-leaf" />
+          <div className={e.kind === "attachment" ? "tree-row file" : "tree-row"}>
+            <span className="tree-leaf">
+              {e.kind === "attachment" && <Icon name="file" size={14} />}
+            </span>
             <a
               href={urls.file(e.path)}
-              title={e.path}
+              title={fileLabel(e)}
+              data-path={e.path}
               {...ahead(e.path)}
               aria-current={props.file === e.path ? "page" : undefined}
               ref={props.file === e.path ? setCurrentRow : undefined}

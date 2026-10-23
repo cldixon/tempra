@@ -122,7 +122,7 @@ function useContributors(urls: Urls) {
 
 /**
  * Who acted, as an ActorView, for pages that draw people and agents apart (the byline, home,
- * Activity, Needs you). `me` is the signed-in person's actor (`human:handle`).
+ * Activity, the Inbox). `me` is the signed-in person's actor (`human:handle`).
  */
 export function useActors(urls: Urls, me: string | null) {
   const { list, byId, note } = useContributors(urls);

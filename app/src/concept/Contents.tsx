@@ -22,16 +22,16 @@ export function contentsOf(prepared: Prepared, skipFirst: boolean): Entry[] {
   return headings.filter((h) => h.depth <= top + 1).map((h) => ({ ...h, sub: h.depth > top }));
 }
 
-/** The heading the sheet is scrolled to: the last one above the top of the view. */
+/** The heading the page is scrolled to: the last one above the top of the view. */
 function useCurrent(headings: Heading[]): string | null {
   const [current, setCurrent] = useState<string | null>(null);
   const ids = headings.map((h) => h.id).join(" ");
   useEffect(() => {
-    const sheet = document.querySelector(".ws-main");
-    if (!sheet || !ids) return;
+    const scroller = document.querySelector(".ws-main");
+    if (!scroller || !ids) return;
     const list = ids.split(" ");
     const update = () => {
-      const top = sheet.getBoundingClientRect().top + 120;
+      const top = scroller.getBoundingClientRect().top + 120;
       let at: string | null = list[0] ?? null;
       for (const id of list) {
         const el = document.getElementById(id);
@@ -40,8 +40,8 @@ function useCurrent(headings: Heading[]): string | null {
       setCurrent(at);
     };
     update();
-    sheet.addEventListener("scroll", update, { passive: true });
-    return () => sheet.removeEventListener("scroll", update);
+    scroller.addEventListener("scroll", update, { passive: true });
+    return () => scroller.removeEventListener("scroll", update);
   }, [ids]);
   return current;
 }

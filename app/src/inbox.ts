@@ -14,7 +14,6 @@ export type InboxKind =
   | "thread"
   | "invitation"
   | "access"
-  | "report"
   | "verify"
   | "stale";
 
@@ -212,8 +211,6 @@ export function kindLabel(i: InboxItem, now = Date.now()): string {
       return "Invitation";
     case "access":
       return "Access";
-    default:
-      return "Report";
   }
 }
 

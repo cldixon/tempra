@@ -52,22 +52,6 @@
   line-height: var(--tempra-line-height);
 }
 
-/* "Live": a small ink dot before the line. */
-.view-live {
-  display: flex;
-  align-items: center;
-  gap: var(--tempra-space-2);
-}
-
-.view-live::before {
-  content: "";
-  flex: none;
-  width: var(--tempra-dot);
-  height: var(--tempra-dot);
-  border-radius: 50%;
-  background: var(--tempra-color-text);
-}
-
 /* A link beside a header or a section's heading: "The full ledger", "All 5", "Activity". */
 .view-aside {
   margin-left: auto;
@@ -146,18 +130,6 @@
   border-radius: var(--tempra-radius-pill);
   color: var(--tempra-color-muted);
   cursor: pointer;
-}
-
-/* An outlined pill that stays pressed: ink edge and a grey fill when on. */
-.pill-toggle {
-  color: var(--tempra-color-muted);
-}
-
-.pill-toggle[aria-pressed="true"],
-.pill-toggle[aria-pressed="true"]:hover:not(:disabled) {
-  border-color: var(--tempra-color-text);
-  background: var(--tempra-color-selected);
-  color: var(--tempra-color-text);
 }
 
 @media (max-width: 900px) {
@@ -440,14 +412,6 @@
   overflow-wrap: anywhere;
 }
 
-.entry-titles {
-  margin: 0;
-  overflow: hidden;
-  color: var(--tempra-color-muted);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 /* The concepts it touched: what happened, the title, the words changed. */
 .entry-touched {
   display: flex;
@@ -614,36 +578,10 @@ a.activity-download {
   font-size: var(--tempra-text-meta);
 }
 
-/* On the home: smaller marks, no fill, the note in the body's face. */
-.entry.compact {
-  padding: 6px 0;
-  background: none;
-}
-
-.entry.compact > .avatar-mark {
-  width: var(--tempra-avatar-small);
-  height: var(--tempra-avatar-small);
-  font-size: var(--tempra-text-initial);
-}
-
-.entry.compact .entry-line {
-  font-size: var(--tempra-text-ui);
-}
-
-.entry.compact .entry-note {
-  font-family: inherit;
-  font-size: var(--tempra-text-ui);
-}
-
 @media (max-width: 900px) {
   .entry {
     gap: 10px;
     padding: 12px 8px;
-  }
-
-  .entry.compact .entry-note,
-  .entry.compact .entry-titles {
-    display: none;
   }
 }
 

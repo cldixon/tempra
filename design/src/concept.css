@@ -2,7 +2,7 @@
  * A concept's page (take 4, TEMPRA-114; tempra-dev: app/reader, decisions/one-panel-from-the-top-
  * bar): the text (title, description, byline, body, sources) centred in its column, and on the
  * right its contents, or one panel in their place (Comments, History, Properties). The page's
- * width decides what fits (container queries on `sheet`, the page's scroller): under 1100px the
+ * width decides what fits (container queries on `page`, the page's scroller): under 1100px the
  * contents hide (On this page under the byline), and a panel takes their column down to 960px
  * and overlays the page below that; on a phone (900px and under, the window's call) a panel is
  * a sheet from the bottom.
@@ -23,14 +23,14 @@
   grid-column: text;
   justify-self: center;
   width: 100%;
-  max-width: calc(var(--tempra-column-text) + 2 * var(--tempra-sheet-pad));
+  max-width: calc(var(--tempra-column-text) + 2 * var(--tempra-page-pad));
   min-width: 0;
-  padding: 40px var(--tempra-sheet-pad) 140px;
+  padding: 40px var(--tempra-page-pad) 140px;
 }
 
 /* The Markdown view is wider than the text: the file's lines are long. */
 .concept.markdown-on .doc {
-  max-width: calc(var(--tempra-measure) + 2 * var(--tempra-sheet-pad) + 200px);
+  max-width: calc(var(--tempra-measure) + 2 * var(--tempra-page-pad) + 200px);
 }
 
 .concept-side {
@@ -523,7 +523,7 @@
 /* ---------- What fits: the page's width decides ---------- */
 
 /* No room beside the text: the contents move under the byline, and a panel overlays the page. */
-@container sheet (width < 1100px) {
+@container page (width < 1100px) {
   .concept-grid,
   .concept.panel-open .concept-grid {
     grid-template-columns: [text] minmax(0, 1fr);
@@ -557,7 +557,7 @@
 /* Room for the text and a panel, not the contents as well (a laptop of about 1280px with the
    sidebar shown): an open panel takes a column again and the text moves over for it, so nothing
    (On this page included) runs under it. Narrower than this, it overlays. */
-@container sheet (960px <= width < 1100px) {
+@container page (960px <= width < 1100px) {
   .concept.panel-open .concept-grid {
     grid-template-columns: [text] minmax(0, 1fr) [side] var(--tempra-panel);
   }

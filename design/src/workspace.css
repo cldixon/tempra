@@ -16,10 +16,6 @@ body.ground {
 
 /* ---------- Shared pieces: menus, the avatar, icon buttons ---------- */
 
-.header-sep {
-  color: var(--tempra-color-faint);
-}
-
 /* A menu: a button that opens a card of links below it. */
 .menu {
   position: relative;
@@ -100,14 +96,6 @@ body.ground {
   font-size: var(--tempra-text-label);
   letter-spacing: 0.04em;
   text-transform: uppercase;
-}
-
-/* Who is signed in, at the top of the avatar's menu. */
-.menu-list .menu-who {
-  padding: 6px 10px 4px;
-  color: var(--tempra-color-faint);
-  font-size: var(--tempra-text-meta);
-  overflow-wrap: anywhere;
 }
 
 .menu-list hr {
@@ -247,45 +235,19 @@ body.ground {
   font-size: var(--tempra-text-ui);
 }
 
-.dialog-foot {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  margin: 12px 0 0;
-  color: var(--tempra-color-muted);
-  font-size: var(--tempra-text-meta);
-}
-
-.dialog-foot a {
-  color: inherit;
-}
-
 /* ---------- A page's column: the account's pages, settings, the library's tools ---------- */
 
 /* One centred column; the frame's top bar and sidebar are around it. */
-.sheet-page,
+.page-column,
 .page {
   width: 100%;
   max-width: var(--tempra-page-width);
   margin: 0 auto;
-  padding: 72px var(--tempra-sheet-pad) 96px;
+  padding: 72px var(--tempra-page-pad) 96px;
 }
 
-.sheet-page.wide {
+.page-column.wide {
   max-width: 960px;
-}
-
-.page-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 28px;
-}
-
-.page-head h1 {
-  margin: 0;
 }
 
 /* The New pill: an outlined pill with a plus. */
@@ -745,8 +707,9 @@ body.ground {
   line-height: var(--tempra-leading-tight);
 }
 
-.menu-person-names .handle {
-  color: var(--tempra-color-faint);
+.menu-person-names .email {
+  overflow-wrap: anywhere;
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
 }
 
@@ -884,7 +847,7 @@ body.ground {
 }
 
 /* The page: the frame's scroller. Its width, not the window's, decides a concept's columns
-   (container queries on `sheet`, kept by that name from take 3, in concept.css), so hiding the
+   (container queries on `page`, in concept.css), so hiding the
    sidebar widens the reading layout. */
 .ws-main {
   grid-area: main;
@@ -892,11 +855,11 @@ body.ground {
   min-height: 0;
   overflow: hidden auto;
   background: var(--tempra-color-bg);
-  container: sheet / inline-size;
+  container: page / inline-size;
 }
 
 /* Showing the hidden sidebar: a quiet glyph at the left of the crumbs. */
-.sheet-toggle {
+.show-sidebar {
   flex: none;
   color: var(--tempra-color-faint);
 }
@@ -940,24 +903,9 @@ body.ground {
   font-weight: var(--tempra-weight-strong);
 }
 
-.lib-names {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  line-height: var(--tempra-leading-tight);
-}
-
 .lib-name {
   overflow: hidden;
   font-weight: var(--tempra-weight-strong);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.lib-owner {
-  overflow: hidden;
-  color: var(--tempra-color-faint);
-  font-size: var(--tempra-text-label);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -1028,8 +976,8 @@ body.ground {
 }
 
 /* The tree: nested lists, one row per folder or file, indented a step a level. A folder's row is
-   a button that opens and closes it (a chevron turns) with its count of concepts; a file's row is
-   a link. */
+   its chevron (a button that opens and closes it, turning), its name (a link to its folder view)
+   and its count of concepts; a page's or a file's row is a link, a file's with a small icon. */
 .tree,
 .tree ul {
   margin: 0;
@@ -1061,43 +1009,37 @@ body.ground {
   background: var(--tempra-color-hover);
 }
 
-button.tree-row {
-  width: 100%;
-  border: 0;
-  background: none;
-  color: var(--tempra-color-text);
-  font: inherit;
-  font-size: var(--tempra-text-ui);
-  text-align: left;
-}
-
-button.tree-row:hover:not(:disabled) {
-  background: var(--tempra-color-hover);
-}
-
-button.tree-row[aria-current="page"] {
-  background: var(--tempra-color-selected);
-}
-
 .tree-chevron {
   flex: none;
   display: flex;
+  align-self: stretch;
+  align-items: center;
+  justify-content: center;
   width: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--tempra-radius-row);
+  background: none;
   color: var(--tempra-color-faint);
-  transition: transform 0.15s ease;
+  cursor: pointer;
+}
+
+.tree-chevron:hover {
+  color: var(--tempra-color-text);
 }
 
 .tree-chevron svg {
   width: 12px;
   height: 12px;
+  transition: transform 0.15s ease;
 }
 
-.tree-row[aria-expanded="true"] .tree-chevron {
+.tree-chevron[aria-expanded="true"] svg {
   transform: rotate(90deg);
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tree-chevron {
+  .tree-chevron svg {
     transition: none;
   }
 }
@@ -1129,6 +1071,10 @@ button.tree-row[aria-current="page"] {
   background: var(--tempra-color-selected);
 }
 
+.tree-row.dir > a {
+  color: var(--tempra-color-text);
+}
+
 .tree-row > a[aria-current="page"] {
   color: var(--tempra-color-text);
   font-weight: var(--tempra-weight-medium);
@@ -1136,7 +1082,10 @@ button.tree-row[aria-current="page"] {
 
 .tree-leaf {
   flex: none;
+  display: flex;
+  justify-content: center;
   width: 16px;
+  color: var(--tempra-color-faint);
 }
 
 /* Marks: an agent's change (a dot), open comments (a count), a clock (stale) or an hourglass
@@ -1227,7 +1176,7 @@ button.tree-row[aria-current="page"] {
 
   .topbar-brand,
   .topbar-crumbs,
-  .sheet-toggle,
+  .show-sidebar,
   .has-tools .topbar-end .bell,
   .has-tools .phone-search {
     display: none;
@@ -1389,7 +1338,7 @@ button.tree-row[aria-current="page"] {
     height: var(--tempra-touch);
   }
 
-  .sheet-page,
+  .page-column,
   .page {
     padding: 32px 16px 72px;
   }
@@ -1417,7 +1366,7 @@ button.tree-row[aria-current="page"] {
 
 /* A command or URL to copy (the connect pages): an inset that wraps rather than widening the page. */
 .page pre,
-.sheet-page pre {
+.page-column pre {
   margin: 0 0 var(--tempra-space-3);
   padding: 10px 14px;
   border-radius: var(--tempra-radius-row);
@@ -1428,9 +1377,9 @@ button.tree-row[aria-current="page"] {
   overflow-wrap: anywhere;
 }
 
-.sheet-page pre,
-.sheet-page pre.src,
-.sheet-page pre.diff {
+.page-column pre,
+.page-column pre.src,
+.page-column pre.diff {
   background: var(--tempra-color-ground);
 }
 
