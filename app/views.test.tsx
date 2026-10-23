@@ -309,7 +309,8 @@ describe("the library's home (take 4)", () => {
         now={Date.now()}
       />,
     );
-    expect(written).toContain("Last write by claude-code/dev, just now: mcp smoke cleanup");
+    expect(written).toContain("Last write by Claude Code, <time");
+    expect(written).toContain(">just now</time>: mcp smoke cleanup");
     expect(written).not.toContain("Waiting");
   });
 

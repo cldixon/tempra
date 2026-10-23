@@ -41,15 +41,14 @@ export function SourcesSection(props: {
     const name = typeof s.title === "string" ? s.title : (id ?? "Source");
     const resource = typeof s.resource === "string" ? s.resource : null;
     const internal = (s.internal ?? null) as JsonObject | null;
-    const cited = typeof s.cited === "number" ? s.cited : 0;
+    // People's words only (TEMPRA-131): no paths, trust tiers or citation counts.
     const meta: string[] = [];
     let link: ReactNode = <span>{name}</span>;
     if (internal?.broken) {
-      meta.push(`${resource ?? ""} · missing`);
+      meta.push("missing");
     } else if (internal && typeof internal.path === "string") {
       link = <a href={urls.file(internal.path)}>{name}</a>;
-      meta.push(internal.path);
-      if (internal.trust_tier) meta.push(String(internal.trust_tier));
+      meta.push("in this library");
       if (internal.stale) meta.push("stale");
       if (internal.status && internal.status !== "stable") meta.push(String(internal.status));
     } else if (resource && /^https?:\/\//i.test(resource)) {
@@ -60,7 +59,6 @@ export function SourcesSection(props: {
       );
       meta.push("external");
     } else if (resource) meta.push(resource);
-    if (id) meta.push(cited > 0 ? `cited ${cited}×` : "not cited");
     // The footnote's own text, unless it only repeats the source's title.
     const note = id ? footnotes.find((f) => f.label === id) : undefined;
     const def = note && plain(note) !== name.trim() ? note : undefined;

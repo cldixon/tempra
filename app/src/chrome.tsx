@@ -48,15 +48,18 @@ import {
   type InboxPage,
   itemDetail,
   itemHref,
+  itemLibrary,
   itemTitle,
   kindLabel,
-  libraryLabel,
   markRead,
+  useAgentLabels,
   usePageTitles,
   useUnread,
+  withNames,
 } from "./inbox";
+import { Moment } from "./Moment";
 import { THEMES, useTheme } from "./theme";
-import { type Me, recently, useMe } from "./ui";
+import { type Me, useMe } from "./ui";
 
 /*
  * The app's chrome (take 2, TEMPRA-53): the icons, menus and the avatar shared by the workspace
@@ -243,10 +246,12 @@ export function Bell() {
   }, [reload]);
   // Read when the popover draws (it opens on a state change, so this is fresh enough).
   const now = Date.now();
-  const items = latest.state === "ready" ? latest.data.items : [];
-  const me = useMe();
+  const raw = latest.state === "ready" ? latest.data.items : null;
+  const labels = useAgentLabels(raw);
   // A reply names its page by path: titles from the library's outline, once the popover opens.
-  const titles = usePageTitles(open ? items : null);
+  const titles = usePageTitles(open ? raw : null);
+  const handle = useMe()?.handle ?? null;
+  const items = withNames(raw ?? [], labels);
   return (
     <Menu
       label={
@@ -287,9 +292,6 @@ export function Bell() {
         <div className="bell-empty">Nothing for you</div>
       )}
       {items.map((i) => {
-        // The Inbox row's words (F-14): the page's title, the detail line, the library.
-        const [owner = "", slug = ""] = i.library.split("/");
-        const library = me !== null && owner === me.handle ? libraryLabel(i) : `${owner} / ${slug}`;
         return (
           <a
             key={i.id}
@@ -298,14 +300,14 @@ export function Bell() {
             onClick={() => i.read_at === null && void markRead([i.id])}
           >
             <span className="lib-tile" aria-hidden="true">
-              {(libraryLabel(i)[0] ?? "?").toUpperCase()}
+              {(itemLibrary(i, handle)[0] ?? "?").toUpperCase()}
             </span>
             <span className="bell-item-what">
               <strong>{itemTitle(i, titles)}</strong>
               <span className="bell-item-detail">{itemDetail(i, now)}</span>
             </span>
             <span className="bell-item-where">
-              {library} · {kindLabel(i, now)} · {recently(i.created, now)}
+              {itemLibrary(i, handle)} · {kindLabel(i, now)} · <Moment ts={i.created} now={now} />
             </span>
             {i.read_at === null && (
               <>

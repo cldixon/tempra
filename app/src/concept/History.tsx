@@ -1,5 +1,6 @@
 import { useState } from "react";
-import { recently, useAgo } from "../ui";
+import { actorText } from "../agents";
+import { Moment } from "../Moment";
 import type { Urls } from "../urls";
 import type { Namer } from "./Byline";
 import { actedBy, type Concept, type Standing, type Version } from "./data";
@@ -63,11 +64,10 @@ export function HistoryList(props: {
                 <span className="version-n">v{version.n}</span>
                 <span className="version-what">
                   <span className="version-note">
-                    {note || (version.n === 1 ? "Created" : "No note")}
+                    {note || (version.n === 1 ? "Created" : "Edited")}
                   </span>
                   <span className="version-who">
-                    {who.name}
-                    {who.for && ` for ${who.for}`} · <When ts={e.ts} />
+                    {actorText(who)} · <Moment ts={e.ts} />
                   </span>
                 </span>
               </a>
@@ -86,17 +86,4 @@ export function HistoryList(props: {
       )}
     </>
   );
-}
-
-/** When a version was made, as people say it: "just now", "14 min ago", else the day. */
-export function versionTime(ts: string, now: number): string {
-  const age = now - Date.parse(ts);
-  if (age < 60_000) return "just now";
-  return age < 86_400_000 ? `${recently(ts, now)} ago` : recently(ts, now);
-}
-
-/** A version's time, kept current as time passes. */
-function When({ ts }: { ts: string }) {
-  useAgo(ts);
-  return <time dateTime={ts}>{versionTime(ts, Date.now())}</time>;
 }

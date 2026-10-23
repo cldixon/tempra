@@ -54,18 +54,18 @@ a:hover {
   text-decoration-color: currentcolor;
 }
 
+/* Focus (TEMPRA-132): the ring, 2px in the text colour, on every control reached by keyboard. */
 :focus-visible {
-  outline: 2px solid var(--tempra-color-text);
-  outline-offset: 2px;
+  outline: var(--tempra-focus-ring);
+  outline-offset: var(--tempra-focus-offset);
 }
 
-/* A text field shows focus by its caret and a firmer edge, not the ring. */
+/* A text field has the same ring, close to its edge. */
 input:not([type="checkbox"], [type="radio"], [type="file"]):focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-  outline: 1px solid var(--tempra-color-border-strong);
-  outline-offset: 0;
-  border-color: var(--tempra-color-border-strong);
+  outline: var(--tempra-focus-ring);
+  outline-offset: 1px;
 }
 
 code,
@@ -89,7 +89,7 @@ kbd {
   padding: 1px 7px;
   border-radius: var(--tempra-radius-pill);
   background: var(--tempra-color-ground);
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-family: inherit;
   font-size: var(--tempra-text-label);
 }
@@ -251,8 +251,24 @@ details > summary {
   color: var(--tempra-color-muted);
 }
 
+/* Faint is for icons and separators, never words (under 4.5:1; TEMPRA-132). */
 .faint {
   color: var(--tempra-color-faint);
+}
+
+::placeholder {
+  color: var(--tempra-color-muted);
+  opacity: 1;
+}
+
+/* Who acted (AgentName, TEMPRA-131): the name, then whom an agent acts for, quieter. */
+.agent-name > b {
+  color: var(--tempra-color-text);
+  font-weight: var(--tempra-weight-medium);
+}
+
+.agent-for {
+  color: var(--tempra-color-muted);
 }
 
 .small {
@@ -274,7 +290,7 @@ details > summary {
 /* An uppercase label over a group (SOURCES, LINKED FROM). */
 .label {
   margin: 0 0 var(--tempra-space-2);
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-label);
   font-weight: var(--tempra-weight-regular);
   letter-spacing: 0.04em;

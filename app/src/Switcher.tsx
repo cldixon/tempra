@@ -10,7 +10,7 @@ import {
 import { api } from "./api";
 import { prefetchFile } from "./prefetch";
 import { readRecent } from "./recent";
-import { libraryName, useLibraries } from "./role";
+import { libraryLabel, useLibraries } from "./role";
 import { navigate } from "./router";
 import type { OutlineFile } from "./Tree";
 import { Urls } from "./urls";
@@ -298,8 +298,8 @@ export function LibrarySearch(props: { open: boolean; onClose(): void }) {
       .slice(0, MAX)
       .map((l) => ({
         key: `${l.owner}/${l.slug}`,
-        title: l.title || libraryName(l),
-        detail: l.title ? libraryName(l) : "",
+        title: libraryLabel(l),
+        detail: l.description ?? "",
         href: new Urls(l.owner, l.slug).tree(""),
       }));
   }, [libs, needle]);

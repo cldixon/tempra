@@ -91,7 +91,7 @@
   flex-wrap: wrap;
   gap: 4px 16px;
   padding: 16px 4px;
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
 }
 
@@ -176,7 +176,7 @@
 .steps li::before {
   content: counter(step);
   min-width: 1.25rem;
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-variant-numeric: tabular-nums;
 }
 

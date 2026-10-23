@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import type { ActedBy, ActorView } from "../agents";
+import { AgentName } from "../AgentName";
+import { type ActedBy, type ActorView, actorText } from "../agents";
 import { Avatar } from "../chrome";
-import { useAgo } from "../ui";
+import { Moment } from "../Moment";
 import { actedBy, type Concept, type HistoryEvent, standing } from "./data";
 import type { Live } from "./live";
 
@@ -27,9 +28,10 @@ function useWithin(ts: number | null, ms: number): boolean {
 
 /**
  * The concept's byline (take 4, TEMPRA-114; tempra-dev: app/reader, The byline): who wrote the
- * version on screen, for whom when an agent ("Claude Code for @ann"), and when; while an agent
- * writes the page (a write within the last minute, or one on the feed not yet shown) "Claude
- * Code is editing now" with the pulsing dot. Versions are in History, verification in
+ * version on screen, for whom when an agent ("Claude Code for @ann"), and when ("edited 14 min
+ * ago"); while an agent writes the page (a write within the last minute, or one on the feed not
+ * yet shown) "· editing now" with the pulsing dot, the agent named once (TEMPRA-131: "Claude
+ * Code for @ann · editing now · edited just now"). Versions are in History, verification in
  * Properties (decisions/verification-out-of-the-way).
  */
 export function Byline(props: {
@@ -42,7 +44,6 @@ export function Byline(props: {
   const s = standing(props.history, c.seq);
   const author = s.current?.event;
   const who = author ? name(author.actor, actedBy(author)) : null;
-  const ago = useAgo(author?.ts ?? new Date().toISOString());
   // An agent's write on the feed (not yet swapped in) or the version on screen, if recent.
   const pending = live?.change;
   const pendingAgent =
@@ -62,25 +63,34 @@ export function Byline(props: {
       ? Date.parse(author.ts)
       : null;
   const editing = useWithin(at, EDITING_MS) && writer !== null;
-  if (!who) return <div className="byline" />;
+  if (!who || !author) return <div className="byline" />;
+  // The agent is named once: when the one writing now wrote the version on screen, "editing
+  // now" follows its name; another writer is named in that clause.
+  const same = writer !== null && actorText(writer) === actorText(who);
+  const sep = (
+    <span className="byline-sep" aria-hidden="true">
+      ·
+    </span>
+  );
   return (
     <div className="byline">
       <Avatar name={who.mark} agent={who.agent} />
       <span className="byline-name">
-        <strong>{who.name}</strong>
-        {who.for && <span className="muted"> for {who.for}</span>}
+        <AgentName who={who} />
       </span>
-      <span className="byline-sep" aria-hidden="true">
-        ·
-      </span>
-      {editing && writer ? (
-        <span className="byline-live" role="status">
-          <span className="change-dot live" aria-hidden="true" />
-          {writer.name} is editing now
-        </span>
-      ) : (
-        <span className="muted">edited {ago} ago</span>
+      {editing && writer && (
+        <>
+          {sep}
+          <span className="byline-live" role="status">
+            <span className="change-dot live" aria-hidden="true" />
+            {same ? "editing now" : `${actorText(writer)} is editing now`}
+          </span>
+        </>
       )}
+      {sep}
+      <span className="muted">
+        edited <Moment ts={author.ts} />
+      </span>
     </div>
   );
 }

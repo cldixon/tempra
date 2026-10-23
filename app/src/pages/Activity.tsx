@@ -1,4 +1,5 @@
 import { type FormEvent, Fragment, type ReactNode, useEffect, useState } from "react";
+import { AgentName } from "../AgentName";
 import {
   byPerson,
   type Entry,
@@ -19,14 +20,14 @@ import {
   useNow,
   useTitles,
 } from "../activity";
-import { agentLabel, useActors } from "../agents";
+import { actorLabel, agentLabel, useActors } from "../agents";
 import { api, useLoad } from "../api";
 import { isAgentChange } from "../changes";
 import { Avatar, Icon } from "../chrome";
 import { markSeen, useFeed, useLastSeen, useTrailing } from "../live";
-import { useRole } from "../role";
+import { useLibraryLabel, useRole } from "../role";
 import { type Done, navigate } from "../router";
-import { plural, Status, useTitle } from "../ui";
+import { localTime, plural, Status, useTitle } from "../ui";
 import type { ActivityFilters, Urls, Who } from "../urls";
 import { PageColumn } from "../Workspace";
 
@@ -56,7 +57,7 @@ export function Activity(props: {
   done?: Done;
 }) {
   const { urls, actor, filters } = props;
-  useTitle(`Activity · ${urls.slug}`);
+  useTitle(`Activity · ${useLibraryLabel(urls)}`);
   const view = filters.view === "events" ? "events" : "summary";
   const prefix = filters.prefix ?? "";
   const exact = filters.actor ?? "";
@@ -274,7 +275,7 @@ function WhoFilter(props: {
         </optgroup>
       )}
       {props.actor && !people.some((c) => c.actor === props.actor) && (
-        <option value={`actor:${props.actor}`}>{props.actor}</option>
+        <option value={`actor:${props.actor}`}>{actorLabel(props.actor, null, {})}</option>
       )}
     </select>
   );
@@ -551,16 +552,17 @@ function EventLine(props: {
         {e.seq}
       </td>
       <td className="events-when">
-        {row.lead && <time dateTime={e.ts}>{entryTime(e.ts, now, true)}</time>}
+        {row.lead && (
+          <time dateTime={e.ts} title={localTime(e.ts)}>
+            {entryTime(e.ts, now, true)}
+          </time>
+        )}
       </td>
       <td className="events-who">
         {row.lead && (
           <span className="events-person">
             <Avatar name={actor.mark} agent={actor.agent} />
-            <span>
-              {actor.name}
-              {actor.for && <span className="entry-for"> for {actor.for}</span>}
-            </span>
+            <AgentName who={actor} />
           </span>
         )}
       </td>

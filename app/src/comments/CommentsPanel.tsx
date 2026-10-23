@@ -90,7 +90,7 @@ export function CommentsList(props: {
       )}
       {tab === "open" && props.writable && !draft && !composing && (
         <button type="button" className="ghost new-thread" onClick={() => setComposing(true)}>
-          Comment on this concept
+          Comment on the page
         </button>
       )}
       {threads.map((t) => (

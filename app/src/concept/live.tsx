@@ -3,7 +3,7 @@ import { useAgentNames } from "../agents";
 import { Icon, Menu } from "../chrome";
 import { composing } from "../comments/composing";
 import { type FeedEvent, useFeed } from "../live";
-import { useAgo } from "../ui";
+import { relativeTime, useNow } from "../ui";
 import { dirOf, type Urls } from "../urls";
 import { CONTENT_OPS, type FileData } from "./data";
 
@@ -96,7 +96,7 @@ export function useIdle(ms: number): boolean {
   return idle;
 }
 
-/** "Claude for @ann changed this 4 s ago: the note." */
+/** "Claude for @ann changed this 4 min ago: the note." */
 function changeLine(e: FeedEvent, by: string, since: string): string {
   const what =
     e.op === "delete"
@@ -106,7 +106,7 @@ function changeLine(e: FeedEvent, by: string, since: string): string {
         : e.op === "verify"
           ? "verified this"
           : "changed this";
-  return `${by} ${what} ${since} ago${e.note ? `: ${e.note}` : ""}.`;
+  return `${by} ${what} ${since}${e.note ? `: ${e.note}` : ""}.`;
 }
 
 /**
@@ -115,7 +115,7 @@ function changeLine(e: FeedEvent, by: string, since: string): string {
  */
 export function NewVersion({ urls, live }: { urls: Urls; live: Live }) {
   const e = live.change;
-  const since = useAgo(e.ts);
+  const since = relativeTime(e.ts, useNow(5000));
   const by = useAgentNames(urls, [e.by?.agent])(e.actor, e.by);
   return (
     <div className="new-version">
@@ -142,15 +142,15 @@ export function NewVersion({ urls, live }: { urls: Urls; live: Live }) {
  */
 export function LiveNotice({ urls, live }: { urls: Urls; live: Live }) {
   const e = live.change;
-  const since = useAgo(e.ts);
+  const since = relativeTime(e.ts, useNow(5000));
   const by = useAgentNames(urls, [e.by?.agent])(e.actor, e.by);
   return (
     <div className="notice" role="status">
       {changeLine(e, by, since)}{" "}
       {e.op === "move" ? (
-        <a href={urls.pinned(undefined).file(e.path)}>Go to {e.path}</a>
+        <a href={urls.pinned(undefined).file(e.path)}>Open it where it is now</a>
       ) : e.op === "delete" ? (
-        <a href={urls.tree(dirOf(e.from_path ?? e.path))}>Back to the directory</a>
+        <a href={urls.tree(dirOf(e.from_path ?? e.path))}>Back to the folder</a>
       ) : (
         <>
           {CONTENT_OPS.has(e.op) && (

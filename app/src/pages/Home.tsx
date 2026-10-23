@@ -1,6 +1,5 @@
 import { useMemo } from "react";
 import {
-  agoWords,
   byPerson,
   dayLabel,
   type LedgerEvent,
@@ -8,14 +7,22 @@ import {
   useNow,
   whoWorksHere,
 } from "../activity";
-import { type ActedBy, type ActorView, useActors } from "../agents";
+import { type ActedBy, type ActorView, actorAgentName, actorText, useActors } from "../agents";
 import { api, useLoad } from "../api";
 import { Icon } from "../chrome";
-import { type Card, forYouCards, type InboxPage, type PageTitles, useLibraryInbox } from "../inbox";
+import {
+  type Card,
+  forYouCards,
+  type InboxPage,
+  type PageTitles,
+  useAgentLabels,
+  useLibraryInbox,
+  withNames,
+} from "../inbox";
 import { useFeed, useSeenCursor, useTrailing } from "../live";
 import { Moment } from "../Moment";
 import { type Needs, useNeeds } from "../needs";
-import { type Role, useLibraries, useRole } from "../role";
+import { libraryLabel, type Role, useLibraries, useRole } from "../role";
 import { fileLabel, type OutlineFile, topLevel } from "../Tree";
 import { clip, plural, Status, useCopy, useMe, useTitle } from "../ui";
 import { dirOf, folderName, type Urls } from "../urls";
@@ -45,7 +52,7 @@ export function Home({ urls }: { urls: Urls }) {
     libs.state === "ready"
       ? libs.data.libraries.find((l) => l.owner === urls.owner && l.slug === urls.slug)
       : undefined;
-  const name = lib?.title || urls.slug;
+  const name = libraryLabel(lib ?? urls);
   useTitle(name);
   const me = useMe();
   const role = useRole(urls);
@@ -394,7 +401,8 @@ export const inboxHref = (urls: Urls) =>
  * in Inbox" (the same count the filtered Inbox shows); nothing when there is nothing.
  */
 export function ForYou(props: { urls: Urls; inbox: InboxPage; titles?: PageTitles }) {
-  const cards: Card[] = forYouCards(props.inbox.items, props.titles);
+  const labels = useAgentLabels(props.inbox.items);
+  const cards: Card[] = forYouCards(withNames(props.inbox.items, labels), props.titles);
   if (cards.length === 0) return null;
   return (
     <section className="home-section" aria-labelledby="home-for-you">
@@ -527,7 +535,8 @@ export function EmptyLibrary(props: {
         <>
           <span className="change-dot" aria-hidden="true" />
           <span>
-            Last write by {props.who?.name ?? latest.actor}, {agoWords(latest.ts, props.now)}
+            Last write by {props.who ? actorText(props.who) : actorAgentName(latest.actor)},{" "}
+            <Moment ts={latest.ts} now={props.now} />
             {latest.note ? `: ${clip(latest.note, 80)}` : ""}
           </span>
         </>

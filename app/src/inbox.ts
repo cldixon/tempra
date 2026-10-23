@@ -1,5 +1,7 @@
 import { useEffect } from "react";
+import { actorAgentName, agentLabel, type Contributor, readableName } from "./agents";
 import { api, useLoad } from "./api";
+import { libraryLabel } from "./role";
 import { clip, day } from "./ui";
 import { Urls } from "./urls";
 
@@ -101,14 +103,82 @@ export function useUnread(): number {
 /** A path's last part without .md: what names a page that has no title. */
 const pageName = (path: string) => path.replace(/\.md$/, "").split("/").pop() ?? path;
 
-/** The library as a row names it: its title, else its slug. */
-export const libraryLabel = (i: Pick<InboxItem, "library" | "library_title">) =>
-  i.library_title || (i.library.split("/").pop() ?? i.library);
+/**
+ * The item's library as people read it (libraryLabel, TEMPRA-131): its title, else its slug;
+ * the owner after it when it is not the person's own (`me` is their handle).
+ */
+export function itemLibrary(
+  i: Pick<InboxItem, "library" | "library_title">,
+  me: string | null,
+): string {
+  const [owner = "", slug = i.library] = i.library.split("/");
+  return libraryLabel({
+    owner,
+    slug,
+    title: i.library_title,
+    role: me === null || owner === me ? "owner" : "read",
+  });
+}
 
 /** What the item is about: the page, or the library for an invitation or an access change. */
 export function itemTitle(i: InboxItem, titles: PageTitles = {}): string {
   if (i.path) return i.title || titles[`${i.library} ${i.path}`] || pageName(i.path);
-  return i.library_title || i.library.replace("/", " / ");
+  return i.library_title || (i.library.split("/").pop() ?? i.library);
+}
+
+/** Agents' names by "owner/slug actor", for items whose actor is an agent (useAgentLabels). */
+export type AgentLabels = Record<string, string>;
+
+/**
+ * Who did it, as people read it (AgentName's words, TEMPRA-131): an agent named for its person
+ * ("Claude Code for @dev") when the library's agents tell which one it is, else by its readable
+ * name ("Claude Code", never "claude-code/local"); a person by their handle.
+ */
+export function itemWho(
+  i: Pick<InboxItem, "who" | "actor" | "agent" | "library">,
+  labels: AgentLabels = {},
+): string {
+  if (!i.agent) return i.who;
+  const known = labels[`${i.library} ${i.actor}`];
+  if (known) return known;
+  return i.who === i.actor ? actorAgentName(i.actor) : readableName(i.who);
+}
+
+/** Items with `who` in people's words (itemWho), for the row, the bell and the home's cards. */
+export const withNames = (items: InboxItem[], labels: AgentLabels): InboxItem[] =>
+  items.map((i) => ({ ...i, who: itemWho(i, labels) }));
+
+/**
+ * The agents of the libraries agents' items are in (`GET …/agents`), as labels by actor. An
+ * actor two people's agents share ("claude-ai/connector") cannot tell them apart, so it keeps
+ * the agent's plain name.
+ */
+export function useAgentLabels(items: InboxItem[] | null): AgentLabels {
+  const want = [...new Set((items ?? []).filter((i) => i.agent).map((i) => i.library))].sort();
+  const loaded = useLoad(`inbox agents ${want.join(" ")}`, async () => {
+    const out: AgentLabels = {};
+    const shared = new Set<string>();
+    await Promise.all(
+      want.map(async (library) => {
+        const [owner = "", slug = ""] = library.split("/");
+        try {
+          const r = await api<{ contributors: Contributor[] }>(new Urls(owner, slug).api("agents"));
+          for (const c of r.contributors) {
+            if (!c.agent) continue;
+            const key = `${library} ${c.actor}`;
+            const label = agentLabel(c);
+            if (key in out && out[key] !== label) shared.add(key);
+            out[key] = label;
+          }
+        } catch {
+          // A library out of reach names its agents by their plain names.
+        }
+      }),
+    );
+    for (const key of shared) delete out[key];
+    return out;
+  });
+  return loaded.state === "ready" ? loaded.data : {};
 }
 
 /** Pages' titles by "owner/slug path", for items the server names by path only (replies). */

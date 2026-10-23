@@ -5,7 +5,7 @@ import { ApiError, api, field, useAction, useLoad } from "../api";
 import { useConfirm } from "../Dialog";
 import { useFeed, useTrailing } from "../live";
 import { Moment } from "../Moment";
-import { librariesChanged, type Role, useLibraries, useRole } from "../role";
+import { librariesChanged, type Role, useLibraries, useLibraryLabel, useRole } from "../role";
 import { navigate } from "../router";
 import {
   Crumbs,
@@ -104,7 +104,7 @@ const KIND_WORDS: Record<string, string> = {
  * check's line (TEMPRA-66).
  */
 export function Work({ urls, kind }: { urls: Urls; kind?: string }) {
-  useTitle(`For agents · ${urls.slug}`);
+  useTitle(`For agents · ${useLibraryLabel(urls)}`);
   const titleOf = useTitleOf();
   const loaded = useLoad(`work ${urls.work(kind)}`, async () => {
     const [w, stats, health] = await Promise.all([
@@ -228,7 +228,7 @@ function NightlyLinks({ urls, date }: { urls: Urls; date: string }) {
 
 /** Export a bundle, import one as a single change, and the nightly exports (owner only). */
 export function Transfer({ urls }: { urls: Urls }) {
-  useTitle(`Import & export · ${urls.slug}`);
+  useTitle(`Import & export · ${useLibraryLabel(urls)}`);
   return (
     <OwnerOnly urls={urls}>
       <TransferPage urls={urls} />
@@ -404,7 +404,7 @@ function useNamer(urls: Urls) {
 
 /** Point-in-time restore of the whole library, and undoing one (owner only). */
 export function Recovery({ urls }: { urls: Urls }) {
-  useTitle(`Recovery · ${urls.slug}`);
+  useTitle(`Recovery · ${useLibraryLabel(urls)}`);
   return (
     <OwnerOnly urls={urls}>
       <RecoveryPage urls={urls} />
@@ -582,7 +582,7 @@ const folderOf = (path: string) => (dirOf(path) ? folderName(dirOf(path)) : "the
 
 /** Undoing one change (a ledger request), as a new change by the owner (owner only). */
 export function Revert({ urls, request }: { urls: Urls; request: string; actor: string }) {
-  useTitle(`Revert · ${urls.slug}`);
+  useTitle(`Revert · ${useLibraryLabel(urls)}`);
   return (
     <>
       <PageBar>
@@ -683,7 +683,7 @@ export function Restore(props: { urls: Urls; path: string; to?: number; actor: s
   const { urls, path } = props;
   const titleOf = useTitleOf();
   const title = titleOf(path);
-  useTitle(`Restore ${title} · ${urls.slug}`);
+  useTitle(`Restore ${title} · ${useLibraryLabel(urls)}`);
   return (
     <>
       <PageBar>
@@ -758,7 +758,7 @@ function RestorePage(props: { urls: Urls; path: string; to?: number; title: stri
 
 /** A library's Connect tab: the steps naming it, and (live) whether an agent has written yet. */
 export function ConnectLibrary({ urls }: { urls: Urls }) {
-  useTitle(`Connect · ${urls.slug}`);
+  useTitle(`Connect · ${useLibraryLabel(urls)}`);
   const loaded = useLoad(`connect ${urls.base}`, async () => {
     const [recent, stats] = await Promise.all([
       api<{ requests: LedgerRequest[] }>(urls.api("requests", { limit: 50 })),
@@ -808,7 +808,7 @@ export function ConnectLibrary({ urls }: { urls: Urls }) {
  * member's settings are Members alone, so General sends them there.
  */
 export function General({ urls }: { urls: Urls }) {
-  useTitle(`General · ${urls.slug}`);
+  useTitle(`General · ${useLibraryLabel(urls)}`);
   const libs = useLibraries();
   const role = useRole(urls);
   const action = useAction();
@@ -891,7 +891,8 @@ export function General({ urls }: { urls: Urls }) {
 
 /** Deleting the library, typing its name (v2 spec: Accounts; owner only). */
 export function DeleteLibrary({ urls }: { urls: Urls }) {
-  useTitle(`Delete · ${urls.slug}`);
+  const label = useLibraryLabel(urls);
+  useTitle(`Delete · ${label}`);
   const action = useAction();
   const submit = (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -905,7 +906,7 @@ export function DeleteLibrary({ urls }: { urls: Urls }) {
   };
   return (
     <OwnerOnly urls={urls}>
-      <h1>Delete {urls.slug}</h1>
+      <h1>Delete {label}</h1>
       {action.error && <div className="notice">{action.error}</div>}
       <p>
         Deletes every page, attachment, export and token of this library.{" "}
@@ -946,7 +947,7 @@ const ROLE_WORDS = { read: "Read and comment", write: "Read and write" } as cons
  * removes; a member may leave. Each of those asks first (S-4).
  */
 export function Members({ urls, me }: { urls: Urls; me: string | null }) {
-  useTitle(`Members · ${urls.slug}`);
+  useTitle(`Members · ${useLibraryLabel(urls)}`);
   const loaded = useLoad(`members ${urls.base}`, async () => {
     const [m, a] = await Promise.all([
       api<MembersData>(urls.api("members")),

@@ -18,14 +18,21 @@
   --tempra-color-selected: light-dark(#e1e1dd, #2a2a2e);
   --tempra-color-selection: light-dark(#dededa, #3a3a3d);
 
-  /* Color: text, in three steps */
+  /* Color: text, in three steps. Text people read is text or muted, at least 4.5:1 on every
+     surface in light and dark (TEMPRA-132; design/contrast.test.ts). Faint is under that: icons,
+     rules and disabled controls only, never words. */
   --tempra-color-text: light-dark(#1a1a1b, #ececea);
-  --tempra-color-muted: light-dark(#6f6f73, #9a9a9e);
+  --tempra-color-muted: light-dark(#616165, #9a9a9e);
   --tempra-color-faint: light-dark(#a3a3a7, #68686c);
 
   /* Color: lines */
   --tempra-color-border: light-dark(#e8e8e4, #2a2a2d);
   --tempra-color-border-strong: light-dark(#d2d2ce, #3c3c40);
+
+  /* Focus (TEMPRA-132): a 2px ring in the text colour on every control focused by keyboard
+     (:focus-visible), until the palette (TEMPRA-1) designs its own */
+  --tempra-focus-ring: 2px solid var(--tempra-color-text);
+  --tempra-focus-offset: 2px;
 
   /* Color: the change dot (the only colour before the palette) */
   --tempra-color-agent: light-dark(#e8722a, #f0884a);
@@ -187,18 +194,18 @@ a:hover {
   text-decoration-color: currentcolor;
 }
 
+/* Focus (TEMPRA-132): the ring, 2px in the text colour, on every control reached by keyboard. */
 :focus-visible {
-  outline: 2px solid var(--tempra-color-text);
-  outline-offset: 2px;
+  outline: var(--tempra-focus-ring);
+  outline-offset: var(--tempra-focus-offset);
 }
 
-/* A text field shows focus by its caret and a firmer edge, not the ring. */
+/* A text field has the same ring, close to its edge. */
 input:not([type="checkbox"], [type="radio"], [type="file"]):focus-visible,
 select:focus-visible,
 textarea:focus-visible {
-  outline: 1px solid var(--tempra-color-border-strong);
-  outline-offset: 0;
-  border-color: var(--tempra-color-border-strong);
+  outline: var(--tempra-focus-ring);
+  outline-offset: 1px;
 }
 
 code,
@@ -222,7 +229,7 @@ kbd {
   padding: 1px 7px;
   border-radius: var(--tempra-radius-pill);
   background: var(--tempra-color-ground);
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-family: inherit;
   font-size: var(--tempra-text-label);
 }
@@ -384,8 +391,24 @@ details > summary {
   color: var(--tempra-color-muted);
 }
 
+/* Faint is for icons and separators, never words (under 4.5:1; TEMPRA-132). */
 .faint {
   color: var(--tempra-color-faint);
+}
+
+::placeholder {
+  color: var(--tempra-color-muted);
+  opacity: 1;
+}
+
+/* Who acted (AgentName, TEMPRA-131): the name, then whom an agent acts for, quieter. */
+.agent-name > b {
+  color: var(--tempra-color-text);
+  font-weight: var(--tempra-weight-medium);
+}
+
+.agent-for {
+  color: var(--tempra-color-muted);
 }
 
 .small {
@@ -407,7 +430,7 @@ details > summary {
 /* An uppercase label over a group (SOURCES, LINKED FROM). */
 .label {
   margin: 0 0 var(--tempra-space-2);
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-label);
   font-weight: var(--tempra-weight-regular);
   letter-spacing: 0.04em;
@@ -700,7 +723,7 @@ details > summary {
   position: absolute;
   top: 10px;
   left: 18px;
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-family: var(--tempra-font-body);
   font-size: var(--tempra-text-label);
   letter-spacing: 0.04em;
@@ -786,7 +809,7 @@ details > summary {
 
 .prose .image-dropped,
 .prose .image-broken {
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-style: italic;
 }
 
@@ -835,7 +858,7 @@ details > summary {
 }
 
 .prose .figure-open:focus-visible {
-  outline: 2px solid var(--tempra-color-text);
+  outline: var(--tempra-focus-ring);
   outline-offset: 3px;
 }
 
@@ -916,7 +939,7 @@ details > summary {
 }
 
 .prose del.diff-removed {
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   text-decoration: line-through;
 }
 
@@ -1321,7 +1344,7 @@ details > summary {
 .lightbox-facts {
   max-width: var(--tempra-measure);
   margin: 0;
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
   overflow-wrap: anywhere;
 }
@@ -1458,7 +1481,7 @@ body.ground {
 
 .menu-list .menu-note {
   padding: 6px 10px 2px;
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-label);
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -1709,11 +1732,6 @@ body.ground {
   font-weight: var(--tempra-weight-medium);
 }
 
-.lib-card-name .owner {
-  color: var(--tempra-color-faint);
-  font-weight: var(--tempra-weight-regular);
-}
-
 .lib-card-for {
   flex: none;
   color: var(--tempra-color-muted);
@@ -1729,7 +1747,7 @@ body.ground {
 
 .lib-card-meta {
   margin: 4px 0 0;
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
 }
 
@@ -2031,7 +2049,7 @@ body.ground {
 
 .bell-item-where {
   grid-column: 2;
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
 }
 
@@ -2163,7 +2181,7 @@ body.ground {
 
 .menu-lib .menu-lib-role {
   grid-column: 2;
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
 }
 
@@ -2199,7 +2217,7 @@ body.ground {
 
 .sidebar-label {
   margin: 14px 10px 4px;
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
 }
 
@@ -2254,7 +2272,7 @@ body.ground {
 /* Showing the hidden sidebar: a quiet glyph at the left of the crumbs. */
 .show-sidebar {
   flex: none;
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
 }
 
 /* The change dot's second state (take 4): pulsing while an agent writes. */
@@ -2446,7 +2464,7 @@ body.ground {
 
 .tree-count {
   flex: none;
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-label);
   font-variant-numeric: tabular-nums;
 }
@@ -2487,14 +2505,14 @@ body.ground {
   display: inline-flex;
   flex: none;
   align-items: center;
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-label);
   font-variant-numeric: tabular-nums;
 }
 
 .tree-note {
   padding: 4px 10px;
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
 }
 
@@ -2706,7 +2724,7 @@ body.ground {
     border: 1px solid var(--tempra-color-border);
     border-radius: var(--tempra-radius-pill);
     background: var(--tempra-color-bg);
-    color: var(--tempra-color-faint);
+    color: var(--tempra-color-muted);
     font-size: var(--tempra-text-name);
     text-align: left;
   }
@@ -2803,7 +2821,7 @@ table.list {
 table.list th {
   padding: 6px 10px;
   border-bottom: 1px solid var(--tempra-color-border);
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-label);
   font-weight: var(--tempra-weight-regular);
   letter-spacing: 0.04em;
@@ -2851,7 +2869,7 @@ form.token {
 /* The ledger's filters: small labels, inset fields, no box. */
 form.filters {
   margin: 0 0 var(--tempra-space-3);
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
 }
 
@@ -2976,7 +2994,7 @@ ul.events {
   margin-left: -1px;
   padding: 4px 0 4px 14px;
   border-left: 1px solid transparent;
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   text-decoration: none;
 }
 
@@ -3144,11 +3162,6 @@ ul.events {
   font-size: var(--tempra-text-ui);
 }
 
-.byline-name strong {
-  color: var(--tempra-color-text);
-  font-weight: var(--tempra-weight-medium);
-}
-
 .byline-sep {
   color: var(--tempra-color-faint);
 }
@@ -3187,7 +3200,7 @@ ul.events {
 }
 
 .version-n {
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-variant-numeric: tabular-nums;
 }
 
@@ -3204,7 +3217,7 @@ ul.events {
 }
 
 .version-who {
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
 }
 
@@ -3316,13 +3329,13 @@ ul.events {
 }
 
 .sources .num {
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-variant-numeric: tabular-nums;
 }
 
 .sources .meta {
   display: block;
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
 }
 
@@ -3366,7 +3379,7 @@ ul.events {
   display: flex;
   flex-direction: column;
   padding: 16px 10px 16px 14px;
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-variant-numeric: tabular-nums;
   text-align: right;
   user-select: none;
@@ -3672,17 +3685,19 @@ ul.events {
 
 .thread-replies {
   flex: none;
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-variant-numeric: tabular-nums;
 }
 
 .thread.collapsed time {
   flex: none;
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
 }
 
-.thread.resolved {
-  opacity: 0.7;
+/* A resolved thread reads quieter: muted text, never faded below AA (TEMPRA-132). */
+.thread.resolved,
+.thread.resolved strong {
+  color: var(--tempra-color-muted);
 }
 
 /* The active thread (and a new comment): a card with the comments, a reply, Resolve. */
@@ -3709,7 +3724,7 @@ ul.events {
 
 .said-by time,
 .said-change {
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
 }
 
@@ -3843,7 +3858,7 @@ section.thread.open {
 
 .view-meta {
   margin: 0;
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
 }
 
@@ -4036,7 +4051,7 @@ section.thread.open {
 }
 
 .home-card-kind {
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
 }
 
@@ -4085,7 +4100,7 @@ section.thread.open {
   display: flex;
   align-items: center;
   gap: var(--tempra-space-2);
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
   font-variant-numeric: tabular-nums;
 }
@@ -4106,7 +4121,7 @@ section.thread.open {
   display: inline-flex;
   align-items: center;
   gap: var(--tempra-space-1);
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   text-decoration: none;
 }
 
@@ -4194,7 +4209,7 @@ section.thread.open {
 
 .empty-more {
   margin: var(--tempra-space-3) 0 0;
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-ui);
 }
 
@@ -4265,14 +4280,9 @@ section.thread.open {
   overflow-wrap: anywhere;
 }
 
-.entry-who {
-  font-weight: var(--tempra-weight-medium);
-}
-
-.entry-for,
 .entry-words,
 .entry-more {
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
 }
 
 .entry-words {
@@ -4307,7 +4317,7 @@ section.thread.open {
 .entry-what {
   flex: none;
   width: 52px;
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-label);
 }
 
@@ -4316,7 +4326,7 @@ section.thread.open {
   flex-direction: column;
   align-items: flex-end;
   gap: var(--tempra-space-2);
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
   white-space: nowrap;
 }
@@ -4345,11 +4355,12 @@ a.activity-download {
   padding: 0 12px;
   border: 1px solid var(--tempra-color-border);
   border-radius: var(--tempra-radius-pill);
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
 }
 
 .activity-find:focus-within {
-  border-color: var(--tempra-color-border-strong);
+  outline: var(--tempra-focus-ring);
+  outline-offset: 1px;
 }
 
 .activity-find input:not([type="checkbox"], [type="radio"], [type="file"]) {
@@ -4384,7 +4395,7 @@ a.activity-download {
 .events-table th {
   padding: 8px 10px;
   border-bottom: 1px solid var(--tempra-color-border);
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
   font-weight: var(--tempra-weight-regular);
   text-align: left;
@@ -4470,7 +4481,7 @@ a.activity-download {
 .folder-empty,
 .folder-foot {
   margin: 0;
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
 }
 
@@ -4543,7 +4554,7 @@ a.activity-download {
 .folder-count,
 .folder-live {
   flex: none;
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
   white-space: nowrap;
 }
@@ -4669,13 +4680,6 @@ a.activity-download {
   display: flex;
   flex-direction: column;
   gap: var(--tempra-space-3);
-}
-
-.not-found-code {
-  margin: 0;
-  color: var(--tempra-color-faint);
-  font-family: var(--tempra-font-mono);
-  font-size: var(--tempra-text-meta);
 }
 
 /* Where it went, in a box with Open at the end. */
@@ -4987,7 +4991,7 @@ a.activity-download {
   flex-wrap: wrap;
   gap: 4px 16px;
   padding: 16px 4px;
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
 }
 
@@ -5072,7 +5076,7 @@ a.activity-download {
 .steps li::before {
   content: counter(step);
   min-width: 1.25rem;
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-variant-numeric: tabular-nums;
 }
 

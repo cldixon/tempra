@@ -9,7 +9,8 @@
  */
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { Icon } from "../chrome";
-import { day, formatSize } from "../ui";
+import { formatSize, relativeTime } from "../ui";
+import { baseName } from "../urls";
 import { useDiagram } from "./Diagram";
 import { BrokenImage } from "./Figure";
 import type { DiagramFigure, Figure, ImageFigure } from "./prepare";
@@ -36,11 +37,11 @@ export interface FigureView {
   fileHref?(path: string): string;
 }
 
-/** An image figure's quiet line: path (or URL), size, who added it and when. */
+/** An image figure's quiet line: its file name (or URL), size, who added it and when. */
 export function factsLine(f: ImageFigure, facts: ImageFacts | null): string {
-  const parts = [f.path ?? f.url];
+  const parts = [f.path ? baseName(f.path) : f.url];
   if (facts?.size != null) parts.push(formatSize(facts.size));
-  if (facts?.by) parts.push(`added by ${facts.by}${facts.at ? `, ${day(facts.at)}` : ""}`);
+  if (facts?.by) parts.push(`added by ${facts.by}${facts.at ? `, ${relativeTime(facts.at)}` : ""}`);
   return parts.join(" · ");
 }
 

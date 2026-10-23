@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { agoWords, useNow } from "../activity";
-import { type ActorView, useActors } from "../agents";
+import { AgentName } from "../AgentName";
+import { actorText, useActors } from "../agents";
 import { ApiError, api, useLoad } from "../api";
 import { Icon } from "../chrome";
 import { useThreads } from "../comments/data";
@@ -17,15 +17,16 @@ import {
   loadFile,
 } from "../concept/data";
 import { LiveNotice, useLiveFile } from "../concept/live";
+import { Moment } from "../Moment";
 import { Reader } from "../Reader";
 import { prepare } from "../reader/prepare";
+import { useLibraryLabel } from "../role";
 import type { Compare } from "../router";
 import { navigate } from "../router";
 import { fileLabel } from "../Tree";
 import {
   AtNotice,
   Crumbs,
-  calendarDay,
   formatSize,
   Status,
   useCopy,
@@ -33,13 +34,13 @@ import {
   useScrollToHash,
   useTitle,
 } from "../ui";
-import { baseName, dirOf, enc, type Urls } from "../urls";
+import { baseName, dirOf, enc, folderName, type Urls } from "../urls";
 import { PageBar, PageColumn, useFrame } from "../Workspace";
 
 /** What the last server action did, said once on the page it returns to (`?done=`). */
 const DONE: Record<string, (actor: string) => string> = {
   restore: () => "Restored, as a new change by you.",
-  verify: (actor) => `Verified as ${actor}. The trust tier is human-reviewed until the next edit.`,
+  verify: () => "Verified. It stays verified until the next edit.",
 };
 
 /**
@@ -133,10 +134,9 @@ export function typeName(media: string | null, path: string): string {
  */
 function Attachment(props: { urls: Urls; head: number; file: AttachmentFile }) {
   const { urls, file } = props;
-  useTitle(`${baseName(file.path)} · ${urls.slug}`);
+  useTitle(`${baseName(file.path)} · ${useLibraryLabel(urls)}`);
   const me = useMe();
   const actors = useActors(urls, me?.actor ?? null);
-  const now = useNow();
   const frame = useFrame();
   const extra = useLoad(`attachment ${urls.base} ${file.path} ${file.seq}`, async () => {
     const p = enc(file.path);
@@ -213,7 +213,12 @@ function Attachment(props: { urls: Urls; head: number; file: AttachmentFile }) {
             <div>
               <dt>Added</dt>
               <dd>
-                <AddedBy who={actors.view(added.actor, actedBy(added))} ts={added.ts} now={now} />
+                <div>
+                  <AgentName who={actors.view(added.actor, actedBy(added))} />
+                </div>
+                <div className="muted">
+                  <Moment ts={added.ts} />
+                </div>
               </dd>
             </div>
           )}
@@ -229,6 +234,7 @@ function Attachment(props: { urls: Urls; head: number; file: AttachmentFile }) {
                   {usedIn.map((p) => (
                     <li key={p}>
                       <a href={urls.file(p)}>{titles.get(p) ?? baseName(p)}</a>
+                      {dirOf(p) && <span className="muted"> · {folderName(dirOf(p))}</span>}
                     </li>
                   ))}
                 </ul>
@@ -238,16 +244,6 @@ function Attachment(props: { urls: Urls; head: number; file: AttachmentFile }) {
         </dl>
       </aside>
     </div>
-  );
-}
-
-function AddedBy({ who, ts, now }: { who: ActorView; ts: string; now: number }) {
-  const when = now - Date.parse(ts) < 7 * 86_400_000 ? agoWords(ts, now) : calendarDay(ts);
-  return (
-    <>
-      {who.name}
-      {who.for && ` for ${who.for}`} · {when}
-    </>
   );
 }
 
@@ -289,7 +285,6 @@ export function NotFound({ urls, path }: { urls: Urls; path: string }) {
   const me = useMe();
   const actors = useActors(urls, me?.actor ?? null);
   const frame = useFrame();
-  const now = useNow();
   const fate = useLoad(`fate ${urls.base} ${path}`, async () => {
     if (path === "") return null;
     try {
@@ -303,7 +298,13 @@ export function NotFound({ urls, path }: { urls: Urls; path: string }) {
     }
   });
   const f = fate.state === "ready" ? fate.data : null;
-  const who = f ? actors.view(f.actor, f.by).name : "";
+  const who = f ? actorText(actors.view(f.actor, f.by)) : "";
+  // Where it went, by its title and folder (H-13), as the tree names it.
+  const moved = f?.kind === "moved" ? frame.index?.find((x) => x.path === f.to) : undefined;
+  const where =
+    f?.kind === "moved"
+      ? `${moved ? fileLabel(moved) : baseName(f.to).replace(/\.md$/, "")}${dirOf(f.to) ? ` (${folderName(dirOf(f.to))})` : ""}`
+      : "";
   return (
     <>
       <PageBar>
@@ -311,12 +312,11 @@ export function NotFound({ urls, path }: { urls: Urls; path: string }) {
       </PageBar>
       <PageColumn>
         <div className="not-found">
-          <p className="not-found-code">404</p>
           <h1 className="view-title">This page isn't here</h1>
           {f?.kind === "moved" && (
             <p className="not-found-fate">
               <span>
-                Moved to <code>{f.to}</code> by {who}, {agoWords(f.ts, now)}
+                Moved to {where} by {who}, <Moment ts={f.ts} />
               </span>
               <a href={urls.file(f.to)}>Open</a>
             </p>
@@ -324,7 +324,7 @@ export function NotFound({ urls, path }: { urls: Urls; path: string }) {
           {f?.kind === "deleted" && (
             <p className="not-found-fate">
               <span>
-                Deleted by {who}, {agoWords(f.ts, now)}
+                Deleted by {who}, <Moment ts={f.ts} />
               </span>
               <a href={urls.activity({ view: "events", q: path })}>In Activity</a>
             </p>
@@ -350,7 +350,7 @@ export function Derived(props: {
   file: Extract<FileJson, { kind: "derived" }>;
 }) {
   const { urls, file } = props;
-  useTitle(`${file.path} · ${urls.slug}`);
+  useTitle(`${file.path} · ${useLibraryLabel(urls)}`);
   const prepared = useMemo(
     () => prepare(file.doc, { path: file.path, href: bodyHref(urls), footnote: () => null }),
     [file, urls],

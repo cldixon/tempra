@@ -537,7 +537,7 @@ describe("figures (tempra-dev: app/reader, Figures)", () => {
       expect(links[1]?.getAttribute("href")).toBe("/o/l/assets/tower.png");
       expect(asked).toEqual(["assets/tower.png"]);
       const facts = () => d.querySelector(".lightbox-facts")?.textContent ?? "";
-      expect(facts()).toMatch(/^assets\/tower\.png · 316 KB · added by ann, /);
+      expect(facts()).toMatch(/^tower\.png · 316 KB · added by ann, /);
       const prev = d.querySelector(".lightbox-prev") as HTMLButtonElement;
       expect(prev.disabled).toBe(true);
       // Next: the external image, its URL and nothing asked.
@@ -579,7 +579,7 @@ describe("figures (tempra-dev: app/reader, Figures)", () => {
       const d = host.querySelector("dialog.lightbox") as HTMLDialogElement;
       expect(d.querySelector(".lightbox-where")).toBeNull();
       expect(d.querySelector(".lightbox-caption")).toBeNull();
-      expect(d.querySelector(".lightbox-facts > span")?.textContent).toBe("assets/a.png");
+      expect(d.querySelector(".lightbox-facts > span")?.textContent).toBe("a.png");
       await act(async () => (d.querySelector(".lightbox-next") as HTMLButtonElement).click());
       expect(d.querySelector(".lightbox-actions a")).toBeNull();
       expect(d.querySelector(".lightbox-caption")?.textContent).toBe("Flow");

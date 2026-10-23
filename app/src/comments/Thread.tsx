@@ -1,11 +1,13 @@
 import { type FormEvent, type RefObject, useEffect, useRef, useState } from "react";
-import { type ActedBy, type ActorView, useActors } from "../agents";
+import { AgentName } from "../AgentName";
+import { type ActedBy, type ActorView, actorText, useActors } from "../agents";
 import { api, useAction } from "../api";
 import { Avatar } from "../chrome";
 import { threadElementId } from "../concept/Panel";
 import { MentionArea, useMentionable } from "../Mentions";
+import { Moment } from "../Moment";
 import { revealOffset } from "../Reader";
-import { Ago, clip, useMe } from "../ui";
+import { clip, useMe } from "../ui";
 import type { Urls } from "../urls";
 import { useComposing } from "./composing";
 import type { CommentT, Draft, Placed, Thread } from "./data";
@@ -22,12 +24,12 @@ function useNamer(urls: Urls): (actor: string, by?: ActedBy | null) => ActorView
   return useActors(urls, me?.actor ?? null).view;
 }
 
-/** Who said it: their mark and name. */
-function By({ who }: { who: ActorView }) {
+/** Who said it: their mark and name; `full` adds whom an agent acts for (AgentName). */
+function By({ who, full = false }: { who: ActorView; full?: boolean }) {
   return (
     <>
       <Avatar name={who.mark} agent={who.agent} />
-      <strong>{who.name}</strong>
+      {full ? <AgentName who={who} /> : <strong>{who.name}</strong>}
     </>
   );
 }
@@ -42,7 +44,6 @@ export function ThreadView(props: {
 }) {
   const { urls, thread: t, active } = props;
   const name = useNamer(urls);
-  const [now] = useState(() => Date.now());
   const first = t.comments[0];
   const outdated = t.anchor !== null && t.at === null;
   const select = () => {
@@ -68,7 +69,7 @@ export function ThreadView(props: {
           {first && <By who={name(first.actor, first.by)} />}
           <span className="thread-words">{first ? clip(first.body, 80) : ""}</span>
           {t.replies > 0 && <span className="thread-replies">{t.replies + 1}</span>}
-          {first && <Ago ts={t.comments[t.comments.length - 1]?.ts ?? first.ts} now={now} />}
+          {first && <Moment ts={t.comments[t.comments.length - 1]?.ts ?? first.ts} />}
         </span>
       </button>
     );
@@ -97,23 +98,19 @@ export function ThreadView(props: {
         </blockquote>
       )}
       {outdated && <p className="small muted">The quoted text is no longer in the body.</p>}
-      <Said thread={t} name={name} now={now} />
+      <Said thread={t} name={name} />
       <ThreadActions {...props} />
     </section>
   );
 }
 
 /** The thread's comments and its resolves and reopens, in order. */
-function Said(props: {
-  thread: Thread;
-  name: (actor: string, by?: ActedBy | null) => ActorView;
-  now: number;
-}) {
-  const { thread: t, name, now } = props;
+function Said(props: { thread: Thread; name: (actor: string, by?: ActedBy | null) => ActorView }) {
+  const { thread: t, name } = props;
   const comment = (c: CommentT) => (
     <div key={c.id} className="said">
       <div className="said-by">
-        <By who={name(c.actor, c.by)} /> <Ago ts={c.ts} now={now} />
+        <By who={name(c.actor, c.by)} full /> <Moment ts={c.ts} />
       </div>
       <p className="comment">{c.body}</p>
     </div>
@@ -127,8 +124,8 @@ function Said(props: {
           return (
             <div key={a.seq}>
               <p className="said-change">
-                {a.kind === "resolve" ? "Resolved" : "Reopened"} by {name(a.actor, a.by).name}{" "}
-                <Ago ts={a.ts} now={now} />
+                {a.kind === "resolve" ? "Resolved" : "Reopened"} by {actorText(name(a.actor, a.by))}{" "}
+                <Moment ts={a.ts} />
               </p>
               {c && <p className="comment">{c.body}</p>}
             </div>
@@ -234,7 +231,7 @@ export function NewComment(props: {
   const people = useMentionable(props.urls);
   const { draft, onDone } = props;
   useComposing(draft !== null || text.trim() !== "");
-  // The box takes the focus when it opens (from the toolbar, or "Comment on this concept").
+  // The box takes the focus when it opens (from the toolbar, or "Comment on the page").
   // biome-ignore lint/correctness/useExhaustiveDependencies: on opening, and on a new draft.
   useEffect(() => box.current?.focus(), [draft]);
   const submit = (e: FormEvent<HTMLFormElement>) => {
@@ -278,7 +275,7 @@ export function NewComment(props: {
           const to = e.relatedTarget instanceof Element ? e.relatedTarget : null;
           if (!e.currentTarget.value.trim() && !to?.closest(".comment-form")) onDone();
         }}
-        placeholder={draft ? "Comment on the selection" : "Comment on this concept"}
+        placeholder={draft ? "Comment on the selection" : "Comment on the page"}
       />
       {error && <div className="notice">{error}</div>}
       <div className="actions">
