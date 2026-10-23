@@ -13,18 +13,31 @@ import { html, operatorEmail, signedIn } from "./signin";
 type AppEnv = { Bindings: Cloudflare.Env };
 
 const notFound = () => messagePage("Not found", "There is nothing here.", 404);
+const WAITLIST = { href: "/waitlist", label: "Back to the waitlist" };
+
+/**
+ * What a decision did, as the page after it says it. The post redirects here (V-12), so a reload
+ * shows the list again rather than deciding twice.
+ */
+const OUTCOMES: Record<string, (email: string) => string> = {
+  approved: (e) => `${e} approved.`,
+  dismissed: (e) => `${e} dismissed.`,
+  missing: (e) => `${e} was not waiting.`,
+  mail_failed: (e) => `${e} approved, but the email to them failed; tell them yourself.`,
+  no_mail: (e) => `${e} approved. This deployment cannot send email; tell them yourself.`,
+};
 
 function reviewPage(entries: { email: string; created: string }[], done?: string): Response {
   const rows = entries
     .map(
       (e) => `<tr><td>${esc(e.email)}</td><td>${esc(e.created.slice(0, 10))}</td><td>
 <form method="post" action="/waitlist"><input type="hidden" name="email" value="${esc(e.email)}">
-<button type="submit" name="decision" value="invited">Approve</button>
-<button type="submit" name="decision" value="dismissed">Dismiss</button></form></td></tr>`,
+<button type="submit" name="decision" value="invited" aria-label="Approve ${esc(e.email)}">Approve</button>
+<button type="submit" name="decision" value="dismissed" aria-label="Dismiss ${esc(e.email)}">Dismiss</button></form></td></tr>`,
     )
     .join("\n");
   const list = entries.length
-    ? `<table><thead><tr><th>Email</th><th>Asked</th><th></th></tr></thead><tbody>
+    ? `<table><thead><tr><th>Email</th><th>Asked</th><th>Decision</th></tr></thead><tbody>
 ${rows}
 </tbody></table>`
     : "<p>Nobody is waiting.</p>";
@@ -48,7 +61,9 @@ export function registerWaitlistRoutes<E extends AppEnv>(
     const user = await signedIn(c.req.raw, d);
     if (user instanceof Response) return user;
     if (user.email !== operatorEmail(c.env)) return notFound();
-    return reviewPage(await d.accounts.waitlist());
+    const outcome = OUTCOMES[c.req.query("done") ?? ""];
+    const email = c.req.query("email") ?? "";
+    return reviewPage(await d.accounts.waitlist(), outcome && email ? outcome(email) : undefined);
   });
 
   app.post("/waitlist", async (c) => {
@@ -61,12 +76,12 @@ export function registerWaitlistRoutes<E extends AppEnv>(
     const email = String(form.get("email") ?? "");
     const decision = String(form.get("decision") ?? "");
     if (decision !== "invited" && decision !== "dismissed") {
-      return messagePage("Bad request", "Approve or dismiss.", 400);
+      return messagePage("Bad request", "Approve or dismiss.", 400, WAITLIST);
     }
     const decided = await d.accounts.decideWaitlist(email, decision);
-    let done = decided ? `${email} dismissed.` : `${email} was not waiting.`;
+    let done: keyof typeof OUTCOMES = decided ? "dismissed" : "missing";
     if (decided && decision === "invited") {
-      done = `${email} approved.`;
+      done = "approved";
       if (d.mailer) {
         const origin = new URL(c.req.url).origin;
         try {
@@ -78,12 +93,13 @@ export function registerWaitlistRoutes<E extends AppEnv>(
           d.meter?.({ kind: "email", account: email });
         } catch (e) {
           console.error(JSON.stringify({ mail_failed: "waitlist approval", error: String(e) }));
-          done = `${email} approved, but the email to them failed; tell them yourself.`;
+          done = "mail_failed";
         }
       } else {
-        done = `${email} approved. This deployment cannot send email; tell them yourself.`;
+        done = "no_mail";
       }
     }
-    return reviewPage(await d.accounts.waitlist(), done);
+    const q = new URLSearchParams({ done, email });
+    return c.redirect(`/waitlist?${q}`, 303);
   });
 }

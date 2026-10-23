@@ -15,7 +15,15 @@ import { normalizeDir } from "../okf/paths";
 import { signedIn } from "../signin";
 import { OkfError } from "../store/errors";
 import type { AccountGrant } from "../tenancy";
-import { type ConsentForm, consentKey, consentPage, messagePage } from "./pages";
+import {
+  type ConsentField,
+  type ConsentForm,
+  consentKey,
+  consentPage,
+  messagePage,
+  offersCreate,
+  PAGE_HEADERS,
+} from "./pages";
 
 /** OAuth scopes (spec: Apps under Auth). A grant never carries more than the person approved. */
 export const SCOPES = ["okf:read", "okf:write"];
@@ -78,43 +86,70 @@ function readForm(form: FormData): ConsentForm {
   };
 }
 
-/** Checks the form; returns an error message for the person, or null. */
-function validate(form: ConsentForm, libs: ReachableLibrary[]): string | null {
-  if (!AGENT_ACTOR.test(form.actor)) {
-    return "The ledger name must look like app/label, e.g. claude-ai/connector: lowercase letters, digits, dots, hyphens or underscores on each side of one slash.";
-  }
+type Problem = { message: string; field: ConsentField };
+
+/** Checks the form; returns the problem for the person, and the field it is about, or null. */
+function validate(form: ConsentForm, libs: ReachableLibrary[]): Problem | null {
   if (form.newLibrary !== "") {
     try {
       checkSlug(form.newLibrary);
     } catch (e) {
-      return (e as OkfError).message;
+      return { message: (e as OkfError).message, field: "new_library" };
     }
     if (libs.some((l) => l.role === "owner" && l.slug === form.newLibrary.toLowerCase())) {
-      return `You already have a library named ${form.newLibrary}; pick it from the list.`;
+      return {
+        message: `You already have a library named ${form.newLibrary}; pick it from the list.`,
+        field: "new_library",
+      };
     }
   }
   if (form.libraries === "selected") {
     if (form.selected.some((key) => !libs.some((l) => consentKey(l) === key))) {
-      return "Pick libraries from the list.";
+      return { message: "Pick libraries from the list.", field: "libraries" };
     }
     if (form.selected.length === 0 && form.newLibrary === "") {
-      return "Pick at least one library, or name a new one.";
+      return { message: "Pick at least one library, or name a new one.", field: "libraries" };
     }
   }
-  if (form.prefix.includes("..")) return "The directory cannot contain '..'.";
+  // Create libraries is refused, not dropped, when it cannot apply (V-9): the page has no
+  // script to untick it, so the person is told and chooses (tenancy.ts cannotCreate checks the
+  // same on every call).
+  if (form.create && (form.access !== "write" || form.tiers !== "all")) {
+    return {
+      message:
+        "Create libraries needs Read and write and All tools. Choose those, or untick Create libraries.",
+      field: "create",
+    };
+  }
+  if (form.prefix.includes("..")) {
+    return { message: "The folder cannot contain '..'.", field: "prefix" };
+  }
+  if (!AGENT_ACTOR.test(form.actor)) {
+    return {
+      message:
+        "The connection name is two parts joined by a slash, like claude/laptop: lowercase letters, digits, dots, hyphens or underscores.",
+      field: "actor",
+    };
+  }
   return null;
 }
 
 function html(body: string, headers?: Headers, status = 200): Response {
   const h = new Headers(headers);
-  h.set("Content-Type", "text/html; charset=utf-8");
-  h.set("X-Frame-Options", "DENY");
+  for (const [k, v] of Object.entries(PAGE_HEADERS)) h.set(k, v);
+  // Approving redirects to the app's own address, which the form's action must be allowed.
   h.set(
     "Content-Security-Policy",
-    "default-src 'none'; style-src 'self'; img-src 'self'; form-action 'self' https: http://localhost:* http://127.0.0.1:*; frame-ancestors 'none'",
+    "default-src 'none'; style-src 'self'; img-src 'self'; form-action 'self' https: http://localhost:* http://127.0.0.1:*; frame-ancestors 'none'; base-uri 'none'",
   );
   return new Response(body, { status, headers: h });
 }
+
+/** The consent page's own path and query, where signing out and in again comes back to. */
+const selfUrl = (url: string) => {
+  const u = new URL(url);
+  return u.pathname + u.search;
+};
 
 function authError(e: unknown): Response {
   if (e instanceof AuthorizationError && e.redirectTo) return Response.redirect(e.redirectTo, 302);
@@ -151,6 +186,7 @@ export function registerAppRoutes<E extends AppEnv>(
           details,
           handle: consent.handle,
           signedInAs: user.email,
+          self: selfUrl(c.req.url),
           libraries: libs,
           form: defaultForm(request, details, libs),
         }),
@@ -175,12 +211,14 @@ export function registerAppRoutes<E extends AppEnv>(
         return new Response(null, { status: 302, headers: denied.headers });
       }
       const form = readForm(body);
+      // The form posts to its own URL, so the original authorization request is in the query.
+      const oauthReq = await oauth.parseAuthRequest(new Request(c.req.url)).catch(() => null);
+      // Not offered to an app that asked to read only, so not something to refuse either.
+      if (oauthReq && !offersCreate(oauthReq)) form.create = false;
       const libs = await accounts.reachable(user.id);
       const problem = validate(form, libs);
       if (problem) {
-        // The handle is still unused, so the same page can be shown again with the error. The
-        // form posts to its own URL, so the original authorization request is in the query.
-        const oauthReq = await oauth.parseAuthRequest(new Request(c.req.url)).catch(() => null);
+        // The handle is still unused, so the same page can be shown again with the error.
         const details: ConsentDescription = oauthReq
           ? await oauth.describeConsent(oauthReq)
           : {
@@ -196,6 +234,7 @@ export function registerAppRoutes<E extends AppEnv>(
             details,
             handle,
             signedInAs: user.email,
+            self: selfUrl(c.req.url),
             libraries: libs,
             form,
             error: problem,
@@ -215,8 +254,8 @@ export function registerAppRoutes<E extends AppEnv>(
               ...(created ? [created.id] : []),
             ];
       const prefix = normalizeDir(form.prefix) || null;
-      // Only a read-and-write connection with all tools keeps "Create libraries" (tenancy.ts
-      // cannotCreate checks the same on every call).
+      // validate() refused "Create libraries" without read and write and all tools; this stays
+      // as the rule's last word (tenancy.ts cannotCreate checks the same on every call).
       const create = form.create && form.access === "write" && form.tiers === "all";
       const grantId = crypto.randomUUID();
       // Who is connecting, as far as can be told (agents.ts): its sign-in domain is the

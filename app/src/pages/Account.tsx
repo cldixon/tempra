@@ -636,7 +636,7 @@ export function Account({ done }: { done: string | null }) {
         method: "POST",
         body: JSON.stringify({ email }),
       });
-      setNotice(`Check ${res.sent_to} for a link.`);
+      setNotice(`Check ${res.sent_to} for a link, and open it while signed in as you are now.`);
       setDevLink(res.dev_link ?? null);
     });
   };

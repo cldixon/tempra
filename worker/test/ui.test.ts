@@ -365,11 +365,63 @@ describe("the shared design stylesheet", () => {
       [s.anon, "/sign-in"],
       [s.app, consent],
       [s.app, "/account/email/confirm?t=x"],
+      [s.app, "/no-such-page"],
     ] as const) {
-      const r = await client.request(path);
-      expect(r.status).toBe(200);
+      const r = await client.request(path, { headers: { Accept: "text/html" } });
+      expect(r.status).toBeLessThan(500);
       expect(await r.text()).toContain(`<link rel="stylesheet" href="${design.href}">`);
       expect(r.headers.get("Content-Security-Policy")).toContain("style-src 'self'");
+    }
+  });
+});
+
+describe("errors as pages (V-1)", () => {
+  const browser = { headers: { Accept: "text/html,application/xhtml+xml,*/*;q=0.8" } };
+
+  test("an unknown address is a 404 page for a browser, JSON for the API and MCP", async () => {
+    const s = setup();
+    for (const [client, path] of [
+      [s.app, "/typo"],
+      [s.anon, "/ann"],
+      [s.app, "/nobody/nothing/page"],
+    ] as const) {
+      const r = await client.request(path, browser);
+      expect(r.status).toBe(404);
+      expect(r.headers.get("Content-Type")).toContain("text/html");
+      expect(r.headers.get("Cache-Control")).toBe("no-store");
+      expect(r.headers.get("X-Robots-Tag")).toBe("noindex");
+      const html = await r.text();
+      expect(html).toContain("<h1>Not found</h1>");
+      expect(html).toContain('<a href="/">Go to your libraries</a>');
+    }
+    for (const path of ["/api/v1/nope", `${API}/nope`, "/api/nope"]) {
+      const r = await s.app.request(path, browser);
+      expect(r.status).toBe(404);
+      expect(r.headers.get("Content-Type")).toContain("application/json");
+    }
+    // Without HTML in Accept (scripts, fetch), JSON as before.
+    const plain = await s.app.request("/typo");
+    expect(plain.status).toBe(404);
+    expect(((await plain.json()) as { code: string }).code).toBe("no_route");
+  });
+
+  test("an uncaught error is a 500 page for a browser, JSON for the API", async () => {
+    const s = setup();
+    s.accounts.reachable = () => Promise.reject(new Error("boom"));
+    const errors = console.error;
+    console.error = () => {};
+    try {
+      const r = await s.app.request("/", browser);
+      expect(r.status).toBe(500);
+      expect(r.headers.get("Content-Type")).toContain("text/html");
+      const html = await r.text();
+      expect(html).toContain("<h1>Something went wrong</h1>");
+      expect(html).not.toContain("boom");
+      const api = await s.app.request("/api/v1/libraries", browser);
+      expect(api.status).toBe(500);
+      expect((await api.json()) as object).toEqual({ error: "Internal error.", code: "internal" });
+    } finally {
+      console.error = errors;
     }
   });
 });
