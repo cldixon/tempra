@@ -924,14 +924,14 @@ async function browserRenders(
       // The change dot (take 4, TEMPRA-129): pulsing while the agent writes, named for its
       // person, not by the raw actor (TEMPRA-77): "… for @dev is editing this now".
       await sidebar
-        .locator(".tree-row", { has: page.locator(`a[title="gate-live.md"]`) })
+        .locator(".tree-row", { has: page.locator(`a[data-path="gate-live.md"]`) })
         .locator('.tree-mark[title*=" for @"][title$="is editing this now"] .change-dot.live')
         .waitFor({ timeout: 5000 });
       // After it (a fresh look, the write no longer live): solid, changed since the person
       // looked; take 3's grey is gone.
       await page.reload();
       await sidebar
-        .locator(".tree-row", { has: page.locator(`a[title="gate-live.md"]`) })
+        .locator(".tree-row", { has: page.locator(`a[data-path="gate-live.md"]`) })
         .locator('.tree-mark[title="Changed since you last looked"] .change-dot:not(.live)')
         .waitFor({ timeout: 15_000 });
       if ((await sidebar.locator(".change-dot.cool, .change-dot.warm").count()) > 0) {
