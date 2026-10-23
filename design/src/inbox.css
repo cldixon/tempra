@@ -11,16 +11,6 @@
   color: var(--tempra-color-muted);
 }
 
-/* The library the list is filtered to, as a chosen pill: ink edge, a grey fill, × to clear. */
-.inbox-filters .inbox-filter {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--tempra-space-2);
-  border-color: var(--tempra-color-text);
-  background: var(--tempra-color-selected);
-  color: var(--tempra-color-text);
-}
-
 .inbox-list {
   margin: 0;
   padding: 0;

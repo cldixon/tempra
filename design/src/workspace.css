@@ -162,18 +162,15 @@ body.ground {
   color: var(--tempra-color-text);
 }
 
-/* An agent's change: a small dot, warm while fresh, grey once it cools (the one colour). */
+/* The change dot (the one colour): solid for changed since the person looked, pulsing (.live)
+   for an agent writing now. */
 .change-dot {
   display: inline-block;
   width: var(--tempra-dot);
   height: var(--tempra-dot);
   border-radius: 50%;
-  background: var(--tempra-color-agent-cool);
-  vertical-align: middle;
-}
-
-.change-dot.warm {
   background: var(--tempra-color-agent);
+  vertical-align: middle;
 }
 
 /* Someone's initials in a small round mark: a person on a light fill, an agent on ink. */

@@ -27,9 +27,8 @@
   --tempra-color-border: light-dark(#e8e8e4, #2a2a2d);
   --tempra-color-border-strong: light-dark(#d2d2ce, #3c3c40);
 
-  /* Color: an agent's recent change (the only colour before the palette), cooling to grey */
+  /* Color: the change dot (the only colour before the palette) */
   --tempra-color-agent: light-dark(#e8722a, #f0884a);
-  --tempra-color-agent-cool: var(--tempra-color-faint);
 
   /* Color: a dimmed page behind a sheet or a full-screen view */
   --tempra-color-scrim: light-dark(rgb(20 20 22 / 0.2), rgb(0 0 0 / 0.5));

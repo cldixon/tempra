@@ -27,12 +27,10 @@ import {
   Transfer,
   Work,
 } from "./pages/Manage";
-import { interceptLinks, match, navigate, useLocation } from "./router";
+import { interceptLinks, match, navigate, pageKey, useLocation } from "./router";
 import { PageBoundary, useMe } from "./ui";
 import { Urls } from "./urls";
 import { AccountFrame, type AccountPage, PageColumn, type Place, Workspace } from "./Workspace";
-
-let handle: string | null = null;
 
 /** The pages that lay out their column themselves (a concept's columns, the person's views). */
 const OWN_COLUMN = new Set(["file", "directory", "activity"]);
@@ -61,7 +59,6 @@ function urlsFor(owner: string, slug: string, at: number | undefined): Urls {
 function App() {
   const url = useLocation();
   const who = useMe();
-  handle = who?.handle ?? null;
   const route = match(url);
   const actor = who?.actor ?? "";
   let page: React.ReactNode = null;
@@ -133,8 +130,11 @@ function App() {
         page = <Activity urls={urls} actor={actor} filters={route.filters} done={route.done} />;
         break;
       case "file":
+        // Keyed by the file: nothing of one page (a panel, the Markdown view, the active thread)
+        // carries to the next.
         page = (
           <File
+            key={route.path}
             urls={urls}
             path={route.path}
             done={url.searchParams.get("done")}
@@ -175,19 +175,7 @@ function App() {
         break;
     }
   }
-  // A page starts afresh on a new URL, with two exceptions. A concept's page stays mounted while
-  // only how it is shown changes (`?since=`, `?review=`, `?panel=`, `?done=`), so its open panel
-  // stays open (tempra-dev: app/reader, The panels); a pinned version (`?at=`) is another page.
-  // Activity keeps its page across its own view and filter changes (a text filter keeps focus
-  // while the URL follows it).
-  const at = url.searchParams.get("at");
-  const pageKey =
-    route?.page === "file"
-      ? `${url.pathname}${at === null ? "" : `?at=${at}`}`
-      : route?.page === "activity"
-        ? url.pathname
-        : url.pathname + url.search;
-  const boundary = <PageBoundary key={pageKey}>{page}</PageBoundary>;
+  const boundary = <PageBoundary key={pageKey(url, route)}>{page}</PageBoundary>;
   // A library's pages share one workspace, kept mounted while the person moves within it.
   if (library) {
     const { urls, place } = library;
@@ -207,7 +195,7 @@ function App() {
   );
 }
 
-interceptLinks(() => handle);
+interceptLinks();
 createRoot(document.getElementById("root") as HTMLElement).render(
   <StrictMode>
     <App />

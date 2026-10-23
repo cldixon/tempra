@@ -27,9 +27,8 @@
   --tempra-color-border: light-dark(#e8e8e4, #2a2a2d);
   --tempra-color-border-strong: light-dark(#d2d2ce, #3c3c40);
 
-  /* Color: an agent's recent change (the only colour before the palette), cooling to grey */
+  /* Color: the change dot (the only colour before the palette) */
   --tempra-color-agent: light-dark(#e8722a, #f0884a);
-  --tempra-color-agent-cool: var(--tempra-color-faint);
 
   /* Color: a dimmed page behind a sheet or a full-screen view */
   --tempra-color-scrim: light-dark(rgb(20 20 22 / 0.2), rgb(0 0 0 / 0.5));
@@ -1521,18 +1520,15 @@ body.ground {
   color: var(--tempra-color-text);
 }
 
-/* An agent's change: a small dot, warm while fresh, grey once it cools (the one colour). */
+/* The change dot (the one colour): solid for changed since the person looked, pulsing (.live)
+   for an agent writing now. */
 .change-dot {
   display: inline-block;
   width: var(--tempra-dot);
   height: var(--tempra-dot);
   border-radius: 50%;
-  background: var(--tempra-color-agent-cool);
-  vertical-align: middle;
-}
-
-.change-dot.warm {
   background: var(--tempra-color-agent);
+  vertical-align: middle;
 }
 
 /* Someone's initials in a small round mark: a person on a light fill, an agent on ink. */
@@ -2928,8 +2924,9 @@ ul.events {
  * bar): the text (title, description, byline, body, sources) centred in its column, and on the
  * right its contents, or one panel in their place (Comments, History, Properties). The page's
  * width decides what fits (container queries on `page`, the page's scroller): under 1100px the
- * contents hide and a panel overlays the page; on a phone (900px and under, the window's call)
- * a panel is a sheet from the bottom.
+ * contents hide (On this page under the byline), and a panel takes their column down to 960px
+ * and overlays the page below that; on a phone (900px and under, the window's call) a panel is
+ * a sheet from the bottom.
  */
 
 .concept-grid {
@@ -3478,6 +3475,30 @@ ul.events {
   }
 }
 
+/* Room for the text and a panel, not the contents as well (a laptop of about 1280px with the
+   sidebar shown): an open panel takes a column again and the text moves over for it, so nothing
+   (On this page included) runs under it. Narrower than this, it overlays. */
+@container page (960px <= width < 1100px) {
+  .concept.panel-open .concept-grid {
+    grid-template-columns: [text] minmax(0, 1fr) [side] var(--tempra-panel);
+  }
+
+  .concept.panel-open .concept-side {
+    display: block;
+  }
+
+  .concept.panel-open .concept-panel {
+    position: sticky;
+    top: 0;
+    right: auto;
+    bottom: auto;
+    z-index: auto;
+    width: auto;
+    height: calc(100dvh - var(--tempra-topbar));
+    box-shadow: none;
+  }
+}
+
 /* The crumbs under the phone's top bar (board 33): the concept's folders and what is exceptional,
    over the title. Elsewhere the top bar holds them. */
 .doc-crumbs {
@@ -3832,6 +3853,11 @@ section.thread.open {
   margin: 0;
   color: var(--tempra-color-faint);
   font-size: var(--tempra-text-meta);
+}
+
+/* Every event, filtered over what is loaded: says how much, over the table. */
+.events-scope {
+  margin-bottom: var(--tempra-space-2);
 }
 
 /* A library's description under its name on the home (TEMPRA-102, take 4). */
@@ -4640,16 +4666,6 @@ a.activity-download {
 .inbox-filters .inbox-mark {
   margin-left: auto;
   color: var(--tempra-color-muted);
-}
-
-/* The library the list is filtered to, as a chosen pill: ink edge, a grey fill, × to clear. */
-.inbox-filters .inbox-filter {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--tempra-space-2);
-  border-color: var(--tempra-color-text);
-  background: var(--tempra-color-selected);
-  color: var(--tempra-color-text);
 }
 
 .inbox-list {

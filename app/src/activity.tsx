@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import type { ActedBy, ActorView } from "./agents";
 import { api, useLoad } from "./api";
 import { Avatar } from "./chrome";
-import { ago, plural, who } from "./ui";
+import { ago, plural } from "./ui";
 import { baseName, folderName, type Urls } from "./urls";
 
 /*
@@ -602,7 +602,7 @@ export function EntryRow(props: {
   const { entry: e, urls, actor, now, isNew } = props;
   return (
     <article className={isNew ? "entry new" : "entry"}>
-      <Avatar name={actor.agent ? actor.name : who(e.actor)} agent={actor.agent} />
+      <Avatar name={actor.mark} agent={actor.agent} />
       <div className="entry-body">
         <p className="entry-line">
           <b className="entry-who">{actor.name}</b>
@@ -618,7 +618,7 @@ export function EntryRow(props: {
       <span className="entry-side">
         <time dateTime={e.ts}>{entryTime(e.ts, now)}</time>
         {isNew && (
-          <span className="change-dot warm">
+          <span className="change-dot">
             <span className="visually-hidden">New since you looked</span>
           </span>
         )}
@@ -640,7 +640,7 @@ export function LiveEntry(props: {
   const { write: w, urls, actor } = props;
   return (
     <article className="entry live" aria-live="polite">
-      <Avatar name={actor.name} agent={actor.agent} />
+      <Avatar name={actor.mark} agent={actor.agent} />
       <div className="entry-body">
         <p className="entry-line">
           <b className="entry-who">{actor.name}</b>

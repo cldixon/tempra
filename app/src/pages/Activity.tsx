@@ -192,7 +192,7 @@ export function Activity(props: {
       <Status loaded={loaded}>
         {(page) => (
           <Older key={key} urls={urls} prefix={prefix} actor={exact} first={page}>
-            {(requests) =>
+            {(requests, more) =>
               view === "summary" ? (
                 <Summary
                   urls={urls}
@@ -213,6 +213,7 @@ export function Activity(props: {
                   empty={page.requests.length === 0}
                   seen={seen}
                   filter={{ who: filters.who, kind: filters.kind, q: filters.q }}
+                  more={more}
                   live={liveSeqs}
                   now={now}
                 />
@@ -326,7 +327,8 @@ function Older(props: {
   prefix: string;
   actor: string;
   first: Page;
-  children: (requests: LedgerRequest[]) => ReactNode;
+  /** The requests loaded so far, and whether there are older ones to page to. */
+  children: (requests: LedgerRequest[], more: boolean) => ReactNode;
 }) {
   const { urls, first } = props;
   const [older, setOlder] = useState<Page>({ requests: [], next: null });
@@ -349,7 +351,7 @@ function Older(props: {
   };
   return (
     <>
-      {props.children([...first.requests, ...older.requests])}
+      {props.children([...first.requests, ...older.requests], next !== null)}
       {next !== null && (
         <p className="view-more">
           <button type="button" onClick={loadOlder} disabled={paging}>
@@ -435,6 +437,8 @@ function EveryEvent(props: {
   empty: boolean;
   seen: number | null;
   filter: { who?: Who; kind?: string; q?: string };
+  /** Older requests are still to load ("Older"). */
+  more: boolean;
   live: Map<number, number>;
   now: number;
 }) {
@@ -442,50 +446,64 @@ function EveryEvent(props: {
   const actors = useActors(urls, props.me || null);
   const role = useRole(urls);
   const rows = eventRows(props.requests, props.filter);
+  // Who (Agents, People), the kind and the text filter what is loaded, not the whole ledger: say
+  // so while older requests remain, and "Older" pages on.
+  const f = props.filter;
+  const partial =
+    props.more &&
+    (Boolean(f.kind) || Boolean(f.q) || (f.who !== undefined && f.who !== "everyone"));
+  const scope = `in the latest ${plural(props.requests.length, "request")}`;
   if (rows.length === 0) {
     return (
       <p className="view-empty">
-        {props.empty ? "Nothing has happened here yet." : "No events match."}
+        {props.empty
+          ? "Nothing has happened here yet."
+          : partial
+            ? `No events match ${scope}.`
+            : "No events match."}
       </p>
     );
   }
   return (
-    <div className="table-wrap">
-      <table className="events-table">
-        <thead>
-          <tr>
-            <th scope="col">Seq</th>
-            <th scope="col">When</th>
-            <th scope="col">Who</th>
-            <th scope="col">Kind</th>
-            <th scope="col">Path and note</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row) => (
-            <EventLine
-              key={row.event.seq}
-              row={row}
-              urls={urls}
-              actor={actors.view(row.request.actor, row.request.by)}
-              dot={
-                (live.get(row.event.seq) ?? 0) > now - LIVE_MS
-                  ? "live"
-                  : seen !== null && row.event.seq > seen
-                    ? "new"
-                    : null
-              }
-              revert={
-                row.lead &&
-                (role === "owner" || role === "write") &&
-                row.request.events.some((e) => e.op !== "verify" && e.op !== "comment")
-              }
-              now={now}
-            />
-          ))}
-        </tbody>
-      </table>
-    </div>
+    <>
+      {partial && <p className="view-meta events-scope">Matching events {scope}</p>}
+      <div className="table-wrap">
+        <table className="events-table">
+          <thead>
+            <tr>
+              <th scope="col">Seq</th>
+              <th scope="col">When</th>
+              <th scope="col">Who</th>
+              <th scope="col">Kind</th>
+              <th scope="col">Path and note</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <EventLine
+                key={row.event.seq}
+                row={row}
+                urls={urls}
+                actor={actors.view(row.request.actor, row.request.by)}
+                dot={
+                  (live.get(row.event.seq) ?? 0) > now - LIVE_MS
+                    ? "live"
+                    : seen !== null && row.event.seq > seen
+                      ? "new"
+                      : null
+                }
+                revert={
+                  row.lead &&
+                  (role === "owner" || role === "write") &&
+                  row.request.events.some((e) => e.op !== "verify" && e.op !== "comment")
+                }
+                now={now}
+              />
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
 
@@ -508,7 +526,7 @@ function EventLine(props: {
     <tr className={row.lead ? "lead" : undefined}>
       <td className="events-seq">
         {dot && (
-          <span className={dot === "live" ? "change-dot live" : "change-dot warm"}>
+          <span className={dot === "live" ? "change-dot live" : "change-dot"}>
             <span className="visually-hidden">
               {dot === "live" ? "Being written now" : "New since you looked"}
             </span>
@@ -522,7 +540,7 @@ function EventLine(props: {
       <td className="events-who">
         {row.lead && (
           <span className="events-person">
-            <Avatar name={actor.name} agent={actor.agent} />
+            <Avatar name={actor.mark} agent={actor.agent} />
             <span>
               {actor.name}
               {actor.for && <span className="entry-for"> for {actor.for}</span>}

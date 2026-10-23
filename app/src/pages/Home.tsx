@@ -1,27 +1,28 @@
+import { useMemo } from "react";
 import { agoWords, byPerson, type LedgerRequest, useNow, whoWorksHere } from "../activity";
 import { type ActorView, useActors } from "../agents";
 import { api, useLoad } from "../api";
 import { Icon } from "../chrome";
+import { type Card, forYouCards, type InboxPage, type PageTitles, useLibraryInbox } from "../inbox";
 import { useFeed, useLastSeen, useTrailing } from "../live";
 import { type Needs, useNeeds } from "../needs";
 import { useLibraries } from "../role";
 import { fileLabel, type OutlineFile, topLevel } from "../Tree";
-import { calendarDay, clip, plural, Status, useCopy, useMe, useTitle } from "../ui";
+import { clip, plural, Status, useCopy, useMe, useTitle } from "../ui";
 import { dirOf, folderName, type Urls } from "../urls";
 import { PageColumn, useFrame } from "../Workspace";
-
-/** How many cards "For you here" shows. */
-const CARDS = 3;
 
 /** The requests read for the empty library's line (the newest agent write among them). */
 const READ = 20;
 
 /**
  * The library's home (take 4, TEMPRA-117; tempra-dev: app/home): its title and description, one
- * quiet line (who works here, the page count, the guide), up to three things for the person from
- * `GET …/needs` with the way to the Inbox, every top-level section with its count and the solid
- * dot, and at the foot the agents' housekeeping. An empty library shows how to connect an agent
- * instead of the sections. Quiet on purpose; it does not move the seen cursor (Activity does).
+ * quiet line (who works here, the page count, the guide), up to three of the person's open Inbox
+ * items here (`GET /api/v1/inbox?library=`, so what is done in the Inbox leaves the home too)
+ * with the way to the Inbox, every top-level section with its count and the solid dot, and at
+ * the foot the agents' housekeeping (`GET …/needs`). An empty library shows how to connect an
+ * agent instead of the sections. Quiet on purpose; it does not move the seen cursor (Activity
+ * does).
  */
 export function Home({ urls }: { urls: Urls }) {
   const libs = useLibraries();
@@ -52,6 +53,15 @@ export function Home({ urls }: { urls: Urls }) {
   const reload = useTrailing(loaded.reload, 1500);
   useFeed(urls, loaded.state === "ready" ? loaded.data.head : null, reload, reload);
   const needs = useNeeds(urls);
+  const inbox = useLibraryInbox(`${urls.owner}/${urls.slug}`);
+  // A reply's item names its page by path; the tree's outline has its title.
+  const titles = useMemo(() => {
+    const out: PageTitles = {};
+    for (const f of frame.index ?? []) {
+      if (f.title) out[`${urls.owner}/${urls.slug} ${f.path}`] = f.title;
+    }
+    return out;
+  }, [frame.index, urls]);
   return (
     <PageColumn>
       <Status loaded={loaded}>
@@ -92,8 +102,8 @@ export function Home({ urls }: { urls: Urls }) {
                 />
               ) : (
                 <>
-                  {needs.state === "ready" && (
-                    <ForYou urls={urls} needs={needs.data} view={(a, by) => actors.view(a, by)} />
+                  {inbox.state === "ready" && (
+                    <ForYou urls={urls} inbox={inbox.data} titles={titles} />
                   )}
                   {files !== null && <HomeSections urls={urls} files={files} seen={seen} />}
                   {needs.state === "ready" && <HomeFoot urls={urls} needs={needs.data} />}
@@ -111,68 +121,12 @@ export function Home({ urls }: { urls: Urls }) {
 export const inboxHref = (urls: Urls) =>
   `/inbox?library=${encodeURIComponent(urls.owner)}/${encodeURIComponent(urls.slug)}`;
 
-/** One thing for the person, as a card: its kind, a title and a detail line. */
-interface Card {
-  key: string;
-  kind: string;
-  title: string;
-  detail: string | null;
-  href: string;
-}
-
 /**
- * The cards from `GET …/needs`: one of each kind first (a reply, the pages to verify, a page
- * going stale), then more of them in that order, up to three.
+ * For you here: up to three cards from the person's open Inbox items in this library, and "All n
+ * in Inbox" (the same count the filtered Inbox shows); nothing when there is nothing.
  */
-export function forYouCards(
-  urls: Urls,
-  needs: Needs,
-  view: (actor: string, by: Needs["replies"][number]["last"]["by"]) => ActorView,
-): Card[] {
-  const replies: Card[] = needs.replies.map((r) => ({
-    key: `reply ${r.thread}`,
-    kind: "Reply",
-    title: `${view(r.last.actor, r.last.by).name} on ${r.title ?? r.path}`,
-    detail: r.last.body ? clip(r.last.body, 80) : null,
-    href: urls.thread(r.path, r.thread),
-  }));
-  const verify: Card[] = [];
-  const v = needs.verify;
-  const first = v.items[0];
-  if (v.total > 0 && first) {
-    const titles = v.items.slice(0, 2).map((i) => i.title ?? i.path);
-    const rest = v.total - titles.length;
-    verify.push({
-      key: "verify",
-      kind: "To verify",
-      title: v.total === 1 ? (first.title ?? first.path) : `${v.total} changed pages`,
-      detail:
-        v.total === 1
-          ? plural(first.changes, "change")
-          : titles.join(" and ") + (rest > 0 ? ` and ${rest} more` : ""),
-      href: v.total === 1 ? urls.review(first.path) : inboxHref(urls),
-    });
-  }
-  const stale: Card[] = needs.stale.map((s) => ({
-    key: `stale ${s.path}`,
-    kind: s.stale === "stale" ? "Stale" : "Going stale",
-    title: s.title ?? s.path,
-    detail: calendarDay(s.stale_after),
-    href: urls.file(s.path),
-  }));
-  const kinds = [replies, verify, stale];
-  const firsts = kinds.flatMap((k) => k.slice(0, 1));
-  const rest = kinds.flatMap((k) => k.slice(1));
-  return [...firsts, ...rest].slice(0, CARDS);
-}
-
-/** For you here: up to three cards and "All n in Inbox"; nothing when there is nothing. */
-export function ForYou(props: {
-  urls: Urls;
-  needs: Needs;
-  view: (actor: string, by: Needs["replies"][number]["last"]["by"]) => ActorView;
-}) {
-  const cards = forYouCards(props.urls, props.needs, props.view);
+export function ForYou(props: { urls: Urls; inbox: InboxPage; titles?: PageTitles }) {
+  const cards: Card[] = forYouCards(props.inbox.items, props.titles);
   if (cards.length === 0) return null;
   return (
     <section className="home-section" aria-labelledby="home-for-you">
@@ -181,7 +135,7 @@ export function ForYou(props: {
           For you here
         </h2>
         <a className="view-aside" href={inboxHref(props.urls)}>
-          All {Math.max(props.needs.count, cards.length)} in Inbox
+          All {Math.max(props.inbox.open, cards.length)} in Inbox
         </a>
       </div>
       <ul className="home-cards">
@@ -241,7 +195,7 @@ export function HomeSections(props: { urls: Urls; files: OutlineFile[]; seen: nu
                 {!pages && <span className="home-section-count">{count}</span>}
                 {changed.has(entry.path) ? (
                   <span className="home-section-dot" title="Changed since you last looked">
-                    <span className="change-dot warm" aria-hidden="true" />
+                    <span className="change-dot" aria-hidden="true" />
                     <span className="visually-hidden">changed since you last looked</span>
                   </span>
                 ) : (
@@ -316,7 +270,7 @@ export function EmptyLibrary(props: {
         <p className="empty-wait" aria-live="polite">
           {latest ? (
             <>
-              <span className="change-dot warm" aria-hidden="true" />
+              <span className="change-dot" aria-hidden="true" />
               <span>
                 Last write by {props.who?.name ?? latest.actor}, {agoWords(latest.ts, props.now)}
                 {latest.note ? `: ${clip(latest.note, 80)}` : ""}

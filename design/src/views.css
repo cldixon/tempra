@@ -39,6 +39,11 @@
   font-size: var(--tempra-text-meta);
 }
 
+/* Every event, filtered over what is loaded: says how much, over the table. */
+.events-scope {
+  margin-bottom: var(--tempra-space-2);
+}
+
 /* A library's description under its name on the home (TEMPRA-102, take 4). */
 .view-lede {
   margin: var(--tempra-space-1) 0 0;

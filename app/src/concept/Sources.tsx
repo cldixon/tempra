@@ -84,8 +84,8 @@ export function SourcesSection(props: {
     return null;
   }
   return (
-    <section id="sources" className="doc-sources" aria-labelledby="sources-title">
-      <h2 id="sources-title">Sources</h2>
+    <section id="doc-sources" className="doc-sources" aria-labelledby="doc-sources-title">
+      <h2 id="doc-sources-title">Sources</h2>
       {items.length > 0 && <ol className="sources">{items}</ol>}
       {others.length > 0 && (
         <>

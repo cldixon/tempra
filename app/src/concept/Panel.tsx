@@ -17,13 +17,47 @@ export const PANEL_TITLES: Record<PanelName, string> = {
   properties: "Properties",
 };
 
-/** The panel a link asks for: `?panel=…`, or a thread or the comments by #fragment. */
-export function panelInUrl(): PanelName | null {
-  const p = new URLSearchParams(location.search).get("panel");
+/** The id a #fragment names, decoded; null without one. */
+function hashId(hash: string): string | null {
+  if (hash.length < 2) return null;
+  try {
+    return decodeURIComponent(hash.slice(1));
+  } catch {
+    return hash.slice(1);
+  }
+}
+
+/**
+ * The panel a link asks for: `?panel=…`, or a thread or the comments by #fragment. A fragment
+ * that names a heading in the body (`bodyIds`; a heading "Comments" is `#comments`) is the
+ * heading's, not a panel's: the app's own ids are prefixed (`panel-…`, `doc-sources`) so they
+ * never clash with a heading's slug.
+ */
+export function panelInUrl(
+  bodyIds: ReadonlySet<string> = new Set(),
+  where: { search: string; hash: string } = location,
+): PanelName | null {
+  const p = new URLSearchParams(where.search).get("panel");
   if (p === "comments" || p === "history" || p === "properties") return p;
-  if (location.hash === "#comments" || location.hash.startsWith("#thread-")) return "comments";
+  const id = hashId(where.hash);
+  if (id === null || bodyIds.has(id)) return null;
+  if (id === "comments" || threadInHash(bodyIds, where.hash)) return "comments";
   return null;
 }
+
+/** The thread a link names (`#thread-<id>`), unless that is a heading's id in the body. */
+export function threadInHash(
+  bodyIds: ReadonlySet<string> = new Set(),
+  hash: string = location.hash,
+): string | null {
+  const id = hashId(hash);
+  if (id === null || bodyIds.has(id)) return null;
+  const m = /^thread-(.+)$/.exec(id);
+  return m?.[1] ?? null;
+}
+
+/** A thread's element in the Comments panel (prefixed, so a heading's slug never clashes). */
+export const threadElementId = (id: string) => `panel-thread-${id}`;
 
 /**
  * A panel's frame: its title, a count where it has one, and ×. On a narrow page it overlays the
@@ -41,7 +75,11 @@ export function Panel(props: {
   const drag = useRef<{ id: number; y: number } | null>(null);
   const { onClose } = props;
   return (
-    <aside className={`concept-panel panel-${props.name}`} aria-label={title} id={props.name}>
+    <aside
+      className={`concept-panel panel-${props.name}`}
+      aria-label={title}
+      id={`panel-${props.name}`}
+    >
       <header
         className="panel-head"
         onPointerDown={(e) => {
