@@ -1624,6 +1624,137 @@ body.ground {
   font-size: var(--tempra-text-ui);
 }
 
+/* A compose dialog (New library; after Linear's new issue): anchored high over the page, not
+   centred. Its head names where the new thing goes and what it is ("@ann › New library"); its
+   body is the form's own fields without boxes (a large name, then a description); then a row of
+   small fields as pills, and the action at the foot. */
+.dialog.compose {
+  width: min(40rem, calc(100vw - 32px));
+  margin: 12dvh auto auto;
+}
+
+.compose-form {
+  display: flex;
+  flex-direction: column;
+}
+
+.compose-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 12px 0 16px;
+  color: var(--tempra-color-faint);
+}
+
+.compose-head h2 {
+  flex: 1;
+  margin: 0;
+  color: var(--tempra-color-text);
+  font-size: var(--tempra-text-ui);
+  font-weight: var(--tempra-weight-regular);
+}
+
+.compose-context {
+  padding: 3px 10px;
+  border: 1px solid var(--tempra-color-border);
+  border-radius: var(--tempra-radius-pill);
+  color: var(--tempra-color-text);
+  font-size: var(--tempra-text-ui);
+  font-weight: var(--tempra-weight-medium);
+}
+
+.compose-body {
+  display: flex;
+  flex-direction: column;
+  gap: var(--tempra-space-2);
+  padding: 20px 18px 8px;
+}
+
+.compose-body .compose-title,
+.compose-body .compose-text {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.compose-body .compose-title {
+  font-size: var(--tempra-text-h2);
+  font-weight: var(--tempra-weight-medium);
+  line-height: var(--tempra-leading-tight);
+}
+
+.compose-body .compose-text {
+  min-height: 4lh;
+  field-sizing: content;
+  max-height: 40dvh;
+  resize: none;
+  font-size: var(--tempra-font-size);
+}
+
+.compose-body ::placeholder {
+  color: var(--tempra-color-muted);
+}
+
+/* The focus ring stays (TEMPRA-132), rounded and clear of the text, since the fields have no box. */
+.compose-body .compose-title:focus-visible,
+.compose-body .compose-text:focus-visible {
+  border-radius: var(--tempra-radius-row);
+  outline-offset: 6px;
+}
+
+.compose-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 8px 18px 12px;
+}
+
+/* A small field as a pill: its label, then the field without a box of its own. */
+.compose-field {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 0 4px 0 12px;
+  border: 1px solid var(--tempra-color-border);
+  border-radius: var(--tempra-radius-pill);
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-ui);
+}
+
+.compose-field:focus-within {
+  outline: var(--tempra-focus-ring);
+  outline-offset: 1px;
+}
+
+.compose-field input:not([type="checkbox"], [type="radio"], [type="file"]) {
+  width: 18ch;
+  min-width: 0;
+  padding: 5px 8px 5px 1px;
+  border: 0;
+  background: transparent;
+  outline: none;
+}
+
+.compose-form > .notice {
+  margin: 0 18px 12px;
+}
+
+.compose-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 16px;
+  border-top: 1px solid var(--tempra-color-border);
+}
+
+@media (max-width: 900px) {
+  .dialog.compose {
+    margin-top: 16px;
+  }
+}
+
 /* A confirmation: what happens, then the action and Cancel. */
 .confirm-body p {
   margin: 0 0 var(--tempra-space-2);
@@ -2774,24 +2905,6 @@ a.button.pill-button {
 }
 
 /* ---------- Page pieces: lists, tables, forms ---------- */
-
-.new-library {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  margin: -12px 0 24px;
-  padding: 12px 18px;
-  border-radius: var(--tempra-radius-box);
-  background: var(--tempra-color-bg);
-  box-shadow: var(--tempra-shadow);
-  font-size: var(--tempra-text-ui);
-}
-
-.new-library .notice {
-  flex-basis: 100%;
-  margin: 0;
-}
 
 /* A command or URL to copy (the connect pages): an inset that wraps rather than widening the page. */
 .page pre,

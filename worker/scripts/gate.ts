@@ -1114,6 +1114,31 @@ async function browserRenders(
       await sidebar.getByRole("navigation", { name: "Files" }).waitFor({ timeout: 15_000 });
       if ((await show.count()) > 0) throw new Error("Show sidebar offered after showing it");
     });
+    // New library, from the switcher's menu: a compose dialog over the library list, its address
+    // following the name; Escape closes it and creates nothing.
+    await step("New library: the compose dialog", async () => {
+      await page
+        .locator(".topbar-brand")
+        .getByRole("button", { name: /, switch library$/ })
+        .click();
+      await page
+        .locator(".menu-list.libraries")
+        .getByRole("link", { name: "New library", exact: true })
+        .click();
+      const dialog = page.getByRole("dialog", { name: "New library" });
+      await dialog.waitFor({ timeout: 15_000 });
+      const name = dialog.getByRole("textbox", { name: "Name", exact: true });
+      if (!(await name.evaluate((el) => el === document.activeElement))) {
+        throw new Error("New library: the name field does not have the focus");
+      }
+      await name.fill("Gate Notes & Plans");
+      const address = await dialog.getByRole("textbox", { name: "Address" }).inputValue();
+      if (address !== "gate-notes-plans") throw new Error(`New library: address ${address}`);
+      await page.keyboard.press("Escape");
+      await dialog.waitFor({ state: "hidden", timeout: 5000 });
+      await page.goto(lib);
+      await main.waitFor();
+    });
     // The frame (take 4, TEMPRA-113): the switcher's menu, the library's settings with General
     // (TEMPRA-102), the bell, and the theme, chosen in the avatar's menu and kept on the account.
     await step("the frame: the switcher's menu, General, the bell and the theme", async () => {
