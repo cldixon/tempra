@@ -18,14 +18,21 @@
   --tempra-color-selected: light-dark(#e1e1dd, #2a2a2e);
   --tempra-color-selection: light-dark(#dededa, #3a3a3d);
 
-  /* Color: text, in three steps */
+  /* Color: text, in three steps. Text people read is text or muted, at least 4.5:1 on every
+     surface in light and dark (TEMPRA-132; design/contrast.test.ts). Faint is under that: icons,
+     rules and disabled controls only, never words. */
   --tempra-color-text: light-dark(#1a1a1b, #ececea);
-  --tempra-color-muted: light-dark(#6f6f73, #9a9a9e);
+  --tempra-color-muted: light-dark(#616165, #9a9a9e);
   --tempra-color-faint: light-dark(#a3a3a7, #68686c);
 
   /* Color: lines */
   --tempra-color-border: light-dark(#e8e8e4, #2a2a2d);
   --tempra-color-border-strong: light-dark(#d2d2ce, #3c3c40);
+
+  /* Focus (TEMPRA-132): a 2px ring in the text colour on every control focused by keyboard
+     (:focus-visible), until the palette (TEMPRA-1) designs its own */
+  --tempra-focus-ring: 2px solid var(--tempra-color-text);
+  --tempra-focus-offset: 2px;
 
   /* Color: the change dot (the only colour before the palette) */
   --tempra-color-agent: light-dark(#e8722a, #f0884a);

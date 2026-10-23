@@ -63,7 +63,7 @@
   margin-left: -1px;
   padding: 4px 0 4px 14px;
   border-left: 1px solid transparent;
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   text-decoration: none;
 }
 
@@ -231,11 +231,6 @@
   font-size: var(--tempra-text-ui);
 }
 
-.byline-name strong {
-  color: var(--tempra-color-text);
-  font-weight: var(--tempra-weight-medium);
-}
-
 .byline-sep {
   color: var(--tempra-color-faint);
 }
@@ -274,7 +269,7 @@
 }
 
 .version-n {
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-variant-numeric: tabular-nums;
 }
 
@@ -291,7 +286,7 @@
 }
 
 .version-who {
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
 }
 
@@ -403,13 +398,13 @@
 }
 
 .sources .num {
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-variant-numeric: tabular-nums;
 }
 
 .sources .meta {
   display: block;
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
 }
 
@@ -453,7 +448,7 @@
   display: flex;
   flex-direction: column;
   padding: 16px 10px 16px 14px;
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-variant-numeric: tabular-nums;
   text-align: right;
   user-select: none;

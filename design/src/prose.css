@@ -248,7 +248,7 @@
   position: absolute;
   top: 10px;
   left: 18px;
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-family: var(--tempra-font-body);
   font-size: var(--tempra-text-label);
   letter-spacing: 0.04em;
@@ -334,7 +334,7 @@
 
 .prose .image-dropped,
 .prose .image-broken {
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-style: italic;
 }
 
@@ -383,7 +383,7 @@
 }
 
 .prose .figure-open:focus-visible {
-  outline: 2px solid var(--tempra-color-text);
+  outline: var(--tempra-focus-ring);
   outline-offset: 3px;
 }
 
@@ -464,6 +464,6 @@
 }
 
 .prose del.diff-removed {
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   text-decoration: line-through;
 }

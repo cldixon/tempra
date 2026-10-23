@@ -78,17 +78,19 @@
 
 .thread-replies {
   flex: none;
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-variant-numeric: tabular-nums;
 }
 
 .thread.collapsed time {
   flex: none;
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
 }
 
-.thread.resolved {
-  opacity: 0.7;
+/* A resolved thread reads quieter: muted text, never faded below AA (TEMPRA-132). */
+.thread.resolved,
+.thread.resolved strong {
+  color: var(--tempra-color-muted);
 }
 
 /* The active thread (and a new comment): a card with the comments, a reply, Resolve. */
@@ -115,7 +117,7 @@
 
 .said-by time,
 .said-change {
-  color: var(--tempra-color-faint);
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
 }
 
