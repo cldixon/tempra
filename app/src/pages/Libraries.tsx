@@ -1,10 +1,11 @@
-import { type FormEvent, useEffect, useRef, useState } from "react";
+import { type FormEvent, useState } from "react";
 import { ApiError, api, useLoad } from "../api";
 import { Icon } from "../chrome";
+import { ComposeDialog } from "../Dialog";
 import { libraryLabel } from "../role";
 import { navigate } from "../router";
 import { LibraryTile } from "../Sidebar";
-import { type Health, plural, Status, useTitle } from "../ui";
+import { type Health, plural, Status, useMe, useTitle } from "../ui";
 import { Urls } from "../urls";
 import { PageBar } from "../Workspace";
 
@@ -50,8 +51,8 @@ export function Libraries({ create }: { create: boolean }) {
           <button
             type="button"
             className="tool-pill primary"
-            aria-expanded={creating}
-            onClick={() => setCreating((c) => !c)}
+            aria-haspopup="dialog"
+            onClick={() => setCreating(true)}
           >
             <Icon name="plus" />
             New library
@@ -59,7 +60,7 @@ export function Libraries({ create }: { create: boolean }) {
         }
       />
       <h1>Libraries</h1>
-      {creating && <NewLibrary onCancel={() => setCreating(false)} />}
+      <NewLibrary open={creating} onClose={() => setCreating(false)} />
       {waiting > 0 && (
         <p>
           <a href="/inbox">
@@ -77,10 +78,6 @@ export function Libraries({ create }: { create: boolean }) {
               {libs.length === 0 && <p className="muted">No libraries yet.</p>}
               {yours.length > 0 && <Cards title="Yours" libraries={yours} />}
               {shared.length > 0 && <Cards title="Shared with you" libraries={shared} />}
-              <p className="page-foot">
-                Agents write to a library over MCP. <a href="/connect">Connect an agent</a> or{" "}
-                <a href="/tokens">mint a token</a>.
-              </p>
             </>
           );
         }}
@@ -137,20 +134,49 @@ function Card({ library: l }: { library: Library }) {
   );
 }
 
-function NewLibrary({ onCancel }: { onCancel(): void }) {
+/** A library's address from its name: lowercase letters, digits and dashes, as the server checks. */
+export function slugFrom(name: string): string {
+  return name
+    .normalize("NFKD")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+/, "")
+    .slice(0, 63)
+    .replace(/-+$/, "");
+}
+
+/**
+ * New library, as a compose dialog over the list: its name, a description, and its address
+ * (filled in from the name until the person edits it). Creating opens the new library.
+ */
+function NewLibrary({ open, onClose }: { open: boolean; onClose(): void }) {
+  const me = useMe();
+  const [title, setTitle] = useState("");
+  const [slug, setSlug] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const input = useRef<HTMLInputElement>(null);
-  useEffect(() => input.current?.focus(), []);
+  const address = slug ?? slugFrom(title);
+  const close = () => {
+    setTitle("");
+    setSlug(null);
+    setError(null);
+    onClose();
+  };
   const submit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    const slug = String(new FormData(e.currentTarget).get("slug") ?? "");
+    const description = String(new FormData(e.currentTarget).get("description") ?? "")
+      .replace(/\s+/g, " ")
+      .trim();
     setBusy(true);
     setError(null);
     try {
       const lib = await api<Library>("/api/v1/libraries", {
         method: "POST",
-        body: JSON.stringify({ slug }),
+        body: JSON.stringify({
+          slug: address,
+          title: title.trim() || undefined,
+          description: description || undefined,
+        }),
       });
       navigate(new Urls(lib.owner, lib.slug).tree(""));
     } catch (err) {
@@ -159,24 +185,54 @@ function NewLibrary({ onCancel }: { onCancel(): void }) {
     }
   };
   return (
-    <form className="new-library" onSubmit={submit}>
-      <label htmlFor="slug">New library</label>
+    <ComposeDialog
+      open={open}
+      onClose={close}
+      context={me ? `@${me.handle}` : "You"}
+      title="New library"
+      action="Create library"
+      busy={busy}
+      error={error}
+      onSubmit={submit}
+      fields={
+        <label className="compose-field">
+          <span className={me ? "compose-prefix" : undefined}>
+            {me ? `${me.handle}/` : "Address"}
+          </span>
+          <input
+            name="slug"
+            type="text"
+            aria-label="Address"
+            placeholder="team-notes"
+            required
+            pattern="[a-z0-9][a-z0-9\-]{0,62}"
+            title="Lowercase letters, digits and dashes"
+            value={address}
+            onChange={(e) => setSlug(e.currentTarget.value)}
+          />
+        </label>
+      }
+    >
       <input
-        ref={input}
-        id="slug"
-        name="slug"
+        className="compose-title"
+        name="title"
         type="text"
-        placeholder="team-notes"
-        required
-        pattern="[a-z0-9][a-z0-9\-]{0,62}"
+        aria-label="Name"
+        placeholder="Library name"
+        maxLength={120}
+        autoComplete="off"
+        data-autofocus
+        value={title}
+        onChange={(e) => setTitle(e.currentTarget.value)}
       />
-      <button className="primary" type="submit" disabled={busy}>
-        Create
-      </button>
-      <button type="button" className="ghost" onClick={onCancel}>
-        Cancel
-      </button>
-      {error && <div className="notice">{error}</div>}
-    </form>
+      <textarea
+        className="compose-text"
+        name="description"
+        aria-label="Description"
+        placeholder="Add a description…"
+        maxLength={300}
+        rows={3}
+      />
+    </ComposeDialog>
   );
 }

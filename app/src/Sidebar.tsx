@@ -221,9 +221,7 @@ export function AccountSettingsSidebar({ page }: { page: AccountPage }) {
   const tabs: [AccountPage, string, string][] = [
     ["account", "/account", "Account"],
     ["notifications", "/notifications", "Notifications"],
-    ["connect", "/connect", "Connect an agent"],
-    ["tokens", "/tokens", "Tokens"],
-    ["apps", "/apps", "Connected apps"],
+    ["agents", "/agents", "Agents"],
   ];
   return (
     <nav className="nav" aria-label="Settings">

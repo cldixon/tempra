@@ -87,7 +87,7 @@ describe("first run (v2 spec: Onboarding)", () => {
 
     // Connect: the app's page; no agent has written yet.
     await shell(app, "/newbie/notes/-/connect");
-    await shell(app, "/tokens?library=notes");
+    await shell(app, "/agents?new=token&library=notes");
     const recent = (await (
       await app.request("/api/v1/libraries/newbie/notes/requests?limit=10")
     ).json()) as Requests;
@@ -128,14 +128,25 @@ describe("first run (v2 spec: Onboarding)", () => {
 });
 
 describe("connect an agent (tempra-dev: v2/onboarding)", () => {
-  test("/connect and a library's Connect tab are the app's pages, behind sign-in", async () => {
+  test("/agents and a library's Connect tab are the app's pages, behind sign-in", async () => {
     const s = setup();
-    await shell(s.app, "/connect");
+    await shell(s.app, "/agents");
+    // Connect an agent, Tokens and Connected apps moved there; a library's tokens open New token.
+    for (const [from, to] of <[string, string][]>[
+      ["/connect", "/agents"],
+      ["/apps", "/agents"],
+      ["/tokens", "/agents"],
+      ["/tokens?library=owner/demo", "/agents?new=token&library=owner%2Fdemo"],
+    ]) {
+      const r = await s.app.request(from, { redirect: "manual" });
+      expect(r.status).toBe(301);
+      expect(r.headers.get("Location")).toBe(to);
+    }
     await shell(s.app, `${UI}/-/connect`);
     // Signed out, it asks for sign-in like every other account page.
-    const anon = await s.anon.request("/connect", { redirect: "manual" });
+    const anon = await s.anon.request("/agents", { redirect: "manual" });
     expect(anon.status).toBe(302);
-    expect(anon.headers.get("Location")).toBe("/sign-in?next=%2Fconnect");
+    expect(anon.headers.get("Location")).toBe("/sign-in?next=%2Fagents");
     const stranger = await s.stranger();
     expect((await stranger.app.request(`${UI}/-/connect`)).status).toBe(404);
   });

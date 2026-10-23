@@ -14,6 +14,7 @@ const ROUTES = [
   "about",
   "account",
   "accounts",
+  "agents",
   "api",
   "app",
   "apps",

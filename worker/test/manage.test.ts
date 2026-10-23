@@ -184,7 +184,7 @@ describe("libraries and tokens", () => {
       body: "---\ntype: Note\n---\nvia minted token\n",
     });
     expect(write.status).toBeLessThan(300);
-    expect((await page(s, "/tokens")).status).toBe(200);
+    expect((await page(s, "/agents")).status).toBe(200);
     const list = (await (await s.app.request("/api/v1/tokens")).json()) as {
       tokens: { id: string; actor: string; created_by: string; revoked: unknown }[];
     };

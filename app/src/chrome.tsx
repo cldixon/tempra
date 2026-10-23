@@ -22,7 +22,6 @@ import {
   Hourglass,
   ImageOff,
   Inbox,
-  KeyRound,
   LayoutGrid,
   Link,
   List,
@@ -32,7 +31,6 @@ import {
   MessageSquare,
   PanelLeft,
   Plug,
-  Puzzle,
   RefreshCw,
   Search,
   Settings,
@@ -106,9 +104,7 @@ const ICONS = {
   settings: Settings,
   libraries: LayoutGrid,
   user: User,
-  key: KeyRound,
   plug: Plug,
-  apps: Puzzle,
   theme: SunMoon,
   signout: LogOut,
   copy: Copy,
@@ -394,8 +390,8 @@ export function Bell() {
 
 /** The person's name as the app has it: their handle, until accounts carry a name (TEMPRA-54). */
 /**
- * The avatar and its menu (take 4, board 08): who, then Account, Notifications, Connect an agent,
- * Tokens, Connected apps; the theme; Sign out.
+ * The avatar and its menu (take 4, board 08): who, then Account, Notifications, Agents; the
+ * theme; Sign out.
  */
 export function AccountMenu({ me }: { me: Me | null }) {
   const handle = me?.handle ?? "";
@@ -431,17 +427,9 @@ export function AccountMenu({ me }: { me: Me | null }) {
         <Icon name="bell" />
         Notifications
       </a>
-      <a className="menu-item" href="/connect">
+      <a className="menu-item" href="/agents">
         <Icon name="plug" />
-        Connect an agent
-      </a>
-      <a className="menu-item" href="/tokens">
-        <Icon name="key" />
-        Tokens
-      </a>
-      <a className="menu-item" href="/apps">
-        <Icon name="apps" />
-        Connected apps
+        Agents
       </a>
       <hr />
       <div className="menu-theme">

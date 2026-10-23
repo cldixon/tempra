@@ -41,13 +41,13 @@ const withSession = (secret: string) => ({ Cookie: `${SESSION_COOKIE}=${secret}`
 describe("magic-link sign-in (v2 spec: Accounts and sign-in)", () => {
   test("a page load without a session goes to sign-in, keeping where it was going", async () => {
     const s = setup();
-    const r = await s.anon.request("/tokens?x=1");
+    const r = await s.anon.request("/agents?x=1");
     expect(r.status).toBe(302);
-    expect(r.headers.get("Location")).toBe("/sign-in?next=%2Ftokens%3Fx%3D1");
-    const page = await s.anon.request("/sign-in?next=%2Ftokens");
+    expect(r.headers.get("Location")).toBe("/sign-in?next=%2Fagents%3Fx%3D1");
+    const page = await s.anon.request("/sign-in?next=%2Fagents");
     const html = await page.text();
     expect(page.status).toBe(200);
-    expect(html).toContain('name="next" value="/tokens"');
+    expect(html).toContain('name="next" value="/agents"');
   });
 
   test("sign up by email: link, continue, session; the link works once", async () => {
@@ -59,10 +59,10 @@ describe("magic-link sign-in (v2 spec: Accounts and sign-in)", () => {
     expect(bad.status).toBe(400);
     expect(s.outbox).toHaveLength(0);
 
-    const { r, cookie, secret, link } = await signIn(s, "New.Person@Example.com", "/tokens");
+    const { r, cookie, secret, link } = await signIn(s, "New.Person@Example.com", "/agents");
     expect(s.outbox[0]?.to).toBe("new.person@example.com");
     expect(s.outbox[0]?.text).toContain("within 15 minutes");
-    expect(r.headers.get("Location")).toBe("/tokens");
+    expect(r.headers.get("Location")).toBe("/agents");
     expect(cookie).toContain("HttpOnly");
     expect(cookie).toContain("Secure");
     expect(cookie).toContain("SameSite=Lax");

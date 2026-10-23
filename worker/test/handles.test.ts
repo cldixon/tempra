@@ -51,7 +51,7 @@ describe("the UI moved from /app to the root (v2 spec: URLs)", () => {
     expect(legacyUrl("/app")).toBe("/");
     expect(legacyUrl("/app/libraries")).toBe("/");
     expect(legacyUrl("/app/tokens")).toBe("/tokens");
-    expect(legacyUrl("/app/grants/revoke")).toBe("/apps/revoke");
+    expect(legacyUrl("/app/grants/revoke")).toBe("/agents");
     expect(legacyUrl("/app/libraries/ada/notes/")).toBe("/ada/notes/");
     expect(legacyUrl("/app/libraries/ada/notes/tree/a/b/")).toBe("/ada/notes/a/b/");
     expect(legacyUrl("/app/libraries/ada/notes/files/a/b.md")).toBe("/ada/notes/a/b.md");

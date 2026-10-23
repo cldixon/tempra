@@ -5,6 +5,8 @@
  *
  *   bun run seed [--slug dev] [--actor claude-code/local] [--scope write] [--prefix notes]
  *                [--email dev@localhost] [--persist-to .wrangler/state] [--remote] [--json]
+ *   bun run seed --drop-actors github-actions/preview,github-actions/smoke [--remote]
+ *                                         deletes the seeded account's tokens with those actors
  *
  * Local runs use the state `cf dev` uses (worker/.wrangler/state) unless --persist-to says otherwise.
  */
@@ -69,6 +71,18 @@ export async function seed(opts: SeedOptions = {}): Promise<Seeded> {
   return { token: secret, owner, slug, library_id: id, actor, scope };
 }
 
+/**
+ * Deletes the seeded account's tokens with these actors: a preview's setup tokens, once seeding
+ * and the smoke flow are done, so its Agents page lists only what a person made.
+ */
+export async function dropTokens(actors: string[], opts: SeedOptions = {}): Promise<void> {
+  if (actors.length === 0) return;
+  await d1Sql(
+    `DELETE FROM tokens WHERE created_by = 'user_dev' AND actor IN (${actors.map(q).join(", ")});`,
+    where(opts),
+  );
+}
+
 if (import.meta.main) {
   const { values } = parseArgs({
     options: {
@@ -80,8 +94,15 @@ if (import.meta.main) {
       remote: { type: "boolean" },
       email: { type: "string" },
       json: { type: "boolean" },
+      "drop-actors": { type: "string" },
     },
   });
+  if (values["drop-actors"] !== undefined) {
+    const actors = values["drop-actors"].split(",").filter(Boolean);
+    await dropTokens(actors, { remote: values.remote, persistTo: values["persist-to"] });
+    console.log(`Deleted the tokens of ${actors.join(", ")}.`);
+    process.exit(0);
+  }
   const s = await seed({
     slug: values.slug,
     actor: values.actor,

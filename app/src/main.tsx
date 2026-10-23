@@ -1,14 +1,6 @@
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
-import {
-  Account,
-  Apps,
-  ConnectAccount,
-  Invitations,
-  Notifications,
-  Tokens,
-  Welcome,
-} from "./pages/Account";
+import { Account, Agents, Invitations, Notifications, Welcome } from "./pages/Account";
 import { Activity } from "./pages/Activity";
 import { File } from "./pages/File";
 import { Folder } from "./pages/Folder";
@@ -74,15 +66,9 @@ function App() {
   } else if (route.page === "welcome") {
     account = "welcome";
     page = <Welcome me={who} />;
-  } else if (route.page === "connect") {
-    account = "connect";
-    page = <ConnectAccount />;
-  } else if (route.page === "tokens") {
-    account = "tokens";
-    page = <Tokens me={who} library={route.library} />;
-  } else if (route.page === "apps") {
-    account = "apps";
-    page = <Apps />;
+  } else if (route.page === "agents") {
+    account = "agents";
+    page = <Agents me={who} newToken={route.newToken} library={route.library} />;
   } else if (route.page === "account") {
     account = "account";
     page = <Account done={route.done} />;

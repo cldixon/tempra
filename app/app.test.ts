@@ -75,8 +75,20 @@ describe("routes follow the server's URLs (tempra-dev: v2/urls-and-handles)", ()
   });
 
   test("the account's pages and every library page are the app's (TEMPRA-14)", () => {
-    expect(at("/connect")).toEqual({ page: "connect" });
-    expect(at("/tokens?library=notes")).toEqual({ page: "tokens", library: "notes" });
+    expect(at("/agents")).toEqual({ page: "agents", newToken: false, library: null });
+    expect(at("/agents?new=token&library=ann%2Fnotes")).toEqual({
+      page: "agents",
+      newToken: true,
+      library: "ann/notes",
+    });
+    // Connect an agent, Tokens and Connected apps became Agents.
+    expect(at("/connect")).toEqual({ page: "redirect", to: "/agents" });
+    expect(at("/apps")).toEqual({ page: "redirect", to: "/agents" });
+    expect(at("/tokens")).toEqual({ page: "redirect", to: "/agents" });
+    expect(at("/tokens?library=ann/notes")).toEqual({
+      page: "redirect",
+      to: "/agents?new=token&library=ann%2Fnotes",
+    });
     expect(at("/account?done=email")).toEqual({ page: "account", done: "email" });
     expect(at("/ann/notes/-/work?kind=lint")).toMatchObject({ page: "work", kind: "lint" });
     expect(at("/ann/notes/-/revert/req_1")).toMatchObject({ page: "revert", request: "req_1" });
@@ -156,9 +168,7 @@ describe("links followed in place (TEMPRA-129)", () => {
       "/inbox",
       "/notifications",
       "/account",
-      "/connect",
-      "/tokens",
-      "/apps",
+      "/agents",
       "/invitations",
       "/welcome",
     ]) {

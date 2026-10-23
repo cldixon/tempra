@@ -59,9 +59,7 @@ describe("the app's pages (TEMPRA-9)", () => {
       `${LIB}/-/connect`,
       `${LIB}/-/delete`,
       "/welcome",
-      "/connect",
-      "/tokens",
-      "/apps",
+      "/agents",
       "/account",
       "/inbox",
     ]) {
