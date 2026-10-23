@@ -4,7 +4,7 @@ import { Icon, Menu } from "../chrome";
 import { composing } from "../comments/composing";
 import { type FeedEvent, useFeed } from "../live";
 import { relativeTime, useNow } from "../ui";
-import { dirOf, type Urls } from "../urls";
+import type { Urls } from "../urls";
 import { CONTENT_OPS, type FileData } from "./data";
 
 /*
@@ -166,7 +166,7 @@ export function LiveNotice({ urls, live }: { urls: Urls; live: Live }) {
       {e.op === "move" ? (
         <a href={urls.pinned(undefined).file(e.path)}>Open it where it is now</a>
       ) : e.op === "delete" ? (
-        <a href={urls.tree(dirOf(e.from_path ?? e.path))}>Back to the folder</a>
+        <a href={urls.tree("")}>Home</a>
       ) : (
         <>
           {CONTENT_OPS.has(e.op) && (

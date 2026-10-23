@@ -247,49 +247,6 @@
   white-space: nowrap;
 }
 
-/* Sections: rows, the name (and its description when folders carry one), the count and the dot. */
-.home-sections {
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.home-section-row {
-  display: flex;
-  align-items: center;
-  gap: var(--tempra-space-3);
-  min-height: var(--tempra-touch);
-  padding: var(--tempra-space-2) 0;
-  color: var(--tempra-color-text);
-  text-decoration: none;
-}
-
-.home-section-row:hover .home-section-name {
-  text-decoration: underline;
-}
-
-.home-section-name {
-  flex: 1;
-  min-width: 0;
-  font-weight: var(--tempra-weight-medium);
-  overflow-wrap: anywhere;
-}
-
-.home-section-end {
-  display: flex;
-  align-items: center;
-  gap: var(--tempra-space-2);
-  color: var(--tempra-color-muted);
-  font-size: var(--tempra-text-meta);
-  font-variant-numeric: tabular-nums;
-}
-
-/* The dot's place is kept when there is none, so the counts line up. */
-.home-section-dot {
-  display: inline-flex;
-  width: var(--tempra-dot);
-}
-
 /* The foot: the agents' housekeeping, quiet. */
 .home-foot {
   margin: var(--tempra-space-4) 0 0;
@@ -649,30 +606,26 @@ a.activity-download {
   }
 }
 
-/* ---------- A folder (take 4, TEMPRA-117) ---------- */
+/* ---------- Rows of a list (For agents' work queue) ---------- */
 
+/* The folder view that first drew these retired with TEMPRA-138; the work queue keeps its rows. */
 .folder {
   display: flex;
   flex-direction: column;
   gap: var(--tempra-space-3);
 }
 
-.folder-empty,
 .folder-foot {
-  margin: 0;
+  margin: var(--tempra-space-3) 0 0;
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
-}
-
-.folder-foot {
-  margin-top: var(--tempra-space-3);
 }
 
 .folder-foot a {
   color: var(--tempra-color-muted);
 }
 
-/* Rows with no rules: subfolders first, then concepts, title over its description. */
+/* Rows with no rules: a title over its description. */
 .folder-list {
   display: flex;
   flex-direction: column;
@@ -710,43 +663,16 @@ a.activity-download {
   overflow-wrap: anywhere;
 }
 
-.folder-sub {
-  align-items: center;
-}
-
-.folder-sub .folder-title {
-  flex: 1;
-  min-width: 0;
-}
-
-.folder-sub .folder-title svg,
-.folder-file .folder-title svg {
-  flex: none;
-  color: var(--tempra-color-muted);
-}
-
 .folder-desc {
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-ui);
 }
 
-.folder-count,
-.folder-live {
+.folder-count {
   flex: none;
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
   white-space: nowrap;
-}
-
-.folder-dot {
-  display: inline-flex;
-  flex: none;
-}
-
-@media (max-width: 900px) {
-  .folder-live {
-    display: none;
-  }
 }
 
 /* ---------- An attachment (board 28) ---------- */

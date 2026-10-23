@@ -528,10 +528,11 @@ export function useTitles(urls: Urls) {
 /** How many touched concepts an entry lists before "and n more". */
 const LISTED = 8;
 
-/** A piece of the sentence: text, or a link to a concept (as it was, when gone) or a folder. */
+/** A piece of the sentence: text, a link to a concept (as it was, when gone), or a folder's name. */
 function PartView({ part, urls }: { part: Part; urls: Urls }) {
   if (typeof part === "string") return <>{part}</>;
-  if ("folder" in part) return <a href={urls.tree(part.folder)}>{folderName(part.folder)}</a>;
+  // A folder is named, not linked: it is a group in the tree, not a page (TEMPRA-138).
+  if ("folder" in part) return <>{folderName(part.folder)}</>;
   const href = part.gone ? urls.pinned(part.seq - 1).file(part.concept) : urls.file(part.concept);
   const words = wordsText(part.words);
   return (

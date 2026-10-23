@@ -5,6 +5,7 @@ import { type AgentChange, isLive } from "./changes";
 import { Icon } from "./chrome";
 import { useFeed, useLastSeen } from "./live";
 import { prefetchFile } from "./prefetch";
+import { plural } from "./ui";
 import { baseName, dirOf, folderName, type Urls } from "./urls";
 
 /** One file of `GET …/outline`: the library's index, without bodies. */
@@ -117,23 +118,11 @@ function insideDirs(files: Entry[]): Map<string, Entry[]> {
 }
 
 /**
- * The library's top level, as the tree lists it (folders, then pages, then files), each
- * folder with its count of concepts at any depth: the home's way into the files (TEMPRA-107).
- */
-export function topLevel(files: OutlineFile[]): { entry: OutlineFile; count: number }[] {
-  const counts = countConcepts(files);
-  return (buildDirs(files)[""] ?? []).map((entry) => ({
-    entry,
-    count: counts.get(entry.path) ?? 0,
-  }));
-}
-
-/**
  * The library's file tree (tempra-dev: app/workspace). The whole index (paths, titles,
  * sequences; no bodies) arrives in one small request when the workspace opens, so opening a
- * folder never waits. A folder (named for people, with its count of concepts): its name opens its
- * folder view and expands it, its chevron only expands and collapses (TEMPRA-123). Open folders
- * are remembered on this browser, the open file is revealed and marked, and the change feed
+ * folder never waits. A folder (named for people, with its count of concepts) is a group, not a
+ * page: its row opens and closes it (TEMPRA-138), and a folder's address reveals it here. Open
+ * folders are remembered on this browser, the open file is revealed and marked, and the change feed
  * refreshes the index once per burst of writes. The change dot marks a file: pulsing while an
  * agent writes it now, solid when it changed since the person last looked; a closed folder rolls
  * up the marks of what is inside it.
@@ -188,10 +177,14 @@ export function Tree(props: {
     if (files && seq !== null) onIndex?.(files, seq);
   }, [files, seq, onIndex]);
 
-  // The open file's folders are revealed when it opens (and may be collapsed after).
+  // The open file's folders are revealed when it opens (and may be collapsed after); so is a
+  // folder whose address was opened (`dir`, on its way to the home).
   const current = props.file ?? props.dir;
+  /** A folder being revealed: its row is scrolled into view when it first draws. */
+  const revealing = useRef<string | null>(null);
   useEffect(() => {
     if (current === null) return;
+    if (props.file === null) revealing.current = current;
     const up = props.file !== null ? ancestors(props.file) : [...ancestors(current), current];
     const want = up.filter((d) => d !== "");
     setExpanded((e) => {
@@ -224,13 +217,6 @@ export function Tree(props: {
       void load();
     },
   );
-  const expand = (dir: string) =>
-    setExpanded((e) => {
-      if (e.has(dir)) return e;
-      const next = new Set(e).add(dir);
-      saveExpanded(urls, next);
-      return next;
-    });
   const toggle = (dir: string) =>
     setExpanded((e) => {
       const next = new Set(e);
@@ -240,7 +226,7 @@ export function Tree(props: {
       return next;
     });
 
-  // The open file's row is scrolled into view once, when it opens (not after every refresh,
+  // The open file's (or revealed folder's) row is scrolled into view once, when it opens (not after every refresh,
   // which would pull the person back while agents write).
   const currentRow = useRef<HTMLElement | null>(null);
   const setCurrentRow = (el: HTMLElement | null) => {
@@ -362,30 +348,33 @@ export function Tree(props: {
     return entries.map((e) =>
       e.kind === "dir" ? (
         <li key={e.path}>
-          {/* The chevron opens and closes the folder here; its name opens its folder view, which
-              reveals it (TEMPRA-123). */}
-          <div className="tree-row dir">
+          {/* A folder is a group, not a page (TEMPRA-138): its whole row opens and closes it. */}
+          <div className={expanded.has(e.path) ? "tree-row dir open" : "tree-row dir"}>
+            <span className="tree-chevron" aria-hidden="true">
+              <Icon name="chevron" />
+            </span>
             <button
               type="button"
-              className="tree-chevron"
+              className="tree-name"
               aria-expanded={expanded.has(e.path)}
-              aria-label={`${folderName(e.path)} folder`}
+              title={folderName(e.path)}
+              ref={(el) => {
+                if (el && revealing.current === e.path) {
+                  revealing.current = null;
+                  el.scrollIntoView({ block: "nearest" });
+                }
+              }}
               onClick={() => toggle(e.path)}
             >
-              <Icon name="chevron" />
-            </button>
-            <a
-              className="tree-name"
-              href={urls.tree(e.path)}
-              title={folderName(e.path)}
-              aria-current={props.dir === e.path ? "page" : undefined}
-              ref={props.dir === e.path ? setCurrentRow : undefined}
-              onClick={() => expand(e.path)}
-            >
               {folderName(e.path)}
-            </a>
+              {(counts.get(e.path) ?? 0) > 0 && (
+                <span className="visually-hidden">, {plural(counts.get(e.path) ?? 0, "page")}</span>
+              )}
+            </button>
             {(counts.get(e.path) ?? 0) > 0 && (
-              <span className="tree-count">{counts.get(e.path)}</span>
+              <span className="tree-count" aria-hidden="true">
+                {counts.get(e.path)}
+              </span>
             )}
             {!expanded.has(e.path) && rolledUp(e.path)}
           </div>

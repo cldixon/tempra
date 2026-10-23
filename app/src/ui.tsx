@@ -236,18 +236,12 @@ export const anchorId = (prefix: string, label: string) =>
   `${prefix}-${label.replace(/[^\w.-]/g, "_")}`;
 
 /**
- * Where a page is in its library (the top bar's crumbs): its folders by name, each a link, then the
- * file itself (by `title` when it has one), and after them what the page adds (a concept's
+ * Where a page is in its library (the top bar's crumbs): its folders by name (text: a folder is a
+ * group in the tree, not a page, TEMPRA-138), then the file itself (by `title` when it has one), and after them what the page adds (a concept's
  * staleness or status). The library itself is in the sidebar, so the crumbs start below it.
  */
-export function Crumbs(props: {
-  urls: Urls;
-  path: string;
-  file: boolean;
-  title?: string;
-  children?: ReactNode;
-}) {
-  const { urls, path, file } = props;
+export function Crumbs(props: { path: string; title?: string; children?: ReactNode }) {
+  const { path } = props;
   const parts = path === "" ? [] : path.split("/");
   const items: ReactNode[] = [];
   parts.forEach((seg, i) => {
@@ -263,12 +257,10 @@ export function Crumbs(props: {
     items.push(
       last ? (
         <span key={p} className="here" aria-current="page">
-          {file ? (props.title ?? seg) : folderName(p)}
+          {props.title ?? seg}
         </span>
       ) : (
-        <a key={p} href={urls.tree(p)}>
-          {folderName(p)}
-        </a>
+        <span key={p}>{folderName(p)}</span>
       ),
     );
   });

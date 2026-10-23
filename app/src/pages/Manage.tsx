@@ -664,7 +664,7 @@ export function Restore(props: { urls: Urls; path: string; to?: number; actor: s
   return (
     <>
       <PageBar>
-        <Crumbs urls={urls} path={path} file title={title} />
+        <Crumbs path={path} title={title} />
       </PageBar>
       <OwnerOnly urls={urls}>
         <RestorePage urls={urls} path={path} to={props.to} title={title} />

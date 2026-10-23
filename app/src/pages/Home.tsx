@@ -23,7 +23,7 @@ import { useFeed, useSeenCursor, useTrailing } from "../live";
 import { Moment } from "../Moment";
 import { type Needs, useNeeds } from "../needs";
 import { libraryLabel, type Role, useLibraries, useRole } from "../role";
-import { fileLabel, type OutlineFile, topLevel } from "../Tree";
+import { fileLabel, type OutlineFile } from "../Tree";
 import { clip, plural, Status, useCopy, useMe, useTitle } from "../ui";
 import { dirOf, folderName, type Urls } from "../urls";
 import { PageColumn, useFrame } from "../Workspace";
@@ -41,8 +41,8 @@ const SINCE_READ = 1000;
  * The library's home (take 4, TEMPRA-117, TEMPRA-121; tempra-dev: app/home): its title and
  * description, one quiet line (who works here, the page count, the guide), one line on what
  * changed since the person last looked, up to three of their open Inbox items here with the way
- * to the Inbox, the pages changed most recently, every top-level section with its count and the
- * solid dot, and at the foot the agents' housekeeping (`GET …/needs`). An empty library shows how
+ * to the Inbox, the pages changed most recently, and at the foot the agents' housekeeping
+ * (`GET …/needs`). No sections: the tree beside it lists the folders (TEMPRA-138). An empty library shows how
  * to connect an agent instead (to those who can). Each part loads on its own, so one that fails
  * leaves the rest (H-7). It does not move the seen cursor (Activity does).
  */
@@ -200,7 +200,6 @@ export function Home({ urls }: { urls: Urls }) {
                       view={(a, by) => actors.view(a, by)}
                     />
                   )}
-                  {files !== null && <HomeSections urls={urls} files={files} seen={seen} />}
                   {needs.state === "ready" && <HomeFoot urls={urls} needs={needs.data} />}
                   {needs.state === "error" && (
                     <p className="home-foot view-meta home-failed">
@@ -424,71 +423,6 @@ export function ForYou(props: { urls: Urls; inbox: InboxPage; titles?: PageTitle
             </a>
           </li>
         ))}
-      </ul>
-    </section>
-  );
-}
-
-/**
- * Sections: every top-level folder in the tree's order, with its count of concepts (or of files,
- * for a folder that holds only files: "1 file", H-2) and the solid dot when something under it
- * changed since the person last looked; each opens its folder view. A library with no folders
- * yet (a first library's start-here note) lists its pages instead.
- */
-export function HomeSections(props: { urls: Urls; files: OutlineFile[]; seen: number | null }) {
-  const { urls, files, seen } = props;
-  const top = topLevel(files);
-  const folders = top.filter(({ entry }) => entry.kind === "dir");
-  const pages = folders.length === 0;
-  const rows = pages ? top.filter(({ entry }) => entry.kind === "concept") : folders;
-  if (rows.length === 0) return null;
-  const changed = new Set<string>();
-  const attachments = new Map<string, number>();
-  for (const f of files) {
-    let top = f.path;
-    for (let d = dirOf(top); d !== ""; d = dirOf(d)) top = d;
-    if (f.kind === "attachment") attachments.set(top, (attachments.get(top) ?? 0) + 1);
-    if (seen !== null && typeof f.seq === "number" && f.seq > seen) changed.add(top);
-  }
-  return (
-    <section className="home-section" aria-labelledby="home-sections">
-      <div className="view-section-head">
-        <h2 id="home-sections" className="view-section-title">
-          {pages ? "Pages" : "Sections"}
-        </h2>
-      </div>
-      <ul className="home-sections">
-        {rows.map(({ entry, count }) => {
-          const only = attachments.get(entry.path) ?? 0;
-          return (
-            <li key={entry.path}>
-              <a
-                className="home-section-row"
-                href={pages ? urls.file(entry.path) : urls.tree(entry.path)}
-              >
-                <span className="home-section-name">
-                  {pages ? fileLabel(entry) : folderName(entry.path)}
-                </span>
-                <span className="home-section-end">
-                  {!pages &&
-                    (count === 0 && only > 0 ? (
-                      <span className="home-section-count">{plural(only, "file")}</span>
-                    ) : (
-                      <span className="home-section-count">{count}</span>
-                    ))}
-                  {changed.has(entry.path) ? (
-                    <span className="home-section-dot" title="Changed since you last looked">
-                      <span className="change-dot" aria-hidden="true" />
-                      <span className="visually-hidden">changed since you last looked</span>
-                    </span>
-                  ) : (
-                    <span className="home-section-dot" aria-hidden="true" />
-                  )}
-                </span>
-              </a>
-            </li>
-          );
-        })}
       </ul>
     </section>
   );
