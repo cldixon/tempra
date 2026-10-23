@@ -275,6 +275,14 @@ details > summary {
   font-size: var(--tempra-text-meta);
 }
 
+/* A form field's hint under it: what it becomes and the format it takes. */
+.field-hint {
+  display: block;
+  margin-top: var(--tempra-space-1);
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+}
+
 .warn {
   font-weight: var(--tempra-weight-medium);
 }

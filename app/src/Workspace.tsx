@@ -13,7 +13,7 @@ import { createPortal } from "react-dom";
 import { type AgentChange, useAgentChanges } from "./changes";
 import { AccountMenu, Bell, Icon } from "./chrome";
 import { inboxChanged } from "./inbox";
-import { useFeed } from "./live";
+import { useFeed, useFeedStatus } from "./live";
 import { libraryLabel, useLibraries } from "./role";
 import { lastNavigation } from "./router";
 import {
@@ -195,6 +195,8 @@ interface Chrome {
   /** The sidebar can be hidden (a library's own pages): its state and the way to change it. */
   hidden?: boolean;
   onHide?: (hidden: boolean) => void;
+  /** A quiet word on the top bar when live updates have stopped (a library's feed, F-19). */
+  status?: ReactNode;
 }
 
 /**
@@ -353,6 +355,7 @@ function Shell(props: {
             </div>
             <div className="topbar-tools" ref={setToolsSlot} />
             <div className="topbar-end">
+              {chrome.status}
               {chrome.onSearch && (
                 <button
                   type="button"
@@ -543,6 +546,7 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
     // Only the library's own sidebar hides; the settings' is how the person moves between tabs.
     hidden: settings ? undefined : hidden,
     onHide: settings ? undefined : hide,
+    status: <FeedNotice urls={urls} />,
   };
   const frame = useMemo(
     () => ({ index, latest: agents.latest, now: agents.now }),
@@ -561,6 +565,19 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
         onClose={() => setSwitching(false)}
       />
     </>
+  );
+}
+
+/**
+ * "Reconnecting…", quietly, while the library's feed is trying to get back (F-19): a page then
+ * stops following agents' writes until it does. Nothing while the feed is live.
+ */
+function FeedNotice({ urls }: { urls: Urls }) {
+  const status = useFeedStatus(urls);
+  return (
+    <span className="feed-status" role="status">
+      {status === "reconnecting" ? "Reconnecting…" : ""}
+    </span>
   );
 }
 

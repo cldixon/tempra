@@ -47,15 +47,31 @@ const REAUTHORIZE = 4001;
  */
 export const FEED_FULL = 4029;
 
-/** How often a feed refused a socket reads the ledger, and when it first tries a socket again. */
-export const FALLBACK = { pollMs: 15_000, retryMs: 5 * 60_000, maxRetryMs: 30 * 60_000 };
+/**
+ * How often a feed refused a socket reads the ledger, and when it first tries a socket again;
+ * and how long a failed catch-up waits before the next, doubling up to a minute (F-19).
+ */
+export const FALLBACK = {
+  pollMs: 15_000,
+  retryMs: 5 * 60_000,
+  maxRetryMs: 30 * 60_000,
+  catchUpMs: 2000,
+  maxCatchUpMs: 60_000,
+};
+
+/** Whether the feed is following the library, or trying to get back to it. */
+export type FeedStatus = "live" | "reconnecting";
+
+/** Whether the page is out of sight (a background tab): retries wait for it to show again. */
+const pageHidden = () => typeof document !== "undefined" && document.visibilityState === "hidden";
 
 /**
  * The change feed of one library (tempra-dev: app/live): one WebSocket shared by every page of
  * the library that listens. It reconnects with backoff and, after any gap, catches up from
  * `GET /events?since=` so no event is missed; listeners see each event once, in order. A page
  * says which sequence its data reflects (`sync`), and hears every event after it, including
- * any that arrived while it was loading.
+ * any that arrived while it was loading. Retries (a socket, a catch-up) back off and wait while
+ * the tab is hidden; `status` says when the feed is reconnecting, for the frame's quiet notice.
  */
 export class LibraryFeed {
   private socket: WebSocket | null = null;
@@ -73,13 +89,58 @@ export class LibraryFeed {
   private retrySocket: ReturnType<typeof setTimeout> | undefined;
   /** Sockets refused in a row, to space out the next try. */
   private refused = 0;
+  /** Catch-ups failed in a row, to space out the next. */
+  private failed = 0;
+  /** Retries that came due while the tab was hidden, run when it shows again (one per kind). */
+  private paused = new Map<string, () => void>();
+  private timers = new Set<ReturnType<typeof setTimeout>>();
+  status: FeedStatus = "live";
+  private watchers = new Set<(s: FeedStatus) => void>();
 
   constructor(
     private urls: Urls,
     private open: (url: URL) => WebSocket = (url) => new WebSocket(url),
     private read: typeof readEvents = readEvents,
-    private fallback = FALLBACK,
-  ) {}
+    fallback: Partial<typeof FALLBACK> = {},
+    private hidden: () => boolean = pageHidden,
+  ) {
+    this.fallback = { ...FALLBACK, ...fallback };
+  }
+
+  private fallback: typeof FALLBACK;
+
+  /** Calls `fn` with each change of status, until the function it returns is called. */
+  watch(fn: (s: FeedStatus) => void): () => void {
+    this.watchers.add(fn);
+    return () => this.watchers.delete(fn);
+  }
+
+  private setStatus(s: FeedStatus) {
+    if (this.status === s) return;
+    this.status = s;
+    for (const fn of this.watchers) fn(s);
+  }
+
+  /**
+   * Runs `fn` after `ms`, or, when the tab is hidden by then, once it shows again (`wake`): a
+   * background tab spends nothing on retries. One paused retry is kept of each kind.
+   */
+  private later(kind: string, fn: () => void, ms: number) {
+    const t = setTimeout(() => {
+      this.timers.delete(t);
+      if (this.hidden()) this.paused.set(kind, fn);
+      else fn();
+    }, ms);
+    this.timers.add(t);
+  }
+
+  /** The tab shows again: run the retries it held back. */
+  wake() {
+    if (this.hidden()) return;
+    const due = [...this.paused.values()];
+    this.paused.clear();
+    for (const fn of due) fn();
+  }
 
   subscribe(listener: Listener): Subscription & { close(): void } {
     const sub: Subscription = { listener, from: null, pending: [] };
@@ -126,9 +187,11 @@ export class LibraryFeed {
       }
       this.stopPolling();
       this.refused = 0;
-      // Asked to reconnect (the server re-checks access): at once; otherwise back off.
+      // Asked to reconnect (the server re-checks access): at once; otherwise back off, and say
+      // that the feed is reconnecting.
+      if (e.code !== REAUTHORIZE) this.setStatus("reconnecting");
       const wait = e.code === REAUTHORIZE ? 0 : Math.min(30_000, 1000 * 2 ** this.retry++);
-      setTimeout(() => this.subs.size && !this.socket && this.connect(), wait);
+      this.later("socket", () => this.subs.size && !this.socket && this.connect(), wait);
     };
   }
 
@@ -179,6 +242,7 @@ export class LibraryFeed {
       // A socket is open again: the server took it, so stop polling.
       this.stopPolling();
       this.refused = 0;
+      if (this.failed === 0) this.setStatus("live");
       if (this.last === null) this.last = m.head;
       else if (m.head > this.last) void this.catchUp();
       for (const sub of this.subs) void this.replay(sub);
@@ -240,9 +304,15 @@ export class LibraryFeed {
           this.again = false;
           this.deliver(await this.read(this.urls, this.last ?? 0));
         } while (this.again);
+        this.failed = 0;
+        if (this.socket || this.polling !== undefined) this.setStatus("live");
       } catch {
-        // Retry while anyone listens; a reconnect's hello would also start one.
-        setTimeout(() => this.subs.size && void this.catchUp(), 2000);
+        // Retry while anyone listens, waiting longer each time and not while the tab is hidden
+        // (each read spends the session's rate limit); a reconnect's hello also starts one.
+        this.setStatus("reconnecting");
+        const { catchUpMs, maxCatchUpMs } = this.fallback;
+        const wait = Math.min(maxCatchUpMs, catchUpMs * 2 ** this.failed++);
+        this.later("catch-up", () => this.subs.size && void this.catchUp(), wait);
       } finally {
         this.catching = null;
       }
@@ -254,6 +324,11 @@ export class LibraryFeed {
     clearInterval(this.ping);
     this.stopPolling();
     this.refused = 0;
+    this.failed = 0;
+    for (const t of this.timers) clearTimeout(t);
+    this.timers.clear();
+    this.paused.clear();
+    this.setStatus("live");
     const ws = this.socket;
     this.socket = null;
     ws?.close(1000, "done");
@@ -285,6 +360,48 @@ async function readEvents(urls: Urls, since: number): Promise<FeedEvent[]> {
 
 const feeds = new Map<string, LibraryFeed>();
 
+/** The library's one feed, made on first use; a tab shown again wakes every feed's retries. */
+function feedOf(urls: Urls): LibraryFeed {
+  const key = `${urls.owner}/${urls.slug}`;
+  let feed = feeds.get(key);
+  if (!feed) {
+    if (feeds.size === 0 && typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", () => {
+        for (const f of feeds.values()) f.wake();
+      });
+    }
+    feed = new LibraryFeed(urls);
+    feeds.set(key, feed);
+  }
+  return feed;
+}
+
+/**
+ * Whether the library's feed is live or reconnecting, said only once it has been reconnecting
+ * for a few seconds (a socket the server asks to reopen, or a blip, says nothing).
+ */
+export function useFeedStatus(urls: Urls, quietMs = 4000): FeedStatus {
+  const key = `${urls.owner}/${urls.slug}`;
+  const [shown, setShown] = useState<FeedStatus>("live");
+  // biome-ignore lint/correctness/useExhaustiveDependencies: one feed per library, keyed by it.
+  useEffect(() => {
+    const feed = feedOf(urls);
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const on = (s: FeedStatus) => {
+      clearTimeout(timer);
+      if (s === "live") setShown("live");
+      else timer = setTimeout(() => setShown(feed.status), quietMs);
+    };
+    on(feed.status);
+    const stop = feed.watch(on);
+    return () => {
+      stop();
+      clearTimeout(timer);
+    };
+  }, [key, quietMs]);
+  return shown;
+}
+
 /**
  * Calls `onEvents` with each batch of new events in the library, for as long as the component
  * is mounted, and `onReset` when the ledger is rolled back. `from` is the sequence the page's
@@ -303,11 +420,7 @@ export function useFeed(
   const sub = useRef<ReturnType<LibraryFeed["subscribe"]> | null>(null);
   // biome-ignore lint/correctness/useExhaustiveDependencies: one feed per library, keyed by it.
   useEffect(() => {
-    let feed = feeds.get(key);
-    if (!feed) {
-      feed = new LibraryFeed(urls);
-      feeds.set(key, feed);
-    }
+    const feed = feedOf(urls);
     const s = feed.subscribe({
       events: (events) => callbacks.current.onEvents(events),
       reset: () => callbacks.current.onReset(),
@@ -341,31 +454,81 @@ export function useTrailing(fn: () => void, ms = 400): () => void {
 
 /**
  * "Since you last looked" (tempra-dev: app/live, TEMPRA-72): the ledger sequence a person has
- * seen in a library, kept on the server so it follows them across devices. Read once per page
- * load, so what is new stays marked while the person looks around; null until it arrives, or
- * when they have never looked.
+ * seen in a library, kept on the server so it follows them across devices. Read from the server
+ * once per page load, then followed as this page load moves it (Activity does): the tree's dots,
+ * the home's line and its sections clear after a look at Activity, with no reload. `hold` keeps
+ * the value the page found when it opened, for the page that moves the cursor (Activity still
+ * marks what was new when it opened). Null until it arrives, or when they have never looked.
  */
-export function useLastSeen(urls: Urls): number | null {
+export function useLastSeen(urls: Urls, hold = false): number | null {
+  return useSeenCursor(urls, hold).seen;
+}
+
+/**
+ * The seen cursor and whether it is known yet: `seen` null and `known` true is a person who has
+ * never looked here (the home's first look), not one whose cursor is still loading.
+ */
+export function useSeenCursor(urls: Urls, hold = false): { seen: number | null; known: boolean } {
   const key = seenKey(urls);
-  const [seen, setSeen] = useState(() => atLoad.get(key)?.value ?? null);
+  const [state, setState] = useState(() => {
+    const c = cursors.get(key);
+    return { key, value: c?.loaded ? c.value : null, known: c?.loaded ?? false };
+  });
   useEffect(() => {
-    let entry = atLoad.get(key);
-    if (!entry) {
-      entry = { value: null, ready: loadSeen(urls) };
-      atLoad.set(key, entry);
-    }
+    const c = cursorOf(urls);
     let live = true;
-    void entry.ready.then((v) => live && setSeen(v));
+    const update = () => {
+      if (!live) return;
+      setState((s) =>
+        hold && s.known && s.key === key ? s : { key, value: c.value, known: true },
+      );
+    };
+    if (c.loaded) update();
+    else void c.ready.then(update);
+    c.listeners.add(update);
     return () => {
       live = false;
+      c.listeners.delete(update);
     };
-  }, [key, urls]);
-  return seen;
+  }, [key, urls, hold]);
+  return state.key === key
+    ? { seen: state.value, known: state.known }
+    : { seen: null, known: false };
 }
 
 const seenKey = (urls: Urls) => `${urls.owner}/${urls.slug}`;
 
-const atLoad = new Map<string, { value: number | null; ready: Promise<number | null> }>();
+/** A library's cursor as this page load knows it, and who follows it. */
+interface Cursor {
+  value: number | null;
+  loaded: boolean;
+  ready: Promise<number | null>;
+  listeners: Set<() => void>;
+}
+
+const cursors = new Map<string, Cursor>();
+
+function cursorOf(urls: Urls): Cursor {
+  const key = seenKey(urls);
+  let c = cursors.get(key);
+  if (!c) {
+    const fresh: Cursor = {
+      value: null,
+      loaded: false,
+      ready: Promise.resolve(null),
+      listeners: new Set(),
+    };
+    fresh.ready = loadSeen(urls).then((v) => {
+      // A move made while it loaded (the cursor never goes back) wins over what was read.
+      if (v !== null && (fresh.value === null || v > fresh.value)) fresh.value = v;
+      fresh.loaded = true;
+      return fresh.value;
+    });
+    cursors.set(key, fresh);
+    c = fresh;
+  }
+  return c;
+}
 
 /** The server's cursor; a cursor this browser kept before (local storage) is carried over once. */
 async function loadSeen(urls: Urls): Promise<number | null> {
@@ -389,8 +552,6 @@ async function loadSeen(urls: Urls): Promise<number | null> {
   } catch {
     // Storage off: nothing to carry over.
   }
-  const entry = atLoad.get(key);
-  if (entry) entry.value = seq;
   return seq;
 }
 
@@ -403,7 +564,15 @@ export const SEEN_EVENT = "tempra:seen";
 function sendSeen(urls: Urls, seq: number) {
   sent.set(seenKey(urls), seq);
   void api(urls.api("seen"), { method: "PUT", body: JSON.stringify({ seq }) })
-    .then(() => window.dispatchEvent(new Event(SEEN_EVENT)))
+    .then(() => {
+      // Every page following the cursor here hears the move.
+      const c = cursors.get(seenKey(urls));
+      if (c && (c.value === null || seq > c.value)) {
+        c.value = seq;
+        if (c.loaded) for (const fn of c.listeners) fn();
+      }
+      window.dispatchEvent(new Event(SEEN_EVENT));
+    })
     .catch(() => {
       // Offline: the next look sends it again.
       sent.delete(seenKey(urls));
@@ -417,6 +586,5 @@ function sendSeen(urls: Urls, seq: number) {
 export function markSeen(urls: Urls, seq: number) {
   if ((sent.get(seenKey(urls)) ?? -1) >= seq) return;
   sent.set(seenKey(urls), seq);
-  const read = atLoad.get(seenKey(urls))?.ready ?? Promise.resolve(null);
-  void read.then(() => sendSeen(urls, seq));
+  void cursorOf(urls).ready.then(() => sendSeen(urls, seq));
 }

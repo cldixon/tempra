@@ -669,10 +669,6 @@ async function browserRenders(
             .innerText();
           if (Number(count) !== n) throw new Error(`section ${t} counts ${count}, not ${n}`);
         }
-        // Take 3's ways in and "Since you last looked" are gone.
-        if ((await main.getByText("Since you last looked").count()) > 0) {
-          throw new Error("the home still shows Since you last looked");
-        }
         // The foot: the agents' housekeeping, linking the work queue, when there is any.
         const { housekeeping } = (await (
           await apiAs(devCookie, `/api/v1/libraries/${owner}/${slug}/needs`)
@@ -873,7 +869,7 @@ async function browserRenders(
         .waitFor({ timeout: 15_000 });
       // A row per concept in it, linking to the concept; not index.md in the reader.
       const inFolder = concepts.filter((c) => c.split("/").slice(0, -1).join("/") === folder);
-      const rows = main.locator(".folder-list a.folder-row:not(.folder-sub)");
+      const rows = main.locator(".folder-list a.folder-row:not(.folder-sub):not(.folder-file)");
       await rows.first().waitFor({ timeout: 10_000 });
       if ((await rows.count()) !== inFolder.length) {
         throw new Error(`${await rows.count()} rows for ${inFolder.length} concepts`);
@@ -970,6 +966,86 @@ async function browserRenders(
       await dialog.waitFor({ state: "hidden", timeout: 5000 });
       await agentDeletes(target);
     });
+    // TEMPRA-121: what changed since the person last looked, on the home's one line and in
+    // Recently changed; Activity marks only what is new, under one divider, and moves the cursor:
+    // back on the home (no reload) the line, the section's dot and the tree's dot are gone.
+    await step("home: since you last looked, Recently changed, and a second look", async () => {
+      const libPath = `/api/v1/libraries/${owner}/${slug}`;
+      const { seq: head } = (await (await apiAs(devCookie, `${libPath}/summary`)).json()) as {
+        seq: number;
+      };
+      const put = await apiAs(devCookie, `${libPath}/seen`, "PUT", { seq: head });
+      if (!put.ok) throw new Error(`PUT …/seen: ${put.status}`);
+      const top = folder.split("/")[0] || "";
+      const path = folder ? `${folder}/gate-since.md` : "gate-since.md";
+      const wrote = await fetch(`${libApi}/files/${enc(path)}`, {
+        method: "PUT",
+        headers: { ...bearer, "Content-Type": "text/markdown", "X-Note": "gate: since" },
+        body: "---\ntype: Note\ntitle: Gate since\ndescription: Written after the last look.\n---\nNew.\n",
+      });
+      if (!wrote.ok) throw new Error(`write: ${wrote.status}`);
+      // A fresh load: the write is past the cursor, and no longer arriving live.
+      await page.goto(`${lib}/`);
+      await home();
+      const since = main.locator(".home-since");
+      await since
+        .filter({ hasText: /^Since earlier today: .+ changed 1 page · See Activity$/ })
+        .waitFor({ timeout: 15_000 });
+      const recent = main.getByRole("region", { name: "Recently changed" });
+      await recent
+        .locator(".home-recent-row")
+        .first()
+        .getByRole("link", { name: "Gate since", exact: true })
+        .waitFor({ timeout: 10_000 });
+      const meta = await recent.locator(".home-recent-meta").first().innerText();
+      if (!/ · just now$/.test(meta)) throw new Error(`Recently changed says "${meta}"`);
+      const sectionDot = sections.locator(
+        `a.home-section-row[href="/${owner}/${slug}/${enc(top)}/"] .change-dot`,
+      );
+      // The tree's solid dot: on the file, or rolled up on a closed folder that holds it.
+      const treeDot = sidebar.locator('nav[aria-label="Files"] .change-dot');
+      if (top) await sectionDot.waitFor({ timeout: 5000 });
+      await treeDot.first().waitFor({ timeout: 5000 });
+      if (shots) await page.screenshot({ path: `${shots}/home-since.png` });
+      await markStay();
+      await sidebar
+        .getByRole("navigation", { name: "Views" })
+        .getByRole("link", { name: /^Activity/ })
+        .click();
+      await page.waitForURL(`${lib}/-/activity`);
+      // One divider under the new entry (older entries follow it); no dot on every row.
+      const divider = main.locator(".entry-divider");
+      await divider.waitFor({ timeout: 15_000 });
+      if ((await divider.count()) !== 1) throw new Error(`${await divider.count()} dividers`);
+      const above = await main.locator(".activity-day .entry").first().innerText();
+      if (!above.includes("Gate since")) throw new Error(`the newest entry reads "${above}"`);
+      if ((await main.locator(".activity-day .entry-side .change-dot").count()) > 0) {
+        throw new Error("Activity still draws a dot on each new entry");
+      }
+      if (shots) await page.screenshot({ path: `${shots}/activity-new.png` });
+      // The cursor moves (the server has it) ...
+      const deadline = Date.now() + 10_000;
+      for (;;) {
+        const { seq } = (await (await apiAs(devCookie, `${libPath}/seen`)).json()) as {
+          seq: number | null;
+        };
+        if (seq !== null && seq > head) break;
+        if (Date.now() > deadline) throw new Error(`the cursor stayed at ${seq}`);
+        await page.waitForTimeout(200);
+      }
+      // ... and the home, a second look in the same page load, has nothing new to say.
+      await sidebar
+        .getByRole("navigation", { name: "Views" })
+        .getByRole("link", { name: "Home", exact: true })
+        .click();
+      await page.waitForURL(`${lib}/`);
+      await home();
+      await since.waitFor({ state: "detached", timeout: 10_000 });
+      if (top) await sectionDot.waitFor({ state: "detached", timeout: 10_000 });
+      await treeDot.first().waitFor({ state: "detached", timeout: 10_000 });
+      if (!(await stayed())) throw new Error("moving between home and Activity reloaded the page");
+      await agentDeletes(path);
+    });
     await step("workspace: the quick switcher opens a concept", async () => {
       const first = concepts[0] ?? "";
       const meta = (await (
@@ -994,6 +1070,19 @@ async function browserRenders(
       await closes("Escape", () => box.press("Escape"));
       await closes("the same keys", () => page.keyboard.press("Control+k"));
       await closes("a click outside", () => page.mouse.click(5, 5));
+      // Nothing matches: "No results", once search inside pages has answered (F-12).
+      await page.keyboard.press("Control+k");
+      await box.waitFor({ timeout: 5000 });
+      await box.fill("zqxjvw");
+      await dialog.locator(".switcher-status", { hasText: /^No results$/ }).waitFor({
+        timeout: 10_000,
+      });
+      if ((await dialog.locator('[role="option"]').count()) > 0) {
+        throw new Error("options for a query that matches nothing");
+      }
+      if (shots) await page.screenshot({ path: `${shots}/search-none.png` });
+      await box.press("Escape");
+      await dialog.waitFor({ state: "hidden", timeout: 5000 });
       // The top bar's Search button opens it too.
       await page
         .locator(".topbar-brand")
@@ -1563,7 +1652,11 @@ async function browserRenders(
       await bellButton.click();
       const bell = page.locator(".menu-list.bell-pop");
       await bell.locator(`a.bell-item[href="${reviewHref}"]`).waitFor({ timeout: 5000 });
-      await bell.getByText("changed a page you verified").first().waitFor({ timeout: 5000 });
+      // In the Inbox row's words (F-14): the page, then the detail line.
+      await bell
+        .getByText(/^1 edit by .+ since you verified$/)
+        .first()
+        .waitFor({ timeout: 5000 });
       if (shots) await page.screenshot({ path: `${shots}/bell.png` });
       await bell.getByRole("button", { name: "Mark all read" }).click();
       await page.getByRole("button", { name: "Inbox", exact: true }).waitFor({ timeout: 10_000 });
@@ -2754,31 +2847,46 @@ async function freshAccountConnects(): Promise<string[]> {
     await page.getByRole("heading", { level: 1, name: "Welcome" }).waitFor({ timeout: 15_000 });
     await page.locator('input[name="handle"]').fill("newcomer");
     await page.locator('input[name="library"]').fill("notes");
+    // Both fields say they become the library's address, and how they may be written (H-12).
+    for (const id of ["welcome-handle-hint", "welcome-library-hint"]) {
+      const hint = await page.locator(`#${id}`).innerText();
+      if (!/address/.test(hint) || !/[Ll]owercase/.test(hint)) {
+        throw new Error(`the ${id} reads "${hint}"`);
+      }
+    }
     // No start-here note: the library starts empty, so its home shows how to connect an agent.
     await page.locator('input[name="starter"]').uncheck();
     await page.getByRole("button", { name: "Create" }).click();
     const lib = `${base}/newcomer/notes`;
-    await page.waitForURL(`${lib}/-/connect`);
-    await page.getByText("No agent has written yet").waitFor({ timeout: 15_000 });
     const cookie = await b.cookie();
-    // The empty library's home (take 4, board 31), open in a second tab while the agent
-    // connects: the steps with the MCP URL, waiting for the first write, Import a bundle.
-    const homeTab = await b.context.newPage();
-    const waiting = homeTab.locator("main.ws-main .empty-library");
-    await step("an empty library's home shows how to connect an agent", async () => {
-      await homeTab.goto(`${lib}/`);
-      await waiting.getByRole("heading", { name: "Nothing here yet" }).waitFor({ timeout: 15_000 });
-      await waiting.locator(".copy-field code", { hasText: `${base}/mcp` }).waitFor();
-      await waiting.locator(".empty-wait .change-dot.live").waitFor();
-      await waiting.getByText("Waiting for the first write").waitFor();
-      const imp = await homeTab
-        .getByRole("link", { name: "Import a bundle", exact: true })
-        .getAttribute("href");
-      if (imp !== "/newcomer/notes/-/transfer") throw new Error(`Import a bundle: ${imp}`);
-      if (process.env.GATE_SCREENSHOTS) {
-        await homeTab.screenshot({ path: `${process.env.GATE_SCREENSHOTS}/empty.png` });
-      }
-    });
+    // First run lands on the new library's home (take 4, board 31; H-12): the steps with the MCP
+    // URL, waiting for the first write, Import a bundle. The Connect page waits in a second tab.
+    const waiting = page.locator("main.ws-main .empty-library");
+    await step(
+      "first run lands on the empty library's home, which shows how to connect",
+      async () => {
+        await page.waitForURL(`${lib}/`);
+        await waiting
+          .getByRole("heading", { name: "Nothing here yet" })
+          .waitFor({ timeout: 15_000 });
+        await waiting.locator(".copy-field code", { hasText: `${base}/mcp` }).waitFor();
+        await waiting.locator(".empty-wait .change-dot.live").waitFor();
+        await waiting.getByText("Waiting for the first write").waitFor();
+        const imp = await page
+          .getByRole("link", { name: "Import a bundle", exact: true })
+          .getAttribute("href");
+        if (imp !== "/newcomer/notes/-/transfer") throw new Error(`Import a bundle: ${imp}`);
+        await page
+          .locator("section.ws-sidebar .tree-note", { hasText: "No pages yet." })
+          .waitFor({ timeout: 10_000 });
+        if (process.env.GATE_SCREENSHOTS) {
+          await page.screenshot({ path: `${process.env.GATE_SCREENSHOTS}/empty.png` });
+        }
+      },
+    );
+    const connectTab = await b.context.newPage();
+    await connectTab.goto(`${lib}/-/connect`);
+    await connectTab.getByText("No agent has written yet").waitFor({ timeout: 15_000 });
 
     const connected = await oauthConnect(cookie, {
       library: "notes",
@@ -2793,7 +2901,7 @@ async function freshAccountConnects(): Promise<string[]> {
     if (!(await mcpSmoke({ url: base, token: access_token }))) return ["MCP over OAuth"];
 
     await step("the open Connect page shows the agent's write, live", () =>
-      page.locator("#status", { hasText: /^Last agent write: / }).waitFor({ timeout: 5000 }),
+      connectTab.locator("#status", { hasText: /^Last agent write: / }).waitFor({ timeout: 5000 }),
     );
     await step("the empty library's home fills in live after the first write", async () => {
       // The smoke flow writes and tidies away its note, so the library is empty again: the
@@ -2804,7 +2912,7 @@ async function freshAccountConnects(): Promise<string[]> {
       if ((await waiting.locator(".change-dot.live").count()) > 0) {
         throw new Error("the home still waits for the first write");
       }
-      await homeTab.close();
+      await connectTab.close();
     });
     /** A link in the avatar's menu (take 2: the account's pages live there). */
     const accountLink = async (name: string) => {
@@ -2890,18 +2998,6 @@ async function freshAccountConnects(): Promise<string[]> {
 
     // Sharing in the app (tempra-dev: v2/sharing): invite from the Members tab; the invitee
     // accepts from Invitations; as a reader there is no Verify, at write there is.
-    await step("a note to share", async () => {
-      const put = await ui(
-        `${base}/api/v1/libraries/newcomer/notes/files/shared.md`,
-        {
-          method: "PUT",
-          headers: { Origin: base, "Content-Type": "text/markdown" },
-          body: "---\ntype: Note\ntitle: Shared note\ndescription: For the invited reader.\n---\nRead me.\n",
-        },
-        cookie,
-      );
-      if (put.status !== 200) throw new Error(`PUT shared.md: ${put.status}`);
-    });
     await step("invite a person from the Members tab", async () => {
       await page.goto(`${lib}/`);
       await libraryLink("Members");
@@ -2945,6 +3041,38 @@ async function freshAccountConnects(): Promise<string[]> {
       await page.locator(`.menu-list a.menu-lib[href="${href}"]`).waitFor({ timeout: 5000 });
       await page.keyboard.press("Escape");
       asInvitee = await context.cookies();
+    });
+    // H-11: a read member on an empty library is not offered what only writers can do.
+    await step("a read member's empty library says only that nothing is here yet", async () => {
+      const empty = page.locator("main.ws-main .empty-library");
+      await empty.getByRole("heading", { name: "Nothing here yet" }).waitFor({ timeout: 15_000 });
+      await empty.getByText("Pages appear here when an agent writes them.").waitFor();
+      for (const gone of [".copy-field", ".empty-steps"]) {
+        if ((await empty.locator(gone).count()) > 0) throw new Error(`a reader is shown ${gone}`);
+      }
+      for (const link of ["Import a bundle", "Other ways to connect"]) {
+        if ((await page.getByRole("link", { name: link }).count()) > 0) {
+          throw new Error(`a reader is offered ${link}`);
+        }
+      }
+      await page
+        .locator("section.ws-sidebar .tree-note", { hasText: "No pages yet." })
+        .waitFor({ timeout: 10_000 });
+      if (process.env.GATE_SCREENSHOTS) {
+        await page.screenshot({ path: `${process.env.GATE_SCREENSHOTS}/empty-reader.png` });
+      }
+    });
+    await step("a note to share", async () => {
+      const put = await ui(
+        `${base}/api/v1/libraries/newcomer/notes/files/shared.md`,
+        {
+          method: "PUT",
+          headers: { Origin: base, "Content-Type": "text/markdown" },
+          body: "---\ntype: Note\ntitle: Shared note\ndescription: For the invited reader.\n---\nRead me.\n",
+        },
+        cookie,
+      );
+      if (put.status !== 200) throw new Error(`PUT shared.md: ${put.status}`);
     });
     /** Opens the open concept in review mode from Properties, checking its state there. */
     const review = async () => {

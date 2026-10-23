@@ -45,7 +45,10 @@ function QuickSearch(props: {
   options: Option[];
   /** The option under the cursor (a library's file starts loading). */
   onSelect?(o: Option): void;
+  /** What shows when there are no options: a hint, "Searching…", "No results" or an error. */
   empty: string;
+  /** A quiet line under the options there are (search inside pages failed: titles only). */
+  note?: string | null;
 }) {
   const { open, onClose, options, onSelect } = props;
   const dialog = useRef<HTMLDialogElement>(null);
@@ -148,7 +151,9 @@ function QuickSearch(props: {
           </div>
         ))}
       </div>
-      {options.length === 0 && <p className="muted small">{props.empty}</p>}
+      <p className="muted small switcher-status" role="status">
+        {options.length === 0 ? props.empty : (props.note ?? "")}
+      </p>
     </dialog>
   );
 }
@@ -169,11 +174,15 @@ export function Switcher(props: {
   const { urls, open } = props;
   const [q, setQ] = useState("");
   const [found, setFound] = useState<Hit[]>([]);
+  // Search inside pages (F-12): "Searching…" until the answer, "No results" only after it, and
+  // a line when it failed (titles and paths still match from the index).
+  const [search, setSearch] = useState<"idle" | "searching" | "done" | "failed">("idle");
 
   useEffect(() => {
     if (open) {
       setQ("");
       setFound([]);
+      setSearch("idle");
     }
   }, [open]);
 
@@ -182,14 +191,24 @@ export function Switcher(props: {
     const words = q.trim().split(/\s+/).filter(Boolean);
     if (words.length === 0) {
       setFound([]);
+      setSearch("idle");
       return;
     }
     let live = true;
+    setSearch("searching");
     const t = setTimeout(() => {
       const query = words.map((w) => `${w.replace(/[*"]/g, "")}*`).join(" ");
       api<{ results: Hit[] }>(urls.api("search", { q: query, limit: 10 }))
-        .then((r) => live && setFound(r.results))
-        .catch(() => live && setFound([]));
+        .then((r) => {
+          if (!live) return;
+          setFound(r.results);
+          setSearch("done");
+        })
+        .catch(() => {
+          if (!live) return;
+          setFound([]);
+          setSearch("failed");
+        });
     }, 150);
     return () => {
       live = false;
@@ -241,7 +260,16 @@ export function Switcher(props: {
       onQuery={setQ}
       options={options}
       onSelect={select}
-      empty={needle ? "No page matches." : "Type a title or path."}
+      empty={
+        !needle
+          ? "Type a title or path."
+          : search === "failed"
+            ? "Search didn't answer. Try again in a moment."
+            : search === "done"
+              ? "No results"
+              : "Searching…"
+      }
+      note={search === "failed" ? "Search inside pages didn't answer; titles only." : null}
     />
   );
 }

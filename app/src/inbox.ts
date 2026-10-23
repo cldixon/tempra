@@ -317,32 +317,6 @@ export function itemQuote(i: InboxItem): string | null {
   return null;
 }
 
-/** The bell's one line: "Claude Code replied on Reader". */
-export function bellLine(
-  i: InboxItem,
-  titles: PageTitles = {},
-): { lead: string; on: string | null } {
-  const page = i.path ? itemTitle(i, titles) : null;
-  switch (i.kind) {
-    case "reply":
-      return { lead: `${i.who} replied on`, on: page };
-    case "mention":
-      return { lead: `${i.who} mentioned you on`, on: page };
-    case "thread":
-      return { lead: `${i.who} opened a thread on`, on: page };
-    case "verify":
-      return { lead: `${i.who} changed a page you verified,`, on: page };
-    case "stale":
-      return { lead: kindLabel(i), on: page };
-    case "invitation":
-      return { lead: `${i.who} invited you to`, on: itemTitle(i) };
-    case "access":
-      return { lead: `${i.who} changed your access to`, on: itemTitle(i) };
-    default:
-      return { lead: i.excerpt, on: page };
-  }
-}
-
 /** Where following the item leads: a thread opens in the page's Comments panel. */
 export function itemHref(i: InboxItem): string {
   if (i.thread && i.path && (i.kind === "reply" || i.kind === "mention" || i.kind === "thread")) {

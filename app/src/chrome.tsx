@@ -44,11 +44,13 @@ import {
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
 import { api, useLoad } from "./api";
 import {
-  bellLine,
   INBOX_EVENT,
   type InboxPage,
+  itemDetail,
   itemHref,
   itemLibrary,
+  itemTitle,
+  kindLabel,
   markRead,
   useAgentLabels,
   usePageTitles,
@@ -229,8 +231,9 @@ export function Menu(props: {
 
 /**
  * The bell (take 4, board 03; TEMPRA-116): the Inbox's unread count as a badge, and a popover of
- * the latest few items (one line each, the library, the time, an unread dot) with Mark all read
- * and Open inbox. The count follows the feed and every action on an item, as the Inbox does.
+ * the latest few items (the page, the Inbox row's detail line, the library, kind and time, an
+ * unread dot) with Mark all read and Open inbox; loading, a failure (with Retry) and nothing for
+ * the person each say so (F-14). The count follows the feed and every action on an item.
  */
 export function Bell() {
   const unread = useUnread();
@@ -245,7 +248,8 @@ export function Bell() {
   const now = Date.now();
   const raw = latest.state === "ready" ? latest.data.items : null;
   const labels = useAgentLabels(raw);
-  const titles = usePageTitles(raw);
+  // A reply names its page by path: titles from the library's outline, once the popover opens.
+  const titles = usePageTitles(open ? raw : null);
   const handle = useMe()?.handle ?? null;
   const items = withNames(raw ?? [], labels);
   return (
@@ -275,9 +279,19 @@ export function Bell() {
           </button>
         )}
       </div>
-      {open && items.length === 0 && <div className="bell-empty">Nothing for you</div>}
+      {open && latest.state === "loading" && <div className="bell-empty">Loading…</div>}
+      {open && latest.state === "error" && (
+        <div className="bell-empty" role="alert">
+          Couldn't load the Inbox.{" "}
+          <button type="button" data-stay onClick={reload}>
+            Retry
+          </button>
+        </div>
+      )}
+      {open && latest.state === "ready" && items.length === 0 && (
+        <div className="bell-empty">Nothing for you</div>
+      )}
       {items.map((i) => {
-        const line = bellLine(i, titles);
         return (
           <a
             key={i.id}
@@ -289,16 +303,11 @@ export function Bell() {
               {(itemLibrary(i, handle)[0] ?? "?").toUpperCase()}
             </span>
             <span className="bell-item-what">
-              {line.lead}
-              {line.on && (
-                <>
-                  {" "}
-                  <strong>{line.on}</strong>
-                </>
-              )}
+              <strong>{itemTitle(i, titles)}</strong>
+              <span className="bell-item-detail">{itemDetail(i, now)}</span>
             </span>
             <span className="bell-item-where">
-              {itemLibrary(i, handle)} · <Moment ts={i.created} now={now} />
+              {itemLibrary(i, handle)} · {kindLabel(i, now)} · <Moment ts={i.created} now={now} />
             </span>
             {i.read_at === null && (
               <>

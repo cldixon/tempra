@@ -21,17 +21,22 @@ const ev = (seq: number, path = `p${seq}.md`): FeedEvent => ({
 });
 
 /** A feed whose ledger holds events 1..head; `read` can be held to stage races. */
-function harness(fallback?: ConstructorParameters<typeof LibraryFeed>[3]) {
+function harness(
+  fallback?: ConstructorParameters<typeof LibraryFeed>[3],
+  hidden: () => boolean = () => false,
+) {
   const ledger: FeedEvent[] = [];
   const holds: (() => void)[] = [];
   let hold = false;
-  let failNext = false;
+  let failing = 0;
+  let reads = 0;
   // A read sees the ledger as it was when the request was served (its start).
   const read = async (_urls: Urls, since: number) => {
+    reads++;
     const served = ledger.filter((e) => e.seq > since);
     if (hold) await new Promise<void>((r) => holds.push(r));
-    if (failNext) {
-      failNext = false;
+    if (failing > 0) {
+      failing--;
       throw new Error("offline");
     }
     return served;
@@ -46,6 +51,7 @@ function harness(fallback?: ConstructorParameters<typeof LibraryFeed>[3]) {
     },
     read,
     fallback,
+    hidden,
   );
   const heard: number[] = [];
   let resets = 0;
@@ -72,9 +78,10 @@ function harness(fallback?: ConstructorParameters<typeof LibraryFeed>[3]) {
       hold = on;
       if (!on) for (const r of holds.splice(0)) r();
     },
-    failNext: () => {
-      failNext = true;
+    failNext: (times = 1) => {
+      failing = times;
     },
+    reads: () => reads,
   };
 }
 
@@ -189,6 +196,74 @@ describe("LibraryFeed", () => {
     expect(h.heard).toEqual([4, 5, 6]);
     h.send({ type: "events", head: 7, events: [ev(7)] });
     expect(h.heard).toEqual([4, 5, 6, 7]);
+    h.sub.close();
+  });
+
+  // F-19: offline, the catch-up waits longer each time, not every 2 s forever.
+  test("a failing catch-up backs off, doubling, and says it is reconnecting", async () => {
+    const h = harness({ catchUpMs: 20, maxCatchUpMs: 1000 });
+    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    const statuses: string[] = [];
+    h.feed.watch((s) => statuses.push(s));
+    h.commit(3);
+    h.send({ type: "hello", head: 3 });
+    h.commit(2);
+    h.failNext(3);
+    // Read at 0 (fails), then 20, 60 (fail), then 140 (served).
+    h.send({ type: "events", head: 5, events: [ev(5)] });
+    await wait(45);
+    expect(h.reads()).toBe(2);
+    expect(h.feed.status).toBe("reconnecting");
+    await wait(50);
+    expect(h.reads()).toBe(3);
+    expect(h.heard).toEqual([]);
+    await wait(80);
+    expect(h.reads()).toBe(4);
+    expect(h.heard).toEqual([4, 5]);
+    expect(statuses).toEqual(["reconnecting", "live"]);
+    h.sub.close();
+  });
+
+  test("a hidden tab holds its retries until it shows again", async () => {
+    let hidden = true;
+    const h = harness({ catchUpMs: 20 }, () => hidden);
+    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    h.commit(3);
+    h.send({ type: "hello", head: 3 });
+    h.commit(2);
+    h.failNext();
+    h.send({ type: "events", head: 5, events: [ev(5)] });
+    await wait(80);
+    // Due at 20 ms, but the tab is hidden: nothing read, nothing spent.
+    expect(h.reads()).toBe(1);
+    expect(h.heard).toEqual([]);
+    hidden = false;
+    h.feed.wake();
+    await h.tick();
+    expect(h.reads()).toBe(2);
+    expect(h.heard).toEqual([4, 5]);
+    h.sub.close();
+  });
+
+  test("a socket that drops reconnects with backoff, and the feed recovers what it missed", async () => {
+    const h = harness();
+    const wait = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    h.commit(3);
+    h.feed.sync(h.sub, 3);
+    h.send({ type: "hello", head: 3 });
+    await h.tick();
+    // The dev server restarts: the socket closes, and two writes commit meanwhile.
+    h.sockets[0]?.onclose?.({ code: 1006 } as CloseEvent);
+    expect(h.feed.status).toBe("reconnecting");
+    h.commit(2);
+    await wait(1100);
+    expect(h.sockets).toHaveLength(2);
+    // The new socket says hello at the new head: the gap is read from the ledger.
+    h.send({ type: "hello", head: 5 });
+    await h.tick();
+    await h.tick();
+    expect(h.heard).toEqual([4, 5]);
+    expect(h.feed.status).toBe("live");
     h.sub.close();
   });
 });
