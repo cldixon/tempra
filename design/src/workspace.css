@@ -291,6 +291,8 @@ body.ground {
 }
 
 .compose-body .compose-title {
+  font-family: var(--tempra-font-display);
+  font-variation-settings: var(--tempra-font-display-settings);
   font-size: var(--tempra-text-h2);
   font-weight: var(--tempra-weight-medium);
   line-height: var(--tempra-leading-tight);

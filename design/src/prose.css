@@ -1,20 +1,20 @@
 /*
  * How a rendered concept reads (tempra-dev: app/reader, Reading typography): the body of a
  * concept, in the app now and wherever concepts are shown later (the site, inline MCP Apps views).
- * Scoped to .prose. A serif at 17px, about 66 characters to the line, spacing in em so the rhythm
+ * Scoped to .prose. The app's sans at 17px, about 66 characters to the line, spacing in em so the rhythm
  * scales with the text. Greys, type, spacing and rules only until the palette (TEMPRA-1).
  */
 .prose {
   max-width: var(--tempra-measure-reader);
   color: var(--tempra-color-text);
-  font-family: var(--tempra-font-reader);
+  font-family: var(--tempra-font-text);
   font-size: var(--tempra-text-reader);
   line-height: var(--tempra-leading-reader);
   font-kerning: normal;
   font-optical-sizing: auto;
   font-variant-ligatures: common-ligatures;
-  /* Figures that sit in running text; tables and markers switch to lining, tabular ones. */
-  font-variant-numeric: oldstyle-nums proportional-nums;
+  /* Lining figures in running text; tables and markers switch to tabular ones. */
+  font-variant-numeric: lining-nums proportional-nums;
   /* Quotes and stops hang into the margin where the browser can (Safari). */
   hanging-punctuation: first allow-end;
   /* A long URL or identifier wraps rather than pushing the column wider; words never break. */
@@ -65,7 +65,6 @@
 .prose h5,
 .prose h6 {
   margin: 1.9em 0 0.5em;
-  font-family: var(--tempra-font-reader);
   font-variant-numeric: lining-nums proportional-nums;
   line-height: var(--tempra-leading-tight);
   letter-spacing: -0.005em;
@@ -76,12 +75,16 @@
 }
 
 .prose h1 {
+  font-family: var(--tempra-font-display);
+  font-variation-settings: var(--tempra-font-display-settings);
   font-size: 1.65em;
   font-weight: var(--tempra-weight-medium);
   letter-spacing: -0.012em;
 }
 
 .prose h2 {
+  font-family: var(--tempra-font-display);
+  font-variation-settings: var(--tempra-font-display-settings);
   font-size: 1.35em;
   font-weight: var(--tempra-weight-medium);
   letter-spacing: -0.01em;
@@ -249,7 +252,7 @@
   top: 10px;
   left: 18px;
   color: var(--tempra-color-muted);
-  font-family: var(--tempra-font-body);
+  font-family: var(--tempra-font-text);
   font-size: var(--tempra-text-label);
   letter-spacing: 0.04em;
   text-transform: lowercase;
@@ -277,7 +280,7 @@
 .prose table {
   width: 100%;
   border-collapse: collapse;
-  font-family: var(--tempra-font-body);
+  font-family: var(--tempra-font-text);
   font-size: 0.82em;
   font-variant-numeric: lining-nums tabular-nums;
   line-height: var(--tempra-line-height);
@@ -390,7 +393,7 @@
 .prose figcaption {
   margin-top: 8px;
   color: var(--tempra-color-muted);
-  font-family: var(--tempra-font-body);
+  font-family: var(--tempra-font-text);
   font-size: var(--tempra-text-meta);
   line-height: var(--tempra-line-height);
   text-wrap: pretty;
@@ -415,7 +418,7 @@
   border-radius: var(--tempra-radius-box);
   background: var(--tempra-color-ground);
   color: var(--tempra-color-muted);
-  font-family: var(--tempra-font-body);
+  font-family: var(--tempra-font-text);
   font-size: var(--tempra-text-meta);
   font-style: normal;
   line-height: var(--tempra-line-height);

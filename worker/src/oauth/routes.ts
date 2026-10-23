@@ -140,7 +140,7 @@ function html(body: string, headers?: Headers, status = 200): Response {
   // Approving redirects to the app's own address, which the form's action must be allowed.
   h.set(
     "Content-Security-Policy",
-    "default-src 'none'; style-src 'self'; img-src 'self'; form-action 'self' https: http://localhost:* http://127.0.0.1:*; frame-ancestors 'none'; base-uri 'none'",
+    "default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; form-action 'self' https: http://localhost:* http://127.0.0.1:*; frame-ancestors 'none'; base-uri 'none'",
   );
   return new Response(body, { status, headers: h });
 }

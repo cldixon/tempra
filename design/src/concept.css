@@ -225,8 +225,9 @@
 }
 
 .doc-title {
+  font-family: var(--tempra-font-display);
+  font-variation-settings: var(--tempra-font-display-settings);
   margin: 0 0 12px;
-  font-family: var(--tempra-font-reader);
   font-size: var(--tempra-text-title);
   font-weight: var(--tempra-weight-medium);
   line-height: var(--tempra-leading-tight);
@@ -236,7 +237,6 @@
 .doc-tagline {
   margin: 0;
   color: var(--tempra-color-muted);
-  font-family: var(--tempra-font-reader);
   font-size: var(--tempra-text-reader);
   line-height: var(--tempra-line-height);
 }

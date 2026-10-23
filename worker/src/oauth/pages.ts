@@ -166,7 +166,7 @@ ${opts.error ? alertNotice(ERROR_ID, opts.error.message) : ""}
 export const PAGE_HEADERS: Readonly<Record<string, string>> = {
   "Content-Type": "text/html; charset=utf-8",
   "Content-Security-Policy":
-    "default-src 'none'; style-src 'self'; img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
+    "default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'",
   "X-Frame-Options": "DENY",
   "X-Content-Type-Options": "nosniff",
   "X-Robots-Tag": "noindex",
