@@ -2345,7 +2345,8 @@ async function browserRenders(
         const ringOn = async (what: string) => {
           const ring = await page.evaluate<string>(`(() => {
             const el = document.activeElement;
-            const s = getComputedStyle(el);
+            // The filter field draws its ring on its pill (:focus-within), the rest on themselves.
+            const s = getComputedStyle(el.closest(".activity-find") || el);
             return el.matches(":focus-visible") + " " + s.outlineStyle + " " + s.outlineWidth;
           })()`);
           if (ring !== "true solid 2px") throw new Error(`${what}'s focus ring: ${ring}`);
@@ -2353,7 +2354,14 @@ async function browserRenders(
         await main.getByLabel("Filter by path or note").focus();
         await ringOn("a text field");
         if (shots) await page.screenshot({ path: `${shots}/focus-field.png` });
-        await main.getByRole("link", { name: "Download", exact: false }).first().focus();
+        // By keyboard (a click or a script does not show the ring): Tab on to the next pill.
+        for (let i = 0; i < 6; i++) {
+          await page.keyboard.press("Tab");
+          const pill = await page.evaluate<boolean>(
+            `!!document.activeElement?.matches("button, a.button")`,
+          );
+          if (pill) break;
+        }
         await ringOn("a button");
         if (shots) await page.screenshot({ path: `${shots}/focus-button.png` });
         await page.evaluate("document.activeElement?.blur()");
