@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { SESSION_COOKIE } from "../src/session";
 import { ORIGIN, setup } from "./harness";
 import {
   type App,
@@ -111,13 +112,51 @@ describe("OAuth for MCP clients", () => {
     expect((await call("start")).text).toContain("Library owner/team-notes");
   });
 
+  test("consent says what approving creates, and offers to sign in as someone else (V-9)", async () => {
+    const s = setup();
+    // An account with no libraries yet: approving creates one named notes.
+    const fresh = await s.accounts.user("fresh@example.com");
+    const cookie = `${SESSION_COOKIE}=${s.sessionFor(fresh.id)}`;
+    const asFresh: App = {
+      request: (input, init) => {
+        const headers = new Headers(init?.headers);
+        headers.set("Cookie", [headers.get("Cookie"), cookie].filter(Boolean).join("; "));
+        return s.anon.request(input, { ...init, headers });
+      },
+    };
+    const flow = await begin(asFresh, await register(s.app));
+    expect(flow.html).toContain("Connecting creates the library <strong>notes</strong>.");
+    expect(flow.html).not.toContain("Name in the ledger");
+    // The connection's name sits folded under More options, in plain words.
+    expect(flow.html).toContain("<summary>More options</summary>");
+    expect(flow.html).toContain("Connection name");
+    // Not you? Sign out, and come back to this same consent once signed in again.
+    expect(flow.html).toContain("Not you? Sign out");
+    const out = await asFresh.request("/sign-out", {
+      method: "POST",
+      headers: { Origin: ORIGIN },
+      body: new URLSearchParams({ next: flow.url }),
+      redirect: "manual",
+    });
+    expect(out.status).toBe(303);
+    expect(out.headers.get("Location")).toBe(`/sign-in?next=${encodeURIComponent(flow.url)}`);
+    // Someone with libraries is not told one will be created.
+    const owner = await begin(s.app, await register(s.app));
+    expect(owner.html).not.toContain("Connecting creates the library");
+  });
+
   test("invalid choices re-show the page; cancelling returns access_denied", async () => {
     const { app } = setup();
     const clientId = await register(app);
     const flow = await begin(app, clientId);
     const bad = await submit(app, flow, { ...approve, actor: "human:me" });
     expect(bad.status).toBe(400);
-    expect(await bad.text()).toContain("The ledger name must look like app/label");
+    const page = await bad.text();
+    expect(page).toContain("The connection name is two parts joined by a slash");
+    // Announced, and tied to its field (V-10); the folded options open to show it.
+    expect(page).toContain('id="consent-error" role="alert"');
+    expect(page).toMatch(/name="actor"[^>]*aria-invalid="true" aria-describedby="consent-error"/);
+    expect(page).toContain("<details open>");
     // The same handle still works after the error.
     const denied = await submit(app, flow, { decision: "deny" });
     expect(denied.status).toBe(302);
@@ -287,7 +326,7 @@ describe("OAuth for MCP clients", () => {
     // Their own demo by slug; the owner's as owner/slug, marked shared with their role.
     expect(flow.html).toContain('name="library" value="demo"');
     expect(flow.html).toContain('name="library" value="owner/demo"');
-    expect(flow.html).toContain("shared with you, write");
+    expect(flow.html).toContain("shared with you, read and write");
     const done = await submit(friend.app, flow, {
       ...approve,
       libraries: "selected",
@@ -496,11 +535,21 @@ describe("OAuth for MCP clients", () => {
       const readFlow = await begin(app, clientId, "okf:read");
       expect(readFlow.html).not.toContain("create_libraries");
 
+      // Only with read and write and all tools: asked for with Read only or File tools only, the
+      // page comes back saying so, the box marked (V-9), rather than dropping it quietly.
+      for (const wrong of [{ access: "read" }, { tiers: "files" }]) {
+        const again = await begin(app, clientId);
+        const refused = await submit(app, again, { ...creates, ...wrong });
+        expect(refused.status).toBe(400);
+        const html = await refused.text();
+        expect(html).toContain("Create libraries needs Read and write and All tools");
+        expect(html).toMatch(/name="create_libraries"[^>]*aria-invalid="true"/);
+      }
+
       const on = await connectApp(app, creates);
       const off = await connectApp(app, approve);
-      // Kept only with read and write and all tools, whatever the form says.
-      const files = await connectApp(app, { ...creates, tiers: "files" });
-      const read = await connectApp(app, { ...creates, access: "read" });
+      const files = await connectApp(app, { ...approve, tiers: "files" });
+      const read = await connectApp(app, { ...approve, access: "read" });
       const listed = (await apps(app)) as unknown as { actor: string; create_libraries: boolean }[];
       expect(listed.map((a) => a.create_libraries).sort()).toEqual([false, false, false, true]);
 

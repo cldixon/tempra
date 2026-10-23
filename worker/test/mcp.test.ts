@@ -335,7 +335,7 @@ describe("MCP server", () => {
       expect(r2.text).toContain("create_not_allowed");
       expect(r2.text).toContain("reconnect");
 
-      const files = await connectApp(s.app, { ...creator, tiers: "files" });
+      const files = await connectApp(s.app, { ...without, tiers: "files" });
       expect((await files.call("create_library", { slug: "x" })).text).toContain(
         "create_not_allowed",
       );

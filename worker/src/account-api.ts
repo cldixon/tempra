@@ -3,7 +3,13 @@ import type { Context, Hono } from "hono";
 import { checkTheme, type User } from "./accounts";
 import type { Deps } from "./app";
 import { deleteAccount } from "./lifecycle";
-import { clearedSessionCookie, readCookie, SESSION_COOKIE, sessionId } from "./session";
+import {
+  clearedSessionCookie,
+  LINK_MINUTES,
+  readCookie,
+  SESSION_COOKIE,
+  sessionId,
+} from "./session";
 import { sendLink } from "./signin";
 import { OkfError } from "./store/errors";
 
@@ -91,7 +97,9 @@ export function registerAccountApi(
       to: email,
       link,
       subject: "Confirm your new Tempra email",
-      text: `Open this link to make this your Tempra sign-in email:\n\n${link}\n\nIt works once, within 15 minutes. If you did not ask for it, ignore this email.\n`,
+      // The link works only signed in as the account that asked (V-3): say which, so the
+      // person does not sign in with this new address and make a second account.
+      text: `Open this link to make this your Tempra sign-in email:\n\n${link}\n\nSign in with ${user.email} first: the link works only in that account. It works once, within ${LINK_MINUTES} minutes. If you did not ask for it, ignore this email.\n`,
     });
     if (sent === null)
       throw new OkfError(502, "mail_failed", "Could not send email. Try again later.");

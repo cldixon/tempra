@@ -31,6 +31,11 @@ export interface Sessions {
     /** For an email change: only this account's link is used up. */
     user?: string,
   ): Promise<{ email: string; user: string | null } | null>;
+  /** A live link of that purpose without using it up: its email and account, or null. */
+  peekLink(
+    secret: string,
+    purpose: LinkPurpose,
+  ): Promise<{ email: string; user: string | null } | null>;
   /** Starts a session; returns the cookie's secret. */
   create(userId: string, userAgent: string | null): Promise<string>;
   /** The signed-in user for a cookie's secret, or null. */
@@ -114,6 +119,17 @@ export function d1Sessions(db: D1Database, now = () => Date.now()): Sessions {
            RETURNING email, user`,
         )
         .bind(t, hash(secret), purpose, user ?? null)
+        .first<{ email: string; user: string | null }>();
+      return row ? { email: row.email, user: row.user } : null;
+    },
+
+    async peekLink(secret, purpose) {
+      const row = await db
+        .prepare(
+          `SELECT email, user FROM sign_in_links
+           WHERE hash = ?1 AND purpose = ?2 AND used IS NULL AND expires > ?3`,
+        )
+        .bind(hash(secret), purpose, iso(now()))
         .first<{ email: string; user: string | null }>();
       return row ? { email: row.email, user: row.user } : null;
     },

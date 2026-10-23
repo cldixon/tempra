@@ -17,7 +17,7 @@ import { notificationsOf, registerInboxApi } from "./inbox-api";
 import { registerLegalRoutes } from "./legal";
 import { deleteLibrary } from "./lifecycle";
 import { type Notifications, notifying, postComment } from "./notify";
-import { messagePage } from "./oauth/pages";
+import { messagePage, wantsPage } from "./oauth/pages";
 import { type GrantProps, registerAppRoutes } from "./oauth/routes";
 import { splitFrontmatter } from "./okf/concept";
 import { normalizePath, underPrefix } from "./okf/paths";
@@ -265,13 +265,34 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
         res.headers.set("Retry-After", String(RETRY_AFTER_S));
         return res;
       }
+      if (wantsPage(c.req.raw)) {
+        const title =
+          err.status === 404
+            ? "Not found"
+            : err.status === 403
+              ? "Not allowed"
+              : "Something went wrong";
+        return messagePage(title, err.message, err.status);
+      }
       return c.json(err.toJSON(), err.status as 400);
     }
     console.error(err);
+    // A person's page load gets a page, never raw JSON (V-1); the API and MCP keep JSON.
+    if (wantsPage(c.req.raw)) {
+      return messagePage(
+        "Something went wrong",
+        "Tempra could not answer this page. Try again in a moment.",
+        500,
+      );
+    }
     return c.json({ error: "Internal error.", code: "internal" }, 500);
   });
 
-  app.notFound((c) => c.json({ error: "No such route.", code: "no_route" }, 404));
+  app.notFound((c) =>
+    wantsPage(c.req.raw)
+      ? messagePage("Not found", "There is no page at this address.", 404)
+      : c.json({ error: "No such route.", code: "no_route" }, 404),
+  );
 
   // Spec: Observability. Public, and says only which dependency failed.
   app.get("/healthz", async (c) => {

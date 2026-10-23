@@ -21,12 +21,17 @@ const ask = (s: S, email: string) =>
 /** Lets work run after the response, as waitUntil would. */
 const settle = () => new Promise((r) => setTimeout(r, 10));
 
-const decide = (client: S["app"], email: string, decision: string, origin = ORIGIN) =>
-  client.request("/waitlist", {
+/** Decides, then follows the redirect back to the list (post, redirect, get), as a browser does. */
+const decide = async (client: S["app"], email: string, decision: string, origin = ORIGIN) => {
+  const r = await client.request("/waitlist", {
     method: "POST",
     headers: { Origin: origin },
     body: new URLSearchParams({ email, decision }),
   });
+  if (r.status !== 303) return r;
+  expect(r.headers.get("Location")).toStartWith("/waitlist?");
+  return client.request(r.headers.get("Location") ?? "");
+};
 
 describe("the waitlist (v2 spec: Accounts and sign-in, The waitlist)", () => {
   test("the sign-in page frames invite mode as a private beta", async () => {
@@ -74,6 +79,8 @@ describe("the waitlist (v2 spec: Accounts and sign-in, The waitlist)", () => {
     const html = await page.text();
     expect(html).toContain("friend@example.com");
     expect(html).toContain('value="invited"');
+    // Each button names whom it decides on, for screen readers (V-12).
+    expect(html).toContain('aria-label="Approve friend@example.com"');
     const { app: other } = await s.stranger();
     expect((await other.request("/waitlist")).status).toBe(404);
     expect((await decide(other, "friend@example.com", "invited")).status).toBe(404);

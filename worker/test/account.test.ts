@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { sha256Hex } from "../src/okf/hash";
-import { SESSION_COOKIE } from "../src/session";
+import { LINK_MINUTES, SESSION_COOKIE } from "../src/session";
 import { ORIGIN, setup, UI } from "./harness";
 
 type S = ReturnType<typeof setup>;
@@ -377,8 +377,19 @@ describe("changing the email (v2 spec: A3)", () => {
     const stranger = await s.stranger();
     expect((await post(stranger.app, "/account/email/confirm", { t })).status).toBe(400);
 
+    // The mail says which account to sign in with first (V-3).
+    expect(mail?.text).toContain("Sign in with owner@example.com first");
+    expect(mail?.text).toContain(`within ${LINK_MINUTES} minutes`);
     const page = await text(s.app.request(`/account/email/confirm?t=${t}`));
     expect(page).toContain("Confirm your new email");
+    expect(page).toContain("<strong>new@example.org</strong>");
+    expect(page).toContain('href="/account">Back to Account</a>');
+    // Signed in as another account, the page says so and offers to sign out, back to the link.
+    const other = await stranger.app.request(`/account/email/confirm?t=${t}`);
+    expect(other.status).toBe(403);
+    const otherHtml = await other.text();
+    expect(otherHtml).toContain("This link is for another account");
+    expect(otherHtml).not.toContain("owner@example.com");
     // A post from another site is refused, and the link is not spent by it.
     const forged = await s.app.request("/account/email/confirm", {
       method: "POST",
@@ -401,6 +412,35 @@ describe("changing the email (v2 spec: A3)", () => {
     ).toBe("new@example.org");
     // A used link is spent.
     expect((await post(s.app, "/account/email/confirm", { t })).status).toBe(400);
+  });
+
+  test("opened signed out, the link says to sign in with the current address first (V-3)", async () => {
+    const s = setup();
+    await call(s.app, "/api/v1/account/email", "POST", { email: "new@example.org" });
+    const link = linkIn(s.outbox.at(-1)?.text ?? "");
+    const self = link.pathname + link.search;
+    const r = await s.anon.request(self, { redirect: "manual" });
+    // A page, not a bare redirect to sign-in, where the new address would make a new account.
+    expect(r.status).toBe(200);
+    const html = await r.text();
+    expect(html).toContain("<h1>Sign in first</h1>");
+    expect(html).toContain("<strong>new@example.org</strong>");
+    expect(html).toContain("not the new one");
+    // Never the account's current address to someone not signed in to it.
+    expect(html).not.toContain("owner@example.com");
+    // Sign-in comes back to the link.
+    expect(html).toContain(
+      `href="/sign-in?next=${encodeURIComponent(self).replace(/&/g, "&#38;")}"`,
+    );
+    // Only looking: the link still confirms once signed in.
+    const done = await post(s.app, "/account/email/confirm", {
+      t: link.searchParams.get("t") ?? "",
+    });
+    expect(done.status).toBe(303);
+    // A used or unknown link says so, signed in or not, with a way on.
+    const used = await s.anon.request(self);
+    expect(used.status).toBe(400);
+    expect(await used.text()).toContain("expired or was already used");
   });
 
   test("an address another account uses cannot be taken", async () => {

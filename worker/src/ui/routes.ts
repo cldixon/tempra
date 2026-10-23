@@ -3,13 +3,13 @@ import type { User } from "../accounts";
 import type { Deps } from "../app";
 import type { LibraryClient } from "../client";
 import { isRouteName } from "../handles";
+import { esc, messagePage, type Onward, PAGE_HEADERS, page } from "../oauth/pages";
 import { basename, dirname } from "../okf/paths";
 import { fromThisSite } from "../origin";
-
+import { LINK_MINUTES, readCookie, SESSION_COOKIE } from "../session";
 import { signedIn } from "../signin";
 import { OkfError } from "../store/errors";
 import { type Authorized, authorizeLibrary, requireOwner } from "../tenancy";
-import { esc, htmlResponse, layout } from "./layout";
 import { spaShell } from "./spa";
 import { Urls } from "./urls";
 
@@ -65,16 +65,10 @@ function requireSameOrigin(c: C) {
   }
 }
 
-function errorPage(user: User | null, status: number, message: string): Response {
-  const title = status === 404 ? "Not found" : "Something went wrong";
-  return htmlResponse(
-    layout({
-      title,
-      user: user?.email ?? "",
-      body: `<h1>${esc(title)}</h1><p>${esc(message)}</p><p><a href="/">Libraries</a></p>`,
-    }),
-    status,
-  );
+function errorPage(status: number, message: string, onward?: Onward): Response {
+  const title =
+    status === 404 ? "Not found" : status === 403 ? "Not allowed" : "Something went wrong";
+  return messagePage(title, message, status, onward);
 }
 
 /**
@@ -101,7 +95,7 @@ function ui(deps: (env: Cloudflare.Env) => Deps, handler: (p: Page) => Promise<R
             return c.redirect(`/${encodeURIComponent(now)}${rest}${url.search}`, 301);
           }
         }
-        return errorPage(user, e.status, e.message);
+        return errorPage(e.status, e.message);
       }
       throw e;
     }
@@ -136,12 +130,62 @@ async function openLibrary(p: Page): Promise<{ urls: Urls; lib: LibraryClient; r
   return { urls: new Urls(ref.owner, ref.slug, atParam(p.c)), lib, ref };
 }
 
-function emailConfirmPage(t: string): string {
-  return `<h1>Confirm your new email</h1>
+const ACCOUNT: Onward = { href: "/account", label: "Go to your account" };
+
+/**
+ * The email-change link's page (V-3). The link works only in the session of the account that
+ * asked for it, so opened signed out or as someone else it says so, and how to go on, before the
+ * person signs in (or up) with the new address by mistake. It shows the new address, which the
+ * link's holder was sent, and never the account's current one unless that account is signed in.
+ */
+function emailChangePage(
+  t: string,
+  link: { email: string; user: string | null } | null,
+  user: User | null,
+  self: string,
+): Response {
+  if (!link) {
+    return serverPage(
+      "Link expired",
+      `<h1>This link has expired or was already used</h1>
+<p>Email links work once, within ${LINK_MINUTES} minutes. Ask for a new one from your account.</p>
+<p><a href="/account">Go to your account</a></p>`,
+      400,
+    );
+  }
+  const next = encodeURIComponent(self);
+  if (!user) {
+    return serverPage(
+      "Sign in first",
+      `<h1>Sign in first</h1>
+<p>This link makes <strong>${esc(link.email)}</strong> the email a Tempra account signs in with. Sign in with the email that account uses now, not the new one, and you come back here to confirm.</p>
+<p><a class="button primary" href="/sign-in?next=${esc(next)}">Sign in</a></p>`,
+    );
+  }
+  if (link.user !== user.id) {
+    return serverPage(
+      "Another account",
+      `<h1>This link is for another account</h1>
+<p>You are signed in as ${esc(user.email)}. Sign out, then sign in with the email the other account uses now, not ${esc(link.email)}.</p>
+<form method="post" action="/sign-out"><input type="hidden" name="next" value="${esc(self)}">
+<p><button class="primary" type="submit">Sign out</button></p></form>`,
+      403,
+    );
+  }
+  return serverPage(
+    "Confirm email",
+    `<h1>Confirm your new email</h1>
+<p>Sign in with <strong>${esc(link.email)}</strong> from now on, in place of ${esc(user.email)}.</p>
 <form method="post" action="/account/email/confirm">
 <input type="hidden" name="t" value="${esc(t)}">
-<p><button class="primary" type="submit">Confirm</button></p>
-</form>`;
+<div class="actions"><button class="primary" type="submit">Confirm</button><a class="button" href="/account">Back to Account</a></div>
+</form>`,
+  );
+}
+
+/** A server page with the strict headers (oauth/pages.ts). */
+function serverPage(title: string, body: string, status = 200): Response {
+  return new Response(page(title, body), { status, headers: { ...PAGE_HEADERS } });
 }
 
 /**
@@ -331,15 +375,19 @@ export function registerUiRoutes<E extends AppEnv>(
 
   // Changing the email (v2 spec: Accounts, A3): the link mailed to the new address lands here, a
   // server page like sign-in's, and a same-site post confirms it.
-  get("/account/email/confirm", async (p) =>
-    htmlResponse(
-      layout({
-        title: "Confirm email",
-        user: p.user.email,
-        body: emailConfirmPage(p.c.req.query("t") ?? ""),
-      }),
-    ),
-  );
+  // Opened signed out it does not send the person to sign-in blindly (V-3): it says which
+  // account to sign in with first. Only looking: the link is used up by the post.
+  app.get("/account/email/confirm", async (c) => {
+    const d = deps(c.env);
+    const t = c.req.query("t") ?? "";
+    const secret = readCookie(c.req.raw, SESSION_COOKIE);
+    const [link, user] = await Promise.all([
+      t ? d.sessions.peekLink(t, "email-change") : null,
+      secret ? d.sessions.user(secret) : null,
+    ]);
+    const url = new URL(c.req.url);
+    return emailChangePage(t, link, user, url.pathname + url.search);
+  });
 
   app.post(
     "/account/email/confirm",
@@ -348,7 +396,11 @@ export function registerUiRoutes<E extends AppEnv>(
       const t = String((await p.c.req.formData()).get("t") ?? "");
       const link = await p.deps.sessions.consumeLink(t, "email-change", p.user.id);
       if (!link || link.user !== p.user.id) {
-        throw new OkfError(400, "bad_link", "That link has expired or is not for this account.");
+        return errorPage(
+          400,
+          "That link has expired, was already used, or is for another account.",
+          ACCOUNT,
+        );
       }
       const old = p.user.email;
       await p.deps.accounts.setEmail(p.user.id, link.email);
