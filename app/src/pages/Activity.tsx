@@ -1,4 +1,4 @@
-import { type FormEvent, type ReactNode, useEffect, useState } from "react";
+import { type FormEvent, Fragment, type ReactNode, useEffect, useState } from "react";
 import {
   byPerson,
   type Entry,
@@ -13,6 +13,7 @@ import {
   LIVE_MS,
   LiveEntry,
   type LiveWrite,
+  NewDivider,
   titleOf,
   toEntry,
   useNow,
@@ -129,10 +130,18 @@ export function Activity(props: {
   // A clock that ticks while something reads as live, so the dot stops when the writes do.
   const now = useNow(writing || liveSeqs.size > 0 ? 5000 : 30_000);
 
-  // Looking moves the seen cursor forward; what was new when the page opened stays marked.
-  const seen = useLastSeen(urls);
+  // Looking moves the seen cursor forward; what was new when the page opened stays marked. Only
+  // the whole ledger moves it: a filtered view (a folder, someone, a kind, text) shows part of
+  // what came in, and moving the cursor past the rest would mark it seen (A-11, TEMPRA-121).
+  const seen = useLastSeen(urls, true);
+  const filtered =
+    Boolean(prefix || exact) ||
+    (filters.who !== undefined && filters.who !== "everyone") ||
+    (view === "events" && Boolean(filters.kind || filters.q));
   const newest =
-    loaded.state === "ready" ? (loaded.data.requests[0]?.events.at(-1)?.seq ?? null) : null;
+    loaded.state === "ready" && !filtered
+      ? (loaded.data.requests[0]?.events.at(-1)?.seq ?? null)
+      : null;
   useEffect(() => {
     if (newest !== null) markSeen(urls, newest);
   }, [newest, urls]);
@@ -391,6 +400,10 @@ function Summary(props: {
   const days = groupByDay(entries, now);
   // The live entry heads today's entries (a day of its own when nothing else happened today).
   if (live && days[0]?.label !== "Today") days.unshift({ label: "Today", items: [] });
+  // The divider goes under the last entry after the cursor, when earlier ones follow it (a first
+  // look, or everything loaded being new, marks nothing).
+  const firstSeen = seen === null ? -1 : entries.findIndex((e) => e.last <= seen);
+  const lastNew = firstSeen > 0 ? entries[firstSeen - 1]?.id : undefined;
   return (
     <>
       {entries.length === 0 && !live && (
@@ -410,14 +423,16 @@ function Summary(props: {
             />
           )}
           {day.items.map((e) => (
-            <EntryRow
-              key={e.id}
-              entry={e}
-              urls={urls}
-              actor={actors.view(e.actor, e.by)}
-              now={now}
-              isNew={seen !== null && e.last > seen}
-            />
+            <Fragment key={e.id}>
+              <EntryRow
+                entry={e}
+                urls={urls}
+                actor={actors.view(e.actor, e.by)}
+                now={now}
+                isNew={seen !== null && e.last > seen}
+              />
+              {e.id === lastNew && <NewDivider />}
+            </Fragment>
           ))}
         </section>
       ))}

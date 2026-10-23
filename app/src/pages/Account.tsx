@@ -17,7 +17,11 @@ const post = (url: string, body: unknown, method = "POST") =>
 
 // ---------------------------------------------------------------- first run
 
-/** First run (v2 spec: Onboarding): pick a handle and name the first library. */
+/**
+ * First run (v2 spec: Onboarding): pick a handle and name the first library, both parts of the
+ * library's address (H-12), then land on the new library's home, which shows how to connect an
+ * agent and waits for its first write.
+ */
 export function Welcome({ me }: { me: Me | null }) {
   useTitle("Welcome");
   const { busy, error, run } = useAction();
@@ -36,7 +40,7 @@ export function Welcome({ me }: { me: Me | null }) {
         body: JSON.stringify({ slug, starter }),
       });
       // A full load: the header and links follow the new handle.
-      location.assign(new Urls(lib.owner, lib.slug).connect());
+      location.assign(new Urls(lib.owner, lib.slug).tree(""));
     });
   };
   return (
@@ -46,13 +50,39 @@ export function Welcome({ me }: { me: Me | null }) {
       <form onSubmit={submit}>
         <p>
           <label>
-            Handle <input type="text" name="handle" defaultValue={me.handle} required />
+            Handle{" "}
+            <input
+              type="text"
+              name="handle"
+              defaultValue={me.handle}
+              required
+              autoCapitalize="off"
+              spellCheck={false}
+              aria-describedby="welcome-handle-hint"
+            />
           </label>
+          <span id="welcome-handle-hint" className="field-hint">
+            Part of every library's address: {location.host}/handle/library. 2 to 39 lowercase
+            letters, digits, - or _.
+          </span>
         </p>
         <p>
           <label>
-            First library <input type="text" name="library" defaultValue="notes" required />
+            First library{" "}
+            <input
+              type="text"
+              name="library"
+              defaultValue="notes"
+              required
+              pattern="[a-z0-9][a-z0-9\-]{0,62}"
+              autoCapitalize="off"
+              spellCheck={false}
+              aria-describedby="welcome-library-hint"
+            />
           </label>
+          <span id="welcome-library-hint" className="field-hint">
+            The last part of its address. Lowercase letters, digits and -.
+          </span>
         </p>
         <p>
           <label>

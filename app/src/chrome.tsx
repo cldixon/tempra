@@ -44,16 +44,19 @@ import {
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
 import { api, useLoad } from "./api";
 import {
-  bellLine,
   INBOX_EVENT,
   type InboxPage,
+  itemDetail,
   itemHref,
+  itemTitle,
+  kindLabel,
   libraryLabel,
   markRead,
+  usePageTitles,
   useUnread,
 } from "./inbox";
 import { THEMES, useTheme } from "./theme";
-import { type Me, recently } from "./ui";
+import { type Me, recently, useMe } from "./ui";
 
 /*
  * The app's chrome (take 2, TEMPRA-53): the icons, menus and the avatar shared by the workspace
@@ -225,8 +228,9 @@ export function Menu(props: {
 
 /**
  * The bell (take 4, board 03; TEMPRA-116): the Inbox's unread count as a badge, and a popover of
- * the latest few items (one line each, the library, the time, an unread dot) with Mark all read
- * and Open inbox. The count follows the feed and every action on an item, as the Inbox does.
+ * the latest few items (the page, the Inbox row's detail line, the library, kind and time, an
+ * unread dot) with Mark all read and Open inbox; loading, a failure (with Retry) and nothing for
+ * the person each say so (F-14). The count follows the feed and every action on an item.
  */
 export function Bell() {
   const unread = useUnread();
@@ -240,6 +244,9 @@ export function Bell() {
   // Read when the popover draws (it opens on a state change, so this is fresh enough).
   const now = Date.now();
   const items = latest.state === "ready" ? latest.data.items : [];
+  const me = useMe();
+  // A reply names its page by path: titles from the library's outline, once the popover opens.
+  const titles = usePageTitles(open ? items : null);
   return (
     <Menu
       label={
@@ -267,9 +274,22 @@ export function Bell() {
           </button>
         )}
       </div>
-      {open && items.length === 0 && <div className="bell-empty">Nothing for you</div>}
+      {open && latest.state === "loading" && <div className="bell-empty">Loading…</div>}
+      {open && latest.state === "error" && (
+        <div className="bell-empty" role="alert">
+          Couldn't load the Inbox.{" "}
+          <button type="button" data-stay onClick={reload}>
+            Retry
+          </button>
+        </div>
+      )}
+      {open && latest.state === "ready" && items.length === 0 && (
+        <div className="bell-empty">Nothing for you</div>
+      )}
       {items.map((i) => {
-        const line = bellLine(i);
+        // The Inbox row's words (F-14): the page's title, the detail line, the library.
+        const [owner = "", slug = ""] = i.library.split("/");
+        const library = me !== null && owner === me.handle ? libraryLabel(i) : `${owner} / ${slug}`;
         return (
           <a
             key={i.id}
@@ -281,16 +301,11 @@ export function Bell() {
               {(libraryLabel(i)[0] ?? "?").toUpperCase()}
             </span>
             <span className="bell-item-what">
-              {line.lead}
-              {line.on && (
-                <>
-                  {" "}
-                  <strong>{line.on}</strong>
-                </>
-              )}
+              <strong>{itemTitle(i, titles)}</strong>
+              <span className="bell-item-detail">{itemDetail(i, now)}</span>
             </span>
             <span className="bell-item-where">
-              {i.library.replace("/", " / ")} · {recently(i.created, now)}
+              {library} · {kindLabel(i, now)} · {recently(i.created, now)}
             </span>
             {i.read_at === null && (
               <>

@@ -5,16 +5,17 @@ import { api, useLoad } from "../api";
 import { useAgentChanges } from "../changes";
 import { Icon } from "../chrome";
 import { useFeed, useLastSeen, useTrailing } from "../live";
+import type { OutlineFile } from "../Tree";
 import { Crumbs, plural, Status, useTitle } from "../ui";
-import { folderName, type Urls } from "../urls";
-import { PageBar, PageColumn } from "../Workspace";
+import { baseName, dirOf, folderName, type Urls } from "../urls";
+import { PageBar, PageColumn, useFrame } from "../Workspace";
 import { NotFound } from "./File";
 
 /*
  * A folder (take 4, TEMPRA-117; tempra-dev: app/home, The folder view): its name, then its
  * subfolders with their counts and its concepts by title with their one-line descriptions and the
- * change dot (solid: changed since the person last looked; pulsing: an agent writing it now).
- * Nothing else. The synthesized index.md stays for agents, linked at the foot.
+ * change dot (solid: changed since the person last looked; pulsing: an agent writing it now),
+ * then its files by name (from the workspace's outline, H-2). Nothing else. The synthesized index.md stays for agents, linked at the foot.
  */
 
 /** GET …/folder: a directory at head (worker/src/store/store.ts, FolderView). */
@@ -58,6 +59,7 @@ export function Folder({ urls: pinned, dir }: { urls: Urls; dir: string }) {
     [...agents.changes.values()].map((a) => a.by?.agent),
   );
   const now = useNow(10_000);
+  const frame = useFrame();
   // Live: a write, move or comment under this folder changes its rows.
   const under = (p: string | null) => p !== null && (dir === "" || p.startsWith(`${dir}/`));
   const reload = useTrailing(loaded.reload);
@@ -85,6 +87,7 @@ export function Folder({ urls: pinned, dir }: { urls: Urls; dir: string }) {
               dir={dir}
               view={view}
               seen={seen}
+              index={frame.index}
               live={(path) => {
                 const a = agents.changes.get(path);
                 return a && isLive(a, now) ? name(a.actor, a.by) : null;
@@ -106,10 +109,22 @@ export function FolderBody(props: {
   seen: number | null;
   /** Who is writing a concept now (an agent's write within the last minute), if anyone. */
   live?: (path: string) => string | null;
+  /** The library's outline (the workspace's), for the files: `GET …/folder` lists concepts. */
+  index?: OutlineFile[] | null;
 }) {
-  const { urls, view, seen } = props;
+  const { urls, view, seen, dir } = props;
   const subfolders = [...view.folders].sort((a, b) => a.path.localeCompare(b.path));
   const concepts = [...view.concepts].sort(byTitle);
+  const attachments = (props.index ?? []).filter((f) => f.kind === "attachment");
+  const files = attachments
+    .filter((f) => dirOf(f.path) === dir)
+    .sort((a, b) => baseName(a.path).localeCompare(baseName(b.path), undefined, { numeric: true }));
+  /** A subfolder's size: its pages, or its files when it holds only files ("1 file"). */
+  const size = (f: FolderView["folders"][number]) => {
+    if (f.concepts > 0) return plural(f.concepts, "page");
+    const n = attachments.filter((a) => a.path.startsWith(`${f.path}/`)).length;
+    return n > 0 ? plural(n, "file") : plural(0, "page");
+  };
   return (
     <div className="folder">
       <header className="view-head">
@@ -117,7 +132,7 @@ export function FolderBody(props: {
           <h1 className="view-title">{folderName(props.dir)}</h1>
         </div>
       </header>
-      {subfolders.length + concepts.length === 0 ? (
+      {subfolders.length + concepts.length + files.length === 0 ? (
         <p className="folder-empty">This folder is empty.</p>
       ) : (
         <ul className="folder-list">
@@ -128,7 +143,7 @@ export function FolderBody(props: {
                   <Icon name="folder" />
                   {folderName(f.path)}
                 </span>
-                <span className="folder-count">{plural(f.concepts, "page")}</span>
+                <span className="folder-count">{size(f)}</span>
               </a>
             </li>
           ))}
@@ -140,6 +155,16 @@ export function FolderBody(props: {
               changed={seen !== null && c.seq > seen}
               writing={props.live?.(c.path) ?? null}
             />
+          ))}
+          {files.map((f) => (
+            <li key={f.path}>
+              <a className="folder-row folder-file" href={urls.file(f.path)}>
+                <span className="folder-title">
+                  <Icon name="file" />
+                  {baseName(f.path)}
+                </span>
+              </a>
+            </li>
           ))}
         </ul>
       )}
