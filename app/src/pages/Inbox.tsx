@@ -8,18 +8,21 @@ import {
   inboxChanged,
   itemDetail,
   itemHref,
+  itemLibrary,
   itemQuote,
   itemTitle,
   kindLabel,
-  libraryLabel,
   markRead,
   type PageTitles,
+  useAgentLabels,
   usePageTitles,
+  withNames,
 } from "../inbox";
-import { librariesChanged, useLibraries } from "../role";
+import { Moment } from "../Moment";
+import { librariesChanged, libraryLabel, useLibraries } from "../role";
 import { navigate } from "../router";
 import { LibraryTile } from "../Sidebar";
-import { recently, Status, useMe, useTitle } from "../ui";
+import { Status, useMe, useTitle } from "../ui";
 import { inboxUrl, Urls } from "../urls";
 
 /**
@@ -47,7 +50,9 @@ export function Inbox({ done, library }: { done: boolean; library: string | null
   const first = loaded.state === "ready" ? loaded.data : null;
   // biome-ignore lint/correctness/useExhaustiveDependencies: a new first page starts afresh.
   useEffect(() => setOlder(null), [first]);
-  const items = first ? [...first.items, ...(older?.items ?? [])] : null;
+  const raw = first ? [...first.items, ...(older?.items ?? [])] : null;
+  const labels = useAgentLabels(raw);
+  const items = raw && withNames(raw, labels);
   const next = older ? older.next : (first?.next ?? null);
   const loadOlder = () => {
     if (next === null) return;
@@ -79,7 +84,7 @@ export function Inbox({ done, library }: { done: boolean; library: string | null
       await post(`/api/v1/invitations/${encodeURIComponent(i.invitation ?? "")}/accept`);
       librariesChanged();
       const [owner = "", slug = ""] = i.library.split("/");
-      setJoined({ name: libraryLabel(i), href: new Urls(owner, slug).tree("") });
+      setJoined({ name: itemLibrary(i, me?.handle ?? null), href: new Urls(owner, slug).tree("") });
     });
   const open = first?.open ?? null;
   // Mark all read clears what the list shows: one library's items when it is filtered.
@@ -122,11 +127,13 @@ export function Inbox({ done, library }: { done: boolean; library: string | null
             <option value="">All libraries</option>
             {reachable.map((l) => (
               <option key={`${l.owner}/${l.slug}`} value={`${l.owner}/${l.slug}`}>
-                {(l.role ?? "owner") === "owner" ? l.title || l.slug : `${l.owner} / ${l.slug}`}
+                {libraryLabel(l)}
               </option>
             ))}
             {library && !reachable.some((l) => `${l.owner}/${l.slug}` === library) && (
-              <option value={library}>{library.replace("/", " / ")}</option>
+              <option value={library}>
+                {itemLibrary({ library, library_title: null }, me?.handle ?? null)}
+              </option>
             )}
           </select>
         )}
@@ -211,7 +218,7 @@ function Row(props: {
     if (i.read_at === null) void markRead([i.id]);
   };
   const ownLibrary = props.me !== null && owner === props.me;
-  const name = ownLibrary ? libraryLabel(i) : `${owner} / ${slug}`;
+  const name = itemLibrary(i, props.me);
   const done = (path: string) => () => void run(() => post(path));
   const button = (key: string, label: string, onClick: () => void, primary = false) => (
     <button
@@ -271,12 +278,12 @@ function Row(props: {
       {unread && <span className="visually-hidden">Unread: </span>}
       <div className="inbox-main">
         <p className="inbox-meta">
-          <LibraryTile name={libraryLabel(i)} shared={!ownLibrary} />
+          <LibraryTile name={i.library_title || slug} shared={!ownLibrary} />
           <span>{name}</span>
           <span aria-hidden="true">·</span>
           <span>{kindLabel(i, now)}</span>
           <span aria-hidden="true">·</span>
-          <time dateTime={i.created}>{recently(i.created, now)}</time>
+          <Moment ts={i.created} now={now} />
         </p>
         <p className="inbox-title">
           <a href={href} onClick={read}>

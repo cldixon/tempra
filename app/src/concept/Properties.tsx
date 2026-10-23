@@ -1,7 +1,9 @@
 import { type ReactNode, useState } from "react";
+import { actorText } from "../agents";
 import { ApiError, api } from "../api";
+import { Moment } from "../Moment";
 import { navigate } from "../router";
-import { Chip, day, plural, when } from "../ui";
+import { Chip, day, plural } from "../ui";
 import { enc, type Urls } from "../urls";
 import type { Namer } from "./Byline";
 import { actedBy, type Concept, type Json, type Links, type Standing, type WorkItem } from "./data";
@@ -31,7 +33,7 @@ export function PropertiesList(props: {
   const { urls, concept: c } = props;
   return (
     <>
-      <Facts concept={c} />
+      <Facts concept={c} name={props.name} />
       <LinkedFrom urls={urls} links={props.links} head={props.head} />
       <AgentNotes concept={c} work={props.work} />
       {props.current && (
@@ -138,7 +140,7 @@ function stamp(v: Json | undefined): { by: string; at: string } | null {
 }
 
 /** The concept's facts, read-only: the frontmatter a person asks about, in a fixed order. */
-function Facts({ concept: c }: { concept: Concept }) {
+function Facts({ concept: c, name }: { concept: Concept; name: Namer }) {
   const fm = c.frontmatter;
   const sources = Array.isArray(fm.sources) ? fm.sources.length : 0;
   const generated = stamp(fm.generated);
@@ -176,8 +178,8 @@ function Facts({ concept: c }: { concept: Concept }) {
     rows.push([
       "Generated",
       <span key="g">
-        {generated.at ? when(generated.at) : ""}
-        {generated.by && <div className="small muted">{generated.by}</div>}
+        {generated.at ? <Moment ts={generated.at} /> : ""}
+        {generated.by && <div className="small muted">{actorText(name(generated.by))}</div>}
       </span>,
     ]);
   }
@@ -204,7 +206,7 @@ function LinkedFrom({ urls, links, head }: { urls: Urls; links: Links; head: num
           {links.inbound.map((l) => (
             <li key={`${l.path} ${l.kind} ${l.raw}`}>
               <a href={urls.pinned(undefined).file(l.path)}>{l.path}</a>
-              {l.kind === "source" && <span className="faint"> cites it</span>}
+              {l.kind === "source" && <span className="muted"> cites it</span>}
             </li>
           ))}
         </ul>

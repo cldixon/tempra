@@ -14,7 +14,7 @@ import { type AgentChange, useAgentChanges } from "./changes";
 import { AccountMenu, Bell, Icon } from "./chrome";
 import { inboxChanged } from "./inbox";
 import { useFeed } from "./live";
-import { useLibraries } from "./role";
+import { libraryLabel, useLibraries } from "./role";
 import { lastNavigation } from "./router";
 import {
   AccountSettingsSidebar,
@@ -453,7 +453,7 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
     libs.state === "ready"
       ? libs.data.libraries.find((l) => l.owner === urls.owner && l.slug === urls.slug)
       : undefined;
-  const name = library?.title || urls.slug;
+  const name = libraryLabel(library ?? urls);
 
   const hide = useCallback(
     (h: boolean) => {

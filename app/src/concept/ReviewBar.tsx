@@ -1,12 +1,13 @@
 import { type FormEvent, useState } from "react";
+import { actorText } from "../agents";
 import { ApiError, api } from "../api";
+import { Moment } from "../Moment";
 import type { Compare } from "../router";
 import { navigate } from "../router";
 import { day } from "../ui";
 import { enc, type Urls } from "../urls";
 import type { Namer } from "./Byline";
 import { actedBy, type Concept, type Standing } from "./data";
-import { versionTime } from "./History";
 
 /**
  * The slim bar over the text while it shows changes (tempra-dev: app/reader, Review mode, The
@@ -43,8 +44,7 @@ export function ReviewBar(props: {
           {by && version && (
             <span className="muted">
               {" "}
-              · {by.name}
-              {by.for && ` for ${by.for}`} · {versionTime(version.event.ts, Date.now())}
+              · {actorText(by)} · <Moment ts={version.event.ts} />
             </span>
           )}
           {!fromBefore && base && <span className="muted"> · changes since v{base.n}</span>}

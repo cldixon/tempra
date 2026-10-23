@@ -64,6 +64,27 @@ export function useRole(lib: { owner: string; slug: string }): Role | null {
   }, [missing, key, reload]);
   return found ? (found.role ?? "owner") : null;
 }
-/** How a library is named to this person: its slug when theirs, owner/slug when shared. */
-export const libraryName = (l: ReachableLibrary) =>
-  (l.role ?? "owner") === "owner" ? l.slug : `${l.owner}/${l.slug}`;
+/**
+ * How a library is named to people, the one way the app does it (TEMPRA-131, X-2): its title,
+ * else its slug; its owner after it only when it is shared with the person ("Notes (@ann)"). A
+ * library the list does not know (yet) is named as the person's own.
+ */
+export function libraryLabel(l: {
+  owner: string;
+  slug: string;
+  title?: string | null;
+  role?: Role | null;
+}): string {
+  const name = l.title || l.slug;
+  return (l.role ?? "owner") === "owner" ? name : `${name} (@${l.owner})`;
+}
+
+/** This library's label (libraryLabel), from the person's list; the slug while it loads. */
+export function useLibraryLabel(lib: { owner: string; slug: string }): string {
+  const libs = useLibraries();
+  const found =
+    libs.state === "ready"
+      ? libs.data.libraries.find((l) => l.owner === lib.owner && l.slug === lib.slug)
+      : undefined;
+  return libraryLabel(found ?? lib);
+}

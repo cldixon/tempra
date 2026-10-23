@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { actorText } from "../agents";
 import { api } from "../api";
 import type { FigureView, ImageFacts } from "../reader/Lightbox";
 import { enc, type Urls } from "../urls";
@@ -25,7 +26,7 @@ export function useFigureView(urls: Urls, title: string, name: Namer): FigureVie
             return {
               size: file.kind === "attachment" ? file.size : null,
               media: file.kind === "attachment" ? file.media : null,
-              by: added ? name(added.actor, actedBy(added)).name : null,
+              by: added ? actorText(name(added.actor, actedBy(added))) : null,
               at: added?.ts ?? null,
             };
           },

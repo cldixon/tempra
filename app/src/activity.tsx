@@ -1,13 +1,13 @@
-import { useEffect, useState } from "react";
+import { AgentName } from "./AgentName";
 import type { ActedBy, ActorView } from "./agents";
 import { api, useLoad } from "./api";
 import { Avatar } from "./chrome";
-import { ago, plural } from "./ui";
+import { localTime, plural, relativeTime } from "./ui";
 import { baseName, folderName, type Urls } from "./urls";
 
 /*
- * Activity (take 4, TEMPRA-115; tempra-dev: app/activity): the ledger for people. One entry per
- * request, told as a sentence of what it did ("Claude Code changed 3 concepts in The app"), with
+ * Activity (take 4, TEMPRA-115; tempra-dev: app/activity): what happened, for people. One entry per
+ * request, told as a sentence of what it did ("Claude Code changed 3 pages in The app"), with
  * its note and the concepts it touched. The Activity page draws them grouped by day.
  */
 
@@ -191,10 +191,10 @@ function wherePart(paths: string[]): Part[] {
   return [" in ", ...joinParts(dirs.map((d) => [{ folder: d }]))];
 }
 
-/** The content clause: "rewrote A and added B", or "changed 3 concepts in The app". */
+/** The content clause: "rewrote A and added B", or "changed 3 pages in The app". */
 function contentClauses(touched: Touched[], imported: boolean): Part[][] {
   if (touched.length === 0) return [];
-  const unit = touched.every((t) => isConcept(t.path)) ? "concept" : "file";
+  const unit = touched.every((t) => isConcept(t.path)) ? "page" : "file";
   const verbs = [...new Set(touched.map((t) => t.what))];
   if (imported) {
     return [[`imported ${plural(touched.length, unit)}`, ...wherePart(touched.map((t) => t.path))]];
@@ -234,7 +234,7 @@ function commentClauses(events: LedgerEvent[], titles: Record<string, string>): 
     const first = list[0] as (typeof list)[number];
     return paths.length === 1
       ? [[`commented ${list.length} times on `, on(first)]]
-      : [[`commented on ${plural(paths.length, "concept")}`]];
+      : [[`commented on ${plural(paths.length, "page")}`]];
   }
   return list.map((t) => {
     const k = new Set(t.kinds);
@@ -475,12 +475,12 @@ export function groupByDay<T extends { ts: string }>(
 }
 
 /**
- * When, beside an entry: "14 min" today, the clock time on an earlier day under its day's
- * heading, or (compact, with no headings) "yesterday" and the date.
+ * When, beside an entry: "14 min ago" today (relativeTime), the clock time on an earlier day
+ * under its day's heading, or (compact, with no headings) "yesterday" and the date.
  */
 export function entryTime(ts: string, now: number, compact = false): string {
   const label = dayLabel(ts, now);
-  if (label === "Today") return ago(ts, now);
+  if (label === "Today") return relativeTime(ts, now);
   if (!compact) return clock(new Date(ts));
   return label === "Yesterday" ? "yesterday" : label;
 }
@@ -491,31 +491,8 @@ export function momentText(ts: string, now: number): string {
   return `${label === "Today" || label === "Yesterday" ? label.toLowerCase() : label}, ${clock(new Date(ts))}`;
 }
 
-const AGO_WORDS: [number, string][] = [
-  [86_400, "day"],
-  [3600, "hour"],
-  [60, "minute"],
-];
-
-/** How long ago in words, for a sentence: "just now", "2 hours ago", "3 days ago", "on Oct 12". */
-export function agoWords(ts: string, now: number): string {
-  const secs = Math.max(0, Math.round((now - Date.parse(ts)) / 1000));
-  if (secs >= 30 * 86_400) return `on ${shortDate(new Date(ts), new Date(now))}`;
-  for (const [size, unit] of AGO_WORDS) {
-    if (secs >= size) return `${plural(Math.floor(secs / size), unit)} ago`;
-  }
-  return "just now";
-}
-
-/** The clock relative times are read against, ticking so "2 min" stays true. */
-export function useNow(ms = 30_000): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), ms);
-    return () => clearInterval(t);
-  }, [ms]);
-  return now;
-}
+/** The clock relative times are read against (kept in ui.tsx beside relativeTime). */
+export { useNow } from "./ui";
 
 // ---------------------------------------------------------------- data
 
@@ -605,8 +582,7 @@ export function EntryRow(props: {
       <Avatar name={actor.mark} agent={actor.agent} />
       <div className="entry-body">
         <p className="entry-line">
-          <b className="entry-who">{actor.name}</b>
-          {actor.for && <span className="entry-for"> for {actor.for}</span>}{" "}
+          <AgentName who={actor} />{" "}
           {e.parts.map((p, i) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: the parts of one sentence, fixed.
             <PartView key={i} part={p} urls={urls} />
@@ -616,7 +592,9 @@ export function EntryRow(props: {
         {!e.named && <TouchedList touched={e.touched} urls={urls} />}
       </div>
       <span className="entry-side">
-        <time dateTime={e.ts}>{entryTime(e.ts, now)}</time>
+        <time dateTime={e.ts} title={localTime(e.ts)}>
+          {entryTime(e.ts, now)}
+        </time>
         {isNew && (
           <span className="change-dot">
             <span className="visually-hidden">New since you looked</span>
@@ -643,9 +621,7 @@ export function LiveEntry(props: {
       <Avatar name={actor.mark} agent={actor.agent} />
       <div className="entry-body">
         <p className="entry-line">
-          <b className="entry-who">{actor.name}</b>
-          {actor.for && <span className="entry-for"> for {actor.for}</span>} is editing{" "}
-          <a href={urls.file(w.path)}>{props.title}</a>
+          <AgentName who={actor} /> is editing <a href={urls.file(w.path)}>{props.title}</a>
         </p>
       </div>
       <span className="entry-side entry-now">

@@ -48,12 +48,16 @@ import {
   INBOX_EVENT,
   type InboxPage,
   itemHref,
-  libraryLabel,
+  itemLibrary,
   markRead,
+  useAgentLabels,
+  usePageTitles,
   useUnread,
+  withNames,
 } from "./inbox";
+import { Moment } from "./Moment";
 import { THEMES, useTheme } from "./theme";
-import { type Me, recently } from "./ui";
+import { type Me, useMe } from "./ui";
 
 /*
  * The app's chrome (take 2, TEMPRA-53): the icons, menus and the avatar shared by the workspace
@@ -239,7 +243,11 @@ export function Bell() {
   }, [reload]);
   // Read when the popover draws (it opens on a state change, so this is fresh enough).
   const now = Date.now();
-  const items = latest.state === "ready" ? latest.data.items : [];
+  const raw = latest.state === "ready" ? latest.data.items : null;
+  const labels = useAgentLabels(raw);
+  const titles = usePageTitles(raw);
+  const handle = useMe()?.handle ?? null;
+  const items = withNames(raw ?? [], labels);
   return (
     <Menu
       label={
@@ -269,7 +277,7 @@ export function Bell() {
       </div>
       {open && items.length === 0 && <div className="bell-empty">Nothing for you</div>}
       {items.map((i) => {
-        const line = bellLine(i);
+        const line = bellLine(i, titles);
         return (
           <a
             key={i.id}
@@ -278,7 +286,7 @@ export function Bell() {
             onClick={() => i.read_at === null && void markRead([i.id])}
           >
             <span className="lib-tile" aria-hidden="true">
-              {(libraryLabel(i)[0] ?? "?").toUpperCase()}
+              {(itemLibrary(i, handle)[0] ?? "?").toUpperCase()}
             </span>
             <span className="bell-item-what">
               {line.lead}
@@ -290,7 +298,7 @@ export function Bell() {
               )}
             </span>
             <span className="bell-item-where">
-              {i.library.replace("/", " / ")} · {recently(i.created, now)}
+              {itemLibrary(i, handle)} · <Moment ts={i.created} now={now} />
             </span>
             {i.read_at === null && (
               <>

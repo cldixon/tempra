@@ -1,15 +1,15 @@
-import { agoWords, useNow } from "./activity";
-import { localTime } from "./ui";
+import { localTime, relativeTime, useNow } from "./ui";
 
 /**
- * When something happened, as a sentence says it ("3 minutes ago", "on Oct 12"), kept current,
- * with the reader's local date and time on hover.
+ * When something happened, the one way the app draws it (TEMPRA-131): `relativeTime` ("just
+ * now", "3 min ago", "yesterday", "Oct 12"), kept current, with the reader's local date and time
+ * on hover. `now` is a clock the caller already ticks, if it has one.
  */
-export function Moment({ ts }: { ts: string }) {
-  const now = useNow();
+export function Moment({ ts, now }: { ts: string; now?: number }) {
+  const ticking = useNow();
   return (
     <time dateTime={ts} title={localTime(ts)}>
-      {agoWords(ts, now)}
+      {relativeTime(ts, now ?? ticking)}
     </time>
   );
 }

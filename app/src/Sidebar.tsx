@@ -1,7 +1,7 @@
 import { type AgentChange, isLive } from "./changes";
 import { Icon, Menu } from "./chrome";
 import { useUnread } from "./inbox";
-import { libraryName, type ReachableLibrary, useLibraries, useRole } from "./role";
+import { libraryLabel, type ReachableLibrary, useLibraries, useRole } from "./role";
 import { type OutlineFile, Tree } from "./Tree";
 import { switcherKey } from "./ui";
 import { Urls } from "./urls";
@@ -165,7 +165,7 @@ export function AccountSidebar({ page }: { page: AccountPage }) {
       key={`${l.owner}/${l.slug}`}
       href={new Urls(l.owner, l.slug).tree("")}
       tile={{ name: l.title || l.slug, shared: (l.role ?? "owner") !== "owner" }}
-      label={l.title || libraryName(l)}
+      label={libraryLabel(l)}
     />
   );
   return (
@@ -241,7 +241,7 @@ export function LibrarySwitcher({ urls, name }: { urls: Urls; name: string }) {
       aria-current={here(l) ? "page" : undefined}
     >
       <LibraryTile name={l.title || l.slug} shared={(l.role ?? "owner") !== "owner"} />
-      <span>{l.title || libraryName(l)}</span>
+      <span>{libraryLabel(l)}</span>
       {(l.role ?? "owner") !== "owner" && (
         <span className="menu-lib-role">{l.role === "write" ? "Write" : "Read"}</span>
       )}

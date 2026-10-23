@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { renderToStaticMarkup } from "react-dom/server";
 import {
-  agoWords,
   dayLabel,
   type Entry,
   entryTime,
@@ -17,6 +17,8 @@ import {
   whoWorksHere,
   wordsText,
 } from "./src/activity";
+import { Moment } from "./src/Moment";
+import { localTime, relativeTime } from "./src/ui";
 import { folderName } from "./src/urls";
 
 // Activity's entry model (app/src/activity.tsx): requests told as sentences, days, times.
@@ -96,14 +98,14 @@ describe("toEntry", () => {
       ]),
       titles,
     );
-    expect(text(e)).toBe("changed 3 concepts in App and Decisions");
+    expect(text(e)).toBe("changed 3 pages in App and Decisions");
     expect(e?.named).toBe(false);
     expect(e?.touched.map((t) => t.what)).toEqual(["edited", "edited", "added"]);
   });
 
   test("the same verb for all keeps it; many folders are counted", () => {
     const e = toEntry(req([ev("put", "a/x.md"), ev("put", "b/y.md"), ev("put", "c/z.md")]), titles);
-    expect(text(e)).toBe("edited 3 concepts across 3 folders");
+    expect(text(e)).toBe("edited 3 pages across 3 folders");
   });
 
   test("an import", () => {
@@ -211,19 +213,36 @@ describe("times", () => {
   });
 
   test("an entry's time", () => {
-    expect(entryTime(at(19, 13), now)).toBe("2 h");
+    expect(entryTime(at(19, 13), now)).toBe("2 hours ago");
     expect(entryTime(at(18, 18, 40), now)).toBe("18:40");
     expect(entryTime(at(18, 18, 40), now, true)).toBe("yesterday");
     expect(entryTime(at(12, 9), now, true)).toBe("Oct 12");
     expect(momentText(at(18, 18, 40), now)).toBe("yesterday, 18:40");
   });
 
-  test("ago in words", () => {
-    expect(agoWords(at(19, 13), now)).toBe("2 hours ago");
-    expect(agoWords(at(19, 14, 59), now)).toBe("1 minute ago");
-    expect(agoWords(new Date(now - 10_000).toISOString(), now)).toBe("just now");
-    expect(agoWords(at(16, 15), now)).toBe("3 days ago");
-    expect(agoWords(new Date(2026, 7, 1).toISOString(), now)).toBe("on Aug 1");
+  // The one relative time (TEMPRA-131, X-4): never seconds, never UTC.
+  test("relativeTime", () => {
+    const ago = (ms: number) => new Date(now - ms).toISOString();
+    expect(relativeTime(ago(0), now)).toBe("just now");
+    expect(relativeTime(ago(10_000), now)).toBe("just now");
+    expect(relativeTime(ago(-5_000), now)).toBe("just now"); // a clock a little ahead
+    expect(relativeTime(at(19, 14, 59), now)).toBe("1 min ago");
+    expect(relativeTime(at(19, 14, 57), now)).toBe("3 min ago");
+    expect(relativeTime(at(19, 14), now)).toBe("1 hour ago");
+    expect(relativeTime(at(19, 13), now)).toBe("2 hours ago");
+    expect(relativeTime(at(19, 0, 30), now)).toBe("14 hours ago");
+    expect(relativeTime(at(18, 23), now)).toBe("yesterday");
+    expect(relativeTime(at(18, 1), now)).toBe("yesterday");
+    expect(relativeTime(at(16, 15), now)).toBe("Oct 16");
+    expect(relativeTime(new Date(2025, 7, 1).toISOString(), now)).toBe("Aug 1, 2025");
+    expect(relativeTime("not a time", now)).toBe("not a time");
+  });
+
+  test("Moment: the relative time, the local date and time on hover", () => {
+    const ts = at(19, 13);
+    const html = renderToStaticMarkup(<Moment ts={ts} now={now} />);
+    expect(html).toBe(`<time dateTime="${ts}" title="${localTime(ts)}">2 hours ago</time>`);
+    expect(localTime(ts)).not.toContain("Z");
   });
 });
 

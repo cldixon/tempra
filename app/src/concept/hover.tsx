@@ -8,7 +8,8 @@ import type { FileJson, JsonObject, Sources } from "./data";
 
 /**
  * Cards over the body: a footnote marker shows the source it cites (or its note), an internal
- * link the target's title, type, trust and staleness, an external link its URL.
+ * link the target's title, type and staleness (no trust tiers: those are for agents), an
+ * external link its URL.
  */
 export function useHoverCards(urls: Urls, sources: Sources, prepared: Prepared) {
   const targets = useRef(new Map<string, Promise<FileJson | null>>());
@@ -30,17 +31,12 @@ export function useHoverCards(urls: Urls, sources: Sources, prepared: Prepared) 
           <strong>{typeof s.title === "string" ? s.title : h.label}</strong>
           {typeof s.resource === "string" && <div className="small muted">{s.resource}</div>}
           {internal?.broken ? <div className="small">Missing</div> : null}
-          {internal && typeof internal.trust_tier === "string" && (
-            <div className="small">
-              {internal.trust_tier}
-              {internal.stale ? " · stale" : ""}
-            </div>
-          )}
+          {internal?.stale ? <div className="small">Stale</div> : null}
         </div>
       );
     }
     if (h.path === null) return h.href ? <div className="small">{h.href}</div> : null;
-    if (h.broken) return <div className="small">Missing: nothing at {h.path}</div>;
+    if (h.broken) return <div className="small">Missing: no page is at this link</div>;
     const path = h.path;
     let target = targets.current.get(path);
     if (!target) {
@@ -48,21 +44,16 @@ export function useHoverCards(urls: Urls, sources: Sources, prepared: Prepared) 
       targets.current.set(path, target);
     }
     return target.then((t) => {
-      if (!t) return <div className="small">{path}</div>;
-      if (t.kind !== "concept") return <div className="small">{`${t.path} · ${t.kind}`}</div>;
+      if (!t) return <div className="small">{baseName(path)}</div>;
+      if (t.kind !== "concept") return <div className="small">{`${baseName(t.path)} · file`}</div>;
       const tfm = t.frontmatter;
+      const facts = [typeof tfm.type === "string" ? tfm.type : "", t.stale ? "Stale" : ""];
       return (
         <div>
           <strong>{typeof tfm.title === "string" ? tfm.title : baseName(t.path)}</strong>
-          <div className="small muted">
-            {[
-              typeof tfm.type === "string" ? tfm.type : "no type",
-              t.trust_tier,
-              t.stale ? "stale" : "",
-            ]
-              .filter(Boolean)
-              .join(" · ")}
-          </div>
+          {facts.some(Boolean) && (
+            <div className="small muted">{facts.filter(Boolean).join(" · ")}</div>
+          )}
           {typeof tfm.description === "string" && <div className="small">{tfm.description}</div>}
         </div>
       );

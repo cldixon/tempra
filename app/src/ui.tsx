@@ -91,46 +91,38 @@ export function TrustChip({ tier }: { tier: string | undefined }) {
 /** An actor as a person reads it: a handle for a person (`human:cl_dixon` → `cl_dixon`), an agent as is. */
 export const who = (actor: string) => actor.replace(/^human:/, "");
 
-const AGO_UNITS: [number, string][] = [
-  [86_400, "d"],
-  [3600, "h"],
-  [60, "min"],
-  [1, "s"],
-];
-
-/** How long ago, in one unit: "4 s", "3 min", "2 h", "5 d". */
-export function ago(ts: string, now: number): string {
-  const secs = Math.max(0, Math.round((now - Date.parse(ts)) / 1000));
-  for (const [size, unit] of AGO_UNITS)
-    if (secs >= size) return `${Math.floor(secs / size)} ${unit}`;
-  return "0 s";
-}
-
-/** "4 s", kept current. */
-export function useAgo(ts: string): string {
-  const [now, setNow] = useState(Date.now());
+/** The clock relative times are read against, ticking so "2 min ago" stays true. */
+export function useNow(ms = 30_000): number {
+  const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), 5000);
+    const t = setInterval(() => setNow(Date.now()), ms);
     return () => clearInterval(t);
-  }, []);
-  return ago(ts, now);
+  }, [ms]);
+  return now;
 }
 
-/** A time as "3 min" with the full timestamp on hover. */
-export function Ago({ ts, now }: { ts: string; now: number }) {
-  return (
-    <time dateTime={ts} title={localTime(ts)}>
-      {ago(ts, now)}
-    </time>
-  );
-}
+/** The local calendar day of a moment, as a number to compare (days since the epoch, local). */
+const localDay = (d: Date) =>
+  Math.round(new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime() / 86_400_000);
 
-/** A compact UTC timestamp: 2026-09-29 18:02. */
-export function when(iso: string): string {
-  return iso
-    .replace("T", " ")
-    .replace(/:\d\d(\.\d+)?Z$/, "")
-    .replace(/Z$/, "");
+/**
+ * When something happened, the one way the app says it (TEMPRA-131, X-4): "just now", "3 min
+ * ago", "2 hours ago" today, "yesterday", then the day ("Oct 12", with the year when it is not
+ * this one). In the reader's time zone; never seconds, never UTC. `Moment` draws it with the
+ * local date and time on hover.
+ */
+export function relativeTime(ts: string, now: number = Date.now()): string {
+  const t = Date.parse(ts);
+  if (Number.isNaN(t)) return ts;
+  const secs = Math.max(0, Math.round((now - t) / 1000));
+  if (secs < 60) return "just now";
+  if (secs < 3600) return `${Math.floor(secs / 60)} min ago`;
+  const then = new Date(t);
+  const today = localDay(new Date(now));
+  const d = localDay(then);
+  if (d === today) return `${plural(Math.floor(secs / 3600), "hour")} ago`;
+  if (d === today - 1) return "yesterday";
+  return day(ts);
 }
 
 /** A moment in the reader's own time zone, as people write it: "Oct 21, 2026, 4:52 PM". */
@@ -162,11 +154,6 @@ export function day(iso: string, timeZone?: string): string {
  * same wherever the reader is.
  */
 export const calendarDay = (iso: string) => day(iso, "UTC");
-
-/** When, as a row says it: "14 min" within a day, else the day ("Oct 9"). */
-export function recently(ts: string, now: number): string {
-  return now - Date.parse(ts) < 86_400_000 ? ago(ts, now) : day(ts);
-}
 
 /** The first words of a text on one line, ending in "…" when cut at `max` characters. */
 export function clip(text: string, max: number): string {

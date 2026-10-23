@@ -1,6 +1,7 @@
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { ApiError, api, useLoad } from "../api";
 import { Icon } from "../chrome";
+import { libraryLabel } from "../role";
 import { navigate } from "../router";
 import { LibraryTile } from "../Sidebar";
 import { type Health, plural, Status, useTitle } from "../ui";
@@ -126,10 +127,7 @@ function Card({ library: l }: { library: Library }) {
       </span>
       <span className="lib-card-body">
         <span className="lib-card-name">
-          <span>
-            {shared && <span className="owner">{l.owner} / </span>}
-            {name}
-          </span>
+          <span>{libraryLabel(l)}</span>
           {forYou && <span className="lib-card-for">{forYou}</span>}
         </span>
         {l.description && <span className="lib-card-desc">{l.description}</span>}

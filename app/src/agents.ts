@@ -24,11 +24,41 @@ export interface ActedBy {
   agent?: string;
 }
 
-/** How an agent is named: "Claude for @ann". */
+/** Apps whose slug does not read as their name word by word. */
+const KNOWN_APPS: Record<string, string> = { "claude-ai": "Claude", chatgpt: "ChatGPT" };
+
+/**
+ * An agent's name as people read it. A token's agent is named by its app half, a slug
+ * ("claude-code"), which reads as words ("Claude Code"); names an app chose ("Claude",
+ * "claude.ai") stay as they are.
+ */
+export function readableName(name: string): string {
+  const known = KNOWN_APPS[name];
+  if (known) return known;
+  if (!/^[a-z0-9]+([-_][a-z0-9]+)*$/.test(name)) return name;
+  return name
+    .split(/[-_]/)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+}
+
+/**
+ * An agent's name from its actor alone, for one the library's list does not know (yet): the app
+ * half of a token's actor ("claude-code/laptop" is Claude Code), a process by its name. Never
+ * the raw actor id.
+ */
+export function actorAgentName(actor: string): string {
+  if (actor.startsWith("process:")) {
+    return readableName(actor.slice("process:".length) || "process");
+  }
+  return readableName(actor.split("/")[0] || actor);
+}
+
+/** How an agent is named: "Claude for @ann", "Claude Code for @dev". */
 export function agentLabel(c: Pick<Contributor, "person" | "agent" | "actor">): string {
   const who = c.person ? `@${c.person}` : "a deleted account";
   if (!c.agent) return `${who} in the app`;
-  return `${c.agent.name ?? c.actor} for ${who}`;
+  return `${c.agent.name ? readableName(c.agent.name) : actorAgentName(c.actor)} for ${who}`;
 }
 
 /** Each agent's label by its id. */
@@ -47,8 +77,14 @@ export function actorLabel(
   by: ActedBy | null | undefined,
   names: Record<string, string>,
 ): string {
-  return (by?.agent && names[by.agent]) || who(actor);
+  const named = by?.agent ? names[by.agent] : undefined;
+  if (named) return named;
+  return actor.startsWith("human:") ? who(actor) : actorAgentName(actor);
 }
+
+/** An ActorView as one line of text: "Claude Code for @dev", "You", "ann". */
+export const actorText = (v: Pick<ActorView, "name" | "for">) =>
+  v.for ? `${v.name} for ${v.for}` : v.name;
 
 /** Who acted, as a byline or a row draws them: "Claude Code for @cl_dixon", "You", "ann". */
 export interface ActorView {
@@ -84,10 +120,10 @@ export function actorView(
     const you = me !== null && actor === me;
     return { name: you ? "You" : who(actor), for: null, agent: false, you, mark: who(actor) };
   }
-  // An agent the list does not know yet is named by its actor; `by.person` is an id, never
-  // shown as a handle.
+  // An agent the list does not know yet is named from its actor ("claude-code/local" is Claude
+  // Code); `by.person` is an id, never shown as a handle.
   const person = c?.person ?? null;
-  const name = c?.agent?.name ?? actor;
+  const name = c?.agent?.name ? readableName(c.agent.name) : actorAgentName(actor);
   return { name, for: person ? `@${person}` : null, agent: true, you: false, mark: name };
 }
 

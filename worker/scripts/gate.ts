@@ -955,7 +955,10 @@ async function browserRenders(
         .getByRole("heading", { level: 1, name: "This page isn't here", exact: true })
         .waitFor({ timeout: 15_000 });
       const fate = main.locator(".not-found-fate");
-      await fate.filter({ hasText: `Moved to ${target} by ` }).waitFor({ timeout: 10_000 });
+      // Named by its title and folder, not its path (TEMPRA-131).
+      await fate
+        .filter({ hasText: /Moved to (Gate live|gate-live) \(.+\) by / })
+        .waitFor({ timeout: 10_000 });
       const open = await fate.getByRole("link", { name: "Open", exact: true }).getAttribute("href");
       if (open !== `/${owner}/${slug}/${enc(target)}`) throw new Error(`Open: ${open}`);
       await main.getByRole("link", { name: "Home", exact: true }).waitFor();
@@ -1494,7 +1497,7 @@ async function browserRenders(
         if (shots) await page.screenshot({ path: `${shots}/review.png` });
         await bar.getByRole("button", { name: "Verify this version" }).click();
         await page.waitForURL(`${url}?done=verify`, { timeout: 10_000 });
-        await page.getByText(/^Verified as human:/).waitFor({ timeout: 10_000 });
+        await page.getByText(/^Verified\. It stays verified/).waitFor({ timeout: 10_000 });
         // Nothing to review now: Properties has no Verification section.
         if (!(await properties().isVisible())) await more("Properties");
         await properties().getByText("Agent notes").first().waitFor({ timeout: 10_000 });
@@ -2116,7 +2119,7 @@ async function browserRenders(
           };
           await toggle.click();
           await isSheet(comments, "Comments");
-          await comments.getByRole("button", { name: "Comment on this concept" }).waitFor();
+          await comments.getByRole("button", { name: "Comment on the page" }).waitFor();
           if (shots) await page.screenshot({ path: `${shots}/comments-phone.png` });
           await comments.getByRole("button", { name: "Close comments" }).click();
           await comments.waitFor({ state: "detached", timeout: 5000 });
@@ -2178,8 +2181,9 @@ async function browserRenders(
       const here = `${lib}/${path}`;
       await page.goto(here);
       await contentsNav.waitFor({ timeout: 15_000 });
-      // Just written by an agent: the byline says it is editing now, with the pulsing dot.
-      await byline.getByText(/ is editing now$/).waitFor({ timeout: 5000 });
+      // Just written by an agent: the byline names it once, then "editing now" with the pulsing
+      // dot (TEMPRA-131).
+      await byline.getByText(/editing now$/).waitFor({ timeout: 5000 });
       await byline.locator(".change-dot.live").waitFor();
       if (shots) await page.screenshot({ path: `${shots}/page.png` });
       const entries = await contentsNav.locator("a").allInnerTexts();
@@ -2337,6 +2341,22 @@ async function browserRenders(
           );
         }
         if (shots) await page.screenshot({ path: `${shots}/activity-events.png` });
+        // Focus rings (TEMPRA-132): a field, then a button reached from it, show the 2px ring.
+        const ringOn = async (what: string) => {
+          const ring = await page.evaluate<string>(`(() => {
+            const el = document.activeElement;
+            const s = getComputedStyle(el);
+            return el.matches(":focus-visible") + " " + s.outlineStyle + " " + s.outlineWidth;
+          })()`);
+          if (ring !== "true solid 2px") throw new Error(`${what}'s focus ring: ${ring}`);
+        };
+        await main.getByLabel("Filter by path or note").focus();
+        await ringOn("a text field");
+        if (shots) await page.screenshot({ path: `${shots}/focus-field.png` });
+        await main.getByRole("link", { name: "Download", exact: false }).first().focus();
+        await ringOn("a button");
+        if (shots) await page.screenshot({ path: `${shots}/focus-button.png` });
+        await page.evaluate("document.activeElement?.blur()");
         await page.waitForTimeout(500);
         await agentAppends(
           "A sentence for the live ledger.",
