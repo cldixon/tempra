@@ -137,7 +137,7 @@ export function match(url: URL): Route | null {
         };
       case "work":
         return tail === "" ? { page: "work", owner, slug, kind: q.get("kind") || undefined } : null;
-      // Needs you retired into the Inbox, filtered to the library (TEMPRA-116).
+      // The old `-/needs` URL: the Inbox, filtered to the library (TEMPRA-116).
       case "needs":
         return tail === ""
           ? { page: "redirect", to: inboxUrl({ library: `${owner}/${slug}` }) }
@@ -188,23 +188,25 @@ function compareOf(q: URLSearchParams): Compare | undefined {
   return since === undefined ? undefined : { kind: "since", seq: since };
 }
 
+/**
+ * Which page is on screen: a new key starts the page afresh, with two exceptions. A concept's page
+ * stays mounted while only how it is shown changes (`?since=`, `?review=`, `?panel=`, `?done=`),
+ * so its open panel stays open (tempra-dev: app/reader, The panels); another file or a pinned
+ * version (`?at=`) is another page. Activity keeps its page across its own view and filter
+ * changes (a text filter keeps focus while the URL follows it).
+ */
+export function pageKey(url: URL, route: Route | null): string {
+  const at = url.searchParams.get("at");
+  if (route?.page === "file") return `${url.pathname}${at === null ? "" : `?at=${at}`}`;
+  if (route?.page === "activity") return url.pathname;
+  return url.pathname + url.search;
+}
+
 const NAVIGATE = "tempra:navigate";
 
 /** How the app last moved: to a new page, or back or forward through history. */
 let lastMove: "push" | "pop" = "push";
 export const lastNavigation = () => lastMove;
-
-/** The account's own pages, which no handle can collide with (they are reserved names). */
-const ACCOUNT_PAGES = new Set([
-  "/",
-  "/welcome",
-  "/connect",
-  "/tokens",
-  "/apps",
-  "/account",
-  "/invitations",
-  "/inbox",
-]);
 
 /** Goes to a URL without reloading when the app draws it, otherwise loads it in full. */
 export function navigate(href: string, opts: { replace?: boolean } = {}) {
@@ -240,11 +242,19 @@ export function useLocation(): URL {
 }
 
 /**
- * Same-site links the app draws are followed in place: a link into the signed-in person's own
- * libraries (handles never collide with the site's fixed routes) or to the library list. Links
- * with a target, a download, a modifier key, or only a different #fragment behave as usual.
+ * Whether a link is followed in place: a same-site URL the app draws (`match`), so every account
+ * page and any library's pages, the person's own or one shared with them (handles never collide
+ * with the site's fixed routes). Downloads and server pages under a library (`-/raw/…`) are not.
  */
-export function interceptLinks(handle: () => string | null) {
+export function followsInPlace(url: URL, here: string = location.origin): boolean {
+  return url.origin === here && match(url) !== null;
+}
+
+/**
+ * Same-site links the app draws are followed in place (`followsInPlace`). Links with a target, a
+ * download, a modifier key, or only a different #fragment behave as usual.
+ */
+export function interceptLinks() {
   document.addEventListener("click", (e) => {
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) {
       return;
@@ -254,9 +264,7 @@ export function interceptLinks(handle: () => string | null) {
     const url = new URL(a.href);
     if (url.origin !== location.origin) return;
     if (url.pathname === location.pathname && url.search === location.search && url.hash) return;
-    const first = decodeURIComponent(url.pathname.split("/")[1] ?? "");
-    const ours = ACCOUNT_PAGES.has(url.pathname) || (first !== "" && first === handle());
-    if (!ours || !match(url)) return;
+    if (!followsInPlace(url)) return;
     e.preventDefault();
     navigate(url.href);
   });

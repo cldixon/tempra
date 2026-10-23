@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import { mentionAt, offered } from "./src/Mentions";
-import { tallyText } from "./src/pages/Libraries";
 
 describe("mentions in the comment box (TEMPRA-73)", () => {
   test("finds the @word being typed before the caret", () => {
@@ -16,13 +15,5 @@ describe("mentions in the comment box (TEMPRA-73)", () => {
     expect(offered(["ann", "anna", "bo", "ann"], "ann")).toEqual(["anna", "ann"]);
     expect(offered(["ann", "bo"], "")).toEqual(["ann", "bo"]);
     expect(offered(["ann"], "z")).toEqual([]);
-  });
-});
-
-describe("a library's tally (TEMPRA-72)", () => {
-  test("says only what is there", () => {
-    expect(tallyText({})).toBe("");
-    expect(tallyText({ tally: { changes: 0, for_you: 0 } })).toBe("");
-    expect(tallyText({ tally: { changes: 5, for_you: 2 } })).toBe("2 for you · 5 new");
   });
 });

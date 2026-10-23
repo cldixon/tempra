@@ -59,6 +59,9 @@ export interface ActorView {
   agent: boolean;
   /** The signed-in person themselves (not their agents). */
   you: boolean;
+  /** What their round mark's initials come from: the agent's name, or the person's handle
+   * (never "You"). */
+  mark: string;
 }
 
 /** Each agent's contributor entry by its id. */
@@ -79,17 +82,13 @@ export function actorView(
   const human = actor.startsWith("human:") && !by?.agent;
   if (human) {
     const you = me !== null && actor === me;
-    return { name: you ? "You" : who(actor), for: null, agent: false, you };
+    return { name: you ? "You" : who(actor), for: null, agent: false, you, mark: who(actor) };
   }
   // An agent the list does not know yet is named by its actor; `by.person` is an id, never
   // shown as a handle.
   const person = c?.person ?? null;
-  return {
-    name: c?.agent?.name ?? actor,
-    for: person ? `@${person}` : null,
-    agent: true,
-    you: false,
-  };
+  const name = c?.agent?.name ?? actor;
+  return { name, for: person ? `@${person}` : null, agent: true, you: false, mark: name };
 }
 
 /**
@@ -123,7 +122,7 @@ function useContributors(urls: Urls) {
 
 /**
  * Who acted, as an ActorView, for pages that draw people and agents apart (the byline, home,
- * Activity, Needs you). `me` is the signed-in person's actor (`human:handle`).
+ * Activity, the Inbox). `me` is the signed-in person's actor (`human:handle`).
  */
 export function useActors(urls: Urls, me: string | null) {
   const { list, byId, note } = useContributors(urls);

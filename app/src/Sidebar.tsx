@@ -1,4 +1,4 @@
-import { type AgentChange, warmth } from "./changes";
+import { type AgentChange, isLive } from "./changes";
 import { Icon, Menu } from "./chrome";
 import { useUnread } from "./inbox";
 import { libraryName, type ReachableLibrary, useLibraries, useRole } from "./role";
@@ -64,7 +64,7 @@ export function LibrarySidebar(props: {
 }) {
   const { urls, place } = props;
   const { latest, now } = useFrame();
-  const recent = warmth(latest, now);
+  const writing = isLive(latest, now);
   const unread = useUnread();
   return (
     <>
@@ -86,10 +86,10 @@ export function LibrarySidebar(props: {
           icon="activity"
           label="Activity"
           end={
-            recent ? (
-              <span className="nav-count" title="An agent changed something lately">
-                <span className={`change-dot ${recent}`} aria-hidden="true" />
-                <span className="visually-hidden">An agent changed something lately</span>
+            writing ? (
+              <span className="nav-count" title="An agent is writing now">
+                <span className="change-dot live" aria-hidden="true" />
+                <span className="visually-hidden">An agent is writing now</span>
               </span>
             ) : undefined
           }
@@ -254,7 +254,7 @@ export function LibrarySwitcher({ urls, name }: { urls: Urls; name: string }) {
   );
   return (
     <Menu
-      name={`Library ${urls.slug}, owned by ${urls.owner}`}
+      name={`${name}, switch library`}
       buttonClass="lib-switch"
       listClass="libraries"
       label={
@@ -279,7 +279,7 @@ export function LibrarySwitcher({ urls, name }: { urls: Urls; name: string }) {
       </a>
       <hr />
       <a className="menu-item" href={urls.settings()}>
-        <Icon name="menu" />
+        <Icon name="settings" />
         {name} settings
       </a>
     </Menu>

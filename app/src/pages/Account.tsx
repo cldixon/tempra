@@ -12,9 +12,6 @@ import { Urls } from "../urls";
 /** The landing page's legal pages (TEMPRA-14). */
 export const LEGAL = "https://tempra.dev";
 
-/** The skill agents follow to work in a library (skills/okf/SKILL.md). */
-const SKILL_URL = "https://github.com/cldixon/tempra/blob/main/skills/okf/SKILL.md";
-
 const post = (url: string, body: unknown, method = "POST") =>
   api(url, { method, body: JSON.stringify(body) });
 
@@ -106,10 +103,6 @@ export function ConnectSteps({ slug, library }: { slug?: string; library?: strin
         <a href={library ? `/tokens?library=${encodeURIComponent(library)}` : "/tokens"}>
           Create a token
         </a>
-      </p>
-      <h2>Skill</h2>
-      <p>
-        <a href={SKILL_URL}>SKILL.md</a>
       </p>
     </>
   );

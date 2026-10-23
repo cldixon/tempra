@@ -12,7 +12,7 @@
   color-scheme: light dark;
 
   /* Color: surfaces */
-  --tempra-color-bg: light-dark(#ffffff, #1b1b1d); /* the sheet, panels, pills */
+  --tempra-color-bg: light-dark(#ffffff, #1b1b1d); /* the page, panels, pills */
   --tempra-color-ground: light-dark(#f3f3f1, #121214); /* the page under them, inset fills */
   --tempra-color-hover: light-dark(#e9e9e6, #222225);
   --tempra-color-selected: light-dark(#e1e1dd, #2a2a2e);
@@ -27,9 +27,8 @@
   --tempra-color-border: light-dark(#e8e8e4, #2a2a2d);
   --tempra-color-border-strong: light-dark(#d2d2ce, #3c3c40);
 
-  /* Color: an agent's recent change (the only colour before the palette), cooling to grey */
+  /* Color: the change dot (the only colour before the palette) */
   --tempra-color-agent: light-dark(#e8722a, #f0884a);
-  --tempra-color-agent-cool: var(--tempra-color-faint);
 
   /* Color: a dimmed page behind a sheet or a full-screen view */
   --tempra-color-scrim: light-dark(rgb(20 20 22 / 0.2), rgb(0 0 0 / 0.5));
@@ -88,7 +87,7 @@
   --tempra-space-3: 1rem;
   --tempra-space-4: 2rem;
   --tempra-gutter: 8px; /* the frame's gutter */
-  --tempra-sheet-pad: 40px; /* a page's side padding in the sheet */
+  --tempra-page-pad: 40px; /* a page's side padding in its column */
 
   /* The frame (take 4): a top bar across the window, the sidebar, one panel beside a concept.
      The breakpoints are 1100px (the panel overlays the page) and 900px (the phone layout); a
@@ -108,14 +107,14 @@
   /* A concept's columns (take 4): the text, centred; on the right its contents, or a panel */
   --tempra-column-text: 620px;
   --tempra-contents: 200px;
-  --tempra-page-width: 760px; /* home, Needs you, Activity, a folder */
+  --tempra-page-width: 760px; /* home, Activity, a folder, the Inbox */
 
   /* Shape: squarer than take 2 */
   --tempra-radius: 5px; /* code */
   --tempra-radius-mark: 3px;
   --tempra-radius-row: 7px; /* sidebar rows, inputs */
   --tempra-radius-box: 10px; /* cards, list boxes, threads */
-  --tempra-radius-card: 10px; /* the sheet, dialogs */
+  --tempra-radius-card: 10px; /* the public pages' sheet, dialogs */
   --tempra-radius-tile: 6px; /* the library's initial */
   --tempra-radius-pill: 999px;
 

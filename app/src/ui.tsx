@@ -242,7 +242,7 @@ export const anchorId = (prefix: string, label: string) =>
   `${prefix}-${label.replace(/[^\w.-]/g, "_")}`;
 
 /**
- * Where a page is in its library (the sheet's bar): its folders by name, each a link, then the
+ * Where a page is in its library (the top bar's crumbs): its folders by name, each a link, then the
  * file itself (by `title` when it has one), and after them what the page adds (a concept's
  * staleness or status). The library itself is in the sidebar, so the crumbs start below it.
  */
@@ -286,11 +286,12 @@ export function Crumbs(props: {
   );
 }
 
+/** An earlier version on screen (`?at=`), said in words, with the way back to the latest. */
 export function AtNotice({ urls, head, current }: { urls: Urls; head: number; current: string }) {
   if (urls.at === undefined || urls.at >= head) return null;
   return (
     <div className="notice">
-      Viewing as of sequence {urls.at} (head is {head}). <a href={current}>View current</a>
+      An earlier version. <a href={current}>Back to latest</a>
     </div>
   );
 }

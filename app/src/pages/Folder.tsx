@@ -7,7 +7,7 @@ import { Icon } from "../chrome";
 import { useFeed, useLastSeen, useTrailing } from "../live";
 import { Crumbs, plural, Status, useTitle } from "../ui";
 import { folderName, type Urls } from "../urls";
-import { PageBar, SheetPage } from "../Workspace";
+import { PageBar, PageColumn } from "../Workspace";
 import { NotFound } from "./File";
 
 /*
@@ -77,7 +77,7 @@ export function Folder({ urls: pinned, dir }: { urls: Urls; dir: string }) {
       <PageBar>
         <Crumbs urls={urls} path={dir} file={false} />
       </PageBar>
-      <SheetPage>
+      <PageColumn>
         <Status loaded={loaded}>
           {(view) => (
             <FolderBody
@@ -92,7 +92,7 @@ export function Folder({ urls: pinned, dir }: { urls: Urls; dir: string }) {
             />
           )}
         </Status>
-      </SheetPage>
+      </PageColumn>
     </>
   );
 }
@@ -173,10 +173,7 @@ function ConceptRow(props: {
                 className="folder-dot"
                 title={writing ? `${writing} is editing` : "Changed since you last looked"}
               >
-                <span
-                  className={writing ? "change-dot live" : "change-dot warm"}
-                  aria-hidden="true"
-                />
+                <span className={writing ? "change-dot live" : "change-dot"} aria-hidden="true" />
                 <span className="visually-hidden">
                   {writing ? "being written now" : "changed since you last looked"}
                 </span>

@@ -2,10 +2,12 @@ import { type FormEvent, type RefObject, useEffect, useRef, useState } from "rea
 import { type ActedBy, type ActorView, useActors } from "../agents";
 import { api, useAction } from "../api";
 import { Avatar } from "../chrome";
+import { threadElementId } from "../concept/Panel";
 import { MentionArea, useMentionable } from "../Mentions";
 import { revealOffset } from "../Reader";
 import { Ago, clip, useMe } from "../ui";
 import type { Urls } from "../urls";
+import { useComposing } from "./composing";
 import type { CommentT, Draft, Placed, Thread } from "./data";
 
 /*
@@ -24,7 +26,7 @@ function useNamer(urls: Urls): (actor: string, by?: ActedBy | null) => ActorView
 function By({ who }: { who: ActorView }) {
   return (
     <>
-      <Avatar name={who.name} agent={who.agent} />
+      <Avatar name={who.mark} agent={who.agent} />
       <strong>{who.name}</strong>
     </>
   );
@@ -51,7 +53,7 @@ export function ThreadView(props: {
     return (
       <button
         type="button"
-        id={`thread-${t.id}`}
+        id={threadElementId(t.id)}
         className={t.status === "open" ? "thread collapsed" : "thread collapsed resolved"}
         aria-expanded="false"
         onClick={select}
@@ -73,7 +75,7 @@ export function ThreadView(props: {
   }
   return (
     <section
-      id={`thread-${t.id}`}
+      id={threadElementId(t.id)}
       className={t.status === "open" ? "thread open" : "thread open resolved"}
       aria-label="Comment thread"
     >
@@ -151,6 +153,7 @@ function ThreadActions(props: {
   const { busy, error, run } = useAction();
   const [reply, setReply] = useState("");
   const people = useMentionable(urls);
+  useComposing(reply.trim() !== "");
   if (!props.writable) return null;
   const act = (kind: "reply" | "resolve" | "reopen") => (e?: FormEvent) => {
     e?.preventDefault();
@@ -230,6 +233,7 @@ export function NewComment(props: {
   const box = props.boxRef ?? own;
   const people = useMentionable(props.urls);
   const { draft, onDone } = props;
+  useComposing(draft !== null || text.trim() !== "");
   // The box takes the focus when it opens (from the toolbar, or "Comment on this concept").
   // biome-ignore lint/correctness/useExhaustiveDependencies: on opening, and on a new draft.
   useEffect(() => box.current?.focus(), [draft]);

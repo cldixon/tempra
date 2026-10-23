@@ -19,18 +19,12 @@ import { useFigureView } from "./figures";
 import { HistoryList } from "./History";
 import { useHoverCards } from "./hover";
 import { type Live, LiveNotice, NewVersion } from "./live";
-import { Panel, type PanelName, panelInUrl } from "./Panel";
+import { Panel, type PanelName, panelInUrl, threadInHash } from "./Panel";
 import { PropertiesList } from "./Properties";
 import { RawMarkdown } from "./RawMarkdown";
 import { ReviewBar } from "./ReviewBar";
 import { SourcesSection } from "./Sources";
 import { CopyPage, PageMenu } from "./Tools";
-
-/** The thread a link names (`#thread-<id>`), if any. */
-function threadInHash(): string | null {
-  const m = /^#thread-(.+)$/.exec(location.hash);
-  return m?.[1] ? decodeURIComponent(m[1]) : null;
-}
 
 /**
  * A concept's page (take 4, TEMPRA-114; tempra-dev: app/reader, app/comments,
@@ -95,12 +89,16 @@ export function ConceptPage(props: {
   const hideFirst =
     first?.first === true && first.text.trim().toLowerCase() === title.trim().toLowerCase();
   const contents = useMemo(() => contentsOf(prepared, hideFirst), [prepared, hideFirst]);
+  // The headings' ids: a #fragment naming one goes to the heading, never to a panel.
+  const bodyIds = useMemo(() => new Set(prepared.anchors.values()), [prepared]);
   const hover = useHoverCards(urls, sources, prepared);
   const figureView = useFigureView(urls, title, name);
 
   // Review and history: the text against the last verification, or a chosen version.
   const s = useMemo(() => standing(data.history, c.seq), [data.history, c.seq]);
-  const compare = current ? props.compare : null;
+  // A version from History draws what it changed on that version (`?at=…&since=…`); review mode
+  // is of the latest only.
+  const compare = current || props.compare?.kind === "since" ? props.compare : null;
   const base =
     compare?.kind === "since"
       ? compare.seq
@@ -112,7 +110,7 @@ export function ConceptPage(props: {
   // The right column: the contents, or one panel. A page opens on its contents; a panel opens
   // only from a control, a quote, or a link asking for one (`?panel=`, `#thread-…`,
   // `#comments`), and closing it (×, Escape, the control again) brings the contents back.
-  const [panel, setPanel] = useState<PanelName | null>(panelInUrl);
+  const [panel, setPanel] = useState<PanelName | null>(() => panelInUrl(bodyIds));
   const commentsButton = useRef<HTMLButtonElement>(null);
   const opener = useRef<HTMLElement | null>(null);
   const panelBox = useRef<HTMLDivElement>(null);
@@ -138,7 +136,7 @@ export function ConceptPage(props: {
 
   // Comments: each thread's quote found in the body on screen, highlighted while open, listed in
   // the Comments panel.
-  const [active, setActive] = useState<string | null>(threadInHash);
+  const [active, setActive] = useState<string | null>(() => threadInHash(bodyIds));
   const placed = useMemo(
     () => placeThreads(props.threads ?? [], prepared.text),
     [props.threads, prepared],
@@ -163,26 +161,26 @@ export function ConceptPage(props: {
     () => highlightsOf(placed, active, draft.draft),
     [placed, active, draft.draft],
   );
-  // A link that asks for a panel or a thread (Needs you, the inbox, `?panel=`) opens it when the
+  // A link that asks for a panel or a thread (the Inbox, the home, `?panel=`) opens it when the
   // URL changes to it, and again when the #fragment changes; never on its own otherwise.
-  const asked = panelInUrl();
+  const asked = panelInUrl(bodyIds);
   const where = `${location.search}${location.hash}`;
   // biome-ignore lint/correctness/useExhaustiveDependencies: on a move to a URL that asks.
   useEffect(() => {
     if (!asked) return;
-    const id = threadInHash();
+    const id = threadInHash(bodyIds);
     if (id) setActive(id);
     setPanel(asked);
   }, [asked, where]);
   useEffect(() => {
     const follow = () => {
-      const id = threadInHash();
+      const id = threadInHash(bodyIds);
       if (id) setActive(id);
-      if (id || location.hash === "#comments") setPanel("comments");
+      if (id || panelInUrl(bodyIds, { search: "", hash: location.hash })) setPanel("comments");
     };
     window.addEventListener("hashchange", follow);
     return () => window.removeEventListener("hashchange", follow);
-  }, []);
+  }, [bodyIds]);
   // Escape closes the panel (one Escape, one thing closed: a menu, a dialog, a draft or the
   // drawer handle theirs first and mark it handled).
   useEffect(() => {
@@ -263,7 +261,9 @@ export function ConceptPage(props: {
           )}
           {props.notice && <div className="notice">{props.notice}</div>}
           {moved && live && <LiveNotice urls={urls} live={live} />}
-          <AtNotice urls={urls} head={head} current={urls.pinned(undefined).file(c.path)} />
+          {!compare && (
+            <AtNotice urls={urls} head={head} current={urls.pinned(undefined).file(c.path)} />
+          )}
           {markdown && (
             <RawMarkdown
               urls={urls}
@@ -346,7 +346,7 @@ export function ConceptPage(props: {
                 concept={c}
                 standing={s}
                 name={name}
-                since={compare?.kind === "since" ? compare.seq : null}
+                comparing={compare?.kind === "since"}
               />
             </Panel>
           ) : panel === "properties" ? (

@@ -603,9 +603,9 @@ async function browserRenders(
     /** The concept's comments toggle ("Comments" or "Comments, n open"). */
     const commentsToggle = () => sheetBar.getByRole("button", { name: /^Comments(, \d+ open)?$/ });
     /** The concept's panels (take 4): one at a time, in place of the contents. */
-    const comments = page.locator("aside#comments.concept-panel");
-    const historyPanel = page.locator("aside#history.concept-panel");
-    const properties = () => page.locator("aside#properties.concept-panel");
+    const comments = page.locator("aside#panel-comments.concept-panel");
+    const historyPanel = page.locator("aside#panel-history.concept-panel");
+    const properties = () => page.locator("aside#panel-properties.concept-panel");
     /** The contents on the right, while no panel is open and there is room. */
     const contentsNav = main.locator("nav.concept-contents");
     /** An item of the concept's ⋯ menu. */
@@ -729,18 +729,75 @@ async function browserRenders(
           if (/\/(tree|outline)(\?|$)/.test(new URL(r.url()).pathname)) asked++;
         };
         page.on("request", count);
-        // Folders read as names ("Computations"), with their count beside them.
+        // Folders read as names ("Computations"), with their count beside them. The chevron
+        // only opens and closes the folder in place (TEMPRA-123): the page stays where it is.
+        const files = sidebar.getByRole("navigation", { name: "Files" });
+        const chevron = files.getByRole("button", {
+          name: `${folderName(folder)} folder`,
+          exact: true,
+        });
+        const at = page.url();
+        await chevron.click();
+        await sidebar.locator(`a[data-path="${nested}"]`).waitFor({ timeout: 1000 });
+        if ((await chevron.getAttribute("aria-expanded")) !== "true") {
+          throw new Error("the chevron does not say the folder is open");
+        }
+        await chevron.click();
         await sidebar
-          .getByRole("button", { name: new RegExp(`^${literal(folderName(folder))}( \\d+)?$`) })
-          .click();
-        await sidebar.locator(`a[title="${nested}"]`).waitFor({ timeout: 1000 });
+          .locator(`a[data-path="${nested}"]`)
+          .waitFor({ state: "detached", timeout: 1000 });
+        if (page.url() !== at) throw new Error(`the chevron moved the page to ${page.url()}`);
+        // The folder's name opens its folder view and expands it, in place.
+        await markStay();
+        await files.getByRole("link", { name: folderName(folder), exact: true }).click();
+        await page.waitForURL(`${lib}/${enc(folder)}/`);
+        await main
+          .getByRole("heading", { level: 1, name: folderName(folder), exact: true })
+          .waitFor({ timeout: 15_000 });
+        await sidebar.locator(`a[data-path="${nested}"]`).waitFor({ timeout: 1000 });
+        if (!(await stayed())) throw new Error("the folder's name reloaded the page");
         page.off("request", count);
         if (asked > 0) throw new Error(`opening a folder made ${asked} request(s)`);
+        // Files come after the pages in each folder, with a file icon; at the root after the
+        // folders and the root pages.
+        const file = `${folder}/gate-tree-file.png`;
+        const put = await fetch(`${libApi}/files/${enc(file)}`, {
+          method: "PUT",
+          headers: { ...bearer, "Content-Type": "image/png", "X-Note": "gate: a file in the tree" },
+          body: greyPng(8, 8, 0x99),
+        });
+        if (!put.ok) throw new Error(`upload ${file}: ${put.status} ${await put.text()}`);
+        const fileRow = sidebar.locator(`.tree-row.file:has(a[data-path="${file}"])`);
+        await fileRow.waitFor({ timeout: 10_000 });
+        if ((await fileRow.locator("svg").count()) !== 1)
+          throw new Error("no icon on a file's row");
+        const misplaced = await page.evaluate<string[]>(`(() => {
+          const bad = [];
+          for (const ul of document.querySelectorAll('nav[aria-label="Files"] ul')) {
+            let rank = 0;
+            for (const li of ul.children) {
+              const row = li.querySelector(":scope > .tree-row");
+              if (!row) continue;
+              const r = row.classList.contains("dir") ? 0 : row.classList.contains("file") ? 2 : 1;
+              if (r < rank) bad.push(row.textContent);
+              rank = Math.max(rank, r);
+            }
+          }
+          return bad;
+        })()`);
+        if (misplaced.length > 0) {
+          throw new Error(`rows out of order (folders, pages, files): ${misplaced.join(", ")}`);
+        }
+        await agentDeletes(file);
+        await fileRow.waitFor({ state: "detached", timeout: 10_000 });
+        await page.goBack();
+        await page.waitForURL(`${lib}/`);
+        await home();
       }
-      await sidebar.locator(`a[title="${nested}"]`).click();
+      await sidebar.locator(`a[data-path="${nested}"]`).click();
       await page.waitForURL(`${lib}/${enc(nested)}`);
       await page.locator(".body .prose").waitFor({ timeout: 15_000 });
-      if ((await sidebar.locator(`a[aria-current="page"][title="${nested}"]`).count()) !== 1) {
+      if ((await sidebar.locator(`a[aria-current="page"][data-path="${nested}"]`).count()) !== 1) {
         throw new Error("the open file is not marked in the tree");
       }
       // ⋯ → History opens the History panel; Escape closes it.
@@ -775,7 +832,7 @@ async function browserRenders(
         });
         const before = await main.evaluate((el) => el.scrollTop);
         const title = await main.locator("h1").first().innerText();
-        const link = sidebar.locator(`a[title="${other}"]`);
+        const link = sidebar.locator(`a[data-path="${other}"]`);
         await link.hover();
         await page.waitForTimeout(1500); // the hover's prefetch lands in the cache
         await link.click();
@@ -847,22 +904,40 @@ async function browserRenders(
       if (!(await stayed())) throw new Error("the folder's row reloaded the page");
     });
     await step("workspace: the tree follows an agent's write and move, live", async () => {
+      // The person has seen everything so far: no solid dot until an agent writes.
+      const libPath = `/api/v1/libraries/${owner}/${slug}`;
+      const { seq: head } = (await (await apiAs(devCookie, `${libPath}/summary`)).json()) as {
+        seq: number;
+      };
+      const seen = await apiAs(devCookie, `${libPath}/seen`, "PUT", { seq: head });
+      if (!seen.ok) throw new Error(`PUT …/seen: ${seen.status}`);
+      await page.reload();
+      await sidebar.locator(".tree a").first().waitFor({ timeout: 15_000 });
       const put = await fetch(`${libApi}/files/gate-live.md`, {
         method: "PUT",
         headers: { ...bearer, "Content-Type": "text/markdown", "X-Note": "gate: tree" },
         body: "---\ntype: Note\ntitle: Gate live\ndescription: Written while the tree was open.\n---\nLive.\n",
       });
       if (!put.ok) throw new Error(`write: ${put.status}`);
-      const row = sidebar.locator('a[title="gate-live.md"]');
+      const row = sidebar.locator('a[data-path="gate-live.md"]');
       await row.waitFor({ timeout: 5000 });
-      if ((await sidebar.locator('.tree-mark[title*="changed this just now"]').count()) === 0) {
-        throw new Error("no activity mark on the agent's file");
-      }
-      // Named for its person, not by the raw actor (TEMPRA-77): "… for @dev changed this".
+      // The change dot (take 4, TEMPRA-129): pulsing while the agent writes, named for its
+      // person, not by the raw actor (TEMPRA-77): "… for @dev is editing this now".
       await sidebar
-        .locator('.tree-mark[title*=" for @"][title*="changed this just now"]')
-        .first()
+        .locator(".tree-row", { has: page.locator(`a[data-path="gate-live.md"]`) })
+        .locator('.tree-mark[title*=" for @"][title$="is editing this now"] .change-dot.live')
         .waitFor({ timeout: 5000 });
+      // After it (a fresh look, the write no longer live): solid, changed since the person
+      // looked; take 3's grey is gone.
+      await page.reload();
+      await sidebar
+        .locator(".tree-row", { has: page.locator(`a[data-path="gate-live.md"]`) })
+        .locator('.tree-mark[title="Changed since you last looked"] .change-dot:not(.live)')
+        .waitFor({ timeout: 15_000 });
+      if ((await sidebar.locator(".change-dot.cool, .change-dot.warm").count()) > 0) {
+        throw new Error("the tree still draws take 3's warm or grey dot");
+      }
+      if (shots) await page.screenshot({ path: `${shots}/tree-dot.png` });
       const target = folder ? `${folder}/gate-live.md` : "moved/gate-live.md";
       const moved = await fetch(`${libApi}/files/gate-live.md/move`, {
         method: "POST",
@@ -871,7 +946,7 @@ async function browserRenders(
       });
       if (!moved.ok) throw new Error(`move: ${moved.status}`);
       await row.waitFor({ state: "detached", timeout: 5000 });
-      if (folder) await sidebar.locator(`a[title="${target}"]`).waitFor({ timeout: 5000 });
+      if (folder) await sidebar.locator(`a[data-path="${target}"]`).waitFor({ timeout: 5000 });
       // Not found (take 4, board 32): the old path says where the file moved, with Open, then
       // Home and Search (the quick switcher).
       b.expect404("gate-live.md");
@@ -886,7 +961,7 @@ async function browserRenders(
       await main.getByRole("link", { name: "Home", exact: true }).waitFor();
       if (shots) await page.screenshot({ path: `${shots}/not-found.png` });
       await main.getByRole("button", { name: "Search", exact: true }).click();
-      const dialog = page.getByRole("dialog", { name: "Open a file" });
+      const dialog = page.getByRole("dialog", { name: /^Search / });
       await dialog.waitFor({ timeout: 5000 });
       await page.keyboard.press("Escape");
       await dialog.waitFor({ state: "hidden", timeout: 5000 });
@@ -900,7 +975,7 @@ async function browserRenders(
         })
       ).json()) as { frontmatter?: { title?: string } };
       const word = String(meta.frontmatter?.title ?? "").split(/\s+/)[0] ?? "";
-      const dialog = page.getByRole("dialog", { name: "Open a file" });
+      const dialog = page.getByRole("dialog", { name: /^Search / });
       const box = dialog.getByRole("combobox");
       // It closes every way a person tries: Escape, the same keys, a click outside.
       const closes = async (how: string, close: () => Promise<void>) => {
@@ -953,7 +1028,7 @@ async function browserRenders(
     // (TEMPRA-102), the bell, and the theme, chosen in the avatar's menu and kept on the account.
     await step("the frame: the switcher's menu, General, the bell and the theme", async () => {
       const brand = page.locator(".topbar-brand");
-      const switcher = () => brand.getByRole("button", { name: /^Library .*, owned by / });
+      const switcher = () => brand.getByRole("button", { name: /, switch library$/ });
       await switcher().click();
       const menu = page.locator(".menu-list.libraries");
       await menu
@@ -1059,7 +1134,7 @@ async function browserRenders(
           // Settings and the Inbox at its foot.
           const views = sidebar.getByRole("navigation", { name: "Views" });
           for (const part of [
-            sidebar.getByRole("button", { name: /^Library .*, owned by / }),
+            sidebar.getByRole("button", { name: /, switch library$/ }),
             sidebar.getByRole("button", { name: "Close menu" }),
             sidebar.getByRole("button", { name: `Search ${libraryName}`, exact: true }),
             views.getByRole("link", { name: "Home", exact: true }),
@@ -1091,7 +1166,7 @@ async function browserRenders(
           // The drawer's search field opens the quick switcher.
           await menu.click();
           await sidebar.getByRole("button", { name: `Search ${libraryName}`, exact: true }).click();
-          const dialog = page.getByRole("dialog", { name: "Open a file" });
+          const dialog = page.getByRole("dialog", { name: /^Search / });
           await dialog.waitFor({ timeout: 5000 });
           await page.keyboard.press("Escape");
           await dialog.waitFor({ state: "hidden", timeout: 5000 });
@@ -1386,7 +1461,7 @@ async function browserRenders(
       if (ms > 3000) throw new Error(`the new-version glyph took ${ms} ms`);
       if (shots) await page.screenshot({ path: `${shots}/live.png` });
       // The open file prefetched again (a hover on its own row) must not hide the new version.
-      await page.locator(`.ws-sidebar a[title="${concept}"]`).hover();
+      await page.locator(`.ws-sidebar a[data-path="${concept}"]`).hover();
       await page.waitForTimeout(500);
       await newVersion().click();
       await page.getByRole("status").filter({ hasText: "changed this" }).waitFor();
@@ -1401,7 +1476,7 @@ async function browserRenders(
     await step(
       "review mode: verify, an agent's edit, and the changes since verification",
       async () => {
-        // From here on, a desktop with room for a panel beside the text (1280px overlays it).
+        // From here on, a desktop with room for a panel beside the text (at 1280px the contents give way to it).
         await wide();
         await agentAppends("A sentence before verification.");
         await page.goto(url);
@@ -1496,11 +1571,24 @@ async function browserRenders(
       await row.getByRole("link", { name: "Review", exact: true }).click();
       await page.waitForURL(`${url}?review=1`);
       await page.getByRole("region", { name: "Review" }).waitFor({ timeout: 15_000 });
+      // The home's For you here draws the same open items (TEMPRA-130, H-5).
+      const card = main.locator(`a.home-card[href="${reviewHref}"]`);
+      await page.goto(`${lib}/`);
+      await home();
+      await card.waitFor({ timeout: 15_000 });
       // Dismiss marks it done: gone from Open, listed under Done.
       await page.goto(`${base}/inbox`);
       await row.waitFor({ timeout: 15_000 });
       await row.getByRole("button", { name: "Dismiss", exact: true }).click();
       await row.waitFor({ state: "detached", timeout: 10_000 });
+      // Done in the Inbox, gone from the home.
+      await page.goto(`${lib}/`);
+      await home();
+      await card.waitFor({ state: "detached", timeout: 15_000 });
+      await page.goto(`${base}/inbox`);
+      await main
+        .getByRole("heading", { level: 1, name: "Inbox", exact: true })
+        .waitFor({ timeout: 15_000 });
       await page
         .locator("main.ws-main .inbox-filters")
         .getByRole("button", { name: "Done", exact: true })
@@ -1518,29 +1606,43 @@ async function browserRenders(
     await step("History: a version's changes in the text, and back to the latest", async () => {
       await page.locator(".body .prose").waitFor({ timeout: 15_000 });
       await more("History");
-      const earlier = historyPanel.locator("a.version:not(.current)");
-      await earlier.first().waitFor({ timeout: 10_000 });
+      // A version opens as it was, with what it changed from the one before (TEMPRA-128, C-1):
+      // an earlier one at ?at=<it>&since=<the one before>, the latest at ?since=<the one before>.
+      const changed = historyPanel.locator('a.version[href*="since="]');
+      await changed.first().waitFor({ timeout: 10_000 });
       if ((await historyPanel.getByText(/verif/i).count()) > 0) {
         throw new Error("History shows verification");
       }
       if (shots) await page.screenshot({ path: `${shots}/history.png` });
-      await earlier.first().click();
-      await page.waitForURL(/\?since=\d+$/);
-      // The slim bar names the version; the panel stays open on it, marked.
+      const older = historyPanel.locator('a.version[href*="at="][href*="since="]');
+      const pick = (await older.count()) > 0 ? older.first() : changed.first();
+      const label = (await pick.locator(".version-n").textContent())?.trim() ?? "";
+      const href = (await pick.getAttribute("href")) ?? "";
+      const asked = new URL(href, base).searchParams;
+      await pick.click();
+      await page.waitForURL((u) => u.search.includes(`since=${asked.get("since")}`));
+      // The slim bar names the version on screen, the one chosen; History stays open on it.
       const bar = page.getByRole("region", { name: "Changes" });
-      await bar
-        .getByText(/^v\d+$/)
+      await bar.locator(".version-n").filter({ hasText: label }).waitFor({ timeout: 15_000 });
+      await page
+        .locator(".body ins.diff-added, .body del.diff-removed")
         .first()
         .waitFor({ timeout: 10_000 });
-      await page.locator(".body ins.diff-added").first().waitFor({ timeout: 10_000 });
-      await historyPanel.locator('a.version[aria-current="true"]').waitFor({ timeout: 5000 });
+      await historyPanel
+        .locator('a.version[aria-current="true"] .version-n')
+        .filter({ hasText: label })
+        .waitFor({ timeout: 10_000 });
+      // No sequence numbers for people on the way (the old "Viewing as of sequence …").
+      if ((await page.getByText(/as of sequence/).count()) > 0) {
+        throw new Error("a version shows its sequence number");
+      }
       if (shots) await page.screenshot({ path: `${shots}/version.png` });
-      const read = await bar.getByRole("link", { name: /^Read v\d+$/ }).getAttribute("href");
-      if (!read?.includes("?at=")) throw new Error(`the bar's Read link: ${read}`);
       await bar.getByRole("link", { name: "Back to latest" }).click();
       await page.waitForURL(url);
       await bar.waitFor({ state: "detached", timeout: 5000 });
-      await page.getByRole("button", { name: "Close history" }).click();
+      if ((await historyPanel.count()) > 0) {
+        await page.getByRole("button", { name: "Close history" }).click();
+      }
       await historyPanel.waitFor({ state: "detached", timeout: 5000 });
     });
     await step("an internal link's tooltip", async () => {
@@ -1654,11 +1756,32 @@ async function browserRenders(
         await tools.waitFor({ state: "detached", timeout: 5_000 });
         await box.fill("Gate: please check this sentence.");
         if (shots) await page.screenshot({ path: `${shots}/comment-draft.png` });
+        // An agent writes while the comment is being written (TEMPRA-128, C-4): the new version
+        // waits beside the tools and never swaps in under the draft, past the reader's idle
+        // time (15 s), so nothing typed is lost.
+        await agentAppends("A sentence written under a draft.", "gate: a write under a draft");
+        await newVersion().waitFor({ timeout: 10_000 });
+        await page.waitForTimeout(17_000);
+        if ((await box.inputValue()) !== "Gate: please check this sentence.") {
+          throw new Error("the draft was lost when a new version arrived");
+        }
+        if ((await highlight("tempra-comment-draft", false, 1000)).join("") !== quote) {
+          throw new Error("the draft's quote was lost when a new version arrived");
+        }
+        if ((await page.getByText("A sentence written under a draft.").count()) > 0) {
+          throw new Error("the new version swapped in under the draft");
+        }
         await comments
           .locator("form.comment-form")
           .getByRole("button", { name: "Comment", exact: true })
           .click();
         await highlight("tempra-comment-draft", true);
+        // Posted: the new version comes in when asked, the comment staying on its quote.
+        await showNewVersion();
+        await page
+          .locator(".body .prose")
+          .getByText("A sentence written under a draft.")
+          .waitFor({ timeout: 10_000 });
         // The posted thread is the active one: solid, then dotted with the others.
         const marked = async () => [
           ...(await highlighted("tempra-comment")),
@@ -1681,21 +1804,21 @@ async function browserRenders(
           t.comments.some((c) => c.body === "Gate: please check this sentence."),
         )?.id;
         if (!thread) throw new Error(`the thread is not listed: ${JSON.stringify(listed)}`);
-        const threadEl = comments.locator(`[id="thread-${thread}"]`);
+        const threadEl = comments.locator(`[id="panel-thread-${thread}"]`);
         // A click elsewhere in the text lets the thread go (compact in the panel); a click on
         // its quote makes it the active thread again.
         await page
           .locator(".body .prose")
           .getByText("A sentence the gate added.", { exact: true })
           .click();
-        await comments.locator(`button.thread.collapsed[id="thread-${thread}"]`).waitFor({
+        await comments.locator(`button.thread.collapsed[id="panel-thread-${thread}"]`).waitFor({
           timeout: 5000,
         });
         await highlight("tempra-comment-active", true, 5000);
         const at = await pointOn("tempra-comment");
         if (!at) throw new Error("the thread's quote is not drawn");
         await page.mouse.click(at.x, at.y);
-        await comments.locator(`section.thread.open[id="thread-${thread}"]`).waitFor({
+        await comments.locator(`section.thread.open[id="panel-thread-${thread}"]`).waitFor({
           timeout: 5000,
         });
         await highlight("tempra-comment-active", false, 5000);
@@ -1849,8 +1972,37 @@ async function browserRenders(
       await inboxHeading.waitFor({ timeout: 15_000 });
       await row.waitFor({ timeout: 10_000 });
       await row.getByText("replied to your thread").waitFor({ timeout: 5000 });
-      await main.locator(".inbox-filter").waitFor({ timeout: 5000 });
+      // One library filter (TEMPRA-130, A-12): the select, set to this library.
+      const filter = main.getByRole("combobox", { name: "Library" });
+      if ((await filter.inputValue({ timeout: 5000 })) !== `${owner}/${slug}`) {
+        throw new Error(`the library filter: ${await filter.inputValue()}`);
+      }
+      // The reply's row names the page by its title, never its slug (A-4).
+      const meta = (await (
+        await fetch(`${libApi}/files/${enc(target)}`, {
+          headers: { ...bearer, Accept: "application/json" },
+        })
+      ).json()) as { frontmatter: { title?: string } };
+      const title = meta.frontmatter.title;
+      if (title) {
+        await row
+          .locator(".inbox-title a")
+          .filter({ hasText: new RegExp(`^${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`) })
+          .waitFor({ timeout: 10_000 });
+      }
       if (!(await stayed())) throw new Error("the link reloaded the page");
+      // Mark all read on the filtered list marks this library's items only (A-1).
+      const marked = page.waitForRequest(
+        (r) => r.url().endsWith("/api/v1/inbox/read") && r.method() === "POST",
+      );
+      await main.getByRole("button", { name: "Mark all read", exact: true }).click();
+      const sent = (await marked).postDataJSON() as { library?: string };
+      if (sent.library !== `${owner}/${slug}`) {
+        throw new Error(`Mark all read sent ${JSON.stringify(sent)}`);
+      }
+      await main
+        .getByRole("button", { name: "Mark all read", exact: true })
+        .waitFor({ state: "detached", timeout: 10_000 });
       const { count } = (await (
         await apiAs(devCookie, `/api/v1/libraries/${owner}/${slug}/needs`)
       ).json()) as { count: number };
@@ -1864,7 +2016,9 @@ async function browserRenders(
       await markStay();
       await row.getByRole("link", { name: "Reply", exact: true }).click();
       await page.waitForURL(`${lib}/${enc(target)}#thread-${encodeURIComponent(id)}`);
-      await comments.locator(`section.thread.open[id="thread-${id}"]`).waitFor({ timeout: 15_000 });
+      await comments
+        .locator(`section.thread.open[id="panel-thread-${id}"]`)
+        .waitFor({ timeout: 15_000 });
       if (!(await stayed())) throw new Error("Reply reloaded the page");
       const resolved = await fetch(`${libApi}/comments/${id}/resolve`, {
         method: "POST",
@@ -2007,7 +2161,7 @@ async function browserRenders(
     // The panels (take 4, tempra-dev: decisions/one-panel-from-the-top-bar): one at a time in
     // place of the contents, opened from the top bar, closed by ×, Escape or the same control,
     // the contents back; a link with ?panel= opens one; none is remembered. Under 1100px a panel
-    // overlays the page. Copy page copies the stored file; the byline says an agent is editing.
+    // takes the contents' column, and under 960px overlays the page. Copy page copies the stored file; the byline says an agent is editing.
     await step("panels: open and close, the contents come back, ?panel=, Copy page", async () => {
       const path = "gate-panels.md";
       const put = await fetch(`${libApi}/files/${path}`, {
@@ -2070,17 +2224,34 @@ async function browserRenders(
       await contentsNav.waitFor({ timeout: 15_000 });
       await page.waitForTimeout(300);
       await back("a plain reload");
-      // Under 1100px the contents hide (On this page under the byline) and a panel overlays.
+      // Under 1100px the contents hide (On this page under the byline). At 1280px a panel takes
+      // their column and the text moves over for it: nothing runs under it (TEMPRA-128, C-5).
       await usual();
       try {
         await contentsNav.waitFor({ state: "hidden", timeout: 5000 });
-        await main.locator(".toc-inline summary").waitFor({ timeout: 5000 });
+        const inline = main.locator(".toc-inline");
+        await inline.locator("summary").waitFor({ timeout: 5000 });
         await commentsToggle().click();
         await comments.waitFor({ timeout: 5000 });
-        const position = await page.evaluate<string>(
-          `getComputedStyle(document.querySelector("aside#comments")).position`,
+        const position = () =>
+          page.evaluate<string>(
+            `getComputedStyle(document.querySelector("aside#panel-comments")).position`,
+          );
+        if ((await position()) === "fixed") throw new Error("the panel overlays at 1280px");
+        await page.waitForTimeout(200);
+        const box = await inline.boundingBox();
+        const side = await comments.boundingBox();
+        if (!box || !side || box.x + box.width > side.x + 1) {
+          throw new Error(`On this page runs under the panel: ${JSON.stringify({ box, side })}`);
+        }
+        if (shots) await page.screenshot({ path: `${shots}/panel-1280.png` });
+        // Narrower still, the panel overlays the page.
+        await page.setViewportSize({ width: 1180, height: 720 });
+        await page.waitForFunction(
+          `getComputedStyle(document.querySelector("aside#panel-comments")).position === "fixed"`,
+          undefined,
+          { timeout: 5000 },
         );
-        if (position !== "fixed") throw new Error(`the panel does not overlay: ${position}`);
         if (shots) await page.screenshot({ path: `${shots}/panel-narrow.png` });
         await page.keyboard.press("Escape");
         await comments.waitFor({ state: "detached", timeout: 5000 });
@@ -2183,7 +2354,9 @@ async function browserRenders(
         // The filters: a kind that matches nothing empties the table; Any kind brings it back.
         await main.getByRole("combobox", { name: "Kind" }).selectOption("revert");
         await page.waitForURL(`${lib}/-/activity?view=events&kind=revert`);
-        await main.getByText("No events match.").waitFor({ timeout: 5000 });
+        await main
+          .getByText(/^No events match( in the latest \d+ requests?)?\.$/)
+          .waitFor({ timeout: 5000 });
         await main.getByRole("combobox", { name: "Kind" }).selectOption("");
         await rows.first().waitFor({ timeout: 5000 });
         if (!(await stayed())) throw new Error("the page reloaded");
@@ -2235,17 +2408,19 @@ async function browserRenders(
           if (n === 0) break;
           for (let i = n - 1; i >= 0; i--) await closed.nth(i).click();
         }
-        const files = sidebar.locator("a[title$='.md']");
-        const titles = await files.evaluateAll((els) => els.map((e) => e.getAttribute("title")));
+        const files = sidebar.locator("a[data-path$='.md']");
+        const titles = await files.evaluateAll((els) =>
+          els.map((e) => e.getAttribute("data-path")),
+        );
         let opened = 0;
         while (Date.now() - t0 < 60_000) {
           for (const title of titles) {
-            await sidebar.locator(`a[title="${title}"]`).hover();
+            await sidebar.locator(`a[data-path="${title}"]`).hover();
             await page.waitForTimeout(80);
           }
           for (const title of titles) {
             if (Date.now() - t0 >= 60_000) break;
-            await sidebar.locator(`a[title="${title}"]`).click();
+            await sidebar.locator(`a[data-path="${title}"]`).click();
             await page.locator(".body .prose").first().waitFor({ timeout: 15_000 });
             // Skimming: a glance at each (someone reading opens one every several seconds).
             await page.waitForTimeout(1500);
@@ -2609,7 +2784,7 @@ async function freshAccountConnects(): Promise<string[]> {
       await page.locator(".menu-list").getByRole("link", { name, exact: true }).click();
     };
     /**
-     * A library view: the work queue by its URL (the home's foot line links it once agents have
+     * A library view: For agents by its URL (the home's foot line links it once agents have
      * housekeeping); a settings tab from the settings' sidebar, reached through the switcher's
      * menu (take 4) unless the settings are already open.
      */
@@ -2621,7 +2796,7 @@ async function freshAccountConnects(): Promise<string[]> {
       }
       const tab = page.locator(".ws-sidebar").getByRole("link", { name, exact: true });
       if ((await tab.count()) === 0) {
-        await page.getByRole("button", { name: /^Library .*, owned by / }).click();
+        await page.getByRole("button", { name: /, switch library$/ }).click();
         await page
           .locator(".menu-list")
           .getByRole("link", { name: /settings$/ })
@@ -2650,6 +2825,23 @@ async function freshAccountConnects(): Promise<string[]> {
       await accountLink("Account");
       await page.getByText("this device").waitFor({ timeout: 15_000 });
     });
+    // Off a library, Ctrl/Cmd+K searches the person's libraries (TEMPRA-127); Ctrl/Cmd+\ leaves
+    // the account's sidebar alone (only a library's own sidebar hides).
+    await step("account pages: Ctrl+K finds a library, Ctrl+\\ keeps the sidebar", async () => {
+      await page.keyboard.press("Control+\\");
+      await page.waitForTimeout(200);
+      if (!(await page.locator("section.ws-sidebar").isVisible())) {
+        throw new Error("Ctrl+\\ hid the account's sidebar");
+      }
+      await page.keyboard.press("Control+k");
+      const dialog = page.getByRole("dialog", { name: "Search libraries" });
+      const box = dialog.getByRole("combobox");
+      await box.waitFor({ timeout: 5000 });
+      await box.fill("notes");
+      await dialog.locator('[role="option"]').first().waitFor({ timeout: 5000 });
+      await box.press("Enter");
+      await page.waitForURL(`${lib}/`);
+    });
     for (const [tab, text] of [
       ["For agents", "For agents"],
       ["Import & export", "Nightly exports"],
@@ -2658,7 +2850,7 @@ async function freshAccountConnects(): Promise<string[]> {
       await step(`library tab ${tab}`, async () => {
         await page.goto(`${lib}/`);
         await libraryLink(tab);
-        // In the sheet: the phone's top bar (hidden here) names the page too.
+        // On the page: the phone's top bar (hidden here) names the page too.
         await page.locator(".ws-main").getByText(text).first().waitFor({ timeout: 15_000 });
       });
     }
@@ -2698,11 +2890,32 @@ async function freshAccountConnects(): Promise<string[]> {
       await context.addCookies(cookies);
     };
     let asInvitee: typeof asOwner = [];
-    await step("the invitee accepts from Invitations", async () => {
+    // From the Inbox (TEMPRA-130, A-2): Accept adds the library to the person's list at once
+    // (the sidebar, the switcher), and Open goes there, in place (a shared library, F-2).
+    await step("the invitee accepts from the Inbox and opens the library", async () => {
       await context.clearCookies();
-      await b.signInAs("stranger@localhost", "/invitations");
-      await page.getByRole("button", { name: "Accept" }).click();
+      await b.signInAs("stranger@localhost", "/inbox");
+      const href = new URL(`${lib}/`).pathname;
+      const listed = page.locator(`nav[aria-label="Shared with you"] a[href="${href}"]`);
+      if ((await listed.count()) > 0) throw new Error("listed before accepting");
+      await page
+        .locator("main.ws-main li.inbox-row")
+        .filter({ hasText: "Invitation" })
+        .getByRole("button", { name: "Accept", exact: true })
+        .click();
+      await listed.waitFor({ timeout: 15_000 });
+      await page.evaluate("window.__gateStay = true");
+      await page
+        .locator("main.ws-main .notice")
+        .getByRole("link", { name: "Open", exact: true })
+        .click();
       await page.waitForURL(`${lib}/`, { timeout: 15_000 });
+      if (!(await page.evaluate("window.__gateStay === true"))) {
+        throw new Error("Open reloaded the app");
+      }
+      await page.getByRole("button", { name: /, switch library$/ }).click();
+      await page.locator(`.menu-list a.menu-lib[href="${href}"]`).waitFor({ timeout: 5000 });
+      await page.keyboard.press("Escape");
       asInvitee = await context.cookies();
     });
     /** Opens the open concept in review mode from Properties, checking its state there. */
@@ -2710,7 +2923,7 @@ async function freshAccountConnects(): Promise<string[]> {
       await page.locator(".byline").waitFor({ timeout: 15_000 });
       await page.getByRole("button", { name: "More", exact: true }).click();
       await page.locator(".menu-list").getByRole("button", { name: "Properties" }).click();
-      const panel = page.locator("aside#properties.concept-panel");
+      const panel = page.locator("aside#panel-properties.concept-panel");
       await panel.getByText(/^Not yet verified by a person/).waitFor({ timeout: 15_000 });
       await panel.getByRole("link", { name: "Show changes", exact: true }).click();
       await page.waitForURL(`${lib}/shared.md?review=1`);

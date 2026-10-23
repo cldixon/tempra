@@ -36,7 +36,7 @@ export class Urls {
   since(path: string, seq: number) {
     return `${this.own(path) ?? this.page(`files/${enc(path)}`)}?since=${seq}`;
   }
-  /** A concept with one comment thread open in its margin. */
+  /** A concept with one comment thread open in its Comments panel. */
   thread(path: string, id: string) {
     return this.file(path, `#thread-${encodeURIComponent(id)}`);
   }
@@ -52,8 +52,8 @@ export class Urls {
    * Diff page's address (`-/diff/…?from=&to=`) is sent here.
    */
   diff(path: string, from?: number, to?: number) {
-    const seq = from ?? to;
-    return seq === undefined ? this.pinned(undefined).file(path) : this.since(path, seq);
+    if (from !== undefined) return this.since(path, from);
+    return this.pinned(to).file(path);
   }
   /**
    * Activity's Every event view at the ledger's own address (take 4, TEMPRA-115): `-/ledger`
@@ -71,13 +71,6 @@ export class Urls {
   }
   restore(path: string, to: number) {
     return `${this.base}-/restore/${enc(path)}${query({ to })}`;
-  }
-  /**
-   * What only a person can do here: take 3's Needs you is the Inbox filtered to this library
-   * since take 4 (TEMPRA-116); `-/needs` redirects there.
-   */
-  needs() {
-    return this.inbox();
   }
   /** The Inbox, filtered to this library. */
   inbox() {

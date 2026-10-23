@@ -23,9 +23,9 @@ import {
   LibrarySwitcher,
   SettingsSidebar,
 } from "./Sidebar";
-import { Switcher } from "./Switcher";
+import { LibrarySearch, Switcher } from "./Switcher";
 import type { OutlineFile } from "./Tree";
-import type { Me } from "./ui";
+import { type Me, switcherKey } from "./ui";
 import { baseName, dirOf, folderName, type Urls } from "./urls";
 
 /*
@@ -42,7 +42,6 @@ export interface Place {
   dir: string | null;
   view:
     | "home"
-    | "needs"
     | "activity"
     | "work"
     | "settings"
@@ -60,9 +59,8 @@ export const NARROW = "(max-width: 900px)";
 /** The names of the library's views and settings pages, as the crumbs and the phone show them. */
 const VIEW_NAMES: Record<NonNullable<Place["view"]>, string> = {
   home: "Home",
-  needs: "Needs you",
   activity: "Activity",
-  work: "Work queue",
+  work: "For agents",
   settings: "General",
   transfer: "Import & export",
   recovery: "Recovery",
@@ -125,7 +123,7 @@ interface Frame {
   setOwnTools(own: boolean): void;
   /** Names the page in the phone's top bar (a concept's title), or null for the frame's name. */
   setTitle(title: string | null): void;
-  /** Opens the quick switcher (a library's frame; elsewhere it does nothing). */
+  /** Opens search: a library's quick switcher, or the search of the person's libraries. */
   search(): void;
 }
 
@@ -192,9 +190,9 @@ interface Chrome {
   crumbs: ReactNode;
   /** The phone's top bar: where the person is, until the page names itself. */
   place: string;
-  /** Opens the quick switcher (a library frame). */
+  /** Opens search (Ctrl or Cmd+K too): the library's quick switcher, or the libraries'. */
   onSearch?: () => void;
-  /** The sidebar can be hidden (a library frame): its state and the way to change it. */
+  /** The sidebar can be hidden (a library's own pages): its state and the way to change it. */
   hidden?: boolean;
   onHide?: (hidden: boolean) => void;
 }
@@ -282,13 +280,14 @@ function Shell(props: {
   }, [drawer, narrow]);
 
   // Keys: Escape closes the drawer (not from inside a dialog or a menu, which handle their own);
-  // Ctrl or Cmd+\ hides the sidebar where it can be hidden.
+  // Ctrl or Cmd+\ hides the sidebar where it can be hidden (a library's own, not a settings
+  // page's or the account's, which are their navigation).
   const { hidden, onHide } = chrome;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target instanceof Element ? e.target : null;
       if (e.key === "Escape" && !e.defaultPrevented && drawer && !t?.closest("dialog, .menu")) {
-        // Handled: a comment sheet under the drawer stays open for the next Escape.
+        // Handled: a panel's bottom sheet under the drawer stays open for the next Escape.
         e.preventDefault();
         setDrawer(false);
       } else if ((e.ctrlKey || e.metaKey) && e.key === "\\" && !narrow && onHide) {
@@ -341,7 +340,7 @@ function Shell(props: {
             {!showSidebar && onHide && (
               <button
                 type="button"
-                className="icon-button sheet-toggle"
+                className="icon-button show-sidebar"
                 aria-label="Show sidebar"
                 title="Show sidebar"
                 onClick={() => onHide(false)}
@@ -359,7 +358,7 @@ function Shell(props: {
                   type="button"
                   className="icon-button phone-search"
                   aria-label="Search"
-                  title="Search"
+                  title={`Search (${switcherKey()})`}
                   onClick={chrome.onSearch}
                 >
                   <Icon name="search" />
@@ -408,6 +407,35 @@ function Shell(props: {
 
 const NO_CHANGES = { index: null, latest: undefined, now: 0 };
 
+/** Ctrl or Cmd+K opens search, and again closes it, on every page (TEMPRA-127). */
+function useSearchKey(toggle: () => void) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        toggle();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [toggle]);
+}
+
+/** Over the sidebar: a round search button, the shortcut as its hint. */
+function SearchButton({ onSearch }: { onSearch(): void }) {
+  return (
+    <button
+      type="button"
+      className="icon-button search-button"
+      aria-label="Search"
+      title={`Search (${switcherKey()})`}
+      onClick={onSearch}
+    >
+      <Icon name="search" />
+    </button>
+  );
+}
+
 /**
  * A library's frame, keyed by the library so it stays mounted while the person moves within it:
  * the switcher and search over the sidebar, the library's sidebar (or its settings' sidebar on a
@@ -434,17 +462,8 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
     },
     [urls],
   );
-  // Ctrl or Cmd+K opens the quick switcher, and again closes it.
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        setSwitching((on) => !on);
-      }
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, []);
+  // Ctrl or Cmd+K opens the quick switcher, and again closes it (on the settings pages too).
+  useSearchKey(useCallback(() => setSwitching((on) => !on), []));
   // A comment, a write or a verification may make, change or close an item of the person's
   // (TEMPRA-116): the inbox's count reloads a moment after one (items are written just after the
   // write commits), once for a burst.
@@ -476,21 +495,13 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
       </a>
       <span className="brand-sep" aria-hidden="true" />
       {settings ? (
-        <span className="topbar-name">Library settings</span>
+        <a className="topbar-name" href={urls.settings()}>
+          Library settings
+        </a>
       ) : (
         <LibrarySwitcher urls={urls} name={name} />
       )}
-      {!settings && (
-        <button
-          type="button"
-          className="icon-button search-button"
-          aria-label="Search"
-          title="Search"
-          onClick={onSearch}
-        >
-          <Icon name="search" />
-        </button>
-      )}
+      {!settings && <SearchButton onSearch={onSearch} />}
     </>
   );
   const sidebarContent = settings ? (
@@ -529,8 +540,9 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
     crumbs,
     place: phoneName(place, name),
     onSearch,
-    hidden,
-    onHide: hide,
+    // Only the library's own sidebar hides; the settings' is how the person moves between tabs.
+    hidden: settings ? undefined : hidden,
+    onHide: settings ? undefined : hide,
   };
   const frame = useMemo(
     () => ({ index, latest: agents.latest, now: agents.now }),
@@ -543,6 +555,7 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
       </Shell>
       <Switcher
         urls={urls}
+        name={name}
         index={index ?? []}
         open={switching}
         onClose={() => setSwitching(false)}
@@ -593,6 +606,10 @@ export function AccountFrame(props: { page: AccountPage; me: Me | null; children
   const { page } = props;
   const settings = !ACCOUNT_OWN.has(page);
   const name = ACCOUNT_NAMES[page];
+  // Off a library, search finds a library (TEMPRA-127).
+  const [searching, setSearching] = useState(false);
+  useSearchKey(useCallback(() => setSearching((on) => !on), []));
+  const onSearch = useCallback(() => setSearching(true), []);
   const chrome: Chrome = {
     brand: (
       <>
@@ -600,9 +617,10 @@ export function AccountFrame(props: { page: AccountPage; me: Me | null; children
           T
         </a>
         <span className="brand-sep" aria-hidden="true" />
-        <a className="topbar-name" href="/">
+        <a className="topbar-name" href={settings ? "/account" : "/"}>
           {settings ? "Settings" : "Tempra"}
         </a>
+        <SearchButton onSearch={onSearch} />
       </>
     ),
     sidebar: settings ? <AccountSettingsSidebar page={page} /> : <AccountSidebar page={page} />,
@@ -626,11 +644,15 @@ export function AccountFrame(props: { page: AccountPage; me: Me | null; children
       </nav>
     ),
     place: name,
+    onSearch,
   };
   return (
-    <Shell chrome={chrome} me={props.me} frame={NO_CHANGES}>
-      {props.children}
-    </Shell>
+    <>
+      <Shell chrome={chrome} me={props.me} frame={NO_CHANGES}>
+        {props.children}
+      </Shell>
+      <LibrarySearch open={searching} onClose={() => setSearching(false)} />
+    </>
   );
 }
 
@@ -674,6 +696,6 @@ export function PageBar(props: {
 }
 
 /** A page's column in the frame (everything but a concept, which lays out its own columns). */
-export function SheetPage({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
-  return <div className={wide ? "sheet-page wide" : "sheet-page"}>{children}</div>;
+export function PageColumn({ children, wide = false }: { children: ReactNode; wide?: boolean }) {
+  return <div className={wide ? "page-column wide" : "page-column"}>{children}</div>;
 }

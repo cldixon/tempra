@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { moduleSource } from "./build";
-import { match } from "./src/router";
+import { actorView } from "./src/agents";
+import { initials } from "./src/chrome";
+import { versionHref } from "./src/concept/History";
+import { panelInUrl, threadInHash } from "./src/concept/Panel";
+import { markReadBody } from "./src/inbox";
+import { followsInPlace, match, pageKey } from "./src/router";
 import { Urls } from "./src/urls";
 
 const at = (path: string) => match(new URL(path, "http://localhost"));
@@ -20,9 +25,9 @@ describe("routes follow the server's URLs (tempra-dev: v2/urls-and-handles)", ()
     expect(at(urls.since("a/b.md", 7))).toMatchObject({ compare: { kind: "since", seq: 7 } });
     expect(at(urls.file("a/b.md"))).toMatchObject({ page: "file", compare: undefined });
     expect(at(urls.thread("a/b.md", "t1"))).toMatchObject({ page: "file", path: "a/b.md" });
-    // Needs you is the Inbox filtered to the library (TEMPRA-116); its old URL redirects there.
-    expect(urls.needs()).toBe("/inbox?library=ann/notes");
-    expect(at(urls.needs())).toEqual({ page: "inbox", done: false, library: "ann/notes" });
+    // The old `-/needs` URL redirects to the Inbox filtered to the library (TEMPRA-116).
+    expect(urls.inbox()).toBe("/inbox?library=ann/notes");
+    expect(at(urls.inbox())).toEqual({ page: "inbox", done: false, library: "ann/notes" });
     expect(at("/ann/notes/-/needs")).toEqual({ page: "redirect", to: "/inbox?library=ann/notes" });
     expect(at(urls.activity())).toMatchObject({
       page: "activity",
@@ -131,4 +136,117 @@ test("the generated module names the bundle by its content hash", () => {
   const b = moduleSource("x", { "pele-abc.js": "y" }, "app.BHyq_u-v.js");
   expect(b).toContain('export const hash = "BHyq_u-v";');
   expect(b).toContain('"pele-abc.js":"y"');
+});
+
+describe("links followed in place (TEMPRA-129)", () => {
+  const here = "http://localhost";
+  const inPlace = (path: string) => followsInPlace(new URL(path, here), here);
+
+  test("any library's pages, the person's own or one shared with them (F-2)", () => {
+    expect(inPlace("/dev/notes/a.md")).toBe(true);
+    // Someone else's library, shared with the person: no reload, the frame stays.
+    expect(inPlace("/ann/shared/a.md")).toBe(true);
+    expect(inPlace("/ann/shared/-/activity")).toBe(true);
+    expect(inPlace("/ann/shared/folder/")).toBe(true);
+  });
+
+  test("every account page, Notifications included (F-3)", () => {
+    for (const p of [
+      "/",
+      "/inbox",
+      "/notifications",
+      "/account",
+      "/connect",
+      "/tokens",
+      "/apps",
+      "/invitations",
+      "/welcome",
+    ]) {
+      expect(inPlace(p)).toBe(true);
+    }
+  });
+
+  test("downloads, server pages and other sites load in full", () => {
+    for (const p of ["/ann/shared/-/raw/a.md", "/ann/shared/-/ledger.jsonl", "/sign-out"]) {
+      expect(inPlace(p)).toBe(false);
+    }
+    expect(followsInPlace(new URL("https://example.com/ann/shared/a.md"), here)).toBe(false);
+  });
+});
+
+describe("the concept page (TEMPRA-128)", () => {
+  const urls = new Urls("ann", "notes");
+  const v = (n: number, seq: number) => ({
+    n,
+    event: {
+      seq,
+      ts: "2026-10-20T10:00:00Z",
+      actor: "claude-code/dev",
+      op: "edit",
+      path: "a.md",
+      hash: null,
+      meta: null,
+    },
+  });
+  const versions = [v(1, 3), v(2, 8), v(3, 15), v(4, 20)];
+  const params = (href: string) => new URL(href, "http://localhost").searchParams;
+
+  test("a version in History shows what it changed: the version before it to it (C-1)", () => {
+    // v3: v3 as it was (seq 15), drawn against v2 (seq 8); History stays open.
+    const v3 = versionHref(urls, "a.md", versions, 3);
+    expect(params(v3).get("at")).toBe("15");
+    expect(params(v3).get("since")).toBe("8");
+    expect(params(v3).get("panel")).toBe("history");
+    expect(at(v3)).toMatchObject({ page: "file", at: 15, compare: { kind: "since", seq: 8 } });
+    // The latest is the page itself, against the version before it.
+    const v4 = params(versionHref(urls, "a.md", versions, 4));
+    expect(v4.get("at")).toBeNull();
+    expect(v4.get("since")).toBe("15");
+    // The first has nothing before it: it opens as it was.
+    const v1 = params(versionHref(urls, "a.md", versions, 1));
+    expect(v1.get("at")).toBe("3");
+    expect(v1.get("since")).toBeNull();
+  });
+
+  test("a heading's id is never taken for a panel or a thread (C-2)", () => {
+    const none = new Set<string>();
+    const headings = new Set(["comments", "thread-1", "sources"]);
+    const where = (hash: string, search = "") => ({ search, hash });
+    // Links that ask for the Comments panel or a thread.
+    expect(panelInUrl(none, where("#comments"))).toBe("comments");
+    expect(panelInUrl(none, where("#thread-t1"))).toBe("comments");
+    expect(threadInHash(none, "#thread-t1")).toBe("t1");
+    expect(threadInHash(none, "#thread-a%20b")).toBe("a b");
+    // The same fragments naming a heading in the body go to the heading.
+    expect(panelInUrl(headings, where("#comments"))).toBeNull();
+    expect(panelInUrl(headings, where("#thread-1"))).toBeNull();
+    expect(threadInHash(headings, "#thread-1")).toBeNull();
+    // ?panel= asks plainly, whatever the fragment.
+    expect(panelInUrl(headings, where("#comments", "?panel=history"))).toBe("history");
+    expect(panelInUrl(none, where(""))).toBeNull();
+  });
+
+  test("another file is another page; how one is shown is not (C-3)", () => {
+    const key = (path: string) => {
+      const url = new URL(path, "http://localhost");
+      return pageKey(url, match(url));
+    };
+    expect(key("/ann/notes/a.md")).not.toBe(key("/ann/notes/b.md"));
+    expect(key("/ann/notes/a.md")).toBe(key("/ann/notes/a.md?panel=history"));
+    expect(key("/ann/notes/a.md")).toBe(key("/ann/notes/a.md?since=4#thread-t1"));
+    expect(key("/ann/notes/a.md")).not.toBe(key("/ann/notes/a.md?at=4"));
+  });
+
+  test("the signed-in person's mark is their initials, never YO for You (C-7)", () => {
+    const me = actorView("human:dev", null, {}, "human:dev");
+    expect(me.name).toBe("You");
+    expect(initials(me.mark)).toBe("DE");
+    expect(initials(actorView("human:ann_lee", null, {}, "human:dev").mark)).toBe("AL");
+  });
+});
+
+test("Mark all read on a filtered Inbox marks that library's items only (TEMPRA-130, A-1)", () => {
+  expect(markReadBody(undefined, "ann/notes")).toEqual({ library: "ann/notes" });
+  expect(markReadBody(undefined, null)).toEqual({});
+  expect(markReadBody(["i1"], "ann/notes")).toEqual({ ids: ["i1"] });
 });

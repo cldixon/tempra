@@ -65,7 +65,7 @@ export function Byline(props: {
   if (!who) return <div className="byline" />;
   return (
     <div className="byline">
-      <Avatar name={who.name} agent={who.agent} />
+      <Avatar name={who.mark} agent={who.agent} />
       <span className="byline-name">
         <strong>{who.name}</strong>
         {who.for && <span className="muted"> for {who.for}</span>}
