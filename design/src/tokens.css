@@ -53,12 +53,18 @@
     0 1px 2px light-dark(rgb(0 0 0 / 0.04), rgb(0 0 0 / 0.4)),
     0 6px 24px light-dark(rgb(0 0 0 / 0.04), rgb(0 0 0 / 0.35));
 
-  /* Type (TEMPRA-108; one face since 2026-10-23, tempra-dev decisions/one-face.md): one sans for
-     everything people read, a concept's own text included; the mono for code.
-     body: all of the app and the site (chrome, view titles, a concept's title and body, comments).
-     mono: code, fences, the Markdown view, paths and hashes. */
-  --tempra-font-body:
-    -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", Helvetica, sans-serif;
+  /* Type (TEMPRA-108; Inter since 2026-10-23, tempra-dev decisions/one-face.md): one family, Inter
+     (fonts.css), in two roles, and the mono for code. The variable font's optical-size axis is the
+     pairing: the display cut for titles, the text cut for everything read at reading sizes.
+     display: titles and large headings (h1, a view's title, a page's title, the body's h1 and h2,
+       an attachment's name, a compose dialog's name), at the display optical size.
+     text: everything else (chrome, labels, the byline, a page's body, comments, public pages).
+     mono: code, fences, the Markdown view, paths and hashes.
+     The system faces after Inter cover what it has no glyphs for. */
+  --tempra-font-text:
+    "Inter", -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", Helvetica, sans-serif;
+  --tempra-font-display: var(--tempra-font-text);
+  --tempra-font-display-settings: "opsz" 32; /* Inter's display cut, at any size it is used */
   --tempra-font-mono: ui-monospace, "SF Mono", Menlo, monospace;
   --tempra-font-size: 14px; /* the app's base text */
   --tempra-measure: 680px; /* the reader's column, with its padding */

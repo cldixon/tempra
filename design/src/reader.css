@@ -28,7 +28,7 @@
   background: var(--tempra-color-bg);
   box-shadow: var(--tempra-shadow);
   color: var(--tempra-color-text);
-  font-family: var(--tempra-font-body);
+  font-family: var(--tempra-font-text);
   font-size: var(--tempra-text-ui);
   line-height: var(--tempra-line-height);
   text-wrap: pretty;
@@ -76,7 +76,7 @@
   border-radius: var(--tempra-radius-pill);
   background: var(--tempra-color-bg);
   box-shadow: var(--tempra-shadow);
-  font-family: var(--tempra-font-body);
+  font-family: var(--tempra-font-text);
 }
 
 .selection-tools button {
@@ -119,7 +119,7 @@
   --pele-surface-alt: var(--tempra-color-hover);
   --pele-border: var(--tempra-color-border-strong);
   --pele-accent: var(--tempra-color-text);
-  --pele-font: var(--tempra-font-body);
+  --pele-font: var(--tempra-font-text);
   --pele-font-mono: var(--tempra-font-mono);
   --pele-radius: var(--tempra-radius-row);
   --pele-series-1: var(--tempra-color-text);
@@ -146,7 +146,7 @@
 .prose .diagram-svg {
   overflow-x: auto;
   overscroll-behavior-x: contain;
-  font-family: var(--tempra-font-body);
+  font-family: var(--tempra-font-text);
   font-size: var(--tempra-text-ui);
 }
 
@@ -168,7 +168,7 @@
   right: 8px;
   display: flex;
   gap: 2px;
-  font-family: var(--tempra-font-body);
+  font-family: var(--tempra-font-text);
 }
 
 .prose .figure-tools button {
@@ -201,7 +201,7 @@
 .prose .diagram-notice {
   margin: 6px 0 0;
   color: var(--tempra-color-muted);
-  font-family: var(--tempra-font-body);
+  font-family: var(--tempra-font-text);
   font-size: var(--tempra-text-meta);
 }
 
@@ -240,7 +240,7 @@
   border: 0;
   background: var(--tempra-color-ground);
   color: var(--tempra-color-text);
-  font-family: var(--tempra-font-body);
+  font-family: var(--tempra-font-text);
   font-size: var(--tempra-text-ui);
   line-height: var(--tempra-line-height);
   overflow: hidden;

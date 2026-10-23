@@ -10,7 +10,7 @@ body {
   padding: var(--tempra-space-3);
   background: var(--tempra-color-bg);
   color: var(--tempra-color-text);
-  font-family: var(--tempra-font-body);
+  font-family: var(--tempra-font-text);
   font-size: var(--tempra-font-size);
   line-height: var(--tempra-line-height);
   -webkit-font-smoothing: antialiased;
@@ -21,6 +21,8 @@ body {
 }
 
 h1 {
+  font-family: var(--tempra-font-display);
+  font-variation-settings: var(--tempra-font-display-settings);
   margin: 0 0 var(--tempra-space-3);
   font-size: var(--tempra-text-page);
   font-weight: var(--tempra-weight-medium);

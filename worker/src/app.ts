@@ -302,15 +302,20 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     return c.json({ ok, checks }, ok ? 200 : 503);
   });
 
-  // The shared design stylesheet (@tempra/design, TEMPRA-8), at a content-hashed URL: a new
-  // stylesheet gets a new URL, so the old one can be cached for good.
+  // The shared design stylesheet (@tempra/design, TEMPRA-8) and its fonts (Inter), each at a
+  // content-hashed URL: a new file gets a new URL, so the old one can be cached for good.
   app.get("/_design/:file", (c) => {
-    if (c.req.param("file") !== `tempra.${design.hash}.css`) return c.notFound();
-    return c.body(design.css, 200, {
-      "Content-Type": "text/css; charset=utf-8",
+    const file = c.req.param("file");
+    const immutable = {
       "Cache-Control": "public, max-age=31536000, immutable",
       "X-Content-Type-Options": "nosniff",
-    });
+    };
+    if (file === `tempra.${design.hash}.css`) {
+      return c.body(design.css, 200, { "Content-Type": "text/css; charset=utf-8", ...immutable });
+    }
+    const font = designFont(file);
+    if (!font) return c.notFound();
+    return c.body(font, 200, { "Content-Type": "font/woff2", ...immutable });
   });
 
   // The app's client bundle (TEMPRA-9), at a content-hashed URL like the stylesheet.
@@ -1490,4 +1495,16 @@ function writeResponse(c: C, res: WriteResult) {
         }
       : {}),
   });
+}
+
+/** A design font's bytes by its served name, decoded once per isolate. */
+const decodedFonts = new Map<string, Uint8Array<ArrayBuffer>>();
+function designFont(file: string): Uint8Array<ArrayBuffer> | null {
+  const cached = decodedFonts.get(file);
+  if (cached) return cached;
+  const base64 = Object.hasOwn(design.fonts, file) ? design.fonts[file] : undefined;
+  if (base64 === undefined) return null;
+  const bytes = Uint8Array.from(atob(base64), (ch) => ch.charCodeAt(0));
+  decodedFonts.set(file, bytes);
+  return bytes;
 }

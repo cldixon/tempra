@@ -332,6 +332,22 @@ describe("the shared design stylesheet", () => {
     expect((await s.anon.request("/_design/tempra.000000000000.css")).status).toBe(404);
   });
 
+  test("its fonts (Inter) are served at the hashed paths the stylesheet names, immutable", async () => {
+    const s = setup();
+    const urls = [...design.css.matchAll(/url\("(\/_design\/[^"]+\.woff2)"\)/g)].map((m) => m[1]);
+    expect(urls.length).toBe(Object.keys(design.fonts).length);
+    const r = await s.anon.request(urls[0] as string);
+    expect(r.status).toBe(200);
+    expect(r.headers.get("Content-Type")).toBe("font/woff2");
+    expect(r.headers.get("Cache-Control")).toContain("immutable");
+    // A woff2 file starts with its signature.
+    expect(new TextDecoder().decode((await r.arrayBuffer()).slice(0, 4))).toBe("wOF2");
+    expect(
+      (await s.anon.request("/_design/inter-latin-opsz-normal.000000000000.woff2")).status,
+    ).toBe(404);
+    expect((await s.anon.request("/_design/constructor")).status).toBe(404);
+  });
+
   test("every page links it and its CSP allows it: the shell and the server's own pages", async () => {
     const s = setup();
     // An app asking for consent, so /authorize draws its page.
@@ -369,6 +385,7 @@ describe("the shared design stylesheet", () => {
       expect(r.status).toBeLessThan(500);
       expect(await r.text()).toContain(`<link rel="stylesheet" href="${design.href}">`);
       expect(r.headers.get("Content-Security-Policy")).toContain("style-src 'self'");
+      expect(r.headers.get("Content-Security-Policy")).toContain("font-src 'self'");
     }
   });
 });

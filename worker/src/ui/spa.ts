@@ -51,6 +51,7 @@ export function spaShell(request: Request, opts: { theme?: string | null } = {})
         "default-src 'none'",
         "script-src 'self'",
         "style-src 'self'",
+        "font-src 'self'",
         "img-src 'self' https:",
         `connect-src 'self' ${socket}`,
         "form-action 'self'",

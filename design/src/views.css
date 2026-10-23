@@ -25,6 +25,8 @@
 
 /* A view is the app, not a document: its title is the app's sans, sized as an h1 (TEMPRA-108). */
 .view-title {
+  font-family: var(--tempra-font-display);
+  font-variation-settings: var(--tempra-font-display-settings);
   margin: 0;
   font-size: var(--tempra-text-page);
   font-weight: var(--tempra-weight-strong);
@@ -791,6 +793,8 @@ a.activity-download {
 }
 
 .attachment-name {
+  font-family: var(--tempra-font-display);
+  font-variation-settings: var(--tempra-font-display-settings);
   margin: 0;
   font-size: var(--tempra-text-h2);
   font-weight: var(--tempra-weight-strong);
