@@ -1128,7 +1128,7 @@ async function browserRenders(
       const dialog = page.getByRole("dialog", { name: "New library" });
       await dialog.waitFor({ timeout: 15_000 });
       const name = dialog.getByRole("textbox", { name: "Name", exact: true });
-      if (!(await name.evaluate((el) => el === document.activeElement))) {
+      if (!(await name.evaluate((el) => el === el.ownerDocument.activeElement))) {
         throw new Error("New library: the name field does not have the focus");
       }
       await name.fill("Gate Notes & Plans");
