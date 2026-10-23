@@ -124,10 +124,11 @@ export interface Accounts {
    */
   mayJoin(email: string, mode: SignupMode): Promise<boolean>;
   /**
-   * Records an email that asked to sign in without an invite. True when it is new and the
-   * operator should be told: it takes one of the day's notices (WAITLIST_NOTICES_PER_DAY).
+   * Records an email that asked for access (TEMPRA-125). `added` when it is new (the person is
+   * told once); `notify` when the operator should be told too: it takes one of the day's notices
+   * (WAITLIST_NOTICES_PER_DAY).
    */
-  joinWaitlist(email: string, ip: string | null): Promise<boolean>;
+  joinWaitlist(email: string, ip: string | null): Promise<{ added: boolean; notify: boolean }>;
   /** Emails waiting for the operator's decision, oldest first. */
   waitlist(): Promise<WaitlistEntry[]>;
   /**
@@ -456,7 +457,7 @@ export function d1Accounts(db: D1Database): Accounts {
         .prepare("INSERT OR IGNORE INTO waitlist (email, created, ip) VALUES (?, ?, ?)")
         .bind(email, now.toISOString(), ip)
         .run();
-      if (!added.meta.changes) return false;
+      if (!added.meta.changes) return { added: false, notify: false };
       const dayAgo = new Date(now.getTime() - 86_400_000).toISOString();
       const claimed = await db
         .prepare(
@@ -465,7 +466,7 @@ export function d1Accounts(db: D1Database): Accounts {
         )
         .bind(now.toISOString(), email, dayAgo, WAITLIST_NOTICES_PER_DAY)
         .run();
-      return claimed.meta.changes > 0;
+      return { added: true, notify: claimed.meta.changes > 0 };
     },
     async waitlist() {
       const r = await db

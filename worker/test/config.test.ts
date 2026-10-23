@@ -78,3 +78,22 @@ describe("each deployment has its own sweep queue", () => {
     expect(previewDeployment("7").queue).toBe("tempra-sweep-pr-7");
   });
 });
+
+// TEMPRA-125: the landing page asks people to Request access while production is invite-only.
+describe("the landing page's calls to action match production's SIGNUP", () => {
+  test("invite in production: Request access and Sign in, never Sign up", async () => {
+    const worker = (await (
+      await config({ isPreview: false, mode: "production" } as never)
+    ).worker) as { env: Record<string, unknown> };
+    expect(JSON.stringify(worker.env.SIGNUP)).toContain("invite");
+    const site = new URL("../../site/src/", import.meta.url);
+    const file = (p: string) => Bun.file(new URL(p, site));
+    if (!(await file("pages/index.astro").exists())) return; // worker/ built on its own
+    for (const page of ["pages/index.astro", "layouts/Base.astro"]) {
+      const text = await file(page).text();
+      expect(text).toContain("/request-access");
+      expect(text).toContain("/sign-in");
+      expect(text).not.toMatch(/Sign up|Get started/);
+    }
+  });
+});

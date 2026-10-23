@@ -139,19 +139,107 @@ const EMAIL = /^[^\s@]+@[^\s@]+$/;
 
 const SIGN_IN = { href: "/sign-in", label: "Go to sign in" };
 
+/** Said wherever a link may not have been sent: the link limits per email and per IP. */
+const RATE_HINT = "If you asked several times, wait an hour, then try again.";
+
+/** Who is new here, by mode (TEMPRA-125): the line under the sign-in form. */
+function newHere(mode: SignupMode): string {
+  if (mode === "open") return "New here? The same link creates your account.";
+  if (mode === "invite") return `No account yet? <a href="/request-access">Request access</a>.`;
+  return "Tempra is not taking new accounts.";
+}
+
 function signInForm(next: string, mode: SignupMode, opts: { email?: string; error?: string } = {}) {
   const err = opts.error ? alertNotice("email-error", opts.error) : "";
-  const intro =
-    mode === "invite"
-      ? "Tempra is in private beta. If your email is on the list, we send you a link; if not, you join the waitlist and we write once you are in."
-      : "We email you a link. New here? The same link creates your account.";
   return `<h1>Sign in</h1>
-<p>${intro}</p>
+<p>We'll email you a link.</p>
 ${err}<form method="post" action="/sign-in" class="stack">
 <input type="hidden" name="next" value="${esc(next)}">
 <label class="field">Email
 <input id="email" name="email" type="text" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" required autofocus value="${esc(opts.email ?? "")}"${invalid("email-error", !!opts.error)}></label>
-<p><button class="primary" type="submit">Email me a link</button></p></form>`;
+<p><button class="primary" type="submit">Email me a link</button></p></form>
+<p class="muted">${newHere(mode)}</p>`;
+}
+
+function requestForm(opts: { email?: string; error?: string } = {}) {
+  const err = opts.error ? alertNotice("email-error", opts.error) : "";
+  return `<h1>Request access</h1>
+<p>Tempra is in private beta. Leave your email and we'll write when you're in.</p>
+${err}<form method="post" action="/request-access" class="stack">
+<label class="field">Email
+<input id="email" name="email" type="text" inputmode="email" autocomplete="email" autocapitalize="off" spellcheck="false" required autofocus value="${esc(opts.email ?? "")}"${invalid("email-error", !!opts.error)}></label>
+<p><button class="primary" type="submit">Request access</button></p></form>
+<p class="muted">Have an account? <a href="/sign-in">Sign in</a>.</p>`;
+}
+
+const notSetUp = () =>
+  html(
+    `<h1>Sign-in is not set up</h1><p>This deployment has no way to send sign-in emails yet.</p>`,
+    503,
+    {},
+    "Sign-in is not set up",
+  );
+
+const closedPage = () =>
+  html(
+    `<h1>Not taking new accounts</h1><p>Tempra is not taking new accounts right now.</p><p><a href="/sign-in">Sign in</a> · <a href="${LEGAL}">About Tempra</a></p>`,
+    200,
+    {},
+    "Not taking new accounts",
+  );
+
+/** The email from a sign-in or request form, normalized, and whether it looks like one. */
+function formEmail(form: FormData): { email: string; ok: boolean } {
+  const email = String(form.get("email") ?? "")
+    .trim()
+    .toLowerCase();
+  return { email, ok: EMAIL.test(email) && email.length <= 254 };
+}
+
+/** Local dev: the link shown on the page instead of mailed. */
+const devLink = (shown: string) =>
+  shown ? `<p>Local dev, no email sent: <a id="dev-link" href="${esc(shown)}">link</a></p>` : "";
+
+/**
+ * Creates and sends a sign-in link, within the per-email and per-IP limits. The dev link to show,
+ * "" when mailed or when over a limit (the page says the same either way), null when sending
+ * failed.
+ */
+async function mailSignInLink(
+  c: C,
+  d: Deps,
+  email: string,
+  next: string,
+  intro: string,
+): Promise<string | null> {
+  const secret = await d.sessions.createLink(email, c.req.header("CF-Connecting-IP") ?? null);
+  if (!secret) return "";
+  const link = `${new URL(c.req.url).origin}/sign-in/link?t=${secret}&next=${encodeURIComponent(next)}`;
+  return sendLink(c.req.raw, c.env, d, {
+    to: email,
+    link,
+    subject: "Your Tempra sign-in link",
+    text: `${intro}\n\n${link}\n\nIt works once, within ${LINK_MINUTES} minutes. If you did not ask for it, ignore this email.\n`,
+  });
+}
+
+const couldNotSend = (back: string) =>
+  html(
+    `<h1>Could not send email</h1><p>Try again in a few minutes.</p><p><a href="${esc(back)}">Back</a></p>`,
+    502,
+    {},
+    "Could not send email",
+  );
+
+/** Tells a new waitlisted email it is on the list, once (TEMPRA-125). */
+async function welcomeToWaitlist(c: C, d: Deps, email: string) {
+  const text = `Thanks for asking to join Tempra. You're on the list, and we'll email this address when you're in.\n\nIf you did not ask, ignore this email.\n`;
+  if (!d.mailer || devSignIn(c.req.raw, c.env)) {
+    if (devSignIn(c.req.raw, c.env)) console.log(`Waitlist email for ${email}`);
+    return;
+  }
+  await d.mailer.send({ to: email, subject: "You're on the list: Tempra", text });
+  d.meter?.({ kind: "email", account: email });
 }
 
 export function registerSignInRoutes<E extends AppEnv>(
@@ -164,12 +252,7 @@ export function registerSignInRoutes<E extends AppEnv>(
     const next = safeNext(c.req.query("next"));
     const secret = readCookie(c.req.raw, SESSION_COOKIE);
     if (secret && (await deps(c.env).sessions.user(secret))) return c.redirect(next, 302);
-    if (unavailable(c as unknown as C)) {
-      return html(
-        `<h1>Sign-in is not set up</h1><p>This deployment has no way to send sign-in emails yet.</p>`,
-        503,
-      );
-    }
+    if (unavailable(c as unknown as C)) return notSetUp();
     return html(signInForm(next, signupMode(c.env.SIGNUP)));
   });
 
@@ -179,60 +262,103 @@ export function registerSignInRoutes<E extends AppEnv>(
     const d = deps(c.env);
     const form = await c.req.formData();
     const next = safeNext(String(form.get("next") ?? ""));
-    const email = String(form.get("email") ?? "")
-      .trim()
-      .toLowerCase();
-    if (!EMAIL.test(email) || email.length > 254) {
+    const mode = signupMode(c.env.SIGNUP);
+    const { email, ok } = formEmail(form);
+    if (!ok) {
       return html(
-        signInForm(next, signupMode(c.env.SIGNUP), {
-          email,
-          error: "That does not look like an email address.",
-        }),
+        signInForm(next, mode, { email, error: "That does not look like an email address." }),
         400,
       );
     }
-    const dev = devSignIn(c.req.raw, c.env);
-    if (!d.mailer && !dev) {
-      return html(`<h1>Sign-in is not set up</h1><p>This deployment cannot send email.</p>`, 503);
-    }
-    const ip = c.req.header("CF-Connecting-IP") ?? null;
-    const allowed = await d.accounts.mayJoin(email, signupMode(c.env.SIGNUP));
-    if (!allowed && (await d.accounts.joinWaitlist(email, ip))) {
-      afterResponse(c as unknown as C, notifyOperator(c.env, d, email, new URL(c.req.url).origin));
-    }
-    const secret = allowed ? await d.sessions.createLink(email, ip) : null;
+    if (unavailable(c as unknown as C)) return notSetUp();
+    // Sign-in never adds anyone to the waitlist: that is Request access (TEMPRA-125).
     let shown = "";
-    if (secret) {
-      const origin = new URL(c.req.url).origin;
-      const link = `${origin}/sign-in/link?t=${secret}&next=${encodeURIComponent(next)}`;
-      const sent = await sendLink(c.req.raw, c.env, d, {
-        to: email,
-        link,
-        subject: "Your Tempra sign-in link",
-        text: `Open this link to sign in to Tempra:\n\n${link}\n\nIt works once, within ${LINK_MINUTES} minutes. If you did not ask for it, ignore this email.\n`,
-      });
-      if (sent === null) {
-        return html(
-          `<h1>Could not send email</h1><p>Try again in a few minutes.</p><p><a href="/sign-in?next=${esc(encodeURIComponent(next))}">Back to sign in</a></p>`,
-          502,
-          {},
-          "Could not send email",
-        );
-      }
-      // Local dev: the link is shown here instead of mailed.
-      shown = sent
-        ? `<p>Local dev, no email sent: <a id="dev-link" href="${esc(sent)}">link</a></p>`
-        : "";
+    if (await d.accounts.mayJoin(email, mode)) {
+      const sent = await mailSignInLink(
+        c as unknown as C,
+        d,
+        email,
+        next,
+        "Open this link to sign in to Tempra:",
+      );
+      if (sent === null) return couldNotSend(`/sign-in?next=${encodeURIComponent(next)}`);
+      shown = sent;
     }
-    // The same answer whether the email has an account, is invited, is waitlisted, or asked
-    // too often: the page reveals none of it.
+    // The same answer whether the email has an account, is invited, or asked too often: the page
+    // reveals none of it.
+    const lead =
+      mode === "open"
+        ? `A link is on its way to <strong>${esc(email)}</strong>.`
+        : `If <strong>${esc(email)}</strong> can sign in here, a link is on its way.`;
+    const after =
+      mode === "invite" ? ` No account yet? <a href="/request-access">Request access</a>.` : "";
     return html(
       `<h1>Check your email</h1>
-<p>If <strong>${esc(email)}</strong> can sign in here, a link is on its way. It works once, within ${LINK_MINUTES} minutes. If not, the address is on the waitlist.</p>
-<p class="muted">Nothing? Check spam, or <a href="/sign-in?next=${esc(encodeURIComponent(next))}">try again</a> later.</p>${shown}`,
+<p>${lead} It works once, within ${LINK_MINUTES} minutes.</p>
+<p class="muted">Nothing? Check spam. ${RATE_HINT} <a href="/sign-in?next=${esc(encodeURIComponent(next))}">Back to sign in</a>.${after}</p>${devLink(shown)}`,
       200,
       {},
       "Check your email",
+    );
+  });
+
+  // Request access (TEMPRA-125): joining is its own path while sign-up is by invite.
+  app.get("/request-access", (c) => {
+    const mode = signupMode(c.env.SIGNUP);
+    if (mode === "open") return c.redirect("/sign-in", 302);
+    if (mode === "closed") return closedPage();
+    if (unavailable(c as unknown as C)) return notSetUp();
+    return html(requestForm(), 200, {}, "Request access");
+  });
+
+  app.post("/request-access", async (c) => {
+    if (!sameOrigin(c as unknown as C))
+      return messagePage("Refused", "Ask from this site.", 403, SIGN_IN);
+    const mode = signupMode(c.env.SIGNUP);
+    if (mode === "open") return c.redirect("/sign-in", 303);
+    if (mode === "closed") return closedPage();
+    if (unavailable(c as unknown as C)) return notSetUp();
+    const d = deps(c.env);
+    const { email, ok } = formEmail(await c.req.formData());
+    if (!ok) {
+      return html(
+        requestForm({ email, error: "That does not look like an email address." }),
+        400,
+        {},
+        "Request access",
+      );
+    }
+    let shown = "";
+    if (await d.accounts.mayJoin(email, mode)) {
+      // Already in: a sign-in link, in the same limits as sign-in.
+      const sent = await mailSignInLink(
+        c as unknown as C,
+        d,
+        email,
+        "/",
+        "You can already sign in to Tempra. Open this link to sign in:",
+      );
+      if (sent === null) return couldNotSend("/request-access");
+      shown = sent;
+    } else {
+      const joined = await d.accounts.joinWaitlist(email, c.req.header("CF-Connecting-IP") ?? null);
+      // After the response, so the page answers in the same time whatever the address is.
+      if (joined.added)
+        afterResponse(c as unknown as C, welcomeToWaitlist(c as unknown as C, d, email));
+      if (joined.notify) {
+        afterResponse(
+          c as unknown as C,
+          notifyOperator(c.env, d, email, new URL(c.req.url).origin),
+        );
+      }
+    }
+    return html(
+      `<h1>Request received</h1>
+<p>If <strong>${esc(email)}</strong> is new here, it is on the list and we've emailed to say so; we write again when you're in. If it can already sign in, we've emailed a sign-in link.</p>
+<p class="muted">Nothing? Check spam. ${RATE_HINT} <a href="/">Back</a>.</p>${devLink(shown)}`,
+      200,
+      {},
+      "Request received",
     );
   });
 
@@ -262,9 +388,14 @@ export function registerSignInRoutes<E extends AppEnv>(
       );
     }
     // Checked again here: an invite may have been withdrawn since the link was sent.
-    if (!(await d.accounts.mayJoin(email, signupMode(c.env.SIGNUP)))) {
+    const mode = signupMode(c.env.SIGNUP);
+    if (!(await d.accounts.mayJoin(email, mode))) {
+      const onward =
+        mode === "invite"
+          ? `<a href="/request-access">Request access</a>`
+          : `<a href="${LEGAL}">About Tempra</a>`;
       return html(
-        `<h1>Not invited</h1><p>This address is on the waitlist.</p><p><a href="${LEGAL}">About Tempra</a></p>`,
+        `<h1>Not invited</h1><p>This address cannot sign in yet.</p><p>${onward}</p>`,
         403,
         {},
         "Not invited",

@@ -28,7 +28,7 @@ const concepts = [
 ];
 
 const steps = [
-  "Sign up with your email.",
+  "Request access with your email (Tempra is in private beta).",
   "Connect your agent with one URL.",
   "Ask it to write down what you know.",
 ];
@@ -45,9 +45,10 @@ const steps = [
       together, with every change recorded.
     </p>
     <p class="public-actions">
-      <a class="button primary" href={`${APP}/sign-in`}>Get started</a>
-      <a class="button" href="#concepts">How it works</a>
+      <a class="button primary" href={`${APP}/request-access`}>Request access</a>
+      <a class="button" href={`${APP}/sign-in`}>Sign in</a>
     </p>
+    <p class="muted">Tempra is in private beta.</p>
   </section>
 
   <section aria-labelledby="concepts">
@@ -69,6 +70,9 @@ const steps = [
     <ol class="steps">
       {steps.map((s) => <li>{s}</li>)}
     </ol>
-    <p><a class="button primary" href={`${APP}/sign-in`}>Sign up</a></p>
+    <p class="public-actions">
+      <a class="button primary" href={`${APP}/request-access`}>Request access</a>
+      <a class="button" href={`${APP}/sign-in`}>Sign in</a>
+    </p>
   </section>
 </Base>
