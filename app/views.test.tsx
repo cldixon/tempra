@@ -252,12 +252,12 @@ describe("the library's home (take 4)", () => {
     // A reply names its page by path only: the title comes from the tree's outline.
     const titles = { "cl_dixon/tempra-dev app/reader.md": "Reader" };
     const cards = forYouCards(items, titles);
-    expect(cards.map((c) => c.kind)).toEqual(["Reply", "To verify", "Going stale"]);
+    expect(cards.map((c) => c.kind)).toEqual(["Reply", "To check", "Going stale"]);
     expect(cards[0]?.title).toBe("Claude Code on Reader");
     expect(cards[0]?.detail).toBe("Atoms count as one character.");
     expect(cards[0]?.href).toBe("/cl_dixon/tempra-dev/app/reader.md#thread-t1");
     expect(cards[1]?.title).toBe("Diagrams");
-    expect(cards[1]?.detail).toBe("2 edits by Claude Code since you verified");
+    expect(cards[1]?.detail).toBe("2 edits by Claude Code since you checked");
     expect(cards[2]?.detail).toContain("Dec 24");
     // Without the outline, the page's name stands in, never the raw path.
     expect(forYouCards([item({})])[0]?.title).toBe("Claude Code on reader");

@@ -40,7 +40,7 @@ import { PageBar, PageColumn, useFrame } from "../Workspace";
 /** What the last server action did, said once on the page it returns to (`?done=`). */
 const DONE: Record<string, (actor: string) => string> = {
   restore: () => "Restored, as a new change by you.",
-  verify: () => "Verified. It stays verified until the next edit.",
+  verify: () => "Checked. It stays checked until the next edit.",
 };
 
 /**

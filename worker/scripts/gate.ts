@@ -571,10 +571,11 @@ function greyPng(width: number, height: number, shade: number): Uint8Array {
  * path, an attachment's page, every concept in the reader (drawn from the stored
  * tree, with no Edit, a footnote card on hover), the concept's panels (Comments, History,
  * Properties: opened from the top bar, closed by ×, Escape and the control, the contents back,
- * `?panel=`), Copy page, the byline while an agent edits, History's versions, review mode from
- * Properties, comments in the panel, a concept on a phone (its top bar with Copy page under ⋯,
+ * `?panel=`), Copy page, the byline while an agent edits, History's versions, checking a page
+ * (Mark as checked, the Checked line, review mode), comments in the panel, a concept on a
+ * phone (its top bar with Copy page under ⋯,
  * On this page, every panel as a bottom sheet), the Markdown view,
- * figures in the full-screen view, the Inbox (a reply waiting, a page to verify, the bell, Done,
+ * figures in the full-screen view, the Inbox (a reply waiting, a page to check, the bell, Done,
  * filtered to the library from the home's For you here and from Needs you's old URL), and
  * Activity with its two views (Summary and
  * Every event), all drawn from the API; links move within the app without reloading the page, and
@@ -614,13 +615,10 @@ async function browserRenders(
       await page.locator(".menu-list").getByRole("button", { name: item, exact: true }).click();
     };
     const byline = main.locator(".byline");
-    /** Opens review mode from Properties' Verification section, checking its state there. */
-    const reviewFromProperties = async (state?: RegExp) => {
-      if (!(await properties().isVisible())) await more("Properties");
-      await properties().waitFor({ timeout: 5000 });
-      if (state) await properties().getByText(state).waitFor({ timeout: 10_000 });
-      await properties().getByRole("link", { name: "Show changes", exact: true }).click();
-    };
+    /** Properties' Check section (TEMPRA-122): Mark as checked, or the changes since a check. */
+    const check = () => properties().getByRole("region", { name: "Check" });
+    /** The quiet line under the byline once a person has checked the page. */
+    const checkedLine = main.locator("p.doc-checked");
     /** A width with room for the contents (or a panel) beside the text. */
     const wide = () => page.setViewportSize({ width: 1600, height: 900 });
     const usual = () => page.setViewportSize({ width: 1280, height: 720 });
@@ -1566,52 +1564,70 @@ async function browserRenders(
     });
 
     await step(
-      "review mode: verify, an agent's edit, and the changes since verification",
+      "checking a page: Mark as checked, an agent's edit, the changes since, review mode",
       async () => {
         // From here on, a desktop with room for a panel beside the text (at 1280px the contents give way to it).
         await wide();
-        await agentAppends("A sentence before verification.");
+        await agentAppends("A sentence before the check.");
         await page.goto(url);
-        // Verification is out of the byline (tempra-dev: decisions/verification-out-of-the-way);
-        // Properties says where the concept stands, and its Review opens review mode.
+        // A page nobody checked says nothing about it (TEMPRA-122): no line under the byline,
+        // and Properties offers only Mark as checked (no "not yet verified", no Show changes).
         await byline.waitFor({ timeout: 15_000 });
-        if ((await byline.getByText(/verif|review/i).count()) > 0) {
+        if ((await byline.getByText(/verif|review|check/i).count()) > 0) {
           throw new Error("the byline shows verification");
         }
-        await reviewFromProperties();
-        await page.waitForURL(`${url}?review=1`);
-        const bar = page.getByRole("region", { name: "Review" });
-        await bar.waitFor({ timeout: 10_000 });
-        await bar.getByLabel("Note").fill("Gate: read it through.");
-        if (shots) await page.screenshot({ path: `${shots}/review.png` });
-        await bar.getByRole("button", { name: "Verify this version" }).click();
+        if ((await checkedLine.count()) > 0) throw new Error("a never-checked page says checked");
+        await more("Properties");
+        const mark = check().getByRole("button", { name: "Mark as checked" });
+        await mark.waitFor({ timeout: 10_000 });
+        const said = (await check().innerText()).trim();
+        if ((await check().getByRole("link").count()) > 0 || said !== "Mark as checked") {
+          throw new Error(`a never-checked page's Check says: ${said}`);
+        }
+        if ((await properties().getByText(/verif/i).count()) > 0) {
+          throw new Error("Properties says verify");
+        }
+        await mark.click();
         await page.waitForURL(`${url}?done=verify`, { timeout: 10_000 });
-        await page.getByText(/^Verified\. It stays verified/).waitFor({ timeout: 10_000 });
-        // Nothing to review now: Properties has no Verification section.
+        await page
+          .getByText("Checked. It stays checked until the next edit.")
+          .waitFor({ timeout: 10_000 });
+        // Checked: the line under the byline, and nothing to do in Properties.
+        await checkedLine.getByText(/^Checked by you, /).waitFor({ timeout: 10_000 });
+        if ((await checkedLine.getByText("changed since").count()) > 0) {
+          throw new Error("a page checked just now says changed since");
+        }
         if (!(await properties().isVisible())) await more("Properties");
-        await properties().getByText("Agent notes").first().waitFor({ timeout: 10_000 });
-        await properties()
-          .getByRole("region", { name: "Verification" })
-          .waitFor({ state: "detached", timeout: 10_000 });
+        await properties().getByText("Linked from").waitFor({ timeout: 10_000 });
+        await check().waitFor({ state: "detached", timeout: 10_000 });
         await page.keyboard.press("Escape");
         await properties().waitFor({ state: "detached", timeout: 5000 });
+        // An agent edits it: "· changed since", which opens review mode.
         await agentAppends("A sentence the gate added.");
         await page.goto(url);
-        await byline.waitFor({ timeout: 15_000 });
-        await reviewFromProperties(/^1 change since you verified on /);
+        await checkedLine.getByRole("link", { name: "changed since" }).click();
         await page.waitForURL(`${url}?review=1`);
-        // The changes since the person verified, drawn in the text.
+        const bar = page.getByRole("region", { name: "Review" });
+        await bar.getByText(/^Changes since you checked on /).waitFor({ timeout: 10_000 });
+        // The changes since the person checked, drawn in the text.
         const added = page.locator(".body ins.diff-added").last();
         await added.waitFor({ timeout: 10_000 });
         if (!(await added.innerText()).includes("A sentence the gate added.")) {
           throw new Error(`added: ${await added.innerText()}`);
         }
         if (shots) await page.screenshot({ path: `${shots}/changes.png`, fullPage: true });
-        // Properties stays open in review mode, with Hide changes (Verify is on the bar).
-        await properties().getByRole("link", { name: "Hide changes" }).waitFor({ timeout: 5000 });
-        if ((await page.getByRole("button", { name: "Verify this version" }).count()) !== 1) {
-          throw new Error("Verify is offered twice in review mode");
+        // Properties says how much changed, with no second way out (Done is the bar's).
+        await more("Properties");
+        await check()
+          .getByText(/^1 change since you checked$/)
+          .waitFor({ timeout: 10_000 });
+        if ((await check().getByRole("link").count()) > 0) {
+          throw new Error("Properties offers a second way out of review mode");
         }
+        if ((await page.getByRole("button", { name: "Mark as checked" }).count()) !== 1) {
+          throw new Error("Mark as checked is offered twice in review mode");
+        }
+        if (shots) await page.screenshot({ path: `${shots}/review.png` });
         // Each changed block has the rule beside it.
         // (A script string: this file has no DOM types.)
         const rule = await page.evaluate<string>(`(() => {
@@ -1619,7 +1635,10 @@ async function browserRenders(
           return getComputedStyle(added.closest(".prose > *")).borderLeftWidth;
         })()`);
         if (rule !== "1px") throw new Error(`no rule beside the changed block: ${rule}`);
-        // Done leaves review mode: the plain text again.
+        // Done, the one way out, leaves review mode: the plain text again.
+        if ((await page.getByRole("link", { name: "Hide changes" }).count()) > 0) {
+          throw new Error("review mode has two exits");
+        }
         await bar.getByRole("link", { name: "Done" }).click();
         await page.waitForURL(url);
         await bar.waitFor({ state: "detached", timeout: 5000 });
@@ -1644,8 +1663,8 @@ async function browserRenders(
         .getByRole("heading", { level: 1, name: "Inbox", exact: true })
         .waitFor({ timeout: 15_000 });
       await row.waitFor({ timeout: 10_000 });
-      await row.getByText("To verify").waitFor({ timeout: 5000 });
-      await row.getByText(/^1 edit by .+ since you verified$/).waitFor({ timeout: 5000 });
+      await row.getByText("To check").waitFor({ timeout: 5000 });
+      await row.getByText(/^1 edit by .+ since you checked$/).waitFor({ timeout: 5000 });
       // The bell lists it; Mark all read clears the badge.
       const bellButton = page.getByRole("button", { name: /^Inbox, \d+ unread$/ });
       await bellButton.waitFor({ timeout: 10_000 });
@@ -1654,7 +1673,7 @@ async function browserRenders(
       await bell.locator(`a.bell-item[href="${reviewHref}"]`).waitFor({ timeout: 5000 });
       // In the Inbox row's words (F-14): the page, then the detail line.
       await bell
-        .getByText(/^1 edit by .+ since you verified$/)
+        .getByText(/^1 edit by .+ since you checked$/)
         .first()
         .waitFor({ timeout: 5000 });
       if (shots) await page.screenshot({ path: `${shots}/bell.png` });
@@ -1693,9 +1712,22 @@ async function browserRenders(
       // Newest first: the one just dismissed (an earlier one, closed by verifying, is below).
       await row
         .first()
-        .getByText(/^1 edit by .+ since you verified$/)
+        .getByText(/^1 edit by .+ since you checked$/)
         .waitFor({ timeout: 10_000 });
       if (shots) await page.screenshot({ path: `${shots}/inbox-done.png` });
+      // Checking from review mode's bar, with a note, clears "changed since" (TEMPRA-122).
+      await page.goto(`${url}?review=1`);
+      const bar = page.getByRole("region", { name: "Review" });
+      await bar.getByLabel("Note").fill("Gate: read it through.");
+      await bar.getByRole("button", { name: "Mark as checked" }).click();
+      await page.waitForURL(`${url}?done=verify`, { timeout: 10_000 });
+      await checkedLine.getByText(/^Checked by you, /).waitFor({ timeout: 10_000 });
+      await checkedLine
+        .getByText("changed since")
+        .waitFor({ state: "detached", timeout: 10_000 })
+        .catch(() => {
+          throw new Error("checking did not clear changed since");
+        });
       await page.goto(url);
       await byline.waitFor({ timeout: 15_000 });
     });
@@ -1719,7 +1751,10 @@ async function browserRenders(
       await page.waitForURL((u) => u.search.includes(`since=${asked.get("since")}`));
       // The slim bar names the version on screen, the one chosen; History stays open on it.
       const bar = page.getByRole("region", { name: "Changes" });
-      await bar.locator(".version-n").filter({ hasText: label }).waitFor({ timeout: 15_000 });
+      await bar
+        .locator(".review-lead")
+        .filter({ hasText: new RegExp(`^Changes in ${label}$`) })
+        .waitFor({ timeout: 15_000 });
       await page
         .locator(".body ins.diff-added, .body del.diff-removed")
         .first()
@@ -1733,6 +1768,30 @@ async function browserRenders(
         throw new Error("a version shows its sequence number");
       }
       if (shots) await page.screenshot({ path: `${shots}/version.png` });
+      // An earlier version: "v3 as it was" shows it alone, its byline its own (never "editing
+      // now"), History marking it, and "Changes in v3" draws them again (TEMPRA-134, C-14).
+      if (asked.has("at")) {
+        await bar.getByRole("link", { name: `${label} as it was` }).click();
+        await page.waitForURL((u) => u.searchParams.has("at") && !u.searchParams.has("since"));
+        const alone = page.getByRole("region", { name: "Version" });
+        await alone
+          .locator(".review-lead")
+          .filter({ hasText: new RegExp(`^${label} as it was$`) })
+          .waitFor({ timeout: 15_000 });
+        if ((await page.locator(".body ins.diff-added, .body del.diff-removed").count()) > 0) {
+          throw new Error("a version as it was draws changes");
+        }
+        if ((await byline.getByText(/editing now/).count()) > 0) {
+          throw new Error("an earlier version's byline says editing now");
+        }
+        await historyPanel
+          .locator('a.version[aria-current="true"] .version-n')
+          .filter({ hasText: label })
+          .waitFor({ timeout: 10_000 });
+        await alone.getByRole("link", { name: `Changes in ${label}` }).click();
+        await page.waitForURL((u) => u.search.includes(`since=${asked.get("since")}`));
+        await bar.waitFor({ timeout: 15_000 });
+      }
       await bar.getByRole("link", { name: "Back to latest" }).click();
       await page.waitForURL(url);
       await bar.waitFor({ state: "detached", timeout: 5000 });
@@ -2237,6 +2296,8 @@ async function browserRenders(
       const body = page.locator(".body .prose");
       await body.waitFor({ timeout: 15_000 });
       await more("View Markdown");
+      // In the URL (TEMPRA-134, C-16), with no contents beside it.
+      await page.waitForURL((u) => u.searchParams.get("view") === "markdown");
       const stored = page.locator(".raw-markdown pre");
       await stored.waitFor({ timeout: 10_000 });
       const text = await stored.innerText();
@@ -2245,14 +2306,37 @@ async function browserRenders(
       if (await main.locator("h1.doc-title").isVisible()) {
         throw new Error("the page's title shows over the markdown");
       }
-      const numbers = await page.locator(".raw-lines > span").count();
+      const numbers = await page.locator(".raw-markdown .raw-line").count();
       if (numbers !== text.replace(/\n$/, "").split("\n").length) {
         throw new Error(`${numbers} line numbers for ${text.split("\n").length} lines`);
       }
       await page.locator(".raw-markdown").getByText(concept, { exact: true }).waitFor();
+      if ((await contentsNav.count()) > 0) throw new Error("the contents show beside the markdown");
+      // Download's glyph sits beside its word, not over it.
+      const download = await page
+        .locator(".raw-head")
+        .getByRole("link", { name: "Download" })
+        .boundingBox();
+      if (!download || download.height > 40) {
+        throw new Error(`Download stacks its glyph: ${JSON.stringify(download)}`);
+      }
       if (shots) await page.screenshot({ path: `${shots}/markdown.png` });
+      // Wrap lines: long lines wrap instead of scrolling.
+      const wrap = page.getByRole("button", { name: "Wrap lines" });
+      await wrap.click();
+      if ((await wrap.getAttribute("aria-pressed")) !== "true") throw new Error("Wrap not pressed");
+      const scrolls = await page.evaluate<boolean>(
+        `(() => { const pre = document.querySelector(".raw-markdown pre"); return pre.scrollWidth > pre.clientWidth + 1; })()`,
+      );
+      if (scrolls) throw new Error("wrapped lines still scroll sideways");
+      await wrap.click();
+      // Reloaded, the view is still the Markdown; Back to page leaves it.
+      await page.reload();
+      await stored.waitFor({ timeout: 15_000 });
       await page.getByRole("button", { name: "Back to page" }).click();
       await body.waitFor({ state: "visible" });
+      if (new URL(page.url()).searchParams.has("view"))
+        throw new Error("the view stayed in the URL");
     });
     // The panels (take 4, tempra-dev: decisions/one-panel-from-the-top-bar): one at a time in
     // place of the contents, opened from the top bar, closed by ×, Escape or the same control,
@@ -2287,12 +2371,22 @@ async function browserRenders(
           throw new Error(`a panel is still open after ${what}`);
         }
       };
-      // The control, then the same control again.
+      // The control reads its word (TEMPRA-134, C-10), then opens and closes the panel; the text
+      // stays where it was (the panel takes the contents' space, C-17).
       const toggle = commentsToggle();
+      if ((await toggle.innerText()).trim() !== "Comments") {
+        throw new Error(`the comments control reads "${await toggle.innerText()}"`);
+      }
+      const textX = async () => (await main.locator("article.doc").boundingBox())?.x ?? -1;
+      const before = await textX();
       await toggle.click();
       await comments.waitFor({ timeout: 5000 });
       if ((await toggle.getAttribute("aria-pressed")) !== "true") throw new Error("not pressed");
       if ((await contentsNav.count()) > 0) throw new Error("the contents show beside a panel");
+      const after = await textX();
+      if (Math.abs(after - before) > 1) {
+        throw new Error(`opening a panel moved the text from ${before} to ${after}`);
+      }
       await comments.getByText("No open threads. Select text to comment on it.").waitFor();
       await toggle.click();
       await back("the control again");
@@ -2304,8 +2398,22 @@ async function browserRenders(
       if ((await page.locator("aside.concept-panel").count()) !== 1) {
         throw new Error("two panels at once");
       }
-      await properties().getByText(path, { exact: true }).waitFor();
+      // Properties in people's words (TEMPRA-134, C-12, C-13): Status "not set", no lint codes,
+      // suggested actions or path until For agents is opened.
+      await properties()
+        .locator("dd", { hasText: /^not set$/ })
+        .first()
+        .waitFor();
+      const said = await properties().innerText();
+      if (/\b[a-z]+_[a-z_]+\b|→|suggested|trust|human-reviewed|unverified/.test(said)) {
+        throw new Error(`Properties shows agents' words: ${said}`);
+      }
+      if (await properties().getByText(path, { exact: true }).isVisible()) {
+        throw new Error("Properties shows the path before For agents is opened");
+      }
       if (shots) await page.screenshot({ path: `${shots}/properties.png` });
+      await properties().locator("details.for-agents summary").click();
+      await properties().getByText(path, { exact: true }).waitFor();
       await page.getByRole("button", { name: "Close properties" }).click();
       await back("×");
       await more("History");
@@ -3074,29 +3182,37 @@ async function freshAccountConnects(): Promise<string[]> {
       );
       if (put.status !== 200) throw new Error(`PUT shared.md: ${put.status}`);
     });
-    /** Opens the open concept in review mode from Properties, checking its state there. */
-    const review = async () => {
+    /** Opens the open concept's Properties (TEMPRA-122: a page nobody checked shows only Mark
+     * as checked there, to a write member). */
+    const properties = async () => {
       await page.locator(".byline").waitFor({ timeout: 15_000 });
       await page.getByRole("button", { name: "More", exact: true }).click();
       await page.locator(".menu-list").getByRole("button", { name: "Properties" }).click();
       const panel = page.locator("aside#panel-properties.concept-panel");
-      await panel.getByText(/^Not yet verified by a person/).waitFor({ timeout: 15_000 });
-      await panel.getByRole("link", { name: "Show changes", exact: true }).click();
-      await page.waitForURL(`${lib}/shared.md?review=1`);
-      await page.getByRole("region", { name: "Review" }).waitFor({ timeout: 15_000 });
+      await panel.waitFor({ timeout: 15_000 });
+      return panel;
     };
-    await step("a reader sees the note and no Verify", async () => {
+    await step("a reader sees the note and no Mark as checked", async () => {
       await page.goto(`${lib}/shared.md`);
       await page.getByText("Read me.").waitFor({ timeout: 15_000 });
-      await review();
-      await page
-        .getByRole("region", { name: "Review" })
-        .getByText("Not yet verified by a person")
-        .waitFor({ timeout: 15_000 });
+      const panel = await properties();
+      await panel.getByText("Linked from").waitFor({ timeout: 15_000 });
       // The role loads with the library list; give it the moment it takes.
       await page.waitForTimeout(500);
-      const verify = await page.getByRole("button", { name: "Verify this version" }).count();
-      if (verify !== 0) throw new Error("a read member is offered Verify");
+      if ((await panel.getByRole("region", { name: "Check" }).count()) !== 0) {
+        throw new Error("a read member is offered a check");
+      }
+      if ((await panel.getByText(/verif/i).count()) !== 0)
+        throw new Error("Properties says verify");
+      // Review mode says nobody has checked it, and offers a reader nothing but Done.
+      await page.goto(`${lib}/shared.md?review=1`);
+      await page
+        .getByRole("region", { name: "Review" })
+        .getByText("Nobody has checked this page yet")
+        .waitFor({ timeout: 15_000 });
+      await page.waitForTimeout(500);
+      const check = await page.getByRole("button", { name: "Mark as checked" }).count();
+      if (check !== 0) throw new Error("a read member is offered Mark as checked");
     });
     await step("the owner gives the member write access", async () => {
       await switchTo(asOwner);
@@ -3106,11 +3222,14 @@ async function freshAccountConnects(): Promise<string[]> {
       await page.locator("dialog").getByRole("button", { name: "Change access" }).click();
       await page.getByText("@stranger now has write access").waitFor({ timeout: 15_000 });
     });
-    await step("a writer is offered Verify", async () => {
+    await step("a writer is offered Mark as checked", async () => {
       await switchTo(asInvitee);
       await page.goto(`${lib}/shared.md`);
-      await review();
-      await page.getByRole("button", { name: "Verify this version" }).waitFor({ timeout: 15_000 });
+      const panel = await properties();
+      await panel
+        .getByRole("region", { name: "Check" })
+        .getByRole("button", { name: "Mark as checked" })
+        .waitFor({ timeout: 15_000 });
     });
     // Deleting the library wipes its Durable Object and ends the connection.
     await step("delete the library from its Delete tab", async () => {

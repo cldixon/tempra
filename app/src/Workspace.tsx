@@ -145,6 +145,16 @@ export function useFrame(): Frame {
   return useContext(FrameContext);
 }
 
+/** Pages' titles by path, from the index the tree loaded (the file name until it arrives). */
+export function useTitleOf(): (path: string) => string {
+  const { index } = useFrame();
+  return useMemo(() => {
+    const titles = new Map<string, string>();
+    for (const f of index ?? []) if (f.title) titles.set(f.path, f.title);
+    return (path: string) => titles.get(path) ?? baseName(path).replace(/\.md$/, "");
+  }, [index]);
+}
+
 /** Where the page was scrolled on each URL, for back and forward. */
 const scrolls = new Map<string, number>();
 

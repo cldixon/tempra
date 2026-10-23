@@ -8,14 +8,17 @@
  * a sheet from the bottom.
  */
 
+/* The right column is the panel's width whether it holds the contents or a panel, so opening a
+   panel takes the contents' space and never moves the text (C-17). */
 .concept-grid {
   display: grid;
-  grid-template-columns: [text] minmax(0, 1fr) [side] var(--tempra-contents);
+  grid-template-columns: [text] minmax(0, 1fr) [side] var(--tempra-panel);
   min-height: 100%;
 }
 
-.concept.panel-open .concept-grid {
-  grid-template-columns: [text] minmax(0, 1fr) [side] var(--tempra-panel);
+/* The Markdown view has no contents (its headings lead nowhere there): the file takes the room. */
+.concept.markdown-on:not(.panel-open) .concept-grid {
+  grid-template-columns: [text] minmax(0, 1fr);
 }
 
 .concept .doc {
@@ -44,9 +47,10 @@
 .concept-contents {
   position: sticky;
   top: 0;
+  max-width: calc(var(--tempra-contents) + 2 * var(--tempra-page-pad));
   max-height: calc(100dvh - var(--tempra-topbar));
   overflow: auto;
-  padding: 48px 24px 24px 0;
+  padding: 48px var(--tempra-page-pad) 24px 0;
 }
 
 .toc {
@@ -178,14 +182,32 @@
   margin: 10px 0 0;
 }
 
-.verification {
+/* Check: Mark as checked, or how much changed since someone checked and Show changes. */
+.check {
   padding: 12px 14px;
   border-radius: var(--tempra-radius-box);
   background: var(--tempra-color-ground);
 }
 
-.verification-state {
+.check-state {
   margin: 0;
+}
+
+.check .actions:first-child {
+  margin-top: 0;
+}
+
+/* For agents (n): a closed disclosure at the foot of Properties. */
+.for-agents summary {
+  cursor: pointer;
+}
+
+.for-agents[open] summary {
+  margin-bottom: 8px;
+}
+
+.for-agents .facts {
+  margin-bottom: 12px;
 }
 
 /* Where a crumb notes what is exceptional (stale, a status that is not stable). */
@@ -233,6 +255,21 @@
 
 .byline-sep {
   color: var(--tempra-color-faint);
+}
+
+/* Whether a person checked the page: one quiet line under the byline, only when someone has. */
+.doc-checked {
+  margin: 8px 0 0;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-ui);
+}
+
+.doc-checked a {
+  color: inherit;
+}
+
+.doc-checked a:hover {
+  color: var(--tempra-color-text);
 }
 
 .byline-live {
@@ -320,8 +357,8 @@
   min-width: 0;
 }
 
-.review-what .version-n {
-  margin-right: 6px;
+.review-lead {
+  font-weight: var(--tempra-weight-medium);
 }
 
 .review-actions {
@@ -422,8 +459,10 @@
   margin-bottom: 16px;
 }
 
-.raw-head .pill-button svg {
-  display: block;
+/* Wrap lines, pressed while long lines wrap. */
+.raw-head button[aria-pressed="true"],
+.raw-head button[aria-pressed="true"]:hover:not(:disabled) {
+  background: var(--tempra-color-selected);
 }
 
 .raw-path {
@@ -433,34 +472,42 @@
   overflow-wrap: anywhere;
 }
 
+/* The file in a pre, a line per span; the numbers are CSS counters in the gutter, so they are
+   never selected or copied, and stay on their line when long lines wrap (Wrap lines). */
 .raw-file {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  margin: 0;
+  padding: 16px 18px 16px calc(var(--raw-gutter) + 16px);
+  overflow-x: auto;
   border: 1px solid var(--tempra-color-border);
   border-radius: var(--tempra-radius-box);
   background: var(--tempra-color-ground);
   font-family: var(--tempra-font-mono);
   font-size: var(--tempra-text-ui);
   line-height: var(--tempra-line-height);
+  white-space: pre;
+  counter-reset: line;
+  --raw-gutter: 4ch;
 }
 
-.raw-lines {
-  display: flex;
-  flex-direction: column;
-  padding: 16px 10px 16px 14px;
+.raw-file.wrap {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.raw-line {
+  position: relative;
+  counter-increment: line;
+}
+
+.raw-line::before {
+  content: counter(line);
+  position: absolute;
+  left: calc(-1 * var(--raw-gutter) - 12px);
+  width: var(--raw-gutter);
   color: var(--tempra-color-muted);
   font-variant-numeric: tabular-nums;
   text-align: right;
   user-select: none;
-}
-
-.raw-file pre {
-  margin: 0;
-  padding: 16px 18px 16px 6px;
-  overflow-x: auto;
-  background: none;
-  font: inherit;
-  white-space: pre;
 }
 
 /* ---------- Properties: the facts, links, agent notes ---------- */
@@ -608,8 +655,10 @@
     font-size: var(--tempra-text-page);
   }
 
-  /* On a phone the top bar has Comments and ⋯; Copy page heads ⋯ (TEMPRA-118). */
-  .topbar-tools .copy-page {
+  /* On a phone the top bar has Comments and ⋯; Copy page heads ⋯ (TEMPRA-118). Comments
+     reads as its word and count, without the glyph, to leave the page's name room. */
+  .topbar-tools .copy-page,
+  .comments-toggle svg {
     display: none;
   }
 

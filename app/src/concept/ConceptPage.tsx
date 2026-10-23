@@ -7,11 +7,12 @@ import { Reader } from "../Reader";
 import { type BodyOptions, prepare } from "../reader/prepare";
 import { pushRecent } from "../recent";
 import { useRole } from "../role";
-import type { Compare } from "../router";
-import { AtNotice, anchorId, Crumbs, useMe, useTitle } from "../ui";
+import { type Compare, navigate } from "../router";
+import { anchorId, Crumbs, useMe, useTitle } from "../ui";
 import { dirOf, folderName, type Urls } from "../urls";
 import { PageBar } from "../Workspace";
 import { Byline } from "./Byline";
+import { CheckedLine } from "./Checked";
 import { Contents, contentsOf } from "./Contents";
 import { useCompare } from "./compare";
 import { bodyHref, type ConceptData, standing, titleOf } from "./data";
@@ -22,7 +23,7 @@ import { type Live, LiveNotice, NewVersion } from "./live";
 import { Panel, type PanelName, panelInUrl, threadInHash } from "./Panel";
 import { PropertiesList } from "./Properties";
 import { RawMarkdown } from "./RawMarkdown";
-import { ReviewBar } from "./ReviewBar";
+import { ReviewBar, VersionBar } from "./ReviewBar";
 import { SourcesSection } from "./Sources";
 import { CopyPage, PageMenu } from "./Tools";
 
@@ -60,7 +61,14 @@ export function ConceptPage(props: {
   useTitle(`${title} · ${urls.slug}`);
   const status = typeof fm.status === "string" ? fm.status : null;
   const current = urls.at === undefined || urls.at >= head;
-  const [markdown, setMarkdown] = useState(false);
+  // The Markdown view is in the URL (`?view=markdown`), so back and a shared link keep it.
+  const markdown = new URLSearchParams(location.search).get("view") === "markdown";
+  const setMarkdown = useCallback((on: boolean) => {
+    const to = new URL(location.href);
+    if (on) to.searchParams.set("view", "markdown");
+    else to.searchParams.delete("view");
+    navigate(`${to.pathname}${to.search}${to.hash}`);
+  }, []);
   const inlineContents = useRef<HTMLDetailsElement>(null);
 
   // Footnote markers are numbers: the sources in their order, then the body's other footnotes
@@ -219,14 +227,18 @@ export function ConceptPage(props: {
             <button
               ref={commentsButton}
               type="button"
-              className="icon-button with-count"
+              className="icon-button with-count comments-toggle"
               aria-label={openCount > 0 ? `Comments, ${openCount} open` : "Comments"}
-              title="Comments"
               aria-pressed={panel === "comments"}
               onClick={() => togglePanel("comments")}
             >
               <Icon name="comments" />
-              {openCount > 0 && <span aria-hidden="true">{openCount}</span>}
+              <span aria-hidden="true">Comments</span>
+              {openCount > 0 && (
+                <span className="comments-count" aria-hidden="true">
+                  {openCount}
+                </span>
+              )}
             </button>
             <CopyPage urls={urls} path={c.path} />
             <PageMenu
@@ -261,9 +273,7 @@ export function ConceptPage(props: {
           )}
           {props.notice && <div className="notice">{props.notice}</div>}
           {moved && live && <LiveNotice urls={urls} live={live} />}
-          {!compare && (
-            <AtNotice urls={urls} head={head} current={urls.pinned(undefined).file(c.path)} />
-          )}
+          {!compare && !current && <VersionBar urls={urls} concept={c} standing={s} name={name} />}
           {markdown && (
             <RawMarkdown
               urls={urls}
@@ -290,7 +300,14 @@ export function ConceptPage(props: {
               {typeof fm.description === "string" && (
                 <p className="doc-tagline">{fm.description}</p>
               )}
-              <Byline concept={c} history={data.history} name={name} live={live} />
+              <Byline
+                concept={c}
+                history={data.history}
+                name={name}
+                live={live}
+                current={current}
+              />
+              {current && <CheckedLine urls={urls} path={c.path} standing={s} name={name} />}
               {hasContents && (
                 <details className="toc-inline" ref={inlineContents}>
                   <summary>
@@ -331,6 +348,7 @@ export function ConceptPage(props: {
                 path={c.path}
                 placed={placed}
                 error={props.threadsError}
+                loading={props.threads === null && props.threadsError === null}
                 writable={current}
                 draft={draft.draft}
                 onDraftDone={draft.clear}
@@ -366,7 +384,8 @@ export function ConceptPage(props: {
               />
             </Panel>
           ) : (
-            hasContents && (
+            hasContents &&
+            !markdown && (
               <nav className="concept-contents" aria-label="Contents">
                 <Contents headings={contents} />
               </nav>
