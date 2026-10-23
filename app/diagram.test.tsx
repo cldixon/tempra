@@ -85,6 +85,14 @@ describe("diagrams (tempra-dev: app/diagrams)", () => {
       const ok = await drawn(good);
       expect(ok.host.querySelector("figure.diagram .diagram-svg svg")).not.toBeNull();
       expect(ok.host.querySelector(".diagram-notice")).toBeNull();
+      // One image to a screen reader, named by its caption (C-28).
+      const image = ok.host.querySelector(".diagram-svg");
+      expect(image?.getAttribute("role")).toBe("img");
+      const label = image?.getAttribute("aria-labelledby");
+      const name = label
+        ? window.document.getElementById(label)?.textContent
+        : image?.getAttribute("aria-label");
+      expect(name).toMatch(/^(Figure \d+\.|Diagram)/);
       await act(async () => ok.root.unmount());
       const bad = await drawn(broken);
       const figure = bad.host.querySelector("figure.diagram.failed");

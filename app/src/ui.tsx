@@ -177,6 +177,13 @@ export const switcherKey = () =>
     ? "⌘K"
     : "Ctrl K";
 
+/** The reader's comment shortcut as the person's keyboard names it (Ctrl Alt M, ⌥⌘M). */
+export const commentKey = () =>
+  typeof navigator !== "undefined" &&
+  /Mac|iPhone|iPad|iPod/.test(navigator.platform || navigator.userAgent)
+    ? "⌥⌘M"
+    : "Ctrl Alt M";
+
 export const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /** Copies text from a click; `state` says "copied" (or "failed") for a moment after. */

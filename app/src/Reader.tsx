@@ -11,6 +11,7 @@ import {
   type ReactNode,
   useCallback,
   useEffect,
+  useId,
   useLayoutEffect,
   useMemo,
   useRef,
@@ -21,6 +22,7 @@ import { offsetAtPoint, pointAt, rangeOf, selectionAt } from "./reader/dom";
 import { OpenFigure } from "./reader/Figure";
 import { type FigureView, Lightbox } from "./reader/Lightbox";
 import type { Prepared } from "./reader/prepare";
+import { commentKey } from "./ui";
 
 /** A highlighted range of the text (text offsets), e.g. a comment's quote. */
 export interface Highlight {
@@ -77,6 +79,8 @@ export function revealOffset(at: number) {
 function Floating(props: {
   rect: DOMRect;
   className: string;
+  id?: string;
+  role?: string;
   children: ReactNode;
   onPointerEnter?(): void;
   onPointerLeave?(): void;
@@ -100,6 +104,8 @@ function Floating(props: {
     <div
       ref={ref}
       popover="manual"
+      id={props.id}
+      role={props.role}
       className={`floating ${props.className}`}
       onPointerEnter={props.onPointerEnter}
       onPointerLeave={props.onPointerLeave}
@@ -200,6 +206,26 @@ export function Reader(props: {
     }, delay);
   }, []);
   useEffect(() => () => clearTimeout(timer.current), []);
+  // A card is its trigger's description (the marker's link, or the link), and Escape closes it
+  // (C-27, TEMPRA-133).
+  const cardId = useId();
+  useEffect(() => {
+    if (!card) return;
+    const trigger = card.el.matches("a") ? card.el : (card.el.querySelector("a") ?? card.el);
+    trigger.setAttribute("aria-describedby", cardId);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape" || e.defaultPrevented) return;
+      e.preventDefault();
+      clearTimeout(timer.current);
+      pending.current = null;
+      setCard(null);
+    };
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      trigger.removeAttribute("aria-describedby");
+      document.removeEventListener("keydown", onKey, true);
+    };
+  }, [card, cardId]);
   const targetOf = (t: EventTarget | null) => {
     // A marker's own link is the marker: its card is the source, not the link.
     const el = t instanceof Element ? (t.closest("sup.fnref") ?? t.closest("a")) : null;
@@ -226,10 +252,26 @@ export function Reader(props: {
         setTools({ range: at, rect: sel.getRangeAt(0).getBoundingClientRect() });
       }, 120);
     };
+    // From the keyboard (C-27, TEMPRA-133): Ctrl+Alt+M (Cmd+Option+M on a Mac), as in other
+    // editors, comments on the selected text, toolbar or not.
+    const key = (e: KeyboardEvent) => {
+      if (!(e.ctrlKey || e.metaKey) || !e.altKey || e.code !== "KeyM") return;
+      const el = root.current;
+      const sel = document.getSelection();
+      const at = el ? selectionAt(el, sel) : null;
+      if (!at || !prepared.text.text.slice(at.from, at.to).trim()) return;
+      e.preventDefault();
+      clearTimeout(wait);
+      setTools(null);
+      onComment(at);
+      sel?.removeAllRanges();
+    };
     document.addEventListener("selectionchange", follow);
+    document.addEventListener("keydown", key);
     return () => {
       clearTimeout(wait);
       document.removeEventListener("selectionchange", follow);
+      document.removeEventListener("keydown", key);
     };
   }, [onComment, prepared]);
   // Scrolling: the card follows its marker or link, the toolbar its text.
@@ -300,6 +342,8 @@ export function Reader(props: {
       {card && (
         <Floating
           rect={card.rect}
+          id={cardId}
+          role="tooltip"
           className="tooltip"
           onPointerEnter={() => clearTimeout(timer.current)}
           onPointerLeave={() => hide(200)}
@@ -312,6 +356,8 @@ export function Reader(props: {
           <div role="toolbar" aria-label="Selection">
             <button
               type="button"
+              title={`Comment (${commentKey()})`}
+              aria-keyshortcuts="Control+Alt+M Meta+Alt+M"
               // Pressing the button must not take the selection away first.
               onMouseDown={(e) => e.preventDefault()}
               onClick={() => {

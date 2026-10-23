@@ -228,7 +228,9 @@ describe("what the reader draws", () => {
     expect(html).toContain('id="intro"');
     expect(html).toContain('id="intro-1"');
     expect(html).toContain('id="code-more"');
-    expect(html).toContain('<sup class="fnref" data-atom="" data-label="a"><a href="#src-a">1</a>');
+    expect(html).toContain(
+      '<sup class="fnref" data-atom="" data-label="a"><a href="#src-a" aria-label="footnote 1">1</a>',
+    );
     // A reference with no definition is still a marker, with no link.
     expect(html).toContain('<sup class="fnref" data-atom="" data-label="b">[b]</sup>');
     expect(p.headings.map((h) => h.id)).toEqual(["intro", "intro-1", "code-more"]);

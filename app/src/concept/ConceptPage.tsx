@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useActors } from "../agents";
 import { Icon } from "../chrome";
 import { CommentsList } from "../comments/CommentsPanel";
@@ -10,7 +10,7 @@ import { useRole } from "../role";
 import { type Compare, navigate } from "../router";
 import { anchorId, Crumbs, useMe, useTitle } from "../ui";
 import { dirOf, folderName, type Urls } from "../urls";
-import { PageBar } from "../Workspace";
+import { PageBar, useFrame } from "../Workspace";
 import { Byline } from "./Byline";
 import { CheckedLine } from "./Checked";
 import { Contents, contentsOf } from "./Contents";
@@ -19,7 +19,7 @@ import { bodyHref, type ConceptData, standing, titleOf } from "./data";
 import { useFigureView } from "./figures";
 import { HistoryList } from "./History";
 import { useHoverCards } from "./hover";
-import { type Live, LiveNotice, NewVersion } from "./live";
+import { type Live, LiveAnnouncer, LiveNotice, NewVersion } from "./live";
 import { Panel, type PanelName, panelInUrl, threadInHash } from "./Panel";
 import { PropertiesList } from "./Properties";
 import { RawMarkdown } from "./RawMarkdown";
@@ -122,21 +122,64 @@ export function ConceptPage(props: {
   const commentsButton = useRef<HTMLButtonElement>(null);
   const opener = useRef<HTMLElement | null>(null);
   const panelBox = useRef<HTMLDivElement>(null);
-  const openPanel = useCallback((name: PanelName) => {
+  // Focus (C-25, TEMPRA-133): opening a panel moves the focus to its heading (a draft's text box
+  // takes it instead), and closing it gives the focus back to the control that opened it (⋯ for
+  // History and Properties), unless the person has moved on. Both wait for the panel to draw (and
+  // for the page to be taken out of inert, where the panel overlays it).
+  const [focusTo, setFocusTo] = useState<{ to: "heading" | "opener" } | null>(null);
+  const openPanel = useCallback((name: PanelName, focus = true) => {
     const focused = document.activeElement;
     if (focused instanceof HTMLElement && !panelBox.current?.contains(focused)) {
-      opener.current = focused.closest(".menu") ? commentsButton.current : focused;
+      // Nothing focused (a quote clicked, text selected): the Comments control stands in.
+      const menu = focused.closest(".menu");
+      opener.current =
+        focused === document.body
+          ? null
+          : menu
+            ? (menu.querySelector<HTMLElement>(":scope > button") ?? commentsButton.current)
+            : focused;
     }
     setPanel(name);
+    setFocusTo(focus ? { to: "heading" } : null);
   }, []);
   const closePanel = useCallback(() => {
-    setPanel(null);
-    // The focus goes back where it was, unless the person has moved on.
     const focused = document.activeElement;
-    if (!focused || focused === document.body || panelBox.current?.contains(focused)) {
-      (opener.current ?? commentsButton.current)?.focus();
-    }
+    const lost = !focused || focused === document.body || panelBox.current?.contains(focused);
+    setPanel(null);
+    setFocusTo(lost ? { to: "opener" } : null);
   }, []);
+  // Where the panel overlays the page (under 960px of page, and the phone's sheet: the
+  // stylesheet's call, read from the panel's position), it is modal (C-26, P-4): the page, the top
+  // bar and the sidebar it dims are inert, and a tap on the dimmed page closes it.
+  const { setModal } = useFrame();
+  const [overlaid, setOverlaid] = useState(false);
+  const page = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (!panel) return setOverlaid(false);
+    const measure = () => {
+      const el = panelBox.current?.querySelector(".concept-panel");
+      setOverlaid(el ? getComputedStyle(el).position === "fixed" : false);
+    };
+    measure();
+    const watch = new ResizeObserver(measure);
+    if (page.current) watch.observe(page.current);
+    return () => watch.disconnect();
+  }, [panel]);
+  const modal = panel !== null && overlaid;
+  useLayoutEffect(() => {
+    setModal(modal);
+    return () => setModal(false);
+  }, [modal, setModal]);
+  useEffect(() => {
+    if (!focusTo) return;
+    if (focusTo.to === "heading") {
+      panelBox.current?.querySelector<HTMLElement>(".panel-head h2")?.focus();
+    } else {
+      const back = opener.current?.isConnected ? opener.current : commentsButton.current;
+      back?.focus();
+    }
+    setFocusTo(null);
+  }, [focusTo]);
   const togglePanel = useCallback(
     (name: PanelName) => (panel === name ? closePanel() : openPanel(name)),
     [panel, openPanel, closePanel],
@@ -154,7 +197,7 @@ export function ConceptPage(props: {
   const startDraft = useCallback(
     (range: { from: number; to: number }) => {
       draft.start(range);
-      openPanel("comments");
+      openPanel("comments", false);
     },
     [draft.start, openPanel],
   );
@@ -217,7 +260,7 @@ export function ConceptPage(props: {
   const hasContents = contents.length >= 2;
   const classes = ["concept", panel ? "panel-open" : "", markdown ? "markdown-on" : ""];
   return (
-    <div className={classes.filter(Boolean).join(" ")}>
+    <div className={classes.filter(Boolean).join(" ")} ref={page}>
       <PageBar
         title={title}
         phoneTools
@@ -228,16 +271,20 @@ export function ConceptPage(props: {
               ref={commentsButton}
               type="button"
               className="icon-button with-count comments-toggle"
-              aria-label={openCount > 0 ? `Comments, ${openCount} open` : "Comments"}
               aria-pressed={panel === "comments"}
               onClick={() => togglePanel("comments")}
             >
+              {/* Named by what it shows, "Comments 2 open" (WCAG 2.5.3). */}
               <Icon name="comments" />
-              <span aria-hidden="true">Comments</span>
+              <span>Comments</span>
               {openCount > 0 && (
-                <span className="comments-count" aria-hidden="true">
-                  {openCount}
-                </span>
+                <>
+                  {" "}
+                  <span className="comments-count">
+                    {openCount}
+                    <span className="visually-hidden"> open</span>
+                  </span>
+                </>
               )}
             </button>
             <CopyPage urls={urls} path={c.path} />
@@ -258,7 +305,7 @@ export function ConceptPage(props: {
         </Crumbs>
       </PageBar>
       <div className="concept-grid">
-        <article className="doc">
+        <article className="doc" inert={modal}>
           {compare && (
             <ReviewBar
               urls={urls}
@@ -273,6 +320,7 @@ export function ConceptPage(props: {
           )}
           {props.notice && <div className="notice">{props.notice}</div>}
           {moved && live && <LiveNotice urls={urls} live={live} />}
+          <LiveAnnouncer urls={urls} live={live} />
           {!compare && !current && <VersionBar urls={urls} concept={c} standing={s} name={name} />}
           {markdown && (
             <RawMarkdown
@@ -336,6 +384,8 @@ export function ConceptPage(props: {
             <SourcesSection urls={urls} data={sources} prepared={prepared} numbers={numbers} />
           </div>
         </article>
+        {/* The page dimmed behind an overlaid panel; a tap on it closes the panel (P-4). */}
+        {modal && <div className="panel-scrim" aria-hidden="true" onClick={closePanel} />}
         <div className="concept-side" ref={panelBox}>
           {panel === "comments" ? (
             <Panel

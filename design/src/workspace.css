@@ -1032,6 +1032,24 @@ a.button.pill-button {
   background: var(--tempra-color-hover);
 }
 
+/* The whole row takes a click or a tap (P-2, TEMPRA-133): its link reaches over the row, and a
+   folder's chevron sits above that. */
+.tree-row {
+  position: relative;
+}
+
+.tree-row > a::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+}
+
+.tree-row > .tree-chevron {
+  position: relative;
+  z-index: 1;
+}
+
 .tree-chevron {
   flex: none;
   display: flex;
