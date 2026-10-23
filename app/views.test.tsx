@@ -1,11 +1,21 @@
 import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
+import type { LedgerEvent, LedgerRequest } from "./src/activity";
 import { actorView } from "./src/agents";
 import { forYouCards, type InboxItem, type InboxPage } from "./src/inbox";
 import type { Needs } from "./src/needs";
 import { fateOf, typeName } from "./src/pages/File";
 import { FolderBody, type FolderView } from "./src/pages/Folder";
-import { EmptyLibrary, ForYou, HomeFoot, HomeSections, inboxHref } from "./src/pages/Home";
+import {
+  EmptyLibrary,
+  ForYou,
+  HomeFoot,
+  HomeSections,
+  inboxHref,
+  recentlyChanged,
+  SinceLine,
+  sinceYouLooked,
+} from "./src/pages/Home";
 import { type OutlineFile, topLevel } from "./src/Tree";
 import { Urls } from "./src/urls";
 import { type Place, placeName } from "./src/Workspace";
@@ -110,6 +120,30 @@ describe("a folder (take 4)", () => {
     expect(html).not.toContain("aria-pressed");
     expect(html).not.toContain("You · ");
     expect(html).toContain(`href="${urls.raw("decisions/index.md")}"`);
+  });
+
+  test("its files after its pages, and a subfolder of files only counts them (H-2)", () => {
+    const view: FolderView = {
+      ...folder,
+      folders: [{ path: "decisions/attesters", concepts: 0, newest_ts: null }],
+    };
+    const files = renderToStaticMarkup(
+      <FolderBody
+        urls={urls}
+        dir="decisions"
+        view={view}
+        seen={null}
+        index={[
+          { path: "decisions/a.md", kind: "concept", title: "A", seq: 10 },
+          { path: "decisions/chart.png", kind: "attachment", seq: 11 },
+          { path: "decisions/attesters/sql_equality.py", kind: "attachment", seq: 12 },
+        ]}
+      />,
+    );
+    expect(files).toContain("1 file");
+    expect(files).toContain(`href="${urls.file("decisions/chart.png")}"`);
+    expect(files.indexOf("chart.png")).toBeGreaterThan(files.indexOf("Diagram styles"));
+    expect(files).not.toContain("sql_equality.py</");
   });
 });
 
@@ -252,7 +286,7 @@ describe("the library's home (take 4)", () => {
 
   test("an empty library: the connect steps, waiting with the pulsing dot, Import a bundle", () => {
     const waiting = renderToStaticMarkup(
-      <EmptyLibrary urls={urls} latest={null} who={null} now={Date.now()} />,
+      <EmptyLibrary urls={urls} access="owner" latest={null} who={null} now={Date.now()} />,
     );
     expect(waiting).toContain("Nothing here yet");
     expect(waiting).toContain("/mcp</code>");
@@ -262,6 +296,7 @@ describe("the library's home (take 4)", () => {
     const written = renderToStaticMarkup(
       <EmptyLibrary
         urls={urls}
+        access="owner"
         latest={{
           request_id: "r1",
           ts: new Date().toISOString(),
@@ -276,6 +311,104 @@ describe("the library's home (take 4)", () => {
     );
     expect(written).toContain("Last write by claude-code/dev, just now: mcp smoke cleanup");
     expect(written).not.toContain("Waiting");
+  });
+
+  test("an empty library by role: a writer gets the steps without Import, a reader neither", () => {
+    const writer = renderToStaticMarkup(
+      <EmptyLibrary urls={urls} access="write" latest={null} who={null} now={Date.now()} />,
+    );
+    expect(writer).toContain("/mcp</code>");
+    expect(writer).not.toContain(urls.transfer());
+    expect(writer).toContain(`href="${urls.connect()}"`);
+    const reader = renderToStaticMarkup(
+      <EmptyLibrary urls={urls} access="read" latest={null} who={null} now={Date.now()} />,
+    );
+    expect(reader).toContain("Nothing here yet");
+    expect(reader).not.toContain("/mcp</code>");
+    expect(reader).not.toContain("Add Tempra");
+    expect(reader).not.toContain(urls.transfer());
+    expect(reader).not.toContain(urls.connect());
+  });
+
+  test("a section holding only files counts its files, not 0", () => {
+    const html = renderToStaticMarkup(
+      <HomeSections
+        urls={urls}
+        files={[...files, { path: "attesters/sql_equality.py", kind: "attachment", seq: 3 }]}
+        seen={null}
+      />,
+    );
+    expect(html).toContain('<span class="home-section-count">1 file</span>');
+    expect(html).toContain('<span class="home-section-count">2</span>');
+  });
+
+  const event = (seq: number, over: Partial<LedgerEvent> = {}): LedgerEvent => ({
+    seq,
+    ts: hour(1),
+    actor: "claude-code/dev",
+    op: "put",
+    path: `app/p${seq}.md`,
+    prev_hash: "h",
+    hash: "h2",
+    concept_id: `c${seq}`,
+    meta: { by: { person: "u1", agent: "a1" } },
+    ...over,
+  });
+
+  test("since you last looked: pages, files and comments by others, dated by the cursor", () => {
+    const events = [
+      event(10, { ts: "2026-10-12T12:00:00Z" }),
+      event(11),
+      event(12, { path: "app/p11.md" }),
+      event(13, { path: "app/shot.png" }),
+      event(14, { op: "comment" }),
+      // The person's own edit in the app is not news to them.
+      event(15, { actor: me, path: "app/mine.md", meta: { by: { person: "u1" } } }),
+      event(16, { op: "verify" }),
+    ];
+    const what = sinceYouLooked(events, 10, me);
+    expect(what).toMatchObject({ from: events[0]?.ts, pages: 1, files: 1, comments: 1 });
+    expect(what.who).toHaveLength(1);
+    const html = renderToStaticMarkup(
+      <SinceLine
+        urls={urls}
+        what={what}
+        name={(a, by) => view(a, by).name}
+        now={Date.parse("2026-10-20T12:00:00Z")}
+      />,
+    );
+    expect(html).toContain(
+      "Since Oct 12: Claude Code changed 1 page and 1 file and left 1 comment",
+    );
+    expect(html).toContain(`href="${urls.activity()}"`);
+    // Nothing new (or only the person's own): no line at all.
+    const none = sinceYouLooked(events.slice(0, 1), 10, me);
+    expect(
+      renderToStaticMarkup(<SinceLine urls={urls} what={none} name={() => "x"} now={Date.now()} />),
+    ).toBe("");
+  });
+
+  test("recently changed: the newest pages still here, each once, with who and when", () => {
+    const request = (id: string, events: LedgerEvent[]): LedgerRequest => ({
+      request_id: id,
+      ts: events.at(-1)?.ts ?? hour(1),
+      actor: "claude-code/dev",
+      note: null,
+      by: { person: "cl_dixon", agent: "a1" },
+      events,
+    });
+    const changed = recentlyChanged(
+      [
+        request("r3", [event(30, { path: "app/reader.md" }), event(31, { op: "comment" })]),
+        request("r2", [event(20, { path: "gone.md" }), event(21, { path: "decisions/a.md" })]),
+        request("r1", [event(10, { path: "app/reader.md" })]),
+      ],
+      files,
+    );
+    expect(changed.map((c) => [c.path, c.title])).toEqual([
+      ["app/reader.md", "Reader"],
+      ["decisions/a.md", "A"],
+    ]);
   });
 });
 

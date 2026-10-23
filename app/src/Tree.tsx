@@ -358,7 +358,7 @@ export function Tree(props: {
     }
     if (dirs === null) return <li className="tree-note">Loading…</li>;
     const entries = dirs[dir] ?? [];
-    if (entries.length === 0 && dir === "") return <li className="tree-note">No files yet.</li>;
+    if (entries.length === 0 && dir === "") return <li className="tree-note">No pages yet.</li>;
     return entries.map((e) =>
       e.kind === "dir" ? (
         <li key={e.path}>
