@@ -601,8 +601,8 @@ async function browserRenders(
       await newVersion().click();
       await page.getByRole("button", { name: "Show new version" }).click();
     };
-    /** The concept's comments toggle ("Comments" or "Comments, n open"). */
-    const commentsToggle = () => sheetBar.getByRole("button", { name: /^Comments(, \d+ open)?$/ });
+    /** The concept's comments toggle ("Comments" or "Comments n open"). */
+    const commentsToggle = () => sheetBar.getByRole("button", { name: /^Comments( \d+ open)?$/ });
     /** The concept's panels (take 4): one at a time, in place of the contents. */
     const comments = page.locator("aside#panel-comments.concept-panel");
     const historyPanel = page.locator("aside#panel-history.concept-panel");
@@ -1554,7 +1554,15 @@ async function browserRenders(
       await page.locator(`.ws-sidebar a[data-path="${concept}"]`).hover();
       await page.waitForTimeout(500);
       await newVersion().click();
-      await page.getByRole("status").filter({ hasText: "changed this" }).waitFor();
+      await page
+        .locator(".new-version")
+        .getByText(/changed this/)
+        .waitFor();
+      // Said once to a screen reader too, in the page's polite live region (C-27).
+      await main
+        .getByRole("status")
+        .filter({ hasText: /^New version: .*changed this/ })
+        .waitFor();
       await page.getByRole("button", { name: "Show new version" }).click();
       await page
         .locator(".body")
@@ -2064,9 +2072,9 @@ async function browserRenders(
         await comments.getByRole("button", { name: "Resolved 1" }).waitFor({ timeout: 10_000 });
         await highlight("tempra-comment", true);
         await highlight("tempra-comment-active", true);
-        if ((await commentsToggle().getAttribute("aria-label")) !== "Comments") {
+        if ((await commentsToggle().innerText()).trim() !== "Comments") {
           throw new Error(
-            `the toggle still counts open threads: ${await commentsToggle().getAttribute("aria-label")}`,
+            `the toggle still counts open threads: ${await commentsToggle().innerText()}`,
           );
         }
         // Under Resolved it is there, with Reopen.
@@ -2289,6 +2297,157 @@ async function browserRenders(
         }
       },
     );
+    // Keyboard only (TEMPRA-133): a panel opened from its control takes the focus to its heading
+    // and gives it back on close (⋯ for History); the menus move by arrow keys and close when the
+    // focus leaves; a footnote's card describes its marker and closes on Escape; selected text is
+    // commented on with Ctrl+Alt+M and posted from the keyboard. At phone width the drawer and a
+    // panel's sheet are modal (what they dim is inert), and a tap on the dimmed page closes the
+    // sheet.
+    await step("keyboard: panels, menus, a card, a comment, the drawer and the sheet", async () => {
+      const path = "gate-keys.md";
+      const put = await fetch(`${libApi}/files/${path}`, {
+        method: "PUT",
+        headers: { ...bearer, "Content-Type": "text/markdown", "X-Note": "gate: keys" },
+        body: [
+          "---\ntype: Note\ntitle: Gate keys\ndescription: A page read from the keyboard.\n---",
+          "A sentence long enough to select from the keyboard, with a note.[^n]\n",
+          "[^n]: The note itself.\n",
+        ].join("\n"),
+      });
+      if (!put.ok) throw new Error(`write: ${put.status} ${await put.text()}`);
+      await page.goto(`${lib}/${path}`);
+      const prose = page.locator(".body .prose");
+      await prose.waitFor({ timeout: 15_000 });
+      const focusIs = (selector: string) =>
+        page.evaluate<boolean>(`!!document.activeElement?.matches(${JSON.stringify(selector)})`);
+      const focused = () =>
+        page.evaluate<string>(`(() => {
+          const el = document.activeElement;
+          if (!el) return "nothing";
+          return el.tagName + " " + (el.textContent ?? "").trim().slice(0, 60);
+        })()`);
+      const expectFocus = async (selector: string, what: string) => {
+        const until = Date.now() + 3000;
+        while (!(await focusIs(selector))) {
+          if (Date.now() > until) throw new Error(`${what}: the focus is on ${await focused()}`);
+          await page.waitForTimeout(50);
+        }
+      };
+      // Comments from its control: the focus to the panel's heading, and back on Escape.
+      await commentsToggle().focus();
+      await page.keyboard.press("Enter");
+      await comments.waitFor({ timeout: 5000 });
+      await expectFocus("aside#panel-comments h2", "opening Comments");
+      await page.keyboard.press("Escape");
+      await comments.waitFor({ state: "detached", timeout: 5000 });
+      await expectFocus(".comments-toggle", "closing Comments");
+      // ⋯ by its keys: Down opens it at History, Down, End, Home move; Enter opens History, whose
+      // heading takes the focus; Escape gives it back to ⋯.
+      const moreButton = sheetBar.getByRole("button", { name: "More", exact: true });
+      const list = page.locator(".menu-list");
+      await moreButton.focus();
+      await page.keyboard.press("ArrowDown");
+      await list.waitFor({ timeout: 5000 });
+      await expectFocus(".menu-list button.menu-item:first-of-type", "Down on ⋯");
+      if (!(await focused()).includes("History")) throw new Error(`Down: ${await focused()}`);
+      await page.keyboard.press("ArrowDown");
+      if (!(await focused()).includes("Properties")) throw new Error(`Down: ${await focused()}`);
+      await page.keyboard.press("End");
+      if (!(await focused()).includes("Download")) throw new Error(`End: ${await focused()}`);
+      await page.keyboard.press("Home");
+      if (!(await focused()).includes("History")) throw new Error(`Home: ${await focused()}`);
+      await page.keyboard.press("Enter");
+      await historyPanel.waitFor({ timeout: 5000 });
+      await expectFocus("aside#panel-history h2", "opening History from ⋯");
+      await page.keyboard.press("Escape");
+      await historyPanel.waitFor({ state: "detached", timeout: 5000 });
+      await expectFocus('[aria-label="More"]', "closing History");
+      // A menu closes when the focus leaves it.
+      await page.keyboard.press("Enter");
+      await list.waitFor({ timeout: 5000 });
+      await page.keyboard.press("Shift+Tab");
+      await list.waitFor({ state: "detached", timeout: 5000 });
+      // A footnote marker's card: its description while shown, gone on Escape.
+      const marker = prose.locator(".fnref a").first();
+      await marker.focus();
+      const card = page.locator(".tooltip[role=tooltip]");
+      await card.waitFor({ timeout: 5000 });
+      const described = await marker.getAttribute("aria-describedby");
+      if (!described || described !== (await card.getAttribute("id"))) {
+        throw new Error(`the card does not describe its marker: ${described}`);
+      }
+      if ((await marker.getAttribute("aria-label")) !== "footnote 1") {
+        throw new Error(`the marker says "${await marker.getAttribute("aria-label")}"`);
+      }
+      await page.keyboard.press("Escape");
+      await card.waitFor({ state: "detached", timeout: 5000 });
+      // Selected text, then Ctrl+Alt+M: the draft's box takes the focus; Tab to Comment, Enter.
+      await page.evaluate(`(() => {
+        const text = document.querySelector(".body .prose p").firstChild;
+        const range = document.createRange();
+        range.setStart(text, 0);
+        range.setEnd(text, 18);
+        const sel = document.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+      })()`);
+      await page.keyboard.press("Control+Alt+KeyM");
+      await comments.waitFor({ timeout: 5000 });
+      const box = comments.getByPlaceholder("Comment on the selection");
+      await expectFocus("aside#panel-comments textarea", "Ctrl+Alt+M");
+      await page.keyboard.type("Gate: from the keyboard.");
+      await page.keyboard.press("Tab");
+      await page.keyboard.press("Tab");
+      await expectFocus('form.comment-form button[type="submit"]', "Tab to Comment");
+      await page.keyboard.press("Enter");
+      await box.waitFor({ state: "detached", timeout: 10_000 });
+      await comments
+        .getByRole("region", { name: "Comment thread" })
+        .getByText("Gate: from the keyboard.")
+        .waitFor({ timeout: 10_000 });
+      await page.keyboard.press("Escape");
+      await comments.waitFor({ state: "detached", timeout: 5000 });
+      // The focus goes back where it was before Ctrl+Alt+M: the marker, focused for its card.
+      await expectFocus(".body .fnref a", "closing Comments after commenting");
+      // At phone width: the drawer from its button, modal, closed by Escape, the focus back.
+      await page.setViewportSize({ width: 390, height: 844 });
+      try {
+        const inert = (selector: string) =>
+          page.evaluate<boolean>(`!!document.querySelector(${JSON.stringify(selector)})?.inert`);
+        const menuButton = page.locator("button.ws-menu");
+        await menuButton.waitFor({ timeout: 5000 });
+        await menuButton.focus();
+        await page.keyboard.press("Enter");
+        await page.locator("section.ws-sidebar.open").waitFor({ timeout: 5000 });
+        await expectFocus("section.ws-sidebar, section.ws-sidebar *", "opening the drawer");
+        if (!(await inert("header.ws-topbar")) || !(await inert("main.ws-main"))) {
+          throw new Error("the page behind the drawer is not inert");
+        }
+        for (let i = 0; i < 4; i++) await page.keyboard.press("Tab");
+        await expectFocus("section.ws-sidebar *", "Tab in the drawer");
+        await page.keyboard.press("Escape");
+        await page.locator("section.ws-sidebar.open").waitFor({ state: "detached" });
+        await expectFocus("button.ws-menu", "closing the drawer");
+        if ((await inert("header.ws-topbar")) || (await inert("main.ws-main"))) {
+          throw new Error("the page stayed inert after the drawer closed");
+        }
+        // A panel's sheet: modal, its heading focused, closed by a tap on the dimmed page.
+        await commentsToggle().focus();
+        await page.keyboard.press("Enter");
+        await comments.waitFor({ timeout: 5000 });
+        await expectFocus("aside#panel-comments h2", "opening the sheet");
+        if (!(await inert("main article.doc")) || !(await inert("header.ws-topbar"))) {
+          throw new Error("the page behind the sheet is not inert");
+        }
+        await page.mouse.click(195, 120);
+        await comments.waitFor({ state: "detached", timeout: 5000 });
+        if ((await inert("main article.doc")) || (await inert("header.ws-topbar"))) {
+          throw new Error("the page stayed inert after the sheet closed");
+        }
+      } finally {
+        await wide();
+      }
+    });
     // View Markdown, in ⋯, shows the file as stored, frontmatter first, with line numbers, in
     // place of the page; Back to page returns.
     await step("the Markdown view shows the file as stored", async () => {
@@ -2681,10 +2840,148 @@ async function browserRenders(
         }
       },
     );
+    // axe (TEMPRA-133): the gate's pages, light and dark, a concept with its Comments panel, and
+    // the phone's drawer and sheet, with no serious or critical issue. After the busy minute, so
+    // its loads are not counted there.
+    await step("axe: no serious or critical issues on the app's pages", async () => {
+      const found = await axePages(page, [
+        { name: "home", url: `${lib}/`, ready: () => home() },
+        {
+          name: "folder",
+          url: `${lib}/${folder}/`,
+          ready: () => main.locator("h1").first().waitFor({ timeout: 15_000 }),
+        },
+        {
+          name: "page",
+          url: `${lib}/gate-keys.md`,
+          ready: () => main.locator(".body .prose").waitFor({ timeout: 15_000 }),
+        },
+        {
+          name: "page, Comments",
+          url: `${lib}/gate-keys.md?panel=comments`,
+          ready: () => comments.getByText("Gate: from the keyboard.").waitFor({ timeout: 15_000 }),
+        },
+        {
+          name: "page, Properties",
+          url: `${lib}/gate-keys.md?panel=properties`,
+          ready: () => properties().waitFor({ timeout: 15_000 }),
+        },
+        {
+          name: "Activity",
+          url: `${lib}/-/activity`,
+          ready: () => main.locator("article.entry").first().waitFor({ timeout: 15_000 }),
+        },
+        {
+          name: "Every event",
+          url: `${lib}/-/ledger`,
+          ready: () => main.locator("table").first().waitFor({ timeout: 15_000 }),
+        },
+        {
+          name: "Members",
+          url: `${lib}/-/members`,
+          ready: () => main.locator("h1").first().waitFor({ timeout: 15_000 }),
+        },
+        {
+          name: "libraries",
+          url: `${base}/`,
+          ready: () => main.locator("h1").first().waitFor({ timeout: 15_000 }),
+        },
+        {
+          name: "Inbox",
+          url: `${base}/inbox`,
+          ready: () => main.locator("h1").first().waitFor({ timeout: 15_000 }),
+        },
+        {
+          name: "Account",
+          url: `${base}/account`,
+          ready: () => main.locator("h1").first().waitFor({ timeout: 15_000 }),
+        },
+        {
+          name: "Tokens",
+          url: `${base}/tokens`,
+          ready: () => main.locator("h1").first().waitFor({ timeout: 15_000 }),
+        },
+        {
+          name: "page, dark",
+          url: `${lib}/gate-keys.md`,
+          dark: true,
+          ready: () => main.locator(".body .prose").waitFor({ timeout: 15_000 }),
+        },
+        {
+          name: "home, phone drawer",
+          url: `${lib}/`,
+          phone: true,
+          ready: async () => {
+            await home();
+            await page.locator("button.ws-menu").click();
+            await page.locator("section.ws-sidebar.open").waitFor({ timeout: 5000 });
+          },
+        },
+        {
+          name: "page, phone sheet",
+          url: `${lib}/gate-keys.md`,
+          phone: true,
+          ready: async () => {
+            await main.locator(".body .prose").waitFor({ timeout: 15_000 });
+            await commentsToggle().click();
+            await comments.waitFor({ timeout: 5000 });
+          },
+        },
+      ]);
+      await wide();
+      if (found.length > 0) throw new Error(`axe: ${found.join("; ")}`);
+    });
   } finally {
     await b.close();
   }
   return problems;
+}
+
+/** A page for axe: where it is, what shows it is ready, and how it is seen. */
+interface AxePage {
+  name: string;
+  url: string;
+  ready(): Promise<unknown>;
+  dark?: boolean;
+  phone?: boolean;
+}
+
+/**
+ * Runs axe-core over each page and returns its serious and critical violations, one line each
+ * (rule, impact, the first elements). axe is evaluated into the page through the DevTools
+ * protocol, which the app's CSP (`script-src 'self'`) does not govern; nothing is added to the
+ * page's own scripts.
+ */
+async function axePages(page: import("playwright-core").Page, pages: AxePage[]) {
+  const source = await Bun.file(Bun.resolveSync("axe-core/axe.min.js", import.meta.dir)).text();
+  const found: string[] = [];
+  for (const p of pages) {
+    await page.setViewportSize(
+      p.phone ? { width: 390, height: 844 } : { width: 1600, height: 900 },
+    );
+    await page.emulateMedia({ colorScheme: p.dark ? "dark" : "light" });
+    await page.goto(p.url);
+    await p.ready();
+    await page.waitForTimeout(400);
+    await page.evaluate(source);
+    const violations = await page.evaluate<{ id: string; impact: string; nodes: string[] }[]>(`
+      axe
+        .run(document, { resultTypes: ["violations"] })
+        .then((r) =>
+          r.violations
+            .filter((v) => v.impact === "serious" || v.impact === "critical")
+            .map((v) => ({
+              id: v.id,
+              impact: v.impact,
+              nodes: v.nodes.slice(0, 3).map((n) => n.target.join(" ")),
+            })),
+        )`);
+    for (const v of violations) {
+      found.push(`${p.name}: ${v.id} (${v.impact}) at ${v.nodes.join(", ")}`);
+    }
+  }
+  await page.emulateMedia({ colorScheme: null });
+  return found;
 }
 
 /** Runs the daily maintainers as the app's Export now does, and reads the export from R2. */
