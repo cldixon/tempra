@@ -1,18 +1,21 @@
-import { type ReactNode, useState } from "react";
+import { Fragment, type ReactNode, useState } from "react";
+import { AgentName } from "../AgentName";
 import { actorText } from "../agents";
-import { ApiError, api } from "../api";
+import { ApiError } from "../api";
 import { Moment } from "../Moment";
-import { navigate } from "../router";
-import { Chip, day, plural } from "../ui";
-import { enc, type Urls } from "../urls";
+import { day, plural } from "../ui";
+import type { Urls } from "../urls";
+import { useTitleOf } from "../Workspace";
 import type { Namer } from "./Byline";
+import { changesSince, markChecked } from "./Checked";
 import { actedBy, type Concept, type Json, type Links, type Standing, type WorkItem } from "./data";
 
 /**
- * The Properties panel (take 4, TEMPRA-114; tempra-dev: app/reader, The panels): the concept's
- * facts (type, status, stale after, sources, path, generated), what links to it and its broken
- * links, the agents' notes on it (lint, work items), and the Verification section when there is
- * something to review (decisions/verification-out-of-the-way).
+ * The Properties panel (take 4, TEMPRA-114; TEMPRA-122 and 134; tempra-dev: app/reader, The
+ * panels): short and in people's words. What a reader needs (status, stale or not, who changed
+ * it last, type, tags, sources, what links here by title), then Check when there is something to
+ * do, then For agents (n), closed: the path, who generated it, its lint and work items in plain
+ * words, its broken links (decisions/take4-followups-ui-only).
  */
 export function PropertiesList(props: {
   urls: Urls;
@@ -22,22 +25,21 @@ export function PropertiesList(props: {
   standing: Standing;
   name: Namer;
   work: WorkItem[];
-  /** The page is current (not a pinned old version), so it can be reviewed. */
+  /** The page is current (not a pinned old version), so it can be checked. */
   current: boolean;
-  /** Review mode is on (the changes since verification are drawn). */
+  /** Review mode is on (the changes since the last check are drawn). */
   reviewing: boolean;
-  /** A write member: may verify. */
+  /** A write member: may mark it as checked. */
   mayVerify: boolean;
   onVerified(): void;
 }) {
   const { urls, concept: c } = props;
   return (
     <>
-      <Facts concept={c} name={props.name} />
+      <Facts concept={c} standing={props.standing} name={props.name} />
       <LinkedFrom urls={urls} links={props.links} head={props.head} />
-      <AgentNotes concept={c} work={props.work} />
       {props.current && (
-        <Verification
+        <Check
           urls={urls}
           path={c.path}
           standing={props.standing}
@@ -47,16 +49,18 @@ export function PropertiesList(props: {
           onVerified={props.onVerified}
         />
       )}
+      <ForAgents concept={c} links={props.links} work={props.work} name={props.name} />
     </>
   );
 }
 
 /**
- * "2 changes since you verified" (or "Not yet verified by a person"), Show changes or Hide
- * changes, and Verify this version for a write member. Shown only when there is something to
- * review: not once the version on screen is the one a person verified.
+ * Whether a person checked the page, when there is something to do about it: a page nobody
+ * checked offers only Mark as checked (to a write member); a page checked and changed since says
+ * how much and offers Show changes (review mode, whose bar has Mark as checked and Done); nothing
+ * once the version on screen is the checked one.
  */
-function Verification(props: {
+function Check(props: {
   urls: Urls;
   path: string;
   standing: Standing;
@@ -68,21 +72,13 @@ function Verification(props: {
   const { urls, path, standing: s } = props;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const v = s.verified;
-  if (v && s.since === 0) return null;
-  const by = v ? props.name(v.event.actor, actedBy(v.event)) : null;
-  const whom = by?.you ? "you" : by?.name;
-  const words =
-    v && by
-      ? `${plural(s.since, "change")} since ${whom} verified on ${day(v.event.ts)}`
-      : "Not yet verified by a person";
-  const plain = `${urls.pinned(undefined).file(path)}`;
-  const verify = async () => {
+  if (s.verified && s.since === 0) return null;
+  if (!s.verified && (!props.mayVerify || props.reviewing)) return null;
+  const check = async () => {
     setBusy(true);
     setError(null);
     try {
-      await api(urls.api(`verify/${enc(path)}`), { method: "POST" });
-      navigate(`${plain}?done=verify`, { replace: true });
+      await markChecked(urls, path);
       props.onVerified();
     } catch (err) {
       setError(err instanceof ApiError ? err.message : String(err));
@@ -91,78 +87,80 @@ function Verification(props: {
     }
   };
   return (
-    <section className="panel-section verification" aria-label="Verification">
-      <h3 className="label">Verification</h3>
-      <p className="verification-state">{words}</p>
-      <div className="actions">
-        {props.reviewing ? (
-          <a className="button" href={plain}>
-            Hide changes
-          </a>
-        ) : (
-          <a className="button" href={urls.review(path)}>
-            Show changes
-          </a>
-        )}
-        {/* In review mode the bar over the text carries Verify, with its note. */}
-        {props.mayVerify && !props.reviewing && (
-          <button type="button" className="primary" disabled={busy} onClick={verify}>
-            Verify this version
+    <section className="panel-section check" aria-label="Check">
+      {s.verified ? (
+        <>
+          <p className="check-state">{changesSince(s, props.name)}</p>
+          {/* In review mode the bar over the text has Mark as checked and Done. */}
+          {!props.reviewing && (
+            <div className="actions">
+              <a className="button" href={urls.review(path)}>
+                Show changes
+              </a>
+            </div>
+          )}
+        </>
+      ) : (
+        <div className="actions">
+          <button type="button" disabled={busy} onClick={check}>
+            Mark as checked
           </button>
-        )}
-      </div>
+        </div>
+      )}
       {error && <p className="small warn">{error}</p>}
     </section>
   );
 }
 
-/** A frontmatter value as text: a list joined, a link a link, an object as JSON. */
-function Value({ v }: { v: Json }) {
-  if (v === null) return <span className="muted">null</span>;
-  if (typeof v === "string" && /^https?:\/\//i.test(v)) {
-    return (
-      <a href={v} rel="noopener noreferrer nofollow">
-        {v}
-      </a>
-    );
+/** A frontmatter value as text: a list joined, anything else as it reads. */
+function text(v: Json | undefined): string | null {
+  if (v === undefined || v === null || v === "") return null;
+  if (Array.isArray(v)) {
+    const words = v.filter((x) => x !== null && typeof x !== "object").map(String);
+    return words.length > 0 ? words.join(", ") : null;
   }
-  if (Array.isArray(v) && v.every((x) => x === null || typeof x !== "object")) {
-    return <>{v.map(String).join(", ")}</>;
-  }
-  if (typeof v === "object") return <pre className="src">{JSON.stringify(v, null, 2)}</pre>;
-  return <>{String(v)}</>;
+  return typeof v === "object" ? null : String(v);
 }
 
-/** `generated: { by, at }` as who and when. */
-function stamp(v: Json | undefined): { by: string; at: string } | null {
-  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
-  return { by: String(v.by ?? ""), at: String(v.at ?? "") };
+/** "No, until Nov 19", "Soon, on Nov 2", "Yes, since Oct 3", or "No". */
+function staleWords(c: Concept): string {
+  const after = text(c.frontmatter.stale_after);
+  const on = after ? day(after) : null;
+  if (c.stale) return on ? `Yes, since ${on}` : "Yes";
+  if (c.stale_soon && on) return `Soon, on ${on}`;
+  return on ? `No, until ${on}` : "No";
 }
 
-/** The concept's facts, read-only: the frontmatter a person asks about, in a fixed order. */
-function Facts({ concept: c, name }: { concept: Concept; name: Namer }) {
+const notSet = <span className="muted">not set</span>;
+
+/** What a reader asks about the page, in a fixed order. */
+function Facts({
+  concept: c,
+  standing: s,
+  name,
+}: {
+  concept: Concept;
+  standing: Standing;
+  name: Namer;
+}) {
   const fm = c.frontmatter;
   const sources = Array.isArray(fm.sources) ? fm.sources.length : 0;
-  const generated = stamp(fm.generated);
+  const last = s.current?.event;
   const rows: [string, ReactNode][] = [
-    [
-      "Type",
-      typeof fm.type === "string" && fm.type ? fm.type : <Chip key="t" text="no type" tone="bad" />,
-    ],
+    ["Status", text(fm.status) ?? notSet],
+    ["Stale", staleWords(c)],
   ];
-  if (fm.status !== undefined) rows.push(["Status", <Value key="s" v={fm.status} />]);
-  if (fm.stale_after !== undefined) {
+  if (last) {
     rows.push([
-      "Stale after",
-      <span key="sa">
-        {day(String(fm.stale_after))}
-        {c.stale && <Chip text="stale" tone="bad" />}
-        {c.stale_soon && <Chip text="stale soon" />}
+      "Last changed",
+      <span key="l">
+        <AgentName who={name(last.actor, actedBy(last))} />, <Moment ts={last.ts} />
       </span>,
     ]);
   }
-  if (fm.tags !== undefined) rows.push(["Tags", <Value key="t" v={fm.tags} />]);
-  if (fm.resource !== undefined) rows.push(["Resource", <Value key="r" v={fm.resource} />]);
+  rows.push(["Type", text(fm.type) ?? notSet]);
+  const tags = text(fm.tags);
+  if (tags) rows.push(["Tags", tags]);
   rows.push([
     "Sources",
     sources > 0 ? (
@@ -173,16 +171,6 @@ function Facts({ concept: c, name }: { concept: Concept; name: Namer }) {
       "None"
     ),
   ]);
-  rows.push(["Path", <code key="p">{c.path}</code>]);
-  if (generated) {
-    rows.push([
-      "Generated",
-      <span key="g">
-        {generated.at ? <Moment ts={generated.at} /> : ""}
-        {generated.by && <div className="small muted">{actorText(name(generated.by))}</div>}
-      </span>,
-    ]);
-  }
   return (
     <dl className="facts">
       {rows.map(([k, v]) => (
@@ -195,72 +183,113 @@ function Facts({ concept: c, name }: { concept: Concept; name: Namer }) {
   );
 }
 
-/** What links here, and the concept's own broken links. */
+/** What links here, by title. */
 function LinkedFrom({ urls, links, head }: { urls: Urls; links: Links; head: number }) {
   const atHead = urls.at === undefined || urls.at >= head;
+  const titleOf = useTitleOf();
+  // One row per page, however many times it links here.
+  const pages = [...new Map(links.inbound.map((l) => [l.path, l])).values()];
   return (
     <section className="panel-section">
       <h3 className="label">Linked from</h3>
-      {links.inbound.length > 0 ? (
+      {pages.length > 0 ? (
         <ul className="linked">
-          {links.inbound.map((l) => (
-            <li key={`${l.path} ${l.kind} ${l.raw}`}>
-              <a href={urls.pinned(undefined).file(l.path)}>{l.path}</a>
+          {pages.map((l) => (
+            <li key={l.path}>
+              <a href={urls.pinned(undefined).file(l.path)}>{titleOf(l.path)}</a>
               {l.kind === "source" && <span className="muted"> cites it</span>}
             </li>
           ))}
         </ul>
       ) : (
         <p className="small muted">
-          {atHead ? "Nothing links here." : "Inbound links are shown for the current version."}
-        </p>
-      )}
-      {links.broken.length > 0 && (
-        <p className="small warn">
-          Broken:{" "}
-          {links.broken.map((b, i) => (
-            <span key={`${b.raw} ${b.path}`}>
-              {i > 0 && ", "}
-              <code>{b.raw}</code>
-            </span>
-          ))}
+          {atHead ? "Nothing links here." : "Shown for the latest version."}
         </p>
       )}
     </section>
   );
 }
 
-/**
- * What agents should fix in this concept: its lint and its work items (broken links, staleness,
- * structure), with what to do about each. For people to see, not to act on.
- */
-function AgentNotes({ concept: c, work }: { concept: Concept; work: WorkItem[] }) {
-  const count = c.lint.length + work.length;
+/** A note's text with its `code` spans drawn as code, not as backticks. */
+function Words({ text: t }: { text: string }) {
+  const parts = t.split("`");
   return (
-    <section className="panel-section" aria-label="Agent notes">
-      <h3 className="label">Agent notes{count > 0 ? ` (${count})` : ""}</h3>
-      {count === 0 ? (
-        <p className="small muted">Nothing for agents to fix here.</p>
-      ) : (
+    <>
+      {parts.map((p, i) =>
+        // biome-ignore lint/suspicious/noArrayIndexKey: the parts of one string, in order.
+        i % 2 === 1 ? <code key={i}>{p}</code> : <Fragment key={i}>{p}</Fragment>,
+      )}
+    </>
+  );
+}
+
+/** `generated: { by, at }`, if it is there. */
+function stamp(v: Json | undefined): { by: string; at: string } | null {
+  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
+  return { by: String(v.by ?? ""), at: String(v.at ?? "") };
+}
+
+/**
+ * For agents (n), closed: what an agent reads about the page and would fix (its path, who
+ * generated it, its lint and work items, its broken links). People can look; the page's own
+ * words stay above. View Markdown shows the file itself.
+ */
+function ForAgents(props: { concept: Concept; links: Links; work: WorkItem[]; name: Namer }) {
+  const { concept: c, links, work, name } = props;
+  const generated = stamp(c.frontmatter.generated);
+  const notes = c.lint.length + work.length + (links.broken.length > 0 ? 1 : 0);
+  return (
+    <details className="panel-section for-agents">
+      <summary className="label">For agents{notes > 0 ? ` (${notes})` : ""}</summary>
+      <dl className="facts">
+        <div className="fact">
+          <dt>Path</dt>
+          <dd>
+            <code>{c.path}</code>
+          </dd>
+        </div>
+        {generated?.by && (
+          <div className="fact">
+            <dt>Generated</dt>
+            <dd>
+              {actorText(name(generated.by))}
+              {generated.at && (
+                <>
+                  , <Moment ts={generated.at} />
+                </>
+              )}
+            </dd>
+          </div>
+        )}
+      </dl>
+      {notes > 0 ? (
         <ul className="notes-list">
           {c.lint.map((l, i) => (
             // biome-ignore lint/suspicious/noArrayIndexKey: lint warnings have no id.
             <li key={i}>
-              <Chip text="lint" /> <code>{l.code}</code> <span className="muted">{l.message}</span>
+              <Words text={l.message} />
             </li>
           ))}
           {work.map((w) => (
             <li key={`${w.kind} ${w.detail}`}>
-              <Chip
-                text={w.kind.replace("_", " ")}
-                tone={w.kind === "structure" ? "warn" : "bad"}
-              />{" "}
-              <span>{w.detail}</span>
-              <div className="muted">→ {w.suggested_action}</div>
+              <Words text={w.detail} />
             </li>
           ))}
+          {links.broken.length > 0 && (
+            <li>
+              {links.broken.length === 1 ? "A link leads nowhere: " : "Links that lead nowhere: "}
+              {links.broken.map((b, i) => (
+                <span key={`${b.raw} ${b.path}`}>
+                  {i > 0 && ", "}
+                  <code>{b.raw}</code>
+                </span>
+              ))}
+            </li>
+          )}
         </ul>
+      ) : (
+        <p className="small muted">Nothing for agents to fix here.</p>
       )}
-    </section>
+    </details>
   );
 }

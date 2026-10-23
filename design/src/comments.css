@@ -16,10 +16,27 @@
   margin-bottom: 6px;
 }
 
+/* "Comment on the page": a quiet pill, outlined, at the top of the list. */
 .new-thread {
   align-self: flex-start;
-  padding-left: 8px;
+  color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
+}
+
+.new-thread:hover:not(:disabled) {
+  color: var(--tempra-color-text);
+}
+
+/* A thread whose quote is gone from the body: said in words, as a small outlined label. */
+.thread-outdated {
+  align-self: flex-start;
+  padding: 0 8px;
+  border: 1px solid var(--tempra-color-border);
+  border-radius: var(--tempra-radius-pill);
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+  font-style: normal;
+  line-height: var(--tempra-line-height);
 }
 
 /* A compact thread: its quote, then one line: who, the first words, when. */
@@ -62,10 +79,23 @@
   font-size: var(--tempra-text-initial);
 }
 
-.thread.collapsed strong {
+.thread.collapsed .agent-name {
   flex: none;
+  max-width: 60%;
+  overflow: hidden;
   color: var(--tempra-color-text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.thread.collapsed .agent-name b,
+.said-by .agent-name b {
   font-weight: var(--tempra-weight-medium);
+}
+
+.thread.collapsed .agent-for,
+.said-by .agent-for {
+  color: var(--tempra-color-muted);
 }
 
 .thread-words {
@@ -89,7 +119,7 @@
 
 /* A resolved thread reads quieter: muted text, never faded below AA (TEMPRA-132). */
 .thread.resolved,
-.thread.resolved strong {
+.thread.resolved .agent-name {
   color: var(--tempra-color-muted);
 }
 
@@ -109,10 +139,6 @@
   align-items: center;
   gap: 8px;
   font-size: var(--tempra-text-meta);
-}
-
-.said-by strong {
-  font-weight: var(--tempra-weight-medium);
 }
 
 .said-by time,

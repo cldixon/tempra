@@ -256,7 +256,8 @@ body.ground {
 }
 
 /* The New pill: an outlined pill with a plus. */
-.pill-button {
+.pill-button,
+a.button.pill-button {
   display: inline-flex;
   align-items: center;
   gap: 6px;

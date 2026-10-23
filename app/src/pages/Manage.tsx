@@ -1,4 +1,4 @@
-import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useState } from "react";
 import { byPerson, type LedgerRequest, type Touched, touchedBy, useTitles } from "../activity";
 import { agentLabel, type Contributor, useAgentNames } from "../agents";
 import { ApiError, api, field, useAction, useLoad } from "../api";
@@ -18,8 +18,8 @@ import {
   useMe,
   useTitle,
 } from "../ui";
-import { baseName, dirOf, enc, folderName, type Urls } from "../urls";
-import { PageBar, useFrame } from "../Workspace";
+import { dirOf, enc, folderName, type Urls } from "../urls";
+import { PageBar, useTitleOf } from "../Workspace";
 import { ConnectSteps } from "./Account";
 
 /**
@@ -35,16 +35,6 @@ const json = (body: unknown) => ({ method: "POST", body: JSON.stringify(body) })
 function useLive(urls: Urls, head: number | null, reload: () => void) {
   const soon = useTrailing(reload);
   useFeed(urls, head, () => soon(), soon);
-}
-
-/** Pages' titles by path, from the index the tree loaded (the file name until it arrives). */
-function useTitleOf() {
-  const { index } = useFrame();
-  return useMemo(() => {
-    const titles = new Map<string, string>();
-    for (const f of index ?? []) if (f.title) titles.set(f.path, f.title);
-    return (path: string) => titles.get(path) ?? baseName(path).replace(/\.md$/, "");
-  }, [index]);
 }
 
 /**
@@ -138,7 +128,7 @@ export function Work({ urls, kind }: { urls: Urls; kind?: string }) {
       <Status loaded={loaded}>
         {({ items, total, health }) => (
           <>
-            <HealthLine urls={urls} health={health} />
+            <HealthLine health={health} />
             {items.length === 0 ? (
               <p className="view-empty">Nothing to do.</p>
             ) : (
@@ -171,28 +161,15 @@ export function Work({ urls, kind }: { urls: Urls; kind?: string }) {
 }
 
 /**
- * The daily check's summary, quietly: when it ran, what it counted, and the newest changes
- * nobody has verified since. The list below is live; this line is as of the check.
+ * The daily check's summary, quietly: when it ran and what it counted. The list below is live;
+ * this line is as of the check. Pages nobody verified are not housekeeping, so they are not
+ * listed here (TEMPRA-111, S-7).
  */
-function HealthLine({ urls, health: h }: { urls: Urls; health: Health }) {
+function HealthLine({ health: h }: { health: Health }) {
   const words = healthWords(h.counts);
-  const newest = h.unverified.newest.slice(0, 3);
   return (
     <p className="small muted">
-      Checked <Moment ts={h.at} />: {words || "nothing open"}.
-      {h.unverified.total > 0 && (
-        <>
-          {" "}
-          {h.unverified.total} unverified, newest{" "}
-          {newest.map((c, i) => (
-            <span key={c.path}>
-              {i > 0 && ", "}
-              <a href={urls.file(c.path)}>{c.path}</a>
-            </span>
-          ))}
-          .
-        </>
-      )}
+      Looked over <Moment ts={h.at} />: {words || "nothing open"}.
     </p>
   );
 }

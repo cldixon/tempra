@@ -274,7 +274,7 @@ export function kindLabel(i: InboxItem, now = Date.now()): string {
     case "thread":
       return "New thread";
     case "verify":
-      return "To verify";
+      return "To check";
     case "stale":
       return i.due && Date.parse(i.due) <= now ? "Stale" : "Going stale";
     case "invitation":
@@ -295,7 +295,7 @@ export function itemDetail(i: InboxItem, now = Date.now()): string {
       return `${i.who} opened a thread`;
     case "verify": {
       const n = i.count ?? 1;
-      return `${n} ${n === 1 ? "edit" : "edits"} by ${i.who} since you verified`;
+      return `${n} ${n === 1 ? "edit" : "edits"} by ${i.who} since you checked`;
     }
     case "stale":
       if (!i.due) return "Going stale";

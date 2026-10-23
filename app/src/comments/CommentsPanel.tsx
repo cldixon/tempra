@@ -16,6 +16,9 @@ export function CommentsList(props: {
   placed: Placed[];
   /** The threads could not be loaded (a new comment can still be made). */
   error: string | null;
+  /** The threads are still loading. */
+  loading: boolean;
+  /** Comments can be made (the latest version; an earlier one shows its threads read-only). */
   writable: boolean;
   draft: Draft | null;
   onDraftDone(): void;
@@ -89,7 +92,7 @@ export function CommentsList(props: {
         />
       )}
       {tab === "open" && props.writable && !draft && !composing && (
-        <button type="button" className="ghost new-thread" onClick={() => setComposing(true)}>
+        <button type="button" className="new-thread" onClick={() => setComposing(true)}>
           Comment on the page
         </button>
       )}
@@ -104,11 +107,14 @@ export function CommentsList(props: {
           onChanged={props.onChanged}
         />
       ))}
-      {threads.length === 0 && !draft && !composing && (
+      {props.loading && <p className="small muted">Loading…</p>}
+      {!props.loading && threads.length === 0 && !draft && !composing && (
         <p className="small muted">
-          {tab === "open"
-            ? "No open threads. Select text to comment on it."
-            : "No resolved threads."}
+          {tab === "resolved"
+            ? "No resolved threads."
+            : props.writable
+              ? "No open threads. Select text to comment on it."
+              : "No open threads."}
         </p>
       )}
     </div>

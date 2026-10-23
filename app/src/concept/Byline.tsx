@@ -31,16 +31,20 @@ function useWithin(ts: number | null, ms: number): boolean {
  * version on screen, for whom when an agent ("Claude Code for @ann"), and when ("edited 14 min
  * ago"); while an agent writes the page (a write within the last minute, or one on the feed not
  * yet shown) "· editing now" with the pulsing dot, the agent named once (TEMPRA-131: "Claude
- * Code for @ann · editing now · edited just now"). Versions are in History, verification in
- * Properties (decisions/verification-out-of-the-way).
+ * Code for @ann · editing now · edited just now"). It follows the version on screen: an earlier
+ * one shows who wrote it and when, never "editing now". Versions are in History; whether a person
+ * checked the page is the quiet line under it (`Checked.tsx`).
  */
 export function Byline(props: {
   concept: Concept;
   history: HistoryEvent[];
   name: Namer;
   live: Live | null;
+  /** The latest version is on screen: an earlier one is never being edited now. */
+  current: boolean;
 }) {
-  const { concept: c, name, live } = props;
+  const { concept: c, name } = props;
+  const live = props.current ? props.live : null;
   const s = standing(props.history, c.seq);
   const author = s.current?.event;
   const who = author ? name(author.actor, actedBy(author)) : null;
@@ -62,7 +66,7 @@ export function Byline(props: {
     : who?.agent && author
       ? Date.parse(author.ts)
       : null;
-  const editing = useWithin(at, EDITING_MS) && writer !== null;
+  const editing = useWithin(props.current ? at : null, EDITING_MS) && writer !== null;
   if (!who || !author) return <div className="byline" />;
   // The agent is named once: when the one writing now wrote the version on screen, "editing
   // now" follows its name; another writer is named in that clause.

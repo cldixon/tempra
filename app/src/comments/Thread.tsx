@@ -24,13 +24,22 @@ function useNamer(urls: Urls): (actor: string, by?: ActedBy | null) => ActorView
   return useActors(urls, me?.actor ?? null).view;
 }
 
-/** Who said it: their mark and name; `full` adds whom an agent acts for (AgentName). */
-function By({ who, full = false }: { who: ActorView; full?: boolean }) {
+/** Who said it: their mark and name, an agent with whom it acts for (AgentName). */
+function By({ who }: { who: ActorView }) {
   return (
     <>
       <Avatar name={who.mark} agent={who.agent} />
-      {full ? <AgentName who={who} /> : <strong>{who.name}</strong>}
+      <AgentName who={who} />
     </>
+  );
+}
+
+/** A thread whose quote is no longer in the body, said where it shows. */
+function Outdated() {
+  return (
+    <span className="thread-outdated" title="The quoted text is no longer on the page">
+      Outdated
+    </span>
   );
 }
 
@@ -59,12 +68,8 @@ export function ThreadView(props: {
         aria-expanded="false"
         onClick={select}
       >
-        {t.anchor && (
-          <span className="quote thread-quote">
-            {outdated && <span className="visually-hidden">Outdated: </span>}
-            {clip(t.anchor.quote, 120)}
-          </span>
-        )}
+        {outdated && <Outdated />}
+        {t.anchor && <span className="quote thread-quote">{clip(t.anchor.quote, 120)}</span>}
         <span className="thread-meta">
           {first && <By who={name(first.actor, first.by)} />}
           <span className="thread-words">{first ? clip(first.body, 80) : ""}</span>
@@ -80,6 +85,7 @@ export function ThreadView(props: {
       className={t.status === "open" ? "thread open" : "thread open resolved"}
       aria-label="Comment thread"
     >
+      {outdated && <Outdated />}
       {t.anchor && (
         <blockquote className="quote thread-quote">
           {t.at ? (
@@ -97,7 +103,6 @@ export function ThreadView(props: {
           )}
         </blockquote>
       )}
-      {outdated && <p className="small muted">The quoted text is no longer in the body.</p>}
       <Said thread={t} name={name} />
       <ThreadActions {...props} />
     </section>
@@ -110,7 +115,7 @@ function Said(props: { thread: Thread; name: (actor: string, by?: ActedBy | null
   const comment = (c: CommentT) => (
     <div key={c.id} className="said">
       <div className="said-by">
-        <By who={name(c.actor, c.by)} full /> <Moment ts={c.ts} />
+        <By who={name(c.actor, c.by)} /> <Moment ts={c.ts} />
       </div>
       <p className="comment">{c.body}</p>
     </div>
@@ -188,18 +193,11 @@ function ThreadActions(props: {
       <div className="actions">
         {t.status === "open" ? (
           <>
-            {reply.trim() && (
-              <button type="submit" disabled={busy}>
-                Reply
-              </button>
-            )}
-            <button
-              type="button"
-              className="primary"
-              disabled={busy}
-              onClick={() => act("resolve")()}
-            >
+            <button type="button" disabled={busy} onClick={() => act("resolve")()}>
               Resolve
+            </button>
+            <button type="submit" className="primary" disabled={busy || !reply.trim()}>
+              Reply
             </button>
           </>
         ) : (
