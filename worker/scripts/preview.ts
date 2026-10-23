@@ -237,20 +237,39 @@ async function waitForHealth(url: string, timeoutMs = 600_000) {
   throw new Error(`${url}/healthz did not answer within ${timeoutMs / 1000}s (last: ${last}).`);
 }
 
+/** The actors of the tokens `preview up` mints for itself, deleted once it is done with them. */
+const SEED_ACTOR = "github-actions/preview";
+const SMOKE_ACTOR = "github-actions/smoke";
+
 /**
  * Seeds the operator's account, then runs the MCP smoke flow. The library to review against is a
  * copy of the seed library (PREVIEW_SEED_*, preview-seed.ts) when one is configured, else Google's
  * four sample bundles (TEMPRA-109). Returns the copy's owner/slug on the preview, for the PR
- * comment; null for the samples.
+ * comment; null for the samples. The tokens it used are deleted after, whatever happened: every
+ * run mints new ones, and the operator's Agents page should list only what a person made.
  */
 async function seedAndSmoke(
   url: string,
   email: string | undefined,
   env: Record<string, string | undefined>,
 ): Promise<string | null> {
+  try {
+    return await seedAndSmokeWith(url, (slug, actor) => seedRemote(slug, actor, email, env));
+  } finally {
+    // Cleanup never fails the preview: a token left over is noise, not a broken deploy.
+    await run(
+      ["bun", "scripts/seed.ts", "--remote", "--drop-actors", `${SEED_ACTOR},${SMOKE_ACTOR}`],
+      env,
+    ).catch((e) => console.log(`Could not delete the setup tokens: ${(e as Error).message}`));
+  }
+}
+
+async function seedAndSmokeWith(
+  url: string,
+  seed: (slug: string, actor: string) => Promise<{ owner: string; slug: string; token: string }>,
+): Promise<string | null> {
   const { mcpSmoke } = await import("./mcp-smoke");
   const { copyLibrary, importIfEmpty, seedChoice } = await import("./preview-seed");
-  const seed = (slug: string, actor: string) => seedRemote(slug, actor, email, env);
   const on = (s: { owner: string; slug: string; token: string }) => ({
     url,
     owner: s.owner,
@@ -262,7 +281,7 @@ async function seedAndSmoke(
   const choice = seedChoice(process.env);
   if (choice.kind === "library") {
     const { source } = choice;
-    const s = await seed(source.slug, "github-actions/preview");
+    const s = await seed(source.slug, SEED_ACTOR);
     const done = await copyLibrary(source, on(s));
     console.log(
       done === "imported"
@@ -276,7 +295,7 @@ async function seedAndSmoke(
     const { BUNDLES, loadBundle } = await import("../test/fixtures");
     const { writeTar } = await import("../src/util/tar");
     for (const bundle of BUNDLES) {
-      const s = await seed(bundle.replace(/_/g, "-"), "github-actions/preview");
+      const s = await seed(bundle.replace(/_/g, "-"), SEED_ACTOR);
       const done = await importIfEmpty(on(s), async () => ({
         bytes: writeTar(loadBundle(bundle)),
         source: `fixtures/${bundle}`,
@@ -285,7 +304,7 @@ async function seedAndSmoke(
     }
   }
 
-  const smoke = await seed("smoke", "github-actions/smoke");
+  const smoke = await seed("smoke", SMOKE_ACTOR);
   if (!(await mcpSmoke({ url, token: smoke.token }))) throw new Error("MCP smoke failed.");
   return library;
 }
