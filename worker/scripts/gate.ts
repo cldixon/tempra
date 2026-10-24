@@ -593,7 +593,7 @@ async function browserRenders(
   try {
     const enc = (p: string) => p.split("/").map(encodeURIComponent).join("/");
     const main = page.locator("main.ws-main");
-    /** The top bar (take 4): the crumbs on the left, the page's tools on the right. */
+    /** The top bar (take 4): the page's tools on the right; no crumbs (TEMPRA-139). */
     const sheetBar = page.locator("header.ws-topbar");
     /** Someone else's write: the top bar's glyph, then Show new version in its menu. */
     const newVersion = () => sheetBar.getByRole("button", { name: "New version" });
@@ -812,15 +812,16 @@ async function browserRenders(
         }
       },
     );
-    await step("a folder is not a page: named in the crumbs, its address reveals it", async () => {
+    await step("no crumbs; a folder is not a page, its address reveals it", async () => {
       if (!folder) throw new Error("no concept in a folder");
       await page.locator(".body .prose").waitFor({ timeout: 15_000 });
-      // The crumbs name the page's folders as text (TEMPRA-138): there is no folder page to open.
-      const path = sheetBar.getByRole("navigation", { name: "Path" });
-      await path.getByText(folderName(folder), { exact: true }).first().waitFor();
-      if ((await path.getByRole("link").count()) > 0) {
-        throw new Error("the crumbs link a folder");
+      // The top bar names no path (TEMPRA-139): the tree beside the page shows where it is, so
+      // the page's own line of folders stays hidden too.
+      if ((await sheetBar.getByRole("navigation", { name: "Path" }).count()) > 0) {
+        throw new Error("the top bar still has crumbs");
       }
+      const folders = main.getByRole("navigation", { name: "Folders" });
+      if (await folders.isVisible()) throw new Error("the page's folders show beside the tree");
       // A folder's address (an old link, a link to it in a page's body) opens the home, with the
       // folder open in the tree, and the address becomes the home's.
       await page.goto(`${lib}/${enc(folder)}/`);
@@ -1042,6 +1043,12 @@ async function browserRenders(
       await page.locator(".body .prose").waitFor({ timeout: 15_000 });
       await show.waitFor({ timeout: 5000 });
       if (await sidebar.isVisible()) throw new Error("the hidden sidebar came back on reload");
+      // With the tree out of sight, a page in a folder names its folders above its title.
+      const folders = main.getByRole("navigation", { name: "Folders" });
+      const named = (await folders.count()) > 0 && (await folders.innerText()).trim() !== "";
+      if (named && !(await folders.isVisible())) {
+        throw new Error("the page's folders are hidden with the sidebar hidden");
+      }
       if (shots) await page.screenshot({ path: `${shots}/sidebar-hidden.png` });
       await show.click();
       await sidebar.waitFor({ state: "visible", timeout: 5000 });

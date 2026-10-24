@@ -1,6 +1,6 @@
 import { Component, type ReactNode, useEffect, useState } from "react";
 import { type ApiError, api, type Loaded, useLoad } from "./api";
-import { baseName, folderName, type Urls } from "./urls";
+import { baseName, type Urls } from "./urls";
 
 /** The person the app acts for (GET /api/v1/me). */
 export interface Me {
@@ -234,43 +234,6 @@ export function healthWords(c: Health["counts"]): string {
 /** An element id for a footnote label or source id (as the server's anchorId). */
 export const anchorId = (prefix: string, label: string) =>
   `${prefix}-${label.replace(/[^\w.-]/g, "_")}`;
-
-/**
- * Where a page is in its library (the top bar's crumbs): its folders by name (text: a folder is a
- * group in the tree, not a page, TEMPRA-138), then the file itself (by `title` when it has one), and after them what the page adds (a concept's
- * staleness or status). The library itself is in the sidebar, so the crumbs start below it.
- */
-export function Crumbs(props: { path: string; title?: string; children?: ReactNode }) {
-  const { path } = props;
-  const parts = path === "" ? [] : path.split("/");
-  const items: ReactNode[] = [];
-  parts.forEach((seg, i) => {
-    const p = parts.slice(0, i + 1).join("/");
-    const last = i === parts.length - 1;
-    if (i > 0) {
-      items.push(
-        <span key={`/${p}`} aria-hidden="true">
-          /
-        </span>,
-      );
-    }
-    items.push(
-      last ? (
-        <span key={p} className="here" aria-current="page">
-          {props.title ?? seg}
-        </span>
-      ) : (
-        <span key={p}>{folderName(p)}</span>
-      ),
-    );
-  });
-  return (
-    <nav className="crumbs" aria-label="Path">
-      {items}
-      {props.children}
-    </nav>
-  );
-}
 
 /** An earlier version on screen (`?at=`), said in words, with the way back to the latest. */
 export function AtNotice({ urls, head, current }: { urls: Urls; head: number; current: string }) {

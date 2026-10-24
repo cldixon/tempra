@@ -7,19 +7,9 @@ import { useFeed, useTrailing } from "../live";
 import { Moment } from "../Moment";
 import { librariesChanged, type Role, useLibraries, useLibraryLabel, useRole } from "../role";
 import { navigate } from "../router";
-import {
-  Crumbs,
-  day,
-  type Health,
-  healthWords,
-  localTime,
-  plural,
-  Status,
-  useMe,
-  useTitle,
-} from "../ui";
+import { day, type Health, healthWords, localTime, plural, Status, useMe, useTitle } from "../ui";
 import { dirOf, enc, folderName, type Urls } from "../urls";
-import { PageBar, useTitleOf } from "../Workspace";
+import { useTitleOf } from "../Workspace";
 import { ConnectSteps } from "./Account";
 
 /**
@@ -561,20 +551,9 @@ const folderOf = (path: string) => (dirOf(path) ? folderName(dirOf(path)) : "the
 export function Revert({ urls, request }: { urls: Urls; request: string; actor: string }) {
   useTitle(`Revert · ${useLibraryLabel(urls)}`);
   return (
-    <>
-      <PageBar>
-        <nav className="crumbs" aria-label="Path">
-          <a href={urls.activity({ view: "events" })}>Activity</a>
-          <span aria-hidden="true">/</span>
-          <span className="here" aria-current="page">
-            Revert
-          </span>
-        </nav>
-      </PageBar>
-      <OwnerOnly urls={urls}>
-        <RevertPage urls={urls} request={request} />
-      </OwnerOnly>
-    </>
+    <OwnerOnly urls={urls}>
+      <RevertPage urls={urls} request={request} />
+    </OwnerOnly>
   );
 }
 
@@ -662,14 +641,9 @@ export function Restore(props: { urls: Urls; path: string; to?: number; actor: s
   const title = titleOf(path);
   useTitle(`Restore ${title} · ${useLibraryLabel(urls)}`);
   return (
-    <>
-      <PageBar>
-        <Crumbs path={path} title={title} />
-      </PageBar>
-      <OwnerOnly urls={urls}>
-        <RestorePage urls={urls} path={path} to={props.to} title={title} />
-      </OwnerOnly>
-    </>
+    <OwnerOnly urls={urls}>
+      <RestorePage urls={urls} path={path} to={props.to} title={title} />
+    </OwnerOnly>
   );
 }
 

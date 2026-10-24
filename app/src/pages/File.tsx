@@ -24,18 +24,9 @@ import { useLibraryLabel } from "../role";
 import type { Compare } from "../router";
 import { navigate } from "../router";
 import { fileLabel } from "../Tree";
-import {
-  AtNotice,
-  Crumbs,
-  formatSize,
-  Status,
-  useCopy,
-  useMe,
-  useScrollToHash,
-  useTitle,
-} from "../ui";
+import { AtNotice, formatSize, Status, useCopy, useMe, useScrollToHash, useTitle } from "../ui";
 import { baseName, dirOf, enc, folderName, type Urls } from "../urls";
-import { PageBar, PageColumn, useFrame } from "../Workspace";
+import { PageColumn, useFrame } from "../Workspace";
 
 /** What the last server action did, said once on the page it returns to (`?done=`). */
 const DONE: Record<string, (actor: string) => string> = {
@@ -90,24 +81,19 @@ export function File(props: {
   }
   const attachment = shown?.file.kind === "attachment" ? shown.file : null;
   return (
-    <>
-      <PageBar>
-        <Crumbs path={path} />
-      </PageBar>
-      <PageColumn wide={attachment !== null}>
-        {notice && <div className="notice">{notice}</div>}
-        {live && <LiveNotice urls={urls} live={live} />}
-        <Status loaded={loaded}>
-          {(d) =>
-            d.file.kind === "attachment" ? (
-              <Attachment urls={urls} file={d.file} head={d.head} />
-            ) : d.file.kind === "derived" ? (
-              <Derived urls={urls} file={d.file} head={d.head} />
-            ) : null
-          }
-        </Status>
-      </PageColumn>
-    </>
+    <PageColumn wide={attachment !== null}>
+      {notice && <div className="notice">{notice}</div>}
+      {live && <LiveNotice urls={urls} live={live} />}
+      <Status loaded={loaded}>
+        {(d) =>
+          d.file.kind === "attachment" ? (
+            <Attachment urls={urls} file={d.file} head={d.head} />
+          ) : d.file.kind === "derived" ? (
+            <Derived urls={urls} file={d.file} head={d.head} />
+          ) : null
+        }
+      </Status>
+    </PageColumn>
   );
 }
 
@@ -306,40 +292,35 @@ export function NotFound({ urls, path }: { urls: Urls; path: string }) {
       ? `${moved ? fileLabel(moved) : baseName(f.to).replace(/\.md$/, "")}${dirOf(f.to) ? ` (${folderName(dirOf(f.to))})` : ""}`
       : "";
   return (
-    <>
-      <PageBar>
-        <Crumbs path={path} />
-      </PageBar>
-      <PageColumn>
-        <div className="not-found">
-          <h1 className="view-title">This page isn't here</h1>
-          {f?.kind === "moved" && (
-            <p className="not-found-fate">
-              <span>
-                Moved to {where} by {who}, <Moment ts={f.ts} />
-              </span>
-              <a href={urls.file(f.to)}>Open</a>
-            </p>
-          )}
-          {f?.kind === "deleted" && (
-            <p className="not-found-fate">
-              <span>
-                Deleted by {who}, <Moment ts={f.ts} />
-              </span>
-              <a href={urls.activity({ view: "events", q: path })}>In Activity</a>
-            </p>
-          )}
-          <p className="not-found-ways">
-            <a className="button" href={urls.tree("")}>
-              Home
-            </a>
-            <button type="button" onClick={frame.search}>
-              <Icon name="search" /> Search
-            </button>
+    <PageColumn>
+      <div className="not-found">
+        <h1 className="view-title">This page isn't here</h1>
+        {f?.kind === "moved" && (
+          <p className="not-found-fate">
+            <span>
+              Moved to {where} by {who}, <Moment ts={f.ts} />
+            </span>
+            <a href={urls.file(f.to)}>Open</a>
           </p>
-        </div>
-      </PageColumn>
-    </>
+        )}
+        {f?.kind === "deleted" && (
+          <p className="not-found-fate">
+            <span>
+              Deleted by {who}, <Moment ts={f.ts} />
+            </span>
+            <a href={urls.activity({ view: "events", q: path })}>In Activity</a>
+          </p>
+        )}
+        <p className="not-found-ways">
+          <a className="button" href={urls.tree("")}>
+            Home
+          </a>
+          <button type="button" onClick={frame.search}>
+            <Icon name="search" /> Search
+          </button>
+        </p>
+      </div>
+    </PageColumn>
   );
 }
 

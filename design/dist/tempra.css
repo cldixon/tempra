@@ -213,7 +213,7 @@
   /* Type scale: the only pixel sizes in the CSS (inside .prose, sizes are em of the reading size) */
   --tempra-text-initial: 9px; /* an avatar's initials */
   --tempra-text-label: 11px; /* uppercase labels, marks */
-  --tempra-text-meta: 12px; /* timestamps, crumbs, small print */
+  --tempra-text-meta: 12px; /* timestamps, small print */
   --tempra-text-ui: 13px; /* controls, panels, the tree, comments */
   --tempra-text-name: 15px; /* a library's name, dialog heads, the wordmark */
   --tempra-text-reader: 17px; /* a concept's body and description, the landing page's lede */
@@ -1538,8 +1538,8 @@ details > summary {
 /*
  * The app's frame (TEMPRA-19; take 2 in TEMPRA-53, take 3 in TEMPRA-106, take 4 in TEMPRA-113;
  * tempra-dev: app/workspace). A docs-site layout: a top bar across the window, split at the
- * sidebar's edge (the mark, the library switcher and search over the sidebar; the crumbs, the
- * page's tools, the bell and the avatar over the page), a navigation sidebar with a hairline on
+ * sidebar's edge (the mark, the library switcher and search over the sidebar; the page's tools,
+ * the bell and the avatar over the page; no crumbs), a navigation sidebar with a hairline on
  * its right, and the page as a flat column: no ground, no sheet. The sidebar can be hidden; under
  * 900px it is a drawer behind a top bar. Library settings and the account's pages use the same
  * frame with a sidebar of their own. A concept's own layout is in concept.css; the person's views
@@ -2169,8 +2169,8 @@ a.button.pill-button {
   background: var(--tempra-color-bg);
 }
 
-/* Over the page: the way back to the sidebar when it is hidden, the crumbs, then the page's
-   tools, the bell and the avatar. */
+/* Over the page: the way back to the sidebar when it is hidden, then the page's tools, the bell
+   and the avatar. No crumbs (TEMPRA-139): the tree, the switcher and the page's title say where. */
 .topbar-page {
   display: flex;
   align-items: center;
@@ -2179,11 +2179,8 @@ a.button.pill-button {
   padding: 0 16px 0 20px;
 }
 
-.topbar-crumbs {
-  display: flex;
+.topbar-space {
   flex: 1;
-  align-items: center;
-  gap: 8px;
   min-width: 0;
 }
 
@@ -2204,30 +2201,6 @@ a.button.pill-button {
   flex: none;
   align-items: center;
   gap: 6px;
-}
-
-/* The crumbs in the top bar: the folders, then the page, in the app's text size. */
-.crumbs {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  min-width: 0;
-  color: var(--tempra-color-muted);
-  font-size: var(--tempra-font-size);
-}
-
-.crumbs a {
-  color: inherit;
-  text-decoration: none;
-}
-
-.crumbs a:hover {
-  color: var(--tempra-color-text);
-}
-
-.crumbs .here {
-  color: var(--tempra-color-text);
-  font-weight: var(--tempra-weight-medium);
 }
 
 /* A control in the top bar that reads as a pill: Comments n, Copy page. */
@@ -2565,7 +2538,7 @@ a.button.pill-button {
   container: page / inline-size;
 }
 
-/* Showing the hidden sidebar: a quiet glyph at the left of the crumbs. */
+/* Showing the hidden sidebar: a quiet glyph at the top bar's left, over the page. */
 .show-sidebar {
   flex: none;
   color: var(--tempra-color-muted);
@@ -2909,7 +2882,7 @@ button.tree-name {
   }
 
   .topbar-brand,
-  .topbar-crumbs,
+  .topbar-space,
   .show-sidebar,
   .has-tools .topbar-end .bell,
   .has-tools .phone-search {
@@ -3437,16 +3410,6 @@ ul.events {
   margin-bottom: 12px;
 }
 
-/* Where a crumb notes what is exceptional (stale, a status that is not stable). */
-.crumb-flag {
-  color: var(--tempra-color-muted);
-}
-
-.crumb-flag::before {
-  content: "·";
-  margin-right: 6px;
-}
-
 .doc-head {
   margin-bottom: 32px;
 }
@@ -3482,6 +3445,12 @@ ul.events {
 
 .byline-sep {
   color: var(--tempra-color-faint);
+}
+
+/* What is exceptional about the page, at the byline's end: "Draft", "Stale" (TEMPRA-139). */
+.byline-pills {
+  display: inline-flex;
+  gap: 6px;
 }
 
 /* Whether a person checked the page: one quiet line under the byline, only when someone has. */
@@ -3856,9 +3825,23 @@ ul.events {
   }
 }
 
-/* The crumbs under the phone's top bar (board 33): the concept's folders and what is exceptional,
-   over the title. Elsewhere the top bar holds them. */
+/* The page's folders above its title, only where the tree is out of sight (TEMPRA-139): with the
+   sidebar hidden here, and on a phone below. */
 .doc-crumbs {
+  display: none;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 12px;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-ui);
+}
+
+.sidebar-hidden .doc-crumbs {
+  display: flex;
+}
+
+.doc-crumbs:empty,
+.sidebar-hidden .doc-crumbs:empty {
   display: none;
 }
 
@@ -3871,20 +3854,10 @@ ul.events {
 
   .doc-crumbs {
     display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-bottom: 12px;
-    color: var(--tempra-color-muted);
-    font-size: var(--tempra-text-ui);
   }
 
   .doc-crumbs:empty {
     display: none;
-  }
-
-  .doc-crumbs a {
-    color: inherit;
-    text-decoration: none;
   }
 
   .doc-title {

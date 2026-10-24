@@ -8,7 +8,7 @@ import { type BodyOptions, prepare } from "../reader/prepare";
 import { pushRecent } from "../recent";
 import { useRole } from "../role";
 import { type Compare, navigate } from "../router";
-import { anchorId, Crumbs, useMe, useTitle } from "../ui";
+import { anchorId, useMe, useTitle } from "../ui";
 import { dirOf, folderName, type Urls } from "../urls";
 import { PageBar, useFrame } from "../Workspace";
 import { Byline } from "./Byline";
@@ -298,12 +298,7 @@ export function ConceptPage(props: {
             />
           </>
         }
-      >
-        <Crumbs path={c.path} title={title}>
-          {c.stale && <span className="crumb-flag">stale</span>}
-          {status && status !== "stable" && <span className="crumb-flag">{status}</span>}
-        </Crumbs>
-      </PageBar>
+      />
       <div className="concept-grid">
         <article className="doc" inert={modal}>
           {compare && (
@@ -333,7 +328,8 @@ export function ConceptPage(props: {
           {/* Kept mounted under the markdown, so comments keep their place. */}
           <div className="doc-page" hidden={markdown}>
             <header className="doc-head">
-              {/* On a phone the crumbs sit under the top bar, which names the page (board 33). */}
+              {/* Where the tree is out of sight (a phone, the sidebar hidden): the page's folders
+                  above its title (TEMPRA-139). */}
               <nav className="doc-crumbs" aria-label="Folders">
                 {folders.map((f, i) => (
                   <span key={f}>
@@ -341,8 +337,6 @@ export function ConceptPage(props: {
                     {folderName(f)}
                   </span>
                 ))}
-                {c.stale && <span className="crumb-flag">stale</span>}
-                {status && status !== "stable" && <span className="crumb-flag">{status}</span>}
               </nav>
               <h1 className="doc-title">{title}</h1>
               {typeof fm.description === "string" && (
@@ -354,6 +348,7 @@ export function ConceptPage(props: {
                 name={name}
                 live={live}
                 current={current}
+                status={status}
               />
               {current && <CheckedLine urls={urls} path={c.path} standing={s} name={name} />}
               {hasContents && (
