@@ -33,7 +33,8 @@ function useWithin(ts: number | null, ms: number): boolean {
  * yet shown) "· editing now" with the pulsing dot, the agent named once (TEMPRA-131: "Claude
  * Code for @ann · editing now · edited just now"). It follows the version on screen: an earlier
  * one shows who wrote it and when, never "editing now". Versions are in History; whether a person
- * checked the page is the quiet line under it (`Checked.tsx`).
+ * checked the page is the quiet line under it (`Checked.tsx`). At its end, grey pills say what is
+ * exceptional: a status that is not stable ("Draft") and "Stale" (TEMPRA-139).
  */
 export function Byline(props: {
   concept: Concept;
@@ -42,6 +43,8 @@ export function Byline(props: {
   live: Live | null;
   /** The latest version is on screen: an earlier one is never being edited now. */
   current: boolean;
+  /** The page's `status` from its frontmatter, if any. */
+  status?: string | null;
 }) {
   const { concept: c, name } = props;
   const live = props.current ? props.live : null;
@@ -67,7 +70,8 @@ export function Byline(props: {
       ? Date.parse(author.ts)
       : null;
   const editing = useWithin(props.current ? at : null, EDITING_MS) && writer !== null;
-  if (!who || !author) return <div className="byline" />;
+  const pills = <StatusPills status={props.status ?? null} stale={c.stale} />;
+  if (!who || !author) return <div className="byline">{pills}</div>;
   // The agent is named once: when the one writing now wrote the version on screen, "editing
   // now" follows its name; another writer is named in that clause.
   const same = writer !== null && actorText(writer) === actorText(who);
@@ -95,6 +99,20 @@ export function Byline(props: {
       <span className="muted">
         edited <Moment ts={author.ts} />
       </span>
+      {pills}
     </div>
+  );
+}
+
+/** What is exceptional about the page, as pills: a status that is not stable, and stale. */
+export function StatusPills(props: { status: string | null; stale: boolean }) {
+  const status = props.status?.trim();
+  const shown = status && status.toLowerCase() !== "stable" ? status : null;
+  if (!shown && !props.stale) return null;
+  return (
+    <span className="byline-pills">
+      {shown && <span className="chip">{shown.charAt(0).toUpperCase() + shown.slice(1)}</span>}
+      {props.stale && <span className="chip">Stale</span>}
+    </span>
   );
 }

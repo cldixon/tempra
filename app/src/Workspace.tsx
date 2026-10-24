@@ -26,12 +26,12 @@ import {
 import { LibrarySearch, Switcher } from "./Switcher";
 import type { OutlineFile } from "./Tree";
 import { type Me, switcherKey } from "./ui";
-import { baseName, dirOf, folderName, type Urls } from "./urls";
+import { baseName, folderName, type Urls } from "./urls";
 
 /*
  * The app's frame (take 4, TEMPRA-113; tempra-dev: app/workspace): a top bar across the window,
  * split at the sidebar's edge (the mark, the library switcher and search over the sidebar; the
- * crumbs, the page's tools, the bell and the avatar over the page), a navigation sidebar, and
+ * page's tools, the bell and the avatar over the page, and no crumbs), a navigation sidebar, and
  * the page as a flat column. A library's pages, its settings and the account's pages all use
  * it, each with its own sidebar. Under 900px the sidebar is a drawer behind the top bar.
  */
@@ -56,7 +56,7 @@ export interface Place {
 /** Under this width the sidebar is a drawer behind the top bar (the phone layout). */
 export const NARROW = "(max-width: 900px)";
 
-/** The names of the library's views and settings pages, as the crumbs and the phone show them. */
+/** The names of the library's views and settings pages, as the phone's top bar shows them. */
 const VIEW_NAMES: Record<NonNullable<Place["view"]>, string> = {
   home: "Home",
   activity: "Activity",
@@ -80,20 +80,6 @@ export const SETTINGS_VIEWS: ReadonlySet<Place["view"]> = new Set([
 ]);
 
 /**
- * Where a page is, in a few words (the crumbs' default): the view, a folder by its readable
- * name, or a concept's folder. Null for a file at the library's root.
- */
-export function placeName(place: Place): string | null {
-  if (place.view) return VIEW_NAMES[place.view];
-  if (place.dir) return folderName(place.dir);
-  if (place.file) {
-    const dir = dirOf(place.file);
-    return dir ? folderName(dir) : null;
-  }
-  return null;
-}
-
-/**
  * What the phone's top bar names (take 4, boards 33 and 36): the library on its home, a view or
  * a folder by its name, a file by its name until its page names it (a concept by its title).
  */
@@ -115,10 +101,8 @@ interface Frame {
   /** The latest of agents' recent changes, and the clock it is read against (changes.ts). */
   latest: AgentChange | undefined;
   now: number;
-  /** The top bar's slots a page fills through PageBar: its crumbs and its tools. */
-  slots: { crumbs: HTMLElement | null; tools: HTMLElement | null };
-  /** Tells the frame a page has crumbs of its own, so the default ones step aside. */
-  setOwnCrumbs(own: boolean): void;
+  /** The top bar's slot a page fills through PageBar: its tools. */
+  slots: { tools: HTMLElement | null };
   /** Tells the frame a page has tools of its own (a concept's), which take the phone bar's end. */
   setOwnTools(own: boolean): void;
   /** Names the page in the phone's top bar (a concept's title), or null for the frame's name. */
@@ -135,8 +119,7 @@ const FrameContext = createContext<Frame>({
   index: null,
   latest: undefined,
   now: 0,
-  slots: { crumbs: null, tools: null },
-  setOwnCrumbs: () => {},
+  slots: { tools: null },
   setOwnTools: () => {},
   setTitle: () => {},
   setModal: () => {},
@@ -199,8 +182,6 @@ interface Chrome {
   brand: ReactNode;
   /** The sidebar's content (the drawer's on a phone). */
   sidebar: ReactNode;
-  /** The default crumbs, when the page sets none of its own. */
-  crumbs: ReactNode;
   /** The phone's top bar: where the person is, until the page names itself. */
   place: string;
   /** Opens search (Ctrl or Cmd+K too): the library's quick switcher, or the libraries'. */
@@ -222,14 +203,7 @@ function Shell(props: {
   me: Me | null;
   frame: Omit<
     Frame,
-    | "sidebar"
-    | "narrow"
-    | "slots"
-    | "setOwnCrumbs"
-    | "setOwnTools"
-    | "setTitle"
-    | "setModal"
-    | "search"
+    "sidebar" | "narrow" | "slots" | "setOwnTools" | "setTitle" | "setModal" | "search"
   >;
   children: ReactNode;
 }) {
@@ -238,9 +212,7 @@ function Shell(props: {
   const narrow = useMedia(NARROW);
   const sidebar = useRef<HTMLElement>(null);
   const menuButton = useRef<HTMLButtonElement>(null);
-  const [crumbsSlot, setCrumbsSlot] = useState<HTMLElement | null>(null);
   const [toolsSlot, setToolsSlot] = useState<HTMLElement | null>(null);
-  const [ownCrumbs, setOwnCrumbs] = useState(false);
   const [ownTools, setOwnTools] = useState(false);
   const [title, setTitle] = useState<string | null>(null);
 
@@ -351,14 +323,13 @@ function Shell(props: {
       ...props.frame,
       sidebar: beside,
       narrow,
-      slots: { crumbs: crumbsSlot, tools: toolsSlot },
-      setOwnCrumbs,
+      slots: { tools: toolsSlot },
       setOwnTools,
       setTitle,
       setModal,
       search: chrome.onSearch ?? (() => {}),
     }),
-    [props.frame, beside, narrow, crumbsSlot, toolsSlot, chrome.onSearch, setModal],
+    [props.frame, beside, narrow, toolsSlot, chrome.onSearch, setModal],
   );
   const classes = [
     "workspace",
@@ -394,9 +365,8 @@ function Shell(props: {
                 <Icon name="sidebar" />
               </button>
             )}
-            <div className="topbar-crumbs" ref={setCrumbsSlot}>
-              {!ownCrumbs && chrome.crumbs}
-            </div>
+            {/* No crumbs (TEMPRA-139): the tree, the switcher and the page's title say where. */}
+            <div className="topbar-space" />
             <div className="topbar-tools" ref={setToolsSlot} />
             <div className="topbar-end">
               {chrome.status}
@@ -534,7 +504,6 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
   const onSearch = useCallback(() => setSwitching(true), []);
 
   const settings = SETTINGS_VIEWS.has(place.view);
-  const here = placeName(place);
   const brand = (
     <>
       <a className="wordmark-tile" href="/" aria-label="Tempra" title="Tempra">
@@ -564,27 +533,9 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
       onIndex={onIndex}
     />
   );
-  const crumbs = settings ? (
-    <nav className="crumbs" aria-label="Path">
-      <a href={urls.tree("")}>{name}</a>
-      <span aria-hidden="true">/</span>
-      <a href={urls.settings()}>Settings</a>
-      <span aria-hidden="true">/</span>
-      <span className="here" aria-current="page">
-        {here}
-      </span>
-    </nav>
-  ) : (
-    <nav className="crumbs" aria-label="Path">
-      <span className="here" aria-current="page">
-        {place.view === "home" || here === null ? name : here}
-      </span>
-    </nav>
-  );
   const chrome: Chrome = {
     brand,
     sidebar: sidebarContent,
-    crumbs,
     place: phoneName(place, name),
     onSearch,
     // Only the library's own sidebar hides; the settings' is how the person moves between tabs.
@@ -681,25 +632,6 @@ export function AccountFrame(props: { page: AccountPage; me: Me | null; children
       </>
     ),
     sidebar: settings ? <AccountSettingsSidebar page={page} /> : <AccountSidebar page={page} />,
-    crumbs: (
-      <nav className="crumbs" aria-label="Path">
-        {settings && (
-          <>
-            <a href="/account">Settings</a>
-            <span aria-hidden="true">/</span>
-          </>
-        )}
-        {page === "invitations" && (
-          <>
-            <a href="/inbox">Inbox</a>
-            <span aria-hidden="true">/</span>
-          </>
-        )}
-        <span className="here" aria-current="page">
-          {name}
-        </span>
-      </nav>
-    ),
     place: name,
     onSearch,
   };
@@ -714,25 +646,18 @@ export function AccountFrame(props: { page: AccountPage; me: Me | null; children
 }
 
 /**
- * A page's part of the top bar: its crumbs (in place of the frame's default), its tools (a
- * concept's Comments, Copy page and ⋯), drawn into the bar's slots from wherever the page is,
- * and its name for the phone's top bar (`title`, a concept's), where the crumbs do not show.
+ * A page's part of the top bar: its tools (a concept's Comments, Copy page and ⋯), drawn into
+ * the bar's slot from wherever the page is, and its name for the phone's top bar (`title`, a
+ * concept's). The bar names no path (TEMPRA-139).
  */
 export function PageBar(props: {
-  children?: ReactNode;
   actions?: ReactNode;
   title?: string;
   /** On a phone the tools take the place of search and the bell (a concept's, board 33). */
   phoneTools?: boolean;
 }) {
-  const { slots, setOwnCrumbs, setOwnTools, setTitle } = useFrame();
-  const own = props.children !== undefined && props.children !== null;
+  const { slots, setOwnTools, setTitle } = useFrame();
   const tools = props.phoneTools === true && props.actions !== undefined && props.actions !== null;
-  useLayoutEffect(() => {
-    if (!own) return;
-    setOwnCrumbs(true);
-    return () => setOwnCrumbs(false);
-  }, [own, setOwnCrumbs]);
   useLayoutEffect(() => {
     if (!tools) return;
     setOwnTools(true);
@@ -744,12 +669,7 @@ export function PageBar(props: {
     setTitle(title);
     return () => setTitle(null);
   }, [title, setTitle]);
-  return (
-    <>
-      {own && slots.crumbs && createPortal(props.children, slots.crumbs)}
-      {props.actions && slots.tools && createPortal(props.actions, slots.tools)}
-    </>
-  );
+  return <>{props.actions && slots.tools && createPortal(props.actions, slots.tools)}</>;
 }
 
 /** A page's column in the frame (everything but a concept, which lays out its own columns). */

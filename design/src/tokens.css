@@ -73,7 +73,7 @@
   /* Type scale: the only pixel sizes in the CSS (inside .prose, sizes are em of the reading size) */
   --tempra-text-initial: 9px; /* an avatar's initials */
   --tempra-text-label: 11px; /* uppercase labels, marks */
-  --tempra-text-meta: 12px; /* timestamps, crumbs, small print */
+  --tempra-text-meta: 12px; /* timestamps, small print */
   --tempra-text-ui: 13px; /* controls, panels, the tree, comments */
   --tempra-text-name: 15px; /* a library's name, dialog heads, the wordmark */
   --tempra-text-reader: 17px; /* a concept's body and description, the landing page's lede */

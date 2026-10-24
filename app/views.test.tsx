@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import type { LedgerEvent, LedgerRequest } from "./src/activity";
 import { actorView } from "./src/agents";
+import { StatusPills } from "./src/concept/Byline";
 import { forYouCards, type InboxItem, type InboxPage } from "./src/inbox";
 import type { Needs } from "./src/needs";
 import { fateOf, typeName } from "./src/pages/File";
@@ -16,7 +17,7 @@ import {
 } from "./src/pages/Home";
 import type { OutlineFile } from "./src/Tree";
 import { Urls } from "./src/urls";
-import { type Place, placeName } from "./src/Workspace";
+import { type Place, phoneName } from "./src/Workspace";
 
 const urls = new Urls("cl_dixon", "tempra-dev");
 const me = "human:cl_dixon";
@@ -302,14 +303,32 @@ describe("an attachment and Not found (take 4)", () => {
 });
 
 describe("entering a library on a phone (TEMPRA-107)", () => {
-  test("the top bar names the page under the library", () => {
-    const at = (p: Partial<Place>) => placeName({ file: null, dir: null, view: null, ...p });
-    expect(at({ view: "home" })).toBe("Home");
+  test("the top bar names where the person is", () => {
+    const at = (p: Partial<Place>) =>
+      phoneName({ file: null, dir: null, view: null, ...p }, "Tempra dev");
+    expect(at({ view: "home" })).toBe("Tempra dev");
     expect(at({ view: "work" })).toBe("For agents");
     expect(at({ view: "activity" })).toBe("Activity");
     expect(at({ view: "transfer" })).toBe("Import & export");
-    expect(at({ dir: "app/style-guide" })).toBe("Style guide");
-    expect(at({ file: "decisions/margins-not-panels.md" })).toBe("Decisions");
-    expect(at({ file: "guide.md" })).toBeNull();
+    expect(at({ file: "decisions/margins-not-panels.md" })).toBe("margins-not-panels.md");
+  });
+});
+
+describe("a page's status pills (TEMPRA-139)", () => {
+  const pills = (status: string | null, stale: boolean) =>
+    renderToStaticMarkup(<StatusPills status={status} stale={stale} />);
+
+  test("a status that is not stable, in its own word, and stale", () => {
+    expect(pills("draft", false)).toBe(
+      '<span class="byline-pills"><span class="chip">Draft</span></span>',
+    );
+    expect(pills("deprecated", true)).toContain('<span class="chip">Deprecated</span>');
+    expect(pills("deprecated", true)).toContain('<span class="chip">Stale</span>');
+  });
+
+  test("nothing in the normal state", () => {
+    expect(pills("stable", false)).toBe("");
+    expect(pills(null, false)).toBe("");
+    expect(pills(" Stable ", false)).toBe("");
   });
 });
