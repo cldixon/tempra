@@ -1374,16 +1374,18 @@ button.tree-name {
   }
 
   /* Where the person is: the library on its home, a page by its name, a concept by its title. */
+  /* Tempra, where the desktop has its mark (TEMPRA-140): the page's own title names the page. */
   .ws-topbar-place {
-    display: block;
+    display: inline-flex;
     flex: 1;
+    align-items: center;
+    gap: 8px;
     min-width: 0;
     padding: 0 4px;
-    overflow: hidden;
     color: var(--tempra-color-text);
     font-size: var(--tempra-text-name);
-    font-weight: var(--tempra-weight-medium);
-    text-overflow: ellipsis;
+    font-weight: var(--tempra-weight-strong);
+    text-decoration: none;
     white-space: nowrap;
   }
 

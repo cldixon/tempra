@@ -262,7 +262,6 @@ export function ConceptPage(props: {
   return (
     <div className={classes.filter(Boolean).join(" ")} ref={page}>
       <PageBar
-        title={title}
         phoneTools
         actions={
           <>

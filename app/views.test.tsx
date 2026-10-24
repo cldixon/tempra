@@ -17,7 +17,6 @@ import {
 } from "./src/pages/Home";
 import type { OutlineFile } from "./src/Tree";
 import { Urls } from "./src/urls";
-import { type Place, phoneName } from "./src/Workspace";
 
 const urls = new Urls("cl_dixon", "tempra-dev");
 const me = "human:cl_dixon";
@@ -299,18 +298,6 @@ describe("an attachment and Not found (take 4)", () => {
     });
     expect(deleted?.kind).toBe("deleted");
     expect(fateOf("a.md", { path: "a.md", events: [ev(1, "put", "a.md")] })).toBeNull();
-  });
-});
-
-describe("entering a library on a phone (TEMPRA-107)", () => {
-  test("the top bar names where the person is", () => {
-    const at = (p: Partial<Place>) =>
-      phoneName({ file: null, dir: null, view: null, ...p }, "Tempra dev");
-    expect(at({ view: "home" })).toBe("Tempra dev");
-    expect(at({ view: "work" })).toBe("For agents");
-    expect(at({ view: "activity" })).toBe("Activity");
-    expect(at({ view: "transfer" })).toBe("Import & export");
-    expect(at({ file: "decisions/margins-not-panels.md" })).toBe("margins-not-panels.md");
   });
 });
 
