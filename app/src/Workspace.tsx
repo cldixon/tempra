@@ -26,7 +26,7 @@ import {
 import { LibrarySearch, Switcher } from "./Switcher";
 import type { OutlineFile } from "./Tree";
 import { type Me, switcherKey } from "./ui";
-import { baseName, folderName, type Urls } from "./urls";
+import { baseName, type Urls } from "./urls";
 
 /*
  * The app's frame (take 4, TEMPRA-113; tempra-dev: app/workspace): a top bar across the window,
@@ -56,19 +56,6 @@ export interface Place {
 /** Under this width the sidebar is a drawer behind the top bar (the phone layout). */
 export const NARROW = "(max-width: 900px)";
 
-/** The names of the library's views and settings pages, as the phone's top bar shows them. */
-const VIEW_NAMES: Record<NonNullable<Place["view"]>, string> = {
-  home: "Home",
-  activity: "Activity",
-  work: "For agents",
-  settings: "General",
-  transfer: "Import & export",
-  recovery: "Recovery",
-  connect: "Connect",
-  delete: "Delete library",
-  members: "Members",
-};
-
 /** The library's settings pages: they get the settings sidebar, not the library's. */
 export const SETTINGS_VIEWS: ReadonlySet<Place["view"]> = new Set([
   "settings",
@@ -78,17 +65,6 @@ export const SETTINGS_VIEWS: ReadonlySet<Place["view"]> = new Set([
   "delete",
   "members",
 ]);
-
-/**
- * What the phone's top bar names (take 4, boards 33 and 36): the library on its home, a view or
- * a folder by its name, a file by its name until its page names it (a concept by its title).
- */
-export function phoneName(place: Place, library: string): string {
-  if (place.view === "home" || (!place.view && !place.dir && !place.file)) return library;
-  if (place.view) return VIEW_NAMES[place.view];
-  if (place.dir) return folderName(place.dir);
-  return baseName(place.file ?? "");
-}
 
 /** What a page in the workspace may ask of the frame. */
 interface Frame {
@@ -105,8 +81,6 @@ interface Frame {
   slots: { tools: HTMLElement | null };
   /** Tells the frame a page has tools of its own (a concept's), which take the phone bar's end. */
   setOwnTools(own: boolean): void;
-  /** Names the page in the phone's top bar (a concept's title), or null for the frame's name. */
-  setTitle(title: string | null): void;
   /** A page's overlay (a concept's panel over the page) is modal: the top bar and sidebar go inert. */
   setModal(on: boolean): void;
   /** Opens search: a library's quick switcher, or the search of the person's libraries. */
@@ -121,7 +95,6 @@ const FrameContext = createContext<Frame>({
   now: 0,
   slots: { tools: null },
   setOwnTools: () => {},
-  setTitle: () => {},
   setModal: () => {},
   search: () => {},
 });
@@ -182,8 +155,6 @@ interface Chrome {
   brand: ReactNode;
   /** The sidebar's content (the drawer's on a phone). */
   sidebar: ReactNode;
-  /** The phone's top bar: where the person is, until the page names itself. */
-  place: string;
   /** Opens search (Ctrl or Cmd+K too): the library's quick switcher, or the libraries'. */
   onSearch?: () => void;
   /** The sidebar can be hidden (a library's own pages): its state and the way to change it. */
@@ -201,10 +172,7 @@ interface Chrome {
 function Shell(props: {
   chrome: Chrome;
   me: Me | null;
-  frame: Omit<
-    Frame,
-    "sidebar" | "narrow" | "slots" | "setOwnTools" | "setTitle" | "setModal" | "search"
-  >;
+  frame: Omit<Frame, "sidebar" | "narrow" | "slots" | "setOwnTools" | "setModal" | "search">;
   children: ReactNode;
 }) {
   const { chrome } = props;
@@ -214,7 +182,6 @@ function Shell(props: {
   const menuButton = useRef<HTMLButtonElement>(null);
   const [toolsSlot, setToolsSlot] = useState<HTMLElement | null>(null);
   const [ownTools, setOwnTools] = useState(false);
-  const [title, setTitle] = useState<string | null>(null);
 
   const main = useRef<HTMLElement>(null);
   const topbar = useRef<HTMLElement>(null);
@@ -325,7 +292,6 @@ function Shell(props: {
       narrow,
       slots: { tools: toolsSlot },
       setOwnTools,
-      setTitle,
       setModal,
       search: chrome.onSearch ?? (() => {}),
     }),
@@ -353,7 +319,14 @@ function Shell(props: {
             >
               <Icon name="menu" />
             </button>
-            <span className="ws-topbar-place">{title ?? chrome.place}</span>
+            {/* On a phone, Tempra where the desktop has its mark; the page's title names the page
+                (TEMPRA-140). */}
+            <a className="ws-topbar-place" href="/">
+              <span className="wordmark-tile" aria-hidden="true">
+                T
+              </span>
+              Tempra
+            </a>
             {!showSidebar && onHide && (
               <button
                 type="button"
@@ -536,7 +509,6 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
   const chrome: Chrome = {
     brand,
     sidebar: sidebarContent,
-    place: phoneName(place, name),
     onSearch,
     // Only the library's own sidebar hides; the settings' is how the person moves between tabs.
     hidden: settings ? undefined : hidden,
@@ -613,7 +585,7 @@ const ACCOUNT_OWN: ReadonlySet<AccountPage> = new Set([
 export function AccountFrame(props: { page: AccountPage; me: Me | null; children: ReactNode }) {
   const { page } = props;
   const settings = !ACCOUNT_OWN.has(page);
-  const name = ACCOUNT_NAMES[page];
+  const _name = ACCOUNT_NAMES[page];
   // Off a library, search finds a library (TEMPRA-127).
   const [searching, setSearching] = useState(false);
   useSearchKey(useCallback(() => setSearching((on) => !on), []));
@@ -632,7 +604,6 @@ export function AccountFrame(props: { page: AccountPage; me: Me | null; children
       </>
     ),
     sidebar: settings ? <AccountSettingsSidebar page={page} /> : <AccountSidebar page={page} />,
-    place: name,
     onSearch,
   };
   return (
@@ -647,28 +618,21 @@ export function AccountFrame(props: { page: AccountPage; me: Me | null; children
 
 /**
  * A page's part of the top bar: its tools (a concept's Comments, Copy page and ⋯), drawn into
- * the bar's slot from wherever the page is, and its name for the phone's top bar (`title`, a
- * concept's). The bar names no path (TEMPRA-139).
+ * the bar's slot from wherever the page is. The bar names no path (TEMPRA-139) and, on a phone,
+ * no page: the page's own title does (TEMPRA-140).
  */
 export function PageBar(props: {
   actions?: ReactNode;
-  title?: string;
   /** On a phone the tools take the place of search and the bell (a concept's, board 33). */
   phoneTools?: boolean;
 }) {
-  const { slots, setOwnTools, setTitle } = useFrame();
+  const { slots, setOwnTools } = useFrame();
   const tools = props.phoneTools === true && props.actions !== undefined && props.actions !== null;
   useLayoutEffect(() => {
     if (!tools) return;
     setOwnTools(true);
     return () => setOwnTools(false);
   }, [tools, setOwnTools]);
-  const { title } = props;
-  useLayoutEffect(() => {
-    if (title === undefined) return;
-    setTitle(title);
-    return () => setTitle(null);
-  }, [title, setTitle]);
   return <>{props.actions && slots.tools && createPortal(props.actions, slots.tools)}</>;
 }
 

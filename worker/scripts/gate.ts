@@ -638,12 +638,24 @@ async function browserRenders(
     const folder = nested.split("/").slice(0, -1).join("/");
     const sidebar = page.locator("section.ws-sidebar");
     const lib = `${base}/${owner}/${slug}`;
-    /** The phone's top bar names where the person is (take 4, boards 33 and 36). */
-    const phoneNamed = (name: string) =>
-      sheetBar
-        .locator(".ws-topbar-place")
-        .filter({ hasText: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`) })
-        .waitFor({ timeout: 10_000 });
+    /**
+     * At phone width (TEMPRA-140): the top bar shows Tempra, not the page's name; the page's own
+     * title names it.
+     */
+    const phoneNamed = async (name: string) => {
+      const exact = new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`);
+      await main.locator("h1").filter({ hasText: exact }).first().waitFor({ timeout: 10_000 });
+      // The mark's tile ("T", hidden from screen readers) and the wordmark.
+      await sheetBar
+        .locator("a.ws-topbar-place")
+        .filter({ hasText: /Tempra$/ })
+        .waitFor({ timeout: 5000 });
+      // (The desktop's library switcher is in the bar too, hidden at this width.)
+      const named = sheetBar.getByText(name, { exact: true }).filter({ visible: true });
+      if (name !== "Tempra" && (await named.count()) > 0) {
+        throw new Error(`the phone's top bar names "${name}" above the page's own title`);
+      }
+    };
     await step("the library's root is its home: no sections, the agents' line", async () => {
       await home();
       // No sections: the tree beside it lists the folders (TEMPRA-138).
