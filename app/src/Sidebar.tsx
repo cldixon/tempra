@@ -83,6 +83,11 @@ export function LibrarySidebar(props: {
   const unread = useUnread();
   return (
     <>
+      {/* On a phone the library switcher is the drawer's first row, under Tempra at its head
+          (TEMPRA-141); on the desktop it is over the sidebar. */}
+      <div className="drawer-switch">
+        <LibrarySwitcher urls={urls} name={props.name} />
+      </div>
       {/* On a phone, search as a field at the drawer's top (board 34); it opens the switcher. */}
       <button
         type="button"

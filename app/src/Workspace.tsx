@@ -263,14 +263,16 @@ function Shell(props: {
     return () => document.removeEventListener("pointerdown", away);
   }, [drawer, narrow]);
 
-  // Keys: Escape closes the drawer (not from inside a dialog or a menu, which handle their own);
+  // Keys: Escape closes the drawer (not from inside a dialog, which handles its own; an open menu
+  // takes its Escape first and stops it, and once closed, with the focus on its button in the
+  // drawer, the next Escape closes the drawer: TEMPRA-141);
   // Ctrl or Cmd+\ hides the sidebar where it can be hidden (a library's own, not a settings
   // page's or the account's, which are their navigation).
   const { hidden, onHide } = chrome;
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const t = e.target instanceof Element ? e.target : null;
-      if (e.key === "Escape" && !e.defaultPrevented && drawer && !t?.closest("dialog, .menu")) {
+      if (e.key === "Escape" && !e.defaultPrevented && drawer && !t?.closest("dialog")) {
         // Handled: a panel's bottom sheet under the drawer stays open for the next Escape.
         e.preventDefault();
         setDrawer(false);
@@ -321,12 +323,7 @@ function Shell(props: {
             </button>
             {/* On a phone, Tempra where the desktop has its mark; the page's title names the page
                 (TEMPRA-140). */}
-            <a className="ws-topbar-place" href="/">
-              <span className="wordmark-tile" aria-hidden="true">
-                T
-              </span>
-              Tempra
-            </a>
+            <TempraMark className="ws-topbar-place" />
             {!showSidebar && onHide && (
               <button
                 type="button"
@@ -368,9 +365,10 @@ function Shell(props: {
           aria-label="Navigation"
           hidden={!showSidebar}
         >
-          {/* On a phone the drawer's head: the mark and the switcher (or the frame's name), ×. */}
+          {/* On a phone the drawer's head: Tempra, as on the top bar it covers, and × (TEMPRA-141).
+              A library's switcher is the drawer's first row (LibrarySidebar). */}
           <div className="drawer-head">
-            {chrome.brand}
+            <TempraMark className="drawer-mark" />
             <button
               type="button"
               className="icon-button touch drawer-close"
@@ -392,6 +390,18 @@ function Shell(props: {
         </main>
       </div>
     </FrameContext.Provider>
+  );
+}
+
+/** Tempra's mark and wordmark, the way to the library list: the phone's top bar and drawer. */
+function TempraMark({ className }: { className: string }) {
+  return (
+    <a className={className} href="/">
+      <span className="wordmark-tile" aria-hidden="true">
+        T
+      </span>
+      Tempra
+    </a>
   );
 }
 
