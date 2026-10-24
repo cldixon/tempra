@@ -656,6 +656,20 @@ async function browserRenders(
         throw new Error(`the phone's top bar names "${name}" above the page's own title`);
       }
     };
+    /**
+     * The phone's drawer, open (TEMPRA-141): its head is Tempra, as the top bar it covers is, and
+     * not the frame's own name (the library's, "Library settings", "Settings").
+     */
+    const drawerHeadIsTempra = async (not: string) => {
+      const head = sidebar.locator(".drawer-head");
+      await head
+        .locator("a.drawer-mark")
+        .filter({ hasText: /Tempra$/ })
+        .waitFor({ timeout: 5000 });
+      if ((await head.getByText(not, { exact: true }).count()) > 0) {
+        throw new Error(`the drawer's head names "${not}" where the top bar shows Tempra`);
+      }
+    };
     await step("the library's root is its home: no sections, the agents' line", async () => {
       await home();
       // No sections: the tree beside it lists the folders (TEMPRA-138).
@@ -1157,10 +1171,10 @@ async function browserRenders(
       await page.keyboard.press("Escape");
       await account.waitFor({ state: "detached", timeout: 5000 });
     });
-    // The phone (take 4, TEMPRA-118, boards 34 and 36): a top bar naming the page, the sidebar as
-    // a drawer over it, the home stacked.
+    // The phone (take 4, TEMPRA-118, boards 34 and 36): a top bar with Tempra (TEMPRA-140), the
+    // sidebar as a drawer over it with Tempra at its head (TEMPRA-141), the home stacked.
     await step(
-      "workspace: at phone width the top bar names the page, the sidebar is a drawer",
+      "workspace: at phone width the top bar shows Tempra, the sidebar is a drawer",
       async () => {
         const topbar = page.locator("header.ws-topbar");
         const menu = topbar.getByRole("button", { name: "Menu", exact: true });
@@ -1169,7 +1183,7 @@ async function browserRenders(
         try {
           await menu.waitFor({ state: "visible", timeout: 5000 });
           if (await sidebar.isVisible()) throw new Error("the sidebar shows at phone width");
-          // The top bar on the home: the menu, the library's name, search, the bell, the avatar.
+          // The top bar on the home: the menu, Tempra, search, the bell, the avatar.
           const libraryName = (await main.locator("h1").first().innerText()).trim();
           await phoneNamed(libraryName);
           for (const control of [
@@ -1199,8 +1213,10 @@ async function browserRenders(
             'Boolean(document.querySelector("section.ws-sidebar")?.contains(document.activeElement))',
           );
           if (!focused) throw new Error("the drawer did not take the focus");
-          // What it holds (board 34): the switcher and ×, search, Home, Activity, the tree, then
-          // Settings and the Inbox at its foot.
+          // What it holds (board 34): at its head Tempra, as on the bar it covers, and ×
+          // (TEMPRA-141); then the switcher, search, Home, Activity, the tree, then Settings and
+          // the Inbox at its foot.
+          await drawerHeadIsTempra(libraryName);
           const views = sidebar.getByRole("navigation", { name: "Views" });
           for (const part of [
             sidebar.getByRole("button", { name: /, switch library$/ }),
@@ -1215,6 +1231,17 @@ async function browserRenders(
             if (!(await part.isVisible())) throw new Error(`the drawer lacks ${part}`);
           }
           if (shots) await page.screenshot({ path: `${shots}/drawer-phone.png` });
+          // The switcher, the drawer's first row, opens its menu of libraries there.
+          await sidebar.getByRole("button", { name: /, switch library$/ }).click();
+          const libraries = page.locator(".menu-list.libraries");
+          await libraries
+            .getByRole("link", { name: "All libraries", exact: true })
+            .waitFor({ timeout: 5000 });
+          await page.keyboard.press("Escape");
+          await libraries.waitFor({ state: "hidden", timeout: 5000 });
+          if (!(await sidebar.isVisible())) {
+            throw new Error("closing the switcher's menu closed the drawer");
+          }
           // Escape closes it, and the focus goes back to the menu button.
           await page.keyboard.press("Escape");
           await sidebar.waitFor({ state: "hidden" });
@@ -1241,7 +1268,7 @@ async function browserRenders(
           await dialog.waitFor({ state: "hidden", timeout: 5000 });
           await page.keyboard.press("Escape");
           await sidebar.waitFor({ state: "hidden" });
-          // A view chosen in the drawer opens, the drawer closes, and the top bar names it.
+          // A view chosen in the drawer opens, the drawer closes, and the page's heading names it.
           await menu.click();
           await views.getByRole("link", { name: /^Activity/ }).click();
           await page.waitForURL(`${lib}/-/activity`);
@@ -1291,10 +1318,21 @@ async function browserRenders(
             await tabs.getByRole("link", { name: tab, exact: true }).waitFor({ timeout: 5000 });
           }
           await sidebar.getByRole("button", { name: "Close menu" }).waitFor();
+          await drawerHeadIsTempra("Library settings");
           if (shots) await page.screenshot({ path: `${shots}/settings-drawer-phone.png` });
           await tabs.getByRole("link", { name: "Members", exact: true }).click();
           await page.waitForURL(`${lib}/-/members`);
           await sidebar.waitFor({ state: "hidden" });
+          await phoneNamed("Members");
+          // The account's pages too: Tempra on the bar and at the drawer's head, never their own
+          // name there.
+          await page.goto(`${base}/account`);
+          await menu.click();
+          await sidebar.waitFor({ state: "visible" });
+          await drawerHeadIsTempra("Settings");
+          await page.keyboard.press("Escape");
+          await sidebar.waitFor({ state: "hidden" });
+          await page.goto(`${lib}/-/members`);
           await phoneNamed("Members");
         } finally {
           await page.setViewportSize({ width: 1280, height: 720 });
@@ -2174,8 +2212,8 @@ async function browserRenders(
       });
       if (!resolved.ok) throw new Error(`agent resolve: ${resolved.status}`);
     });
-    // A concept at phone width (take 4, TEMPRA-118, boards 33 and 35): the top bar names it with
-    // Comments n and ⋯ (Copy page under ⋯), the crumbs under the bar, "On this page" closed
+    // A concept at phone width (take 4, TEMPRA-118, boards 33 and 35): the top bar with Tempra,
+    // Comments n and ⋯ (Copy page under ⋯), the folders above the title, "On this page" closed
     // until opened; Comments, History and Properties are one bottom sheet, opened only when
     // asked, closed by × or Escape.
     await step(

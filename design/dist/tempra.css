@@ -2856,6 +2856,7 @@ button.tree-name {
 .ws-topbar-place,
 .phone-search,
 .drawer-head,
+.drawer-switch,
 .drawer-search,
 .ws-scrim,
 .phone-only {
@@ -2911,8 +2912,10 @@ button.tree-name {
   }
 
   /* Where the person is: the library on its home, a page by its name, a concept by its title. */
-  /* Tempra, where the desktop has its mark (TEMPRA-140): the page's own title names the page. */
-  .ws-topbar-place {
+  /* Tempra, where the desktop has its mark (TEMPRA-140): the page's own title names the page.
+     The drawer's head shows the same, so opening it changes nothing there (TEMPRA-141). */
+  .ws-topbar-place,
+  .drawer-mark {
     display: inline-flex;
     flex: 1;
     align-items: center;
@@ -2941,8 +2944,8 @@ button.tree-name {
   }
 
   /* The drawer (board 34): about four fifths of the screen, over the top bar, the page dimmed
-     behind it. At its head the mark, the switcher and ×; then search, Home, Activity, a rule,
-     the tree; Settings and the Inbox at its foot. */
+     behind it. At its head Tempra and × (TEMPRA-141); in a library then the switcher, search,
+     Home, Activity, a rule, the tree; Settings and the Inbox at its foot. */
   .ws-scrim {
     position: fixed;
     inset: 0;
@@ -2984,16 +2987,11 @@ button.tree-name {
     border-bottom: 1px solid var(--tempra-color-border);
   }
 
-  .drawer-head .brand-sep {
-    width: 1px;
-    height: 20px;
-    margin: 0 2px;
-    background: var(--tempra-color-border);
-  }
-
-  /* Search is the field below; the head ends with ×. */
-  .drawer-head .search-button {
-    display: none;
+  /* A library's switcher, the drawer's first row (TEMPRA-141). */
+  .drawer-switch {
+    display: flex;
+    flex: none;
+    margin: 0 -4px 8px;
   }
 
   .drawer-close {
