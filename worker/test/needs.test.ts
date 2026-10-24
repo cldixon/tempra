@@ -136,7 +136,7 @@ describe("Needs you: to verify", () => {
     write(s, agent(), "b.md", doc("b.md", "", "Revenue minus cost, monthly."));
     write(s, anasAgent(), "b.md", doc("b.md", "", "Revenue minus cost, quarterly."));
 
-    const { verify, unverified, count, replies, stale } = s.needs(ME);
+    const { verify, unverified, count, replies } = s.needs(ME);
     expect(verify.total).toBe(1);
     expect(verify.next_offset).toBeNull();
     expect(verify.items.map((i) => i.path)).toEqual(["b.md"]);
@@ -151,7 +151,7 @@ describe("Needs you: to verify", () => {
     expect(b?.verified.seq).toBeLessThan(b?.seq ?? 0);
     // Never verified (TEMPRA-111): a standing, not a request; counted, and not in the sidebar's.
     expect(unverified).toEqual({ total: 1 });
-    expect(count).toBe(replies.length + verify.total + stale.length);
+    expect(count).toBe(replies.length + verify.total);
     // Together, the health summary's (which counts any verification).
     expect(s.health().unverified.total).toBe(verify.total + unverified.total);
   });
@@ -191,8 +191,8 @@ describe("Needs you: to verify", () => {
   });
 });
 
-describe("Needs you: going stale, and the agents' housekeeping", () => {
-  test("stale and stale soon, the soonest first; housekeeping counts the work queue's", () => {
+describe("Needs you: the agents' housekeeping", () => {
+  test("housekeeping counts the work queue's, stale concepts among it, never a person's count", () => {
     const s = newStore();
     write(s, agent(), "soon.md", doc("Soon", "stale_after: 2026-10-12T00:00:00Z\n"));
     write(s, agent(), "past.md", doc("Past", "stale_after: 2026-10-01T00:00:00Z\n"));
@@ -200,20 +200,19 @@ describe("Needs you: going stale, and the agents' housekeeping", () => {
     write(s, agent(), "links.md", doc("Links", "", "See [gone](/gone.md)."));
 
     const needs = s.needs(ME);
-    expect(needs.stale).toEqual([
-      { path: "past.md", title: "Past", stale_after: "2026-10-01T00:00:00Z", stale: "stale" },
-      { path: "soon.md", title: "Soon", stale_after: "2026-10-12T00:00:00Z", stale: "stale_soon" },
-    ]);
+    expect(needs).not.toHaveProperty("stale");
     const work = s.work().counts;
+    expect(work.stale).toBe(1);
     expect(needs.housekeeping).toEqual({
+      stale: 1,
       lint: work.lint ?? 0,
       structure: work.structure ?? 0,
       broken_link: 1,
-      total: (work.lint ?? 0) + (work.structure ?? 0) + 1,
+      total: 1 + (work.lint ?? 0) + (work.structure ?? 0) + 1,
     });
     expect(needs.verify.total).toBe(0);
     expect(needs.unverified.total).toBe(4);
-    expect(needs.count).toBe(2);
+    expect(needs.count).toBe(0);
   });
 });
 

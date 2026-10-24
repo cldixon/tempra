@@ -36,15 +36,15 @@ export interface Needs {
   };
   /** Concepts no person has verified (TEMPRA-111): their standing, counted, never in `count`. */
   unverified: { total: number };
-  /** Stale, or going stale within 14 days; soonest first. */
-  stale: {
-    path: string;
-    title: string | null;
-    stale_after: string;
-    stale: "stale" | "stale_soon";
-  }[];
-  housekeeping: { lint: number; structure: number; broken_link: number; total: number };
-  /** Replies, concepts to verify and stale concepts: the sidebar's number. */
+  /** The agents' share of the work queue, staleness among it (TEMPRA-142); counted only. */
+  housekeeping: {
+    stale: number;
+    lint: number;
+    structure: number;
+    broken_link: number;
+    total: number;
+  };
+  /** Replies and concepts to verify. */
   count: number;
 }
 

@@ -3,7 +3,7 @@ import type { Accounts, LibraryRef } from "./accounts";
 import type { TokenInfo } from "./auth";
 import type { LibraryClient } from "./client";
 import type { CommentAction, CommentResult, Mention } from "./store/comments";
-import type { RequestContext, StaleConcept, WriteNotice } from "./store/store";
+import type { RequestContext, WriteNotice } from "./store/store";
 
 /**
  * Notifications (TEMPRA-58 design, TEMPRA-72, TEMPRA-73): items addressed to one person are
@@ -17,21 +17,13 @@ import type { RequestContext, StaleConcept, WriteNotice } from "./store/store";
  * person who acted in the app themselves (their agents acting for them do notify them), and
  * only to people who can reach the library at that moment.
  *
- * Take 4 (TEMPRA-116) adds two keyed kinds, so the Inbox holds what Needs you did: `verify`, from
- * the content write path after it commits (a concept the person verified changed since), and
- * `stale`, from each library's daily maintainer (a concept stale or going stale within 14 days,
- * to the owner and write members). Items are also closed by what resolves them: a verification,
- * a new `stale_after` or a delete, a resolved thread.
+ * Take 4 (TEMPRA-116) adds a keyed kind, so the Inbox holds what Needs you did: `verify`, from
+ * the content write path after it commits (a concept the person verified changed since). Items
+ * are also closed by what resolves them: a verification or a delete, a resolved thread. Staleness
+ * is the agents' housekeeping (their `work`), never an item (TEMPRA-142).
  */
 
-export type ItemKind =
-  | "reply"
-  | "mention"
-  | "thread"
-  | "invitation"
-  | "access"
-  | "verify"
-  | "stale";
+export type ItemKind = "reply" | "mention" | "thread" | "invitation" | "access" | "verify";
 
 /** Kinds that are mailed at once (batched): the ones addressed to the person. */
 export const MAILED: ReadonlySet<ItemKind> = new Set(["reply", "mention", "thread", "access"]);
@@ -51,15 +43,13 @@ export interface NewItem {
   /** Whether the item may be mailed (prefs are checked when the batch goes out). */
   mail?: boolean;
   /**
-   * `verify` and `stale`: one open item per (user, library, key); another add updates it (its
-   * excerpt, time and count, unread again) instead of adding a row. A `stale` item is updated or
-   * made again only for a new `due`, so the daily run never undoes a dismissal or a read.
+   * `verify`: one open item per (user, library, key); another add updates it (its excerpt, time
+   * and count, unread again) instead of adding a row.
    */
   key?: string | null;
   title?: string | null;
   by_agent?: string | null;
   count?: number | null;
-  due?: string | null;
 }
 
 export interface Item {
@@ -79,15 +69,14 @@ export interface Item {
   by_user: string | null;
   by_agent: string | null;
   count: number | null;
-  due: string | null;
 }
 
 /** What resolves items in a library after a write (TEMPRA-116): see `closeAfterWrite`. */
 export interface Closes {
   /** Verified by a person: the page's open `verify` items, for everyone. */
   verified: string[];
-  /** Changed: its open `stale` items whose `due` is not its new `stale_after`; deleted: all. */
-  changed: { path: string; stale_after: string | null; deleted: boolean }[];
+  /** Deleted: the page's open `verify` items, for everyone. */
+  deleted: string[];
   /** Moved: open items on the old path follow the page. */
   moved: { from: string; to: string }[];
 }
@@ -160,9 +149,9 @@ const bool = (v: number | null | undefined) => (v === null || v === undefined ? 
 const flag = (v: boolean | null | undefined) => (v === null || v === undefined ? null : v ? 1 : 0);
 
 export function d1Notifications(db: D1Database): Notifications {
-  const items = `SELECT id, library, kind, place, path, thread, seq, actor, excerpt, created, read_at, done_at, title, by_user, by_agent, count, due FROM notifications`;
+  const items = `SELECT id, library, kind, place, path, thread, seq, actor, excerpt, created, read_at, done_at, title, by_user, by_agent, count FROM notifications`;
   const COLS =
-    "id, user, library, kind, place, path, thread, seq, actor, by_user, excerpt, created, mail, key, title, by_agent, count, due";
+    "id, user, library, kind, place, path, thread, seq, actor, by_user, excerpt, created, mail, key, title, by_agent, count";
   const MARKS = COLS.split(",")
     .map((_, n) => `?${n + 1}`)
     .join(", ");
@@ -188,7 +177,6 @@ export function d1Notifications(db: D1Database): Notifications {
         i.title ?? null,
         i.by_agent ?? null,
         i.count ?? null,
-        i.due ?? null,
       ];
       const statement = (i: NewItem) => {
         if (!i.key) {
@@ -196,21 +184,14 @@ export function d1Notifications(db: D1Database): Notifications {
             .prepare(`INSERT INTO notifications (${COLS}) VALUES (${MARKS})`)
             .bind(...values(i));
         }
-        // Keyed: the open item with this key is updated rather than a second row added. A stale
-        // item is made or updated only for a new `due`: one already dismissed or read for this
-        // `due` stays as the person left it.
-        const stale = i.kind === "stale";
-        const dismissed = `NOT EXISTS (SELECT 1 FROM notifications d WHERE d.user = ?2
-          AND d.library IS ?3 AND d.key = ?14 AND d.due IS ?18 AND d.done_at IS NOT NULL)`;
+        // Keyed: the open item with this key is updated rather than a second row added.
         return db
           .prepare(
-            `INSERT INTO notifications (${COLS}) SELECT ${MARKS} WHERE ${stale ? dismissed : "1"}
+            `INSERT INTO notifications (${COLS}) VALUES (${MARKS})
              ON CONFLICT (user, library, key) WHERE key IS NOT NULL AND done_at IS NULL
              DO UPDATE SET excerpt = excluded.excerpt, created = excluded.created, read_at = NULL,
                seq = excluded.seq, actor = excluded.actor, by_user = excluded.by_user,
-               by_agent = excluded.by_agent, title = excluded.title, count = excluded.count,
-               due = excluded.due
-             ${stale ? "WHERE notifications.due IS NOT excluded.due" : ""}`,
+               by_agent = excluded.by_agent, title = excluded.title, count = excluded.count`,
           )
           .bind(...values(i));
       };
@@ -253,26 +234,11 @@ export function d1Notifications(db: D1Database): Notifications {
       const done = "done_at = ?1, read_at = COALESCE(read_at, ?1)";
       const open = "library = ?2 AND path = ?3 AND done_at IS NULL";
       const stmts: D1PreparedStatement[] = [];
-      for (const path of closes.verified) {
+      for (const path of [...closes.verified, ...closes.deleted]) {
         stmts.push(
           db
             .prepare(`UPDATE notifications SET ${done} WHERE ${open} AND kind = 'verify'`)
             .bind(now, library, path),
-        );
-      }
-      for (const c of closes.changed) {
-        stmts.push(
-          c.deleted
-            ? db
-                .prepare(
-                  `UPDATE notifications SET ${done} WHERE ${open} AND kind IN ('verify', 'stale')`,
-                )
-                .bind(now, library, c.path)
-            : db
-                .prepare(
-                  `UPDATE notifications SET ${done} WHERE ${open} AND kind = 'stale' AND due IS NOT ?4`,
-                )
-                .bind(now, library, c.path, c.stale_after),
         );
       }
       for (const m of closes.moved) {
@@ -702,7 +668,7 @@ async function fanOut(
   await d.notifications.add(items);
 }
 
-// ---------------------------------------------------------------- verify and stale (TEMPRA-116)
+// ---------------------------------------------------------------- verify (TEMPRA-116)
 
 /** The content writes whose results carry a WriteNotice for the after-commit step. */
 const NOTICED = ["apply", "import", "revert", "verify"] as const;
@@ -741,7 +707,7 @@ export const editsSince = (n: number) => `${n} ${n === 1 ? "edit" : "edits"} sin
  * After a content write commits: a `verify` item for each person whose verification it
  * superseded (keyed, so a repeated edit updates the one item), never for the person acting in
  * the app themselves and only for people who reach the library now; then the closes the write
- * resolves (a verification, a new `stale_after`, a delete, a move).
+ * resolves (a verification, a delete, a move).
  */
 export async function afterWrite(
   d: NotifyDeps,
@@ -784,51 +750,10 @@ export async function afterWrite(
   await n.add(items);
   const closes: Closes = {
     verified: notice.verified.map((v) => v.path),
-    changed: notice.changed.map(({ path, stale_after, deleted }) => ({
-      path,
-      stale_after,
-      deleted,
-    })),
+    deleted: notice.changed.filter((c) => c.deleted).map((c) => c.path),
     moved: notice.moved,
   };
-  if (closes.verified.length || closes.changed.length || closes.moved.length) {
+  if (closes.verified.length || closes.deleted.length || closes.moved.length) {
     await n.closeAfterWrite(ref.id, closes);
   }
-}
-
-/** The actor stale items are made by: the staleness process (TEMPRA-63). */
-export const STALENESS_ACTOR = "process:staleness";
-
-/**
- * The daily `stale` items (TEMPRA-116), handed over by a library's maintainer (maintain.ts) once
- * a pass has flagged its concepts: one item per concept stale or going stale within 14 days, to
- * the owner and each write member (the people who can ask an agent to refresh it), keyed so the
- * next pass changes nothing unless the concept's `stale_after` did. Returns how many it handed.
- */
-export async function notifyStale(
-  d: { accounts: Accounts; notifications: Notifications },
-  doId: string,
-  concepts: StaleConcept[],
-): Promise<number> {
-  if (concepts.length === 0) return 0;
-  const ref = await d.accounts.libraryByDoId(doId);
-  if (!ref) return 0;
-  const members = await d.accounts.members(ref.id);
-  const people = [ref.ownerId, ...members.filter((m) => m.role === "write").map((m) => m.user)];
-  const items: NewItem[] = people.flatMap((user) =>
-    concepts.map((c) => ({
-      user,
-      library: ref.id,
-      kind: "stale" as const,
-      place: `${ref.owner}/${ref.slug}`,
-      path: c.path,
-      actor: STALENESS_ACTOR,
-      excerpt: c.stale === "stale" ? "Stale" : "Going stale",
-      key: `stale:${c.path}`,
-      title: c.title,
-      due: c.stale_after,
-    })),
-  );
-  for (let i = 0; i < items.length; i += 100) await d.notifications.add(items.slice(i, i + 100));
-  return items.length;
 }

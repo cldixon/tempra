@@ -301,14 +301,12 @@ export function setup() {
     maintain: async (doId) => {
       clientFor(doId);
       const { runMaintenance } = await import("../src/maintain");
-      const { notifyStale } = await import("../src/notify");
       return runMaintenance({
         store: stores.get(doId) as LibraryStore,
         blobs,
         bucket,
         libraryId: doId,
         now: new Date(),
-        notifyStale: (concepts) => notifyStale({ accounts, notifications }, doId, concepts),
       });
     },
     recovery: {

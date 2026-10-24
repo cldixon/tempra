@@ -29,7 +29,7 @@ import { inboxUrl, Urls } from "../urls";
  * The Inbox (take 4, boards 02, 13; TEMPRA-116; tempra-dev: v2/notifications): the one place for
  * what the person should do or answer across their libraries, newest first, kept until done:
  * replies on their threads, mentions, new threads on what they wrote, pages they verified that
- * changed since, pages going stale, invitations and access changes. Open and Done tabs, one
+ * changed since, invitations and access changes. Open and Done tabs, one
  * library or all; read and done are kept on the server, so they follow the person. "Older" pages
  * back past the first hundred.
  */
@@ -281,7 +281,7 @@ function Row(props: {
           <LibraryTile name={i.library_title || slug} shared={!ownLibrary} />
           <span>{name}</span>
           <span aria-hidden="true">·</span>
-          <span>{kindLabel(i, now)}</span>
+          <span>{kindLabel(i)}</span>
           <span aria-hidden="true">·</span>
           <Moment ts={i.created} now={now} />
         </p>
@@ -290,7 +290,7 @@ function Row(props: {
             {itemTitle(i, props.titles)}
           </a>
         </p>
-        <p className="inbox-detail">{itemDetail(i, now)}</p>
+        <p className="inbox-detail">{itemDetail(i)}</p>
         {quote && <blockquote className="inbox-quote">{quote}</blockquote>}
       </div>
       {actions.some(Boolean) && (

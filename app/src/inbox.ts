@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { actorAgentName, agentLabel, type Contributor, readableName } from "./agents";
 import { api, useLoad } from "./api";
 import { libraryLabel } from "./role";
-import { clip, day } from "./ui";
+import { clip } from "./ui";
 import { Urls } from "./urls";
 
 /*
@@ -10,14 +10,7 @@ import { Urls } from "./urls";
  * page. Kept apart from the page so the chrome can show it without importing pages.
  */
 
-export type InboxKind =
-  | "reply"
-  | "mention"
-  | "thread"
-  | "invitation"
-  | "access"
-  | "verify"
-  | "stale";
+export type InboxKind = "reply" | "mention" | "thread" | "invitation" | "access" | "verify";
 
 /** One item, as `GET /api/v1/inbox` describes it. */
 export interface InboxItem {
@@ -37,8 +30,6 @@ export interface InboxItem {
   excerpt: string;
   /** `verify`: edits since the person verified. */
   count: number | null;
-  /** `stale`: the concept's stale_after. */
-  due: string | null;
   /** `invitation`: the invitation to accept or decline, while it is open. */
   invitation: string | null;
   created: string;
@@ -241,7 +232,7 @@ export interface Card {
 /**
  * The home's cards from the library's open Inbox items (the same items the Inbox lists, so
  * what is done there leaves the home too): one of each kind first (something said to the person,
- * a page to verify, a page going stale), then more in that order, up to `max`.
+ * a page to verify), then more in that order, up to `max`.
  */
 export function forYouCards(items: InboxItem[], titles: PageTitles = {}, max = 3): Card[] {
   const card = (i: InboxItem): Card => {
@@ -255,9 +246,8 @@ export function forYouCards(items: InboxItem[], titles: PageTitles = {}, max = 3
       href: itemHref(i),
     };
   };
-  const group = (i: InboxItem) =>
-    i.kind === "verify" ? 1 : i.kind === "stale" ? 2 : i.path ? 0 : 3;
-  const kinds: InboxItem[][] = [[], [], [], []];
+  const group = (i: InboxItem) => (i.kind === "verify" ? 1 : i.path ? 0 : 2);
+  const kinds: InboxItem[][] = [[], [], []];
   for (const i of items) kinds[group(i)]?.push(i);
   const firsts = kinds.flatMap((k) => k.slice(0, 1));
   const rest = kinds.flatMap((k) => k.slice(1));
@@ -265,7 +255,7 @@ export function forYouCards(items: InboxItem[], titles: PageTitles = {}, max = 3
 }
 
 /** The kind, as the row's meta line says it. */
-export function kindLabel(i: InboxItem, now = Date.now()): string {
+export function kindLabel(i: InboxItem): string {
   switch (i.kind) {
     case "reply":
       return "Reply";
@@ -275,8 +265,6 @@ export function kindLabel(i: InboxItem, now = Date.now()): string {
       return "New thread";
     case "verify":
       return "To check";
-    case "stale":
-      return i.due && Date.parse(i.due) <= now ? "Stale" : "Going stale";
     case "invitation":
       return "Invitation";
     case "access":
@@ -284,8 +272,8 @@ export function kindLabel(i: InboxItem, now = Date.now()): string {
   }
 }
 
-/** The row's detail line: "Claude Code replied to your thread", "Stale on Oct 24". */
-export function itemDetail(i: InboxItem, now = Date.now()): string {
+/** The row's detail line: "Claude Code replied to your thread". */
+export function itemDetail(i: InboxItem): string {
   switch (i.kind) {
     case "reply":
       return `${i.who} replied to your thread`;
@@ -297,9 +285,6 @@ export function itemDetail(i: InboxItem, now = Date.now()): string {
       const n = i.count ?? 1;
       return `${n} ${n === 1 ? "edit" : "edits"} by ${i.who} since you checked`;
     }
-    case "stale":
-      if (!i.due) return "Going stale";
-      return `${Date.parse(i.due) <= now ? "Stale since" : "Stale on"} ${day(i.due)}`;
     case "invitation":
       return `${i.who} invited you to ${/write/i.test(i.excerpt) ? "write" : "read and comment"}`;
     case "access":

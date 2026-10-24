@@ -365,10 +365,10 @@ export function Bell() {
             </span>
             <span className="bell-item-what">
               <strong>{itemTitle(i, titles)}</strong>
-              <span className="bell-item-detail">{itemDetail(i, now)}</span>
+              <span className="bell-item-detail">{itemDetail(i)}</span>
             </span>
             <span className="bell-item-where">
-              {itemLibrary(i, handle)} · {kindLabel(i, now)} · <Moment ts={i.created} now={now} />
+              {itemLibrary(i, handle)} · {kindLabel(i)} · <Moment ts={i.created} now={now} />
             </span>
             {i.read_at === null && (
               <>

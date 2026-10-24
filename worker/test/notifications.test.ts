@@ -544,7 +544,6 @@ describe("notification mail (TEMPRA-74)", () => {
         by_user: null,
         by_agent: null,
         count: null,
-        due: null,
       },
     ]);
     expect(m.subject).toBe("@bo mentioned you on x.md");
@@ -552,7 +551,7 @@ describe("notification mail (TEMPRA-74)", () => {
   });
 });
 
-describe("the Inbox's verify and stale items (TEMPRA-116)", () => {
+describe("the Inbox's verify items (TEMPRA-116)", () => {
   /** The current hash of a file, or none when it is not there. */
   const hashOf = async (s: S, path: string) => {
     const r = await s.app.request(`${API}/files/${path}`, {
@@ -664,44 +663,22 @@ describe("the Inbox's verify and stale items (TEMPRA-116)", () => {
     ]);
   });
 
-  test("stale items go to the owner and write members once, until a new stale_after", async () => {
+  test("staleness never reaches a person's Inbox: it is the agents' housekeeping (TEMPRA-142)", async () => {
     const s = setup();
     const writer = await s.stranger("writer@example.com");
-    const reader = await s.stranger("reader@example.com");
     await s.accounts.share(LIB.id, writer.user.id, "write", OWNER.id);
-    await s.accounts.share(LIB.id, reader.user.id, "read", OWNER.id);
     const save = (path: string, body: string) => saveAs(s, s.app, path, body);
-    const maintain = async () =>
-      expect((await call(s.app, `${API}/maintain`, "POST")).status).toBeLessThan(300);
     expect((await save("ops/soon.md", staleDoc("Soon", days(5)))).status).toBeLessThan(300);
-    expect((await save("ops/later.md", staleDoc("Later", days(60)))).status).toBeLessThan(300);
-    await maintain();
-    await maintain();
-    for (const app of [s.app, writer.app]) {
-      expect((await inbox(app)).items).toMatchObject([
-        { kind: "stale", path: "ops/soon.md", title: "Soon", actions: ["open", "dismiss"] },
-      ]);
-    }
-    // A read member cannot ask an agent to refresh it.
-    expect((await inbox(reader.app)).items).toEqual([]);
-    // Dismissed, it stays dismissed through the next pass.
-    const [item] = (await inbox(writer.app)).items;
-    await call(writer.app, `/api/v1/inbox/${item?.id}/done`, "POST", {});
-    await maintain();
-    expect((await inbox(writer.app)).items).toEqual([]);
-    // A new stale_after closes it; the next pass, still within 14 days, tells them again.
-    expect((await save("ops/soon.md", staleDoc("Soon", days(6)))).status).toBeLessThan(300);
-    expect((await inbox(s.app)).items).toEqual([]);
-    await maintain();
-    expect((await inbox(writer.app)).items.map((i) => i.path)).toEqual(["ops/soon.md"]);
-    // A delete closes it.
-    const del = await s.app.request(`${API}/files/ops/soon.md`, {
-      method: "DELETE",
-      headers: { Origin: ORIGIN, "If-Match": (await hashOf(s, "ops/soon.md")) ?? "" },
-    });
-    expect(del.status).toBeLessThan(300);
-    expect((await inbox(s.app)).items).toEqual([]);
-    expect((await inbox(writer.app)).items).toEqual([]);
+    expect((await save("ops/past.md", staleDoc("Past", days(-5)))).status).toBeLessThan(300);
+    expect((await call(s.app, `${API}/maintain`, "POST")).status).toBeLessThan(300);
+    for (const app of [s.app, writer.app]) expect((await inbox(app)).items).toEqual([]);
+    // The agents' work queue has it, and the home counts it as their housekeeping.
+    const needs = (await (await call(s.app, `${API}/needs`)).json()) as {
+      housekeeping: { stale: number };
+      count: number;
+    };
+    expect(needs.housekeeping.stale).toBe(1);
+    expect(needs.count).toBe(0);
   });
 
   test("resolving a thread closes its mention items too", async () => {
