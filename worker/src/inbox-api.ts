@@ -31,8 +31,6 @@ export function itemActions(kind: ItemKind): string[] {
       return ["reply"];
     case "verify":
       return ["review", "dismiss"];
-    case "stale":
-      return ["open", "dismiss"];
     case "invitation":
       return ["accept", "decline"];
     default:

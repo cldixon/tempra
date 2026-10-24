@@ -702,7 +702,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   app.get(`${BASE}/health`, async (c) => c.json(await c.var.lib.health()));
 
   // Needs you (layout take 3): what only the person asking can do here (replies waiting on
-  // them, concepts to verify, concepts going stale), with the agents' housekeeping counted.
+  // them, concepts to verify), with the agents' housekeeping (staleness among it) counted.
   app.get(`${BASE}/needs`, async (c) => {
     const t = c.var.token;
     // The person behind the caller, and the human: actor they write with in person.

@@ -163,21 +163,12 @@ export interface WriteNotice {
   changed: {
     path: string;
     title: string | null;
-    stale_after: string | null;
     deleted: boolean;
     /** People whose latest verification this write superseded: users id when known, actor. */
     verifiers: { person: string | null; actor: string; changes: number }[];
   }[];
   verified: { path: string; person: string | null; actor: string }[];
   moved: { from: string; to: string }[];
-}
-
-/** A concept stale or going stale within 14 days, for the daily stale items (TEMPRA-116). */
-export interface StaleConcept {
-  path: string;
-  title: string | null;
-  stale_after: string;
-  stale: Staleness;
 }
 
 export type ImportFile = { path: string; markdown: string } | { path: string; blob: BlobRef };
@@ -484,7 +475,7 @@ const UNVERIFIED = unverified(false, "unverified");
 const CHANGED_SINCE_A_PERSON = unverified(true, "changed");
 const NEVER_BY_A_PERSON = unverified(true, "never");
 
-/** The most concepts one write's notice, or one day's stale items, names (TEMPRA-116). */
+/** The most concepts one write's notice names (TEMPRA-116). */
 const NOTICE_CONCEPTS = 500;
 
 const MARK_OPEN = "\u0002";
@@ -960,8 +951,8 @@ export class LibraryStore {
         )[0];
         if (row && row.kind !== "concept") return [];
         if (!row && !e.path.endsWith(".md")) return [];
-        const c = this.sql.all<{ title: string | null; stale_after: string | null }>(
-          "SELECT title, stale_after FROM concepts WHERE concept_id = ?",
+        const c = this.sql.all<{ title: string | null }>(
+          "SELECT title FROM concepts WHERE concept_id = ?",
           e.concept_id,
         )[0];
         const verifiers = row
@@ -987,7 +978,6 @@ export class LibraryStore {
           {
             path: row?.path ?? e.path,
             title: c?.title ?? null,
-            stale_after: c?.stale_after ?? null,
             deleted: !row,
             verifiers,
           },
@@ -1008,28 +998,6 @@ export class LibraryStore {
       )
       .flatMap((m) => (m.from ? [{ from: m.from, to: m.to }] : []));
     return { changed, verified, moved };
-  }
-
-  /**
-   * Concepts stale or going stale within 14 days, soonest first: what the daily maintainer hands
-   * the Worker for the owner's and write members' `stale` items (TEMPRA-116).
-   */
-  staleConcepts(): StaleConcept[] {
-    const now = this.clock().getTime();
-    return this.sql
-      .all<{ path: string; title: string | null; stale_after: string; stale_ms: number }>(
-        `SELECT DISTINCT p.path, c.title, c.stale_after, c.stale_ms FROM flags f
-         JOIN concepts c ON c.concept_id = f.concept_id
-         JOIN paths p ON p.concept_id = f.concept_id AND p.kind = 'concept'
-         WHERE f.kind IN ('stale', 'stale_soon') AND c.stale_ms IS NOT NULL
-         ORDER BY c.stale_ms, p.path LIMIT ${NOTICE_CONCEPTS}`,
-      )
-      .map((r) => ({
-        path: r.path,
-        title: r.title,
-        stale_after: r.stale_after,
-        stale: (r.stale_ms <= now ? "stale" : "stale_soon") as Staleness,
-      }));
   }
 
   private guard<T>(fn: () => T): T {
@@ -4306,7 +4274,7 @@ export class LibraryStore {
    * open, the last comment not theirs in person (their agents' replies are news to them, as in
    * notify.ts), and they took part (wrote in it, themselves or through an agent) or were
    * mentioned in it. Concepts to verify, as the health summary counts them, paged by offset.
-   * Concepts stale or going stale, soonest first. The agents' housekeeping, counted only.
+   * The agents' housekeeping (stale concepts among it, TEMPRA-142), counted only.
    */
   needs(
     me: { person: string | null; actor: string | null },
@@ -4423,30 +4391,16 @@ export class LibraryStore {
       ];
     });
 
-    const now = this.clock().getTime();
-    const stale = this.sql
-      .all<{ path: string; title: string | null; stale_after: string; stale_ms: number }>(
-        `SELECT DISTINCT p.path, c.title, c.stale_after, c.stale_ms FROM flags f
-         JOIN concepts c ON c.concept_id = f.concept_id
-         JOIN paths p ON p.concept_id = f.concept_id AND p.kind = 'concept'
-         WHERE f.kind IN ('stale', 'stale_soon') AND c.stale_ms IS NOT NULL
-         ORDER BY c.stale_ms, p.path`,
-      )
-      .map((r) => ({
-        path: r.path,
-        title: r.title,
-        stale_after: r.stale_after,
-        stale: (r.stale_ms <= now ? "stale" : "stale_soon") as Staleness,
-      }));
-
     const work = this.workCounts().counts;
     const housekeeping = {
+      stale: work.stale ?? 0,
       lint: work.lint ?? 0,
       structure: work.structure ?? 0,
       broken_link: work.broken_link ?? 0,
       total: 0,
     };
-    housekeeping.total = housekeeping.lint + housekeeping.structure + housekeeping.broken_link;
+    housekeeping.total =
+      housekeeping.stale + housekeeping.lint + housekeeping.structure + housekeeping.broken_link;
     return {
       seq: this.headSeq(),
       replies,
@@ -4456,9 +4410,8 @@ export class LibraryStore {
         next_offset: offset + limit < total ? offset + limit : null,
       },
       unverified: { total: never },
-      stale,
       housekeeping,
-      count: replies.length + total + stale.length,
+      count: replies.length + total,
     };
   }
 
@@ -4587,11 +4540,15 @@ export interface Needs {
   };
   /** Concepts no person has verified (TEMPRA-111): their standing, not a request, so counted only. */
   unverified: { total: number };
-  /** Concepts stale or going stale within the stale-soon window, the soonest first. */
-  stale: { path: string; title: string | null; stale_after: string; stale: Staleness }[];
-  /** The agents' share of the work queue, counted only. */
-  housekeeping: { lint: number; structure: number; broken_link: number; total: number };
-  /** replies + verify.total + stale: the sidebar's number. */
+  /** The agents' share of the work queue, counted only: staleness is theirs (TEMPRA-142). */
+  housekeeping: {
+    stale: number;
+    lint: number;
+    structure: number;
+    broken_link: number;
+    total: number;
+  };
+  /** replies + verify.total. */
   count: number;
 }
 

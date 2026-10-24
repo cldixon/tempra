@@ -32,7 +32,6 @@ export const LIBRARY_METHODS = [
   "summary",
   "health",
   "needs",
-  "staleConcepts",
   "signDownload",
   "openDownload",
   "dump",

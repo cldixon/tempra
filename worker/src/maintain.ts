@@ -1,11 +1,5 @@
 import { type BlobStore, bundleTar } from "./client";
-import type {
-  LibraryHealth,
-  MaintenanceDue,
-  StaleConcept,
-  StalenessRun,
-  StructureRun,
-} from "./store/store";
+import type { LibraryHealth, MaintenanceDue, StalenessRun, StructureRun } from "./store/store";
 
 /**
  * The daily maintainers (spec: Tier 3). A library's maintainers are of two kinds: processes,
@@ -39,7 +33,6 @@ export interface MaintainedStore {
   dump(): string;
   pruneUsage(): number;
   maintainStaleness(): StalenessRun;
-  staleConcepts(): StaleConcept[];
   maintainStructure(): StructureRun;
   maintainHealth(): LibraryHealth;
   maintenance(): Record<string, string>;
@@ -54,8 +47,6 @@ export interface MaintenanceResult {
   staleness: StalenessRun;
   structure: StructureRun;
   health: LibraryHealth;
-  /** Stale items handed to the Worker's notifications (TEMPRA-116); absent when none is wired. */
-  stale_items?: number;
 }
 
 export const DEFAULT_RETENTION_DAYS = 30;
@@ -74,12 +65,6 @@ export async function runMaintenance(opts: {
   libraryId: string;
   now: Date;
   retentionDays?: number;
-  /**
-   * Hands the concepts stale or going stale within 14 days to the Inbox's `stale` items
-   * (notify.ts notifyStale, TEMPRA-116), after staleness has flagged them. A failure is logged;
-   * the pass goes on.
-   */
-  notifyStale?: (concepts: StaleConcept[]) => Promise<number>;
 }): Promise<MaintenanceResult> {
   const { store, bucket, now } = opts;
   const stamp = now.toISOString().replace(/\.\d{3}Z$/, "Z");
@@ -108,25 +93,9 @@ export async function runMaintenance(opts: {
   const pruned = store.pruneUsage();
   store.setMaintenance({ usage_at: stamp });
   const staleness = store.maintainStaleness();
-  let staleItems: number | undefined;
-  if (opts.notifyStale) {
-    try {
-      staleItems = await opts.notifyStale(store.staleConcepts());
-    } catch (e) {
-      console.error(JSON.stringify({ stale_items_failed: opts.libraryId, error: String(e) }));
-    }
-  }
   const structure = store.maintainStructure();
   const health = store.maintainHealth();
-  return {
-    export: exported,
-    deleted,
-    pruned,
-    staleness,
-    structure,
-    health,
-    ...(staleItems === undefined ? {} : { stale_items: staleItems }),
-  };
+  return { export: exported, deleted, pruned, staleness, structure, health };
 }
 
 /**

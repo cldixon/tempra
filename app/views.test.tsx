@@ -38,8 +38,7 @@ const needs = (over: Partial<Needs> = {}): Needs => ({
   replies: [],
   verify: { total: 0, items: [], next_offset: null },
   unverified: { total: 0 },
-  stale: [],
-  housekeeping: { lint: 0, structure: 0, broken_link: 0, total: 0 },
+  housekeeping: { stale: 0, lint: 0, structure: 0, broken_link: 0, total: 0 },
   count: 0,
   ...over,
 });
@@ -66,7 +65,6 @@ describe("the library's home (take 4)", () => {
     agent: true,
     excerpt: "Atoms count as one character.",
     count: null,
-    due: null,
     invitation: null,
     created: hour(1),
     read_at: null,
@@ -96,27 +94,17 @@ describe("the library's home (take 4)", () => {
         actions: ["review", "dismiss"],
         href: "/cl_dixon/tempra-dev/app/diagrams.md?review=1",
       }),
-      item({
-        id: "i4",
-        kind: "stale",
-        path: "v2/limits.md",
-        title: "Limits",
-        thread: null,
-        due: "2026-12-24T00:00:00Z",
-        actions: ["open", "dismiss"],
-        href: "/cl_dixon/tempra-dev/v2/limits.md",
-      }),
+      item({ id: "i4", thread: "t3" }),
     ];
     // A reply names its page by path only: the title comes from the tree's outline.
     const titles = { "cl_dixon/tempra-dev app/reader.md": "Reader" };
     const cards = forYouCards(items, titles);
-    expect(cards.map((c) => c.kind)).toEqual(["Reply", "To check", "Going stale"]);
+    expect(cards.map((c) => c.kind)).toEqual(["Reply", "To check", "Reply"]);
     expect(cards[0]?.title).toBe("Claude Code on Reader");
     expect(cards[0]?.detail).toBe("Atoms count as one character.");
     expect(cards[0]?.href).toBe("/cl_dixon/tempra-dev/app/reader.md#thread-t1");
     expect(cards[1]?.title).toBe("Diagrams");
     expect(cards[1]?.detail).toBe("2 edits by Claude Code since you checked");
-    expect(cards[2]?.detail).toContain("Dec 24");
     // Without the outline, the page's name stands in, never the raw path.
     expect(forYouCards([item({})])[0]?.title).toBe("Claude Code on reader");
     const html = renderToStaticMarkup(
@@ -134,7 +122,9 @@ describe("the library's home (take 4)", () => {
     const html = renderToStaticMarkup(
       <HomeFoot
         urls={urls}
-        needs={needs({ housekeeping: { lint: 1, structure: 11, broken_link: 0, total: 12 } })}
+        needs={needs({
+          housekeeping: { stale: 2, lint: 1, structure: 9, broken_link: 0, total: 12 },
+        })}
       />,
     );
     expect(html).toContain("12 housekeeping items for agents");
