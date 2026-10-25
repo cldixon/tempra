@@ -616,12 +616,7 @@
   font-size: var(--tempra-text-ui);
 }
 
-.sidebar-hidden .doc-crumbs {
-  display: flex;
-}
-
-.doc-crumbs:empty,
-.sidebar-hidden .doc-crumbs:empty {
+.doc-crumbs:empty {
   display: none;
 }
 
@@ -644,9 +639,8 @@
     font-size: var(--tempra-text-page);
   }
 
-  /* On a phone the top bar has Comments and ⋯; Copy page heads ⋯ (TEMPRA-118). Comments
-     reads as its word and count, without the glyph, to leave the page's name room. */
-  .topbar-tools .copy-page,
+  /* On a phone the top bar has Comments and ⋯. Comments reads as its word and count, without
+     the glyph, to leave the library's name room. */
   .comments-toggle svg {
     display: none;
   }
