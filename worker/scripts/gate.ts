@@ -1164,6 +1164,15 @@ async function browserRenders(
       if (JSON.stringify(rows) !== JSON.stringify(["Activity", "Settings"])) {
         throw new Error(`the sidebar's foot reads ${JSON.stringify(rows)}`);
       }
+      // The tree fades out above the foot (TEMPRA-149), with as much room at its end as the fade,
+      // so the last row rests clear of it.
+      const fade = await page.evaluate<{ mask: string; pad: number }>(`(() => {
+        const cs = getComputedStyle(document.querySelector(".ws-sidebar .sidebar-scroll"));
+        return { mask: cs.maskImage || cs.webkitMaskImage, pad: parseFloat(cs.paddingBottom) };
+      })()`);
+      if (!fade.mask.includes("gradient") || fade.pad < 40) {
+        throw new Error(`the tree does not fade above the foot: ${JSON.stringify(fade)}`);
+      }
       for (const gone of ["Home", "Search"]) {
         if (
           (await sidebar.getByText(gone, { exact: true }).filter({ visible: true }).count()) > 0
