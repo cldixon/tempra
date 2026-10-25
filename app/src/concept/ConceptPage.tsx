@@ -11,6 +11,7 @@ import { type Compare, navigate } from "../router";
 import { anchorId, useMe, useTitle } from "../ui";
 import { dirOf, folderName, type Urls } from "../urls";
 import { PageBar, useFrame } from "../Workspace";
+import { PageActions } from "./Actions";
 import { Byline } from "./Byline";
 import { CheckedLine } from "./Checked";
 import { Contents, contentsOf } from "./Contents";
@@ -27,9 +28,13 @@ import { ReviewBar, VersionBar } from "./ReviewBar";
 import { SourcesSection } from "./Sources";
 import { PageMenu } from "./Tools";
 
+/** The floating actions' button: where the focus goes back to when nothing else opened a panel. */
+const actionsButton = () => document.querySelector<HTMLElement>(".page-actions .page-fab");
+
 /**
  * A concept's page (take 4, TEMPRA-114; tempra-dev: app/reader, app/comments,
- * decisions/one-panel-from-the-top-bar): its tools in the top bar (Comments n, Copy page, ⋯), the
+ * decisions/one-panel-from-the-top-bar): its path and ⋯ in the top bar, its actions (Comment,
+ * Check) floating at its bottom right (TEMPRA-172, decisions/a-pages-actions-float), the
  * title, description and byline, the body in the reader and its sources at the end, centred in
  * its column; on the right the contents, or one panel in their place (Comments, History,
  * Properties), opened only by the person and never remembered. Review mode and a version chosen
@@ -119,7 +124,6 @@ export function ConceptPage(props: {
   // only from a control, a quote, or a link asking for one (`?panel=`, `#thread-…`,
   // `#comments`), and closing it (×, Escape, the control again) brings the contents back.
   const [panel, setPanel] = useState<PanelName | null>(() => panelInUrl(bodyIds));
-  const commentsButton = useRef<HTMLButtonElement>(null);
   const opener = useRef<HTMLElement | null>(null);
   const panelBox = useRef<HTMLDivElement>(null);
   // Focus (C-25, TEMPRA-133): opening a panel moves the focus to its heading (a draft's text box
@@ -130,13 +134,13 @@ export function ConceptPage(props: {
   const openPanel = useCallback((name: PanelName, focus = true) => {
     const focused = document.activeElement;
     if (focused instanceof HTMLElement && !panelBox.current?.contains(focused)) {
-      // Nothing focused (a quote clicked, text selected): the Comments control stands in.
+      // Nothing focused (a quote clicked, text selected): the actions' button stands in.
       const menu = focused.closest(".menu");
       opener.current =
         focused === document.body
           ? null
           : menu
-            ? (menu.querySelector<HTMLElement>(":scope > button") ?? commentsButton.current)
+            ? (menu.querySelector<HTMLElement>(":scope > button") ?? actionsButton())
             : focused;
     }
     setPanel(name);
@@ -175,7 +179,7 @@ export function ConceptPage(props: {
     if (focusTo.to === "heading") {
       panelBox.current?.querySelector<HTMLElement>(".panel-head h2")?.focus();
     } else {
-      const back = opener.current?.isConnected ? opener.current : commentsButton.current;
+      const back = opener.current?.isConnected ? opener.current : actionsButton();
       back?.focus();
     }
     setFocusTo(null);
@@ -261,7 +265,6 @@ export function ConceptPage(props: {
   return (
     <div className={classes.filter(Boolean).join(" ")} ref={page}>
       <PageBar
-        phoneTools
         path={
           // The page's path over it, as Linear's docs have it (TEMPRA-145): its folders, words
           // and not links (folders are not pages), then its title.
@@ -279,26 +282,6 @@ export function ConceptPage(props: {
         actions={
           <>
             {live && !moved && <NewVersion urls={urls} live={live} />}
-            <button
-              ref={commentsButton}
-              type="button"
-              className="icon-button with-count comments-toggle"
-              aria-pressed={panel === "comments"}
-              onClick={() => togglePanel("comments")}
-            >
-              {/* Named by what it shows, "Comments 2 open" (WCAG 2.5.3). */}
-              <Icon name="comments" />
-              <span>Comments</span>
-              {openCount > 0 && (
-                <>
-                  {" "}
-                  <span className="comments-count">
-                    {openCount}
-                    <span className="visually-hidden"> open</span>
-                  </span>
-                </>
-              )}
-            </button>
             <PageMenu
               urls={urls}
               path={c.path}
@@ -390,6 +373,21 @@ export function ConceptPage(props: {
             <SourcesSection urls={urls} data={sources} prepared={prepared} numbers={numbers} />
           </div>
         </article>
+        {/* What a person does on the page, floating at its bottom right; aside while a panel is
+            open (TEMPRA-172). */}
+        <PageActions
+          urls={urls}
+          path={c.path}
+          standing={s}
+          name={name}
+          openCount={openCount}
+          current={current}
+          reviewing={compare?.kind === "review"}
+          mayVerify={mayVerify}
+          hidden={panel !== null}
+          onComment={() => openPanel("comments")}
+          onVerified={props.onVerified}
+        />
         {/* The page dimmed behind an overlaid panel; a tap on it closes the panel (P-4). */}
         {modal && <div className="panel-scrim" aria-hidden="true" onClick={closePanel} />}
         <div className="concept-side" ref={panelBox}>

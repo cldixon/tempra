@@ -30,6 +30,7 @@ import {
   MessageSquare,
   PanelLeft,
   Plug,
+  Plus,
   RefreshCw,
   Search,
   Settings,
@@ -107,6 +108,7 @@ const ICONS = {
   signout: LogOut,
   copy: Copy,
   link: Link,
+  add: Plus,
 } as const;
 
 export type Glyph = keyof typeof ICONS;
