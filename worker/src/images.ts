@@ -35,6 +35,13 @@ export const MODEL_EDGE = 1568;
 /** At most this many bytes of image for a model; smaller edges are tried until it fits. */
 export const MODEL_BYTES = 400 * 1024;
 const MODEL_LADDER = [MODEL_EDGE, 1092, 768] as const;
+/**
+ * At most this many image blocks in one call, and this many bytes of image in them all (`read` of
+ * a concept with `images` or `figures`, TEMPRA-154); first guesses for the media trial
+ * (tempra-dev: app/media, Limits).
+ */
+export const IMAGES_PER_CALL = 6;
+export const IMAGE_BYTES_PER_CALL = 2 * 1024 * 1024;
 
 export const variantKey = (hash: string, edge: number, format: VariantFormat) =>
   `variants/${hash}/${edge}.${format}`;

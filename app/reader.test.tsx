@@ -6,6 +6,7 @@ import {
   type Doc,
   type DocNode,
   docText,
+  fenceTitle,
   idOf,
   locate,
   parseMarkdown,
@@ -23,7 +24,7 @@ import { Body, Note } from "./src/reader/Body";
 import { offsetAt, pointAt, rangeOf, readText, textblocks } from "./src/reader/dom";
 import { OpenFigure } from "./src/reader/Figure";
 import type { FigureView } from "./src/reader/Lightbox";
-import { type BodyOptions, fenceTitle, prepare } from "./src/reader/prepare";
+import { type BodyOptions, prepare } from "./src/reader/prepare";
 
 const FIXTURES = join(import.meta.dir, "..", "fixtures");
 

@@ -72,6 +72,12 @@ export function diagramType(header: string): string | null {
   return TYPES.find(([, re]) => re.test(h))?.[0] ?? null;
 }
 
+/** The type a fence's source names on its first line of diagram (frontmatter and comments skipped). */
+export function diagramTypeOf(src: string): string | null {
+  const header = contentLines(src)[0];
+  return header ? diagramType(header.text) : null;
+}
+
 /** Types with no body to draw from. */
 const HEADER_ONLY = new Set(["info"]);
 

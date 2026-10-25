@@ -67,7 +67,13 @@ describe("MCP server", () => {
 
     const { client } = await connect(app, "files");
     const read = (await client.listTools()).tools.find((t) => t.name === "read");
-    expect(Object.keys(read?.inputSchema.properties ?? {})).toEqual(["path", "image", "library"]);
+    expect(Object.keys(read?.inputSchema.properties ?? {})).toEqual([
+      "path",
+      "image",
+      "images",
+      "figures",
+      "library",
+    ]);
     const { client: full } = await connect(app, "writer");
     const tier2Tool = (await full.listTools()).tools.find((t) => t.name === "search");
     expect(tier2Tool?.description?.startsWith("Beyond files:")).toBe(true);
@@ -538,6 +544,129 @@ describe("MCP server", () => {
         .contents[0] as { mimeType: string; text: string };
       expect(huge.mimeType).toBe("text/plain");
       expect(huge.text).toContain("Attachment; download: http");
+    });
+
+    describe("a concept's figures (TEMPRA-154)", () => {
+      const FIGS = [
+        "# Figures",
+        "",
+        "Text with an inline ![icon](/img/dot.png) is not a figure.",
+        "",
+        '![A dot](/img/dot.png "The dot")',
+        "",
+        "![Remote](https://example.com/x.png)",
+        "",
+        '![Gone](/img/gone.png "Lost")',
+        "",
+        '```mermaid title="Flow"',
+        "flowchart LR",
+        "  A --> B",
+        "```",
+        "",
+      ].join("\n");
+
+      const page = async (s: ReturnType<typeof setup>) => {
+        const conn = await connect(s.app);
+        await conn.call("attach", { path: "img/dot.png", content_base64: b64(PNG) });
+        const w = await conn.call("write", { path: "t/figs.md", content: doc("Figs", FIGS) });
+        expect(w.isError).toBe(false);
+        return conn;
+      };
+
+      test("read lists them in the header, numbered as the reader numbers them", async () => {
+        const s = setup();
+        const { client, call } = await page(s);
+        const c = await content(client, { path: "t/figs.md" });
+        expect(c.map((x) => x.type)).toEqual(["text"]);
+        const head = (c[0] as Text).text.split("\n---\n")[0] ?? "";
+        expect(head).toContain(
+          [
+            "Figures:",
+            `Figure 1 · /img/dot.png · alt "A dot" · caption "The dot" · 1×1 · ${PNG.byteLength} B · ok`,
+            'Figure 2 · https://example.com/x.png · alt "Remote" · external',
+            'Figure 3 · /img/gone.png · alt "Gone" · caption "Lost" · missing',
+            'Figure 4 · diagram (mermaid, flowchart) · caption "Flow"',
+          ].join("\n"),
+        );
+        // No bytes were read for the list, and none metered.
+        expect(s.usage.filter((e) => e.kind === "read_image")).toEqual([]);
+        // A concept without figures has no block.
+        await call("write", { path: "t/plain.md", content: doc("Plain", "Just text.\n") });
+        expect((await call("read", { path: "t/plain.md" })).text).not.toContain("Figures:");
+      });
+
+      test("images: true returns the one internal image, and says why the rest are not", async () => {
+        const s = setup();
+        const { client } = await page(s);
+        const c = await content(client, { path: "t/figs.md", images: true });
+        expect(c.map((x) => x.type)).toEqual(["text", "text", "image", "text"]);
+        expect((c[1] as Text).text).toBe("Figure 1: The dot");
+        expect(c[2]).toEqual({ type: "image", data: b64(PNG), mimeType: "image/png" });
+        expect((c[3] as Text).text).toBe(
+          [
+            "Not shown:",
+            "Figure 2: external images are not fetched (TEMPRA-163)",
+            "Figure 3: missing: no attachment at /img/gone.png",
+            "Figure 4: diagram images arrive with the render tool (TEMPRA-166)",
+          ].join("\n"),
+        );
+        expect(s.usage.filter((e) => e.kind === "read_image").map((e) => e.bytes)).toEqual([
+          PNG.byteLength,
+        ]);
+      });
+
+      test("figures: [n] returns only those", async () => {
+        const s = setup();
+        const { client } = await page(s);
+        const one = await content(client, { path: "t/figs.md", figures: [1] });
+        expect(one.map((x) => x.type)).toEqual(["text", "text", "image"]);
+        const other = await content(client, { path: "t/figs.md", figures: [4, 9] });
+        expect(other.map((x) => x.type)).toEqual(["text", "text"]);
+        expect((other[1] as Text).text).toBe(
+          [
+            "Not shown:",
+            "Figure 4: diagram images arrive with the render tool (TEMPRA-166)",
+            "Figure 9: no such figure (this page has 4)",
+          ].join("\n"),
+        );
+      });
+
+      test("caps: at most 6 images and 2 MB a call", async () => {
+        const s = setup();
+        const { client, call } = await connect(s.app);
+        // Seven images of about 380 KB each: within a model image, past 2 MB by the sixth.
+        const lines: string[] = [];
+        for (let i = 1; i <= 7; i++) {
+          const png = makePng(360, 350 + i, { noise: true });
+          expect(png.byteLength).toBeLessThan(MODEL_BYTES);
+          const put = await s.req(`/files/img/n${i}.png`, {
+            method: "PUT",
+            headers: { "Content-Type": "image/png" },
+            body: png,
+          });
+          expect(put.status).toBeLessThan(300);
+          lines.push(`![Noise ${i}](/img/n${i}.png)`, "");
+        }
+        await call("write", { path: "t/many.md", content: doc("Many", lines.join("\n")) });
+        const c = await content(client, { path: "t/many.md", images: true });
+        const images = c.filter((x) => x.type === "image");
+        expect(images.length).toBe(5);
+        const total = s.usage
+          .filter((e) => e.kind === "read_image")
+          .reduce((n, e) => n + (e.bytes ?? 0), 0);
+        expect(total).toBeLessThanOrEqual(2 * 1024 * 1024);
+        expect((c.at(-1) as Text).text).toBe(
+          [
+            "Not shown:",
+            "Figure 6: over the cap of 2.0 MB of images a call; ask with figures: [6]",
+            "Figure 7: over the cap of 6 images a call; ask with figures: [7]",
+          ].join("\n"),
+        );
+        // Asked for by number, a left-out one comes.
+        const seventh = await content(client, { path: "t/many.md", figures: [7] });
+        expect(seventh.map((x) => x.type)).toEqual(["text", "text", "image"]);
+        expect((seventh[1] as Text).text).toBe("Figure 7: Noise 7");
+      });
     });
 
     test("the sweep's variant keys cover every edge and format of a blob", () => {

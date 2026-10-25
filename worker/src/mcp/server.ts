@@ -4,7 +4,16 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { TokenInfo } from "../auth";
 import { type BlobStore, type LibraryClient, mediaFor, putBlob, withDimensions } from "../client";
-import { type Images, imagesService, RASTER_MEDIA, readBytes, toBase64 } from "../images";
+import {
+  IMAGE_BYTES_PER_CALL,
+  IMAGES_PER_CALL,
+  type Images,
+  imagesService,
+  RASTER_MEDIA,
+  readBytes,
+  toBase64,
+} from "../images";
+import { type FigureFact, figureLine, sizeText } from "../okf/figures";
 import { normalizePath, underPrefix } from "../okf/paths";
 import type { LintWarning } from "../okf/types";
 import type { CommentAction, CommentResult } from "../store/comments";
@@ -65,7 +74,7 @@ const BEYOND = "Beyond files: ";
 export const INSTRUCTIONS = `This server holds OKF (Open Knowledge Format) libraries: each a tree of markdown concepts with YAML frontmatter, plus attachments. Every change is attributed to your actor and recorded in the library's ledger.
 
 How to work:
-1. Call \`start\` first. It opens your library, or lists the libraries you can reach when there are several; then pass \`library\` (owner/slug) on every call. When the person asks for a new library, \`create_library\` makes one they own and opens it (only on a connection they allowed to). Then \`browse\` a directory before reading, follow links, and \`read\` what you need. Check frontmatter (type, status, trust tier, stale) before relying on a body.
+1. Call \`start\` first. It opens your library, or lists the libraries you can reach when there are several; then pass \`library\` (owner/slug) on every call. When the person asks for a new library, \`create_library\` makes one they own and opens it (only on a connection they allowed to). Then \`browse\` a directory before reading, follow links, and \`read\` what you need. Check frontmatter (type, status, trust tier, stale) before relying on a body. \`read\` lists a concept's figures; ask for their images with \`images: true\` (or \`figures: [n]\`) when you review a page, change a figure or its caption, or answer a comment on one.
 2. Write conformant concepts: a non-empty \`type\` naming what kind of thing it is (Metric, Protocol, Decision; never a generic word like concept, page or note, and reuse the types \`start\` lists), a \`title\` and one-line \`description\`, absolute links like [x](/dir/x.md), footnotes [^id] keyed to \`sources[].id\`, diagrams as Mermaid in a \`mermaid\` fence (drawn in the app; an unknown type, an empty body or an unclosed bracket or quote comes back as \`diagram_invalid\` lint), one idea per concept.
 3. Prefer \`edit\` for small changes, \`write\` for new concepts or rewrites, \`batch\` for related changes so they land as one request. Pass \`if_match\` (the hash from your last read); on a conflict, re-read and reapply. Bodies are stored in a canonical form (\`-\` bullets, \`*\` emphasis, padded tables): what you write reads back normalized, so \`edit\` the text as \`read\` shows it. To add a file (an image, a PDF): with a shell, \`prepare_upload\` and run the curl line it returns; without one, \`attach\` small files (under about 200 KB) as base64 with their \`sha256\`.
 4. Put a one-line \`note\` on every write. Read the \`lint\` in every write result and fix what it reports; the result's notes say what else to know (ignored fields, the stored form, open comments). A concept with no frontmatter, invalid YAML or no \`type\` is refused. Keep concepts under 100 KB; split big ones into linked concepts.
@@ -470,6 +479,82 @@ export function buildServer(ctx: McpContext): McpServer {
     }),
   );
 
+  /**
+   * The figures `read` of a concept sends as images (TEMPRA-154): internal raster images, each
+   * after a line naming it, within IMAGES_PER_CALL and IMAGE_BYTES_PER_CALL; then what was left
+   * out and why. External images are never fetched; diagrams wait for the render tool.
+   */
+  const figureImages = async (
+    token: TokenInfo,
+    figures: FigureFact[],
+    want: true | number[],
+  ): Promise<CallToolResult["content"]> => {
+    const left = new Map<number, string>();
+    const asked: FigureFact[] = [];
+    if (want === true) asked.push(...figures);
+    else {
+      for (const n of [...new Set(want)].sort((a, b) => a - b)) {
+        const f = figures[n - 1];
+        if (f) asked.push(f);
+        else left.set(n, `no such figure (this page has ${figures.length})`);
+      }
+    }
+    const candidates: (FigureFact & { kind: "image" })[] = [];
+    for (const f of asked) {
+      if (f.kind === "diagram") {
+        left.set(f.n, "diagram images arrive with the render tool (TEMPRA-166)");
+      } else if (f.status === "external") {
+        left.set(f.n, "external images are not fetched (TEMPRA-163)");
+      } else if (f.status === "missing" || !f.blob) {
+        left.set(f.n, `missing: no attachment at ${f.path !== null ? `/${f.path}` : f.url}`);
+      } else if (f.blob.media === "image/svg+xml") {
+        left.set(f.n, `SVG is not sent as an image yet; \`read\` /${f.path} for its source`);
+      } else if (!f.blob.media || !RASTER_MEDIA.has(f.blob.media)) {
+        left.set(f.n, `not an image (${f.blob.media ?? "unknown type"})`);
+      } else candidates.push(f);
+    }
+    for (const f of candidates.slice(IMAGES_PER_CALL)) {
+      left.set(f.n, `over the cap of ${IMAGES_PER_CALL} images a call; ask with figures: [${f.n}]`);
+    }
+    const fetched = await Promise.all(
+      candidates.slice(0, IMAGES_PER_CALL).map(async (f) => ({
+        f,
+        img: await images.forModel(f.blob as NonNullable<typeof f.blob>),
+      })),
+    );
+    const out: CallToolResult["content"] = [];
+    let bytes = 0;
+    for (const { f, img } of fetched) {
+      if ("missing" in img) {
+        left.set(f.n, `its bytes are missing (/${f.path})`);
+        continue;
+      }
+      if ("tooLarge" in img) {
+        left.set(
+          f.n,
+          `too large to send (${sizeText(img.size)}); \`read\` /${f.path} for a download URL`,
+        );
+        continue;
+      }
+      if (bytes + img.bytes.byteLength > IMAGE_BYTES_PER_CALL) {
+        left.set(
+          f.n,
+          `over the cap of ${sizeText(IMAGE_BYTES_PER_CALL)} of images a call; ask with figures: [${f.n}]`,
+        );
+        continue;
+      }
+      bytes += img.bytes.byteLength;
+      ctx.meter?.({ kind: "read_image", library: token.library.id, bytes: img.bytes.byteLength });
+      out.push(line(`Figure ${f.n}: ${f.title || f.alt || `/${f.path}`}`));
+      out.push({ type: "image", data: toBase64(img.bytes), mimeType: img.media });
+    }
+    if (left.size > 0) {
+      const lines = [...left].sort(([a], [b]) => a - b).map(([n, why]) => `Figure ${n}: ${why}`);
+      out.push(line(["Not shown:", ...lines].join("\n")));
+    }
+    return out;
+  };
+
   const readSchema = {
     path: z
       .string()
@@ -478,6 +563,18 @@ export function buildServer(ctx: McpContext): McpServer {
       .boolean()
       .optional()
       .describe("For an image attachment: false returns only its facts, without the image itself."),
+    images: z
+      .boolean()
+      .optional()
+      .describe(
+        `For a concept: true adds its figures' images after the markdown (at most ${IMAGES_PER_CALL}).`,
+      ),
+    figures: z
+      .array(z.number().int().min(1))
+      .optional()
+      .describe(
+        "For a concept: only these figures' images, by number as the Figures list gives them.",
+      ),
     ...(tier2
       ? {
           at: z
@@ -495,60 +592,73 @@ export function buildServer(ctx: McpContext): McpServer {
     "read",
     {
       title: "Read a file",
-      description:
-        "Read a concept as OKF markdown (frontmatter and body), with its hash, sequence, trust tier, staleness, lint and inbound link count above it. Pass the hash as `if_match` when you edit, replace or delete. Check trust tier and `stale` before relying on the content. Also reads index.md and log.md (the latest 200 requests; `log` pages back further); for an attachment returns its size and a short-lived download URL, and for an image (PNG, JPEG, GIF, WebP) the image itself, scaled to at most 1568 px (SVG as its text).",
+      description: `Read a concept as OKF markdown (frontmatter and body), with its hash, sequence, trust tier, staleness, lint, inbound link count and its figures above it (one line each, numbered as the app numbers them: path or URL, alt, caption, size, and ok, missing or external). Pass the hash as \`if_match\` when you edit, replace or delete. Check trust tier and \`stale\` before relying on the content. Ask for the figures' images with \`images: true\` (or \`figures: [n]\`) when you review the page, change a figure or its caption, or answer a comment on one; they come after the markdown, each after a line naming it, at most ${IMAGES_PER_CALL} and ${IMAGE_BYTES_PER_CALL / 1048576} MB a call, what was left out listed with the reason; external images are not fetched. Also reads index.md and log.md (the latest 200 requests; \`log\` pages back further); for an attachment returns its size and a short-lived download URL, and for an image (PNG, JPEG, GIF, WebP) the image itself, scaled to at most 1568 px (SVG as its text).`,
       inputSchema: readSchema,
       annotations: readOnly,
     },
-    guarded(async (args: { path: string; image?: boolean; at?: number; library?: string }) => {
-      const picked = pick(args.library);
-      const view = await withDimensions(
-        picked.lib,
-        ctx.blobs,
-        await picked.lib.read(args.path, { at: args.at }),
-      );
-      if (view.kind === "derived") return text(view.markdown);
-      if (view.kind === "attachment") {
-        const url = await downloadUrl(picked, {
-          k: "file",
-          path: view.path,
-          hash: view.hash,
-          media: view.media,
-        });
-        const facts = text(
+    guarded(
+      async (args: {
+        path: string;
+        image?: boolean;
+        images?: boolean;
+        figures?: number[];
+        at?: number;
+        library?: string;
+      }) => {
+        const picked = pick(args.library);
+        const view = await withDimensions(
+          picked.lib,
+          ctx.blobs,
+          await picked.lib.read(args.path, { at: args.at, figures: true }),
+        );
+        if (view.kind === "derived") return text(view.markdown);
+        if (view.kind === "attachment") {
+          const url = await downloadUrl(picked, {
+            k: "file",
+            path: view.path,
+            hash: view.hash,
+            media: view.media,
+          });
+          const facts = text(
+            [
+              `path: ${view.path}`,
+              `hash: ${view.hash}`,
+              `seq: ${view.seq}`,
+              `size: ${view.size} bytes · media: ${view.media ?? "unknown"}`,
+              ...(view.width && view.height ? [`dimensions: ${view.width}×${view.height} px`] : []),
+              `download (15 minutes): ${url}`,
+            ].join("\n"),
+          );
+          if (args.image !== false) facts.content.push(...(await shown(picked.token, view)));
+          return facts;
+        }
+        const status =
+          typeof view.frontmatter.status === "string"
+            ? view.frontmatter.status
+            : "not set (reads as stable)";
+        const figures = view.figures ?? [];
+        const result = text(
           [
             `path: ${view.path}`,
             `hash: ${view.hash}`,
-            `seq: ${view.seq}`,
-            `size: ${view.size} bytes · media: ${view.media ?? "unknown"}`,
-            ...(view.width && view.height ? [`dimensions: ${view.width}×${view.height} px`] : []),
-            `download (15 minutes): ${url}`,
+            `seq: ${view.seq}${args.at !== undefined ? ` (as of ${args.at})` : ""}`,
+            `trust: ${view.trust_tier} · stale: ${view.stale ? "yes" : view.stale_soon ? "soon" : "no"} · status: ${status} · inbound links: ${view.inbound_links}`,
+            ...(tier2 && view.open_comments > 0
+              ? [
+                  `Open comments: ${view.open_comments}. Read them with \`comments\` (path ${view.path}) before you edit.`,
+                ]
+              : []),
+            lintText(view.lint),
+            ...(figures.length > 0 ? ["Figures:", ...figures.map(figureLine)] : []),
+            "",
+            view.markdown,
           ].join("\n"),
         );
-        if (args.image !== false) facts.content.push(...(await shown(picked.token, view)));
-        return facts;
-      }
-      const status =
-        typeof view.frontmatter.status === "string"
-          ? view.frontmatter.status
-          : "not set (reads as stable)";
-      return text(
-        [
-          `path: ${view.path}`,
-          `hash: ${view.hash}`,
-          `seq: ${view.seq}${args.at !== undefined ? ` (as of ${args.at})` : ""}`,
-          `trust: ${view.trust_tier} · stale: ${view.stale ? "yes" : view.stale_soon ? "soon" : "no"} · status: ${status} · inbound links: ${view.inbound_links}`,
-          ...(tier2 && view.open_comments > 0
-            ? [
-                `Open comments: ${view.open_comments}. Read them with \`comments\` (path ${view.path}) before you edit.`,
-              ]
-            : []),
-          lintText(view.lint),
-          "",
-          view.markdown,
-        ].join("\n"),
-      );
-    }),
+        const want = args.figures ?? (args.images ? true : null);
+        if (want) result.content.push(...(await figureImages(picked.token, figures, want)));
+        return result;
+      },
+    ),
   );
 
   server.registerTool(

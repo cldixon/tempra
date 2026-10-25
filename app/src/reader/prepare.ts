@@ -9,6 +9,8 @@ import {
   type DocNode,
   type DocText,
   docText,
+  fenceTitle,
+  findFigures,
   headingText,
   type LinkTarget,
   linkTarget,
@@ -84,23 +86,6 @@ export interface DiagramFigure extends FigureBase {
   node: Code;
   /** The fence's source. */
   source: string;
-}
-
-/** Fence languages drawn as figures (the registry draws them: registry.tsx). */
-export const FIGURE_FENCES: ReadonlySet<string> = new Set(["mermaid"]);
-
-/** A fence's caption: `title="…"` (or `'…'`, or one word) in what follows its language. */
-export function fenceTitle(meta: string | null | undefined): string | null {
-  const m = /(?:^|\s)title=(?:"([^"]*)"|'([^']*)'|(\S+))/.exec(meta ?? "");
-  const t = (m?.[1] ?? m?.[2] ?? m?.[3] ?? "").trim();
-  return t || null;
-}
-
-/** The image a paragraph holds and nothing else, which makes the paragraph a figure. */
-export function soleImage(n: DocNode): Image | null {
-  if (n.type !== "paragraph" || n.children.length !== 1) return null;
-  const only = n.children[0];
-  return only?.type === "image" ? only : null;
 }
 
 export interface Prepared {
@@ -194,19 +179,18 @@ export function prepare(tree: Doc, options: BodyOptions = {}): Prepared {
   });
   for (const f of footnotes) walk(f.node, (n) => void marker(n));
 
-  // Figures, in document order: images alone in their paragraph and fences drawn as figures.
+  // Figures, in document order, by the rule the Worker numbers them by too (findFigures).
   const figures: Figure[] = [];
   const figureOf = new Map<DocNode, Figure>();
-  walk(tree, (n) => {
-    if (n.type === "footnoteDefinition") return false;
-    const image = soleImage(n);
-    if (image && n.type === "paragraph") {
+  for (const found of findFigures(tree)) {
+    if (found.kind === "image") {
+      const { image } = found;
       const target = linkTarget(options.path ?? "", image.url);
       const f: ImageFigure = {
-        n: figures.length + 1,
+        n: found.n,
         kind: "image",
         caption: image.title?.trim() || image.alt?.trim() || null,
-        node: n,
+        node: found.node,
         image,
         url: image.url,
         alt: image.alt ?? "",
@@ -214,23 +198,20 @@ export function prepare(tree: Doc, options: BodyOptions = {}): Prepared {
         path: target?.kind === "internal" ? target.path : null,
       };
       figures.push(f);
-      figureOf.set(n, f);
+      figureOf.set(found.node, f);
       figureOf.set(image, f);
-      return false;
-    }
-    if (n.type === "code" && n.lang && FIGURE_FENCES.has(n.lang.toLowerCase())) {
+    } else {
       const f: DiagramFigure = {
-        n: figures.length + 1,
+        n: found.n,
         kind: "diagram",
-        caption: fenceTitle(n.meta),
-        node: n,
-        source: n.value,
+        caption: fenceTitle(found.node.meta),
+        node: found.node,
+        source: found.node.value,
       };
       figures.push(f);
-      figureOf.set(n, f);
+      figureOf.set(found.node, f);
     }
-    return undefined;
-  });
+  }
   return { tree, text, options, starts, anchors, headings, markers, footnotes, figures, figureOf };
 }
 
