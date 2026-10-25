@@ -16,23 +16,17 @@ import { inboxChanged } from "./inbox";
 import { useFeed, useFeedStatus } from "./live";
 import { libraryLabel, useLibraries } from "./role";
 import { lastNavigation } from "./router";
-import {
-  AccountSettingsSidebar,
-  AccountSidebar,
-  LibrarySidebar,
-  LibrarySwitcher,
-  SettingsSidebar,
-} from "./Sidebar";
+import { AccountSettingsSidebar, AccountSidebar, LibrarySidebar, SettingsSidebar } from "./Sidebar";
 import { LibrarySearch, Switcher } from "./Switcher";
 import type { OutlineFile } from "./Tree";
-import { type Me, switcherKey } from "./ui";
+import type { Me } from "./ui";
 import { baseName, type Urls } from "./urls";
 
 /*
  * The app's frame (take 4, TEMPRA-113; tempra-dev: app/workspace): a top bar across the window,
- * split at the sidebar's edge (the mark, the library switcher and search over the sidebar; the
- * page's tools, the bell and the avatar over the page, and no crumbs), a navigation sidebar, and
- * the page as a flat column. A library's pages, its settings and the account's pages all use
+ * split at the sidebar's edge (Tempra over the sidebar, on every page; the page's tools, the bell
+ * and the avatar over the page, and no crumbs), a navigation sidebar (in a library, the library
+ * switcher and Search lead it, TEMPRA-143), and the page as a flat column. A library's pages, its settings and the account's pages all use
  * it, each with its own sidebar. Under 900px the sidebar is a drawer behind the top bar.
  */
 
@@ -149,10 +143,8 @@ function saveHidden(urls: Urls, hidden: boolean) {
   }
 }
 
-/** What the frame draws around a page: the brand's part of the top bar, the sidebar, the phone's place. */
+/** What the frame draws around a page: the sidebar and how search opens. */
 interface Chrome {
-  /** Over the sidebar: the library switcher, or the frame's name (Tempra, Settings). */
-  brand: ReactNode;
   /** The sidebar's content (the drawer's on a phone). */
   sidebar: ReactNode;
   /** Opens search (Ctrl or Cmd+K too): the library's quick switcher, or the libraries'. */
@@ -309,7 +301,10 @@ function Shell(props: {
     <FrameContext.Provider value={frame}>
       <div className={classes.join(" ")}>
         <header className="ws-topbar" ref={topbar}>
-          <div className="topbar-brand">{chrome.brand}</div>
+          {/* Tempra over the sidebar on every page; the library leads the sidebar (TEMPRA-143). */}
+          <div className="topbar-brand">
+            <TempraMark className="topbar-mark" />
+          </div>
           <div className="topbar-page">
             <button
               ref={menuButton}
@@ -340,17 +335,6 @@ function Shell(props: {
             <div className="topbar-tools" ref={setToolsSlot} />
             <div className="topbar-end">
               {chrome.status}
-              {chrome.onSearch && (
-                <button
-                  type="button"
-                  className="icon-button phone-search"
-                  aria-label="Search"
-                  title={`Search (${switcherKey()})`}
-                  onClick={chrome.onSearch}
-                >
-                  <Icon name="search" />
-                </button>
-              )}
               <Bell />
               <AccountMenu me={props.me} />
             </div>
@@ -365,8 +349,8 @@ function Shell(props: {
           aria-label="Navigation"
           hidden={!showSidebar}
         >
-          {/* On a phone the drawer's head: Tempra, as on the top bar it covers, and × (TEMPRA-141).
-              A library's switcher is the drawer's first row (LibrarySidebar). */}
+          {/* On a phone the drawer's head: Tempra, as on the top bar it covers, and × (TEMPRA-141);
+              then the same sidebar as on the desktop (TEMPRA-143). */}
           <div className="drawer-head">
             <TempraMark className="drawer-mark" />
             <button
@@ -393,7 +377,7 @@ function Shell(props: {
   );
 }
 
-/** Tempra's mark and wordmark, the way to the library list: the phone's top bar and drawer. */
+/** Tempra's mark and wordmark, the way to the library list: the top bar, and the phone's drawer. */
 function TempraMark({ className }: { className: string }) {
   return (
     <a className={className} href="/">
@@ -421,25 +405,10 @@ function useSearchKey(toggle: () => void) {
   }, [toggle]);
 }
 
-/** Over the sidebar: a round search button, the shortcut as its hint. */
-function SearchButton({ onSearch }: { onSearch(): void }) {
-  return (
-    <button
-      type="button"
-      className="icon-button search-button"
-      aria-label="Search"
-      title={`Search (${switcherKey()})`}
-      onClick={onSearch}
-    >
-      <Icon name="search" />
-    </button>
-  );
-}
-
 /**
  * A library's frame, keyed by the library so it stays mounted while the person moves within it:
- * the switcher and search over the sidebar, the library's sidebar (or its settings' sidebar on a
- * settings page), the quick switcher, and the feed's refresh of the inbox count.
+ * the library's sidebar (the switcher and Search at its top), or its settings' sidebar on a
+ * settings page, the quick switcher, and the feed's refresh of the inbox count.
  */
 export function Workspace(props: { urls: Urls; place: Place; me: Me | null; children: ReactNode }) {
   const { urls, place } = props;
@@ -487,28 +456,14 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
   const onSearch = useCallback(() => setSwitching(true), []);
 
   const settings = SETTINGS_VIEWS.has(place.view);
-  const brand = (
-    <>
-      <a className="wordmark-tile" href="/" aria-label="Tempra" title="Tempra">
-        T
-      </a>
-      <span className="brand-sep" aria-hidden="true" />
-      {settings ? (
-        <a className="topbar-name" href={urls.settings()}>
-          Library settings
-        </a>
-      ) : (
-        <LibrarySwitcher urls={urls} name={name} />
-      )}
-      {!settings && <SearchButton onSearch={onSearch} />}
-    </>
-  );
+  const shared = library !== undefined && (library.role ?? "owner") !== "owner";
   const sidebarContent = settings ? (
     <SettingsSidebar urls={urls} name={name} place={place} />
   ) : (
     <LibrarySidebar
       urls={urls}
       name={name}
+      shared={shared}
       place={place}
       changes={agents.changes}
       now={agents.now}
@@ -517,7 +472,6 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
     />
   );
   const chrome: Chrome = {
-    brand,
     sidebar: sidebarContent,
     onSearch,
     // Only the library's own sidebar hides; the settings' is how the person moves between tabs.
@@ -568,16 +522,6 @@ export type AccountPage =
   | "agents"
   | "invitations";
 
-const ACCOUNT_NAMES: Record<AccountPage, string> = {
-  libraries: "Libraries",
-  inbox: "Inbox",
-  welcome: "Welcome",
-  account: "Account",
-  notifications: "Notifications",
-  agents: "Agents",
-  invitations: "Invitations",
-};
-
 /** The account's pages under its own sidebar; Welcome and Invitations are not settings (S-14). */
 const ACCOUNT_OWN: ReadonlySet<AccountPage> = new Set([
   "libraries",
@@ -589,31 +533,22 @@ const ACCOUNT_OWN: ReadonlySet<AccountPage> = new Set([
 /**
  * The account's frame (take 4, boards 01 to 05): Tempra over the sidebar; the library list, the
  * Inbox (an invitation is answered from it), and first run under the account's sidebar
- * (Libraries, Inbox, the person's libraries), the rest under the settings' (Back to libraries,
+ * (Search, Libraries, Inbox, the person's libraries), the rest under the settings' (Back to libraries,
  * then each page).
  */
 export function AccountFrame(props: { page: AccountPage; me: Me | null; children: ReactNode }) {
   const { page } = props;
   const settings = !ACCOUNT_OWN.has(page);
-  const _name = ACCOUNT_NAMES[page];
   // Off a library, search finds a library (TEMPRA-127).
   const [searching, setSearching] = useState(false);
   useSearchKey(useCallback(() => setSearching((on) => !on), []));
   const onSearch = useCallback(() => setSearching(true), []);
   const chrome: Chrome = {
-    brand: (
-      <>
-        <a className="wordmark-tile" href="/" aria-label="Tempra" title="Tempra">
-          T
-        </a>
-        <span className="brand-sep" aria-hidden="true" />
-        <a className="topbar-name" href={settings ? "/account" : "/"}>
-          {settings ? "Settings" : "Tempra"}
-        </a>
-        <SearchButton onSearch={onSearch} />
-      </>
+    sidebar: settings ? (
+      <AccountSettingsSidebar page={page} />
+    ) : (
+      <AccountSidebar page={page} onSearch={onSearch} />
     ),
-    sidebar: settings ? <AccountSettingsSidebar page={page} /> : <AccountSidebar page={page} />,
     onSearch,
   };
   return (
@@ -633,7 +568,7 @@ export function AccountFrame(props: { page: AccountPage; me: Me | null; children
  */
 export function PageBar(props: {
   actions?: ReactNode;
-  /** On a phone the tools take the place of search and the bell (a concept's, board 33). */
+  /** On a phone the tools take the place of the bell (a concept's, board 33). */
   phoneTools?: boolean;
 }) {
   const { slots, setOwnTools } = useFrame();
