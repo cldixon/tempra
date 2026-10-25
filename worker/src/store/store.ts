@@ -29,6 +29,7 @@ import { diagramLint } from "../okf/diagrams";
 import { unifiedDiff } from "../okf/diff";
 import { type FigureFact, figureFacts } from "../okf/figures";
 import { sha256Hex } from "../okf/hash";
+import { IMAGE_TARGET_CODES, imageLinks, imageLint, imageTargetLint } from "../okf/images";
 import { lintFields } from "../okf/lint";
 import { scanDoc } from "../okf/markdown";
 import {
@@ -576,12 +577,28 @@ export class LibraryStore {
    * before TEMPRA-152); 0 by 0 for one that does not decode. Never overwrites a known size.
    */
   setDimensions(hash: string, width: number, height: number): void {
-    this.sql.run(
-      "UPDATE blobs SET width = ?, height = ? WHERE hash = ? AND location = 'r2' AND width IS NULL",
-      Math.max(0, Math.floor(width)) || 0,
-      Math.max(0, Math.floor(height)) || 0,
+    const unknown = this.sql.all(
+      "SELECT 1 FROM blobs WHERE hash = ? AND location = 'r2' AND width IS NULL",
       hash,
     );
+    if (unknown.length === 0) return;
+    this.sql.transaction(() => {
+      this.sql.run(
+        "UPDATE blobs SET width = ?, height = ? WHERE hash = ? AND location = 'r2' AND width IS NULL",
+        Math.max(0, Math.floor(width)) || 0,
+        Math.max(0, Math.floor(height)) || 0,
+        hash,
+      );
+      // A size now known can make a figure too large (TEMPRA-159).
+      const snap = this.live();
+      for (const r of this.sql.all<{ from_id: string }>(
+        `SELECT DISTINCT l.from_id FROM links l JOIN paths p ON p.concept_id = l.to_id
+         WHERE p.hash = ? AND p.kind = 'attachment'`,
+        hash,
+      )) {
+        this.refreshImages(snap, r.from_id);
+      }
+    });
   }
 
   /**
@@ -1247,15 +1264,21 @@ export class LibraryStore {
    * affected concepts.
    */
   private finish(w: WriteState, results: OpResult[]): OpResult[] {
-    for (const id of w.affected) this.refreshBroken(id);
     const snap = this.live();
+    for (const id of w.affected) {
+      this.refreshBroken(id);
+      this.refreshImages(snap, id);
+    }
     for (const r of results) {
       const id = w.written.get(r.path);
       if (!id || r.hash === null) continue;
       const broken = this.refreshBroken(id);
+      const images = this.refreshImages(snap, id);
       const e = snap.byId.get(id);
       const anchors = e?.kind === "concept" ? this.anchorLint(snap, e) : [];
-      if (broken.length + anchors.length > 0) r.lint = [...r.lint, ...broken, ...anchors];
+      if (broken.length + images.length + anchors.length > 0) {
+        r.lint = [...r.lint, ...broken, ...images, ...anchors];
+      }
     }
     this.refreshStructure(results, w);
     return results;
@@ -1717,7 +1740,8 @@ export class LibraryStore {
       });
       if (cur?.kind === "concept") this.unindex(cur.concept_id);
       this.setPath(path, conceptId, blob.hash, "attachment", seq, cur?.created_seq ?? seq);
-      if (!sameBytes || !cur) this.healLinksTo(w, path, conceptId);
+      // New bytes or a new type: what links here is checked again (broken links, figure lint).
+      this.healLinksTo(w, path, conceptId);
     }
     const result: OpResult = {
       op: w.mode === "import" ? "import" : "put",
@@ -2323,6 +2347,55 @@ export class LibraryStore {
     return lint;
   }
 
+  /**
+   * Figure lint that depends on what a concept's images point to (TEMPRA-159, okf/images.ts):
+   * recomputed, like broken links, when the concept is written or an attachment it shows is
+   * replaced, retyped or deleted. Kept in the stored lint and the concept's lint flag (`work`).
+   */
+  private refreshImages(snap: View, id: string): LintWarning[] {
+    const e = snap.byId.get(id);
+    const stored = this.sql.all<{ lint: string | null }>(
+      "SELECT lint FROM concepts WHERE concept_id = ?",
+      id,
+    )[0];
+    if (e?.kind !== "concept" || !stored) return [];
+    const lint = this.imageTargets(snap, this.record(e.hash));
+    const before = JSON.parse(stored.lint ?? "[]") as LintWarning[];
+    const others = before.filter((l) => !IMAGE_TARGET_CODES.has(l.code));
+    if (others.length === before.length && lint.length === 0) return [];
+    const all = [...others, ...lint];
+    this.sql.run("UPDATE concepts SET lint = ? WHERE concept_id = ?", JSON.stringify(all), id);
+    const flagged = all.filter((l) => l.code !== "broken_link");
+    if (flagged.length > 0) {
+      this.sql.run(
+        `INSERT INTO flags (concept_id, kind, since_seq, detail) VALUES (?, 'lint', ?, ?)
+         ON CONFLICT(concept_id, kind) DO UPDATE SET detail = excluded.detail`,
+        id,
+        this.headSeq(),
+        JSON.stringify(flagged),
+      );
+    } else {
+      this.sql.run("DELETE FROM flags WHERE concept_id = ? AND kind = 'lint'", id);
+    }
+    return lint;
+  }
+
+  /** The target-dependent figure lint of a concept version, as of the snapshot. */
+  private imageTargets(snap: View, r: ConceptRecord): LintWarning[] {
+    return imageTargetLint(imageLinks(r.doc, r.links), (l) => {
+      const t = this.targetAt(snap, l);
+      if (t?.kind !== "attachment") return null;
+      return (
+        this.sql.all<{
+          size: number;
+          media: string | null;
+          width: number | null;
+          height: number | null;
+        }>("SELECT size, media, width, height FROM blobs WHERE hash = ?", t.hash)[0] ?? null
+      );
+    });
+  }
+
   // ---------------------------------------------------------------- reads
 
   /** The href to render for a link, as of the snapshot (spec: Concept model, Reads and export). */
@@ -2388,11 +2461,13 @@ export class LibraryStore {
       return [
         { code: "unparseable_frontmatter", message: "Frontmatter could not be parsed as YAML." },
         ...diagramLint(r.doc),
+        ...imageLint(r.doc),
       ];
     }
     return [
       ...lintFields(r.fm, r.generated, verified, scanDoc(r.doc, path), { strict }),
       ...diagramLint(r.doc),
+      ...imageLint(r.doc),
     ];
   }
 
@@ -2402,6 +2477,7 @@ export class LibraryStore {
     for (const [l, kind] of linkGraph(r)) {
       if (!this.targetAt(snap, l)) lint.push(brokenLink(kind, l.raw, l.path));
     }
+    lint.push(...this.imageTargets(snap, r));
     return lint;
   }
 
