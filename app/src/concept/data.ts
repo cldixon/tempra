@@ -49,7 +49,21 @@ export type FileJson =
       /** An image's size in pixels, from its header (TEMPRA-152); null when not known. */
       width?: number | null;
       height?: number | null;
+      /** Where the bytes were fetched from, when an agent attached them from a URL (TEMPRA-157). */
+      source?: AttachSource | null;
+      /** What the file shows, its credit and its licence, as its writer gave them (TEMPRA-170). */
+      description?: string | null;
+      credit?: string | null;
+      licence?: string | null;
     };
+
+/** An attachment fetched from a URL: the URL, where it ended after redirects, and when. */
+export interface AttachSource {
+  via: "url";
+  url: string;
+  final_url?: string;
+  fetched_at: string;
+}
 
 export type Concept = Extract<FileJson, { kind: "concept" }>;
 
@@ -65,7 +79,11 @@ export interface HistoryEvent {
   op: string;
   path: string;
   hash: string | null;
+  /** The hash before this event (null for the first). */
+  prev_hash?: string | null;
   meta: JsonObject | null;
+  /** An attachment version's bytes: size, type and dimensions (TEMPRA-170). */
+  file?: { size: number; media: string | null; width: number | null; height: number | null };
 }
 
 /** The person and agent behind an event, as its meta keeps them (TEMPRA-75), if it does. */

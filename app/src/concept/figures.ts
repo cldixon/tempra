@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { actorText } from "../agents";
 import { api } from "../api";
+import { hostOf } from "../pages/attachment";
 import type { FigureView, ImageFacts } from "../reader/Lightbox";
 import { enc, type Urls } from "../urls";
 import type { Namer } from "./Byline";
@@ -8,7 +9,8 @@ import { actedBy, type FileJson, type HistoryEvent } from "./data";
 
 /**
  * What the full-screen view says about a concept's images (tempra-dev: app/reader, Figures): the
- * concept's title, and for an image stored in the library its size and who added it, asked for
+ * concept's title, and for an image stored in the library its size, who added it, where it was
+ * fetched from and what it shows (TEMPRA-170), asked for
  * once per image when the view first shows it.
  */
 export function useFigureView(urls: Urls, title: string, name: Namer): FigureView {
@@ -23,9 +25,12 @@ export function useFigureView(urls: Urls, title: string, name: Namer): FigureVie
         ]).then(
           ([file, history]) => {
             const added = [...history.events].reverse().find((e) => e.op !== "comment");
+            const a = file.kind === "attachment" ? file : null;
             return {
-              size: file.kind === "attachment" ? file.size : null,
-              media: file.kind === "attachment" ? file.media : null,
+              size: a ? a.size : null,
+              media: a ? a.media : null,
+              host: a?.source ? hostOf(a.source.url) : null,
+              description: a?.description ?? null,
               by: added ? actorText(name(added.actor, actedBy(added))) : null,
               at: added?.ts ?? null,
             };

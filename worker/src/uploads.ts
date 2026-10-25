@@ -24,6 +24,9 @@ export interface UploadGrant {
   if_match?: string;
   /** What the file shows, kept with the attach op (TEMPRA-157, for the file's page). */
   description?: string;
+  /** Who made it and its licence (TEMPRA-170). */
+  credit?: string;
+  licence?: string;
   note: string | null;
   actor: string;
   by: RequestContext["by"];

@@ -35,8 +35,9 @@ import { readCookie, SESSION_COOKIE, type Sessions } from "./session";
 import { type Mailer, registerSignInRoutes } from "./signin";
 import { OkfError } from "./store/errors";
 import {
+  type AttachFacts,
   type ConceptContent,
-  checkDescription,
+  checkFacts,
   type RequestContext,
   type WriteOp,
   type WriteResult,
@@ -299,7 +300,13 @@ async function attachFromUrl(c: C, path: string): Promise<Response> {
   requireWrite(c, path);
   const type = (c.req.header("Content-Type") ?? "").toLowerCase();
   const body = type.startsWith("application/json")
-    ? await json<{ source_url?: unknown; description?: unknown; note?: unknown }>(c)
+    ? await json<{
+        source_url?: unknown;
+        description?: unknown;
+        credit?: unknown;
+        licence?: unknown;
+        note?: unknown;
+      }>(c)
     : {};
   const from = c.req.query("from") ?? body.source_url;
   if (typeof from !== "string" || from === "") {
@@ -313,7 +320,7 @@ async function attachFromUrl(c: C, path: string): Promise<Response> {
   if (!clean || clean.endsWith(".md")) {
     throw new OkfError(400, "bad_attachment", "Markdown files are concepts, not attachments.");
   }
-  const description = checkDescription(c.req.query("description") ?? body.description);
+  const facts = queryFacts(c, body);
   const d = c.var.deps;
   const got = await fetchBlob(
     {
@@ -340,10 +347,25 @@ async function attachFromUrl(c: C, path: string): Promise<Response> {
       if_match: ifMatch,
       if_none_match: ifNoneMatch,
       source: got.source,
-      ...(description !== undefined ? { description } : {}),
+      ...facts,
     },
   ]);
   return writeResponse(c, res);
+}
+
+/**
+ * An attachment's description, credit and licence (TEMPRA-170) from the query string, else a
+ * JSON body: how REST writes them beside the bytes.
+ */
+function queryFacts(
+  c: C,
+  body: { description?: unknown; credit?: unknown; licence?: unknown } = {},
+): AttachFacts {
+  return checkFacts({
+    description: c.req.query("description") ?? body.description,
+    credit: c.req.query("credit") ?? body.credit,
+    licence: c.req.query("licence") ?? body.licence,
+  });
 }
 
 export function createApp(deps: (env: Cloudflare.Env) => Deps) {
@@ -456,8 +478,8 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     c.header("X-Seq", String(view.seq));
     if (view.kind === "attachment" && wantsJson) {
       // A description, not the bytes: what the app shows on an attachment's page.
-      const { kind, path, seq, hash, size, media, width, height, source, description } =
-        await withDimensions(c.var.lib, c.var.deps.blobs, view);
+      const v = await withDimensions(c.var.lib, c.var.deps.blobs, view);
+      const { kind, path, seq, hash, size, media, width, height, source, description } = v;
       c.header("ETag", `"${hash}"`);
       return c.json({
         kind,
@@ -471,6 +493,8 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
         // Where the bytes were fetched from, and what the file shows (TEMPRA-157, TEMPRA-170).
         source: source ?? null,
         description: description ?? null,
+        credit: v.credit ?? null,
+        licence: v.licence ?? null,
       });
     }
     if (view.kind === "attachment") {
@@ -523,6 +547,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
         ),
         if_match: ifMatch,
         if_none_match: ifNoneMatch,
+        ...queryFacts(c),
       };
     } else if (isMarkdownRequest(c, path)) {
       const type = (c.req.header("Content-Type") ?? "").toLowerCase();
@@ -538,7 +563,14 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
         mediaFor(path, c.req.header("Content-Type")),
         path,
       );
-      op = { op: "attach", path, blob, if_match: ifMatch, if_none_match: ifNoneMatch };
+      op = {
+        op: "attach",
+        path,
+        blob,
+        if_match: ifMatch,
+        if_none_match: ifNoneMatch,
+        ...queryFacts(c),
+      };
     }
     const res = await c.var.lib.apply(requestContext(c), [op]);
     return writeResponse(c, res);
@@ -586,6 +618,8 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
       sha256?: unknown;
       if_match?: unknown;
       description?: unknown;
+      credit?: unknown;
+      licence?: unknown;
       note?: unknown;
     }>(c);
     const path = typeof body.path === "string" && body.path !== "" ? body.path : null;
@@ -596,14 +630,14 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
       sha256: typeof body.sha256 === "string" ? body.sha256 : undefined,
     });
     const media = typeof body.media === "string" && body.media ? body.media : null;
-    const description = path ? checkDescription(body.description) : undefined;
+    const facts = path ? checkFacts(body) : {};
     const ctx = requestContext(c, body.note);
     const prepared = await prepareUpload(c.var.lib, new URL(c.req.url).origin, {
       path,
       media: media ?? (path ? mediaFor(path) : null),
       ...declared,
       if_match: typeof body.if_match === "string" ? body.if_match : undefined,
-      ...(description !== undefined ? { description } : {}),
+      ...facts,
       note: ctx.note ?? null,
       actor: ctx.actor,
       by: ctx.by,
@@ -1205,7 +1239,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
           path: grant.path,
           blob,
           if_match: grant.if_match,
-          ...(grant.description ? { description: grant.description } : {}),
+          ...checkFacts(grant),
         },
       ],
     );

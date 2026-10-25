@@ -4971,6 +4971,70 @@ a.activity-download {
   list-style: none;
 }
 
+.attachment-used > li + li {
+  margin-top: var(--tempra-space-1);
+}
+
+/* The name and, under it, what the file shows (TEMPRA-170). */
+.attachment-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--tempra-space-1);
+}
+
+.attachment-description {
+  margin: 0;
+  text-wrap: pretty;
+  overflow-wrap: anywhere;
+}
+
+/* Under a page in Used in: the figure it appears as, and its caption. */
+.attachment-figure {
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+}
+
+/* File history: every version as a row between hairlines, under the image and the facts. */
+.attachment-history {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.attachment-history ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--tempra-color-border);
+}
+
+.attachment-history li {
+  display: grid;
+  grid-template-columns: 10rem minmax(0, 1fr) 10rem auto;
+  gap: var(--tempra-space-1) var(--tempra-space-3);
+  align-items: baseline;
+  padding: var(--tempra-space-2) 0;
+  border-bottom: 1px solid var(--tempra-color-border);
+}
+
+.attachment-version-when {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--tempra-space-1) var(--tempra-space-2);
+}
+
+.attachment-version-who {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.attachment-version-download {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--tempra-space-1);
+  white-space: nowrap;
+}
+
 @media (max-width: 1100px) {
   .attachment {
     grid-template-columns: minmax(0, 1fr);
@@ -4979,6 +5043,21 @@ a.activity-download {
   .attachment-frame {
     min-height: 14rem;
     padding: var(--tempra-space-3);
+  }
+}
+
+/* A phone: each version stacks, when and who above its size and Download. */
+@media (max-width: 900px) {
+  .attachment-history li {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .attachment-version-who {
+    grid-column: 1 / -1;
+  }
+
+  .attachment-version-download {
+    min-height: 44px;
   }
 }
 
