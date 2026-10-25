@@ -4,6 +4,7 @@ import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/
 import { imagesService, MODEL_BYTES, MODEL_EDGE, variantKeysFor } from "../src/images";
 import { readTar } from "../src/util/tar";
 import { setup } from "./harness";
+import { base64, makePng } from "./images";
 import { approve, connectApp } from "./oauth-flow";
 
 type Text = { type: "text"; text: string };
@@ -233,6 +234,29 @@ describe("MCP server", () => {
     expect((await app.request(url.replace("/dl/lib-1/", "/dl/other/"))).status).toBe(403);
   });
 
+  test("attach round-trips a few-hundred-KB image byte for byte (TEMPRA-105)", async () => {
+    const { app } = setup();
+    const { call } = await connect(app);
+    const png = makePng(320, 320, { noise: true });
+    expect(png.length).toBeGreaterThan(250_000);
+    const r = await call("attach", { path: "assets/attach-test.png", content_base64: base64(png) });
+    expect(r.isError).toBe(false);
+    const read = (await call("read", { path: "assets/attach-test.png" })).text;
+    expect(read).toContain(`size: ${png.length} bytes · media: image/png`);
+    expect(read).toContain("dimensions: 320×320 px");
+    const url = /download \(15 minutes\): (\S+)/.exec(read)?.[1] ?? "";
+    const got = new Uint8Array(await (await app.request(url)).arrayBuffer());
+    expect(got.length).toBe(png.length);
+    expect(Buffer.from(got).equals(Buffer.from(png))).toBe(true);
+    // The same image with its base64 cut short, as a model typing it out might send it.
+    const cut = await call("attach", {
+      path: "assets/attach-cut.png",
+      content_base64: base64(png).slice(0, 4000),
+    });
+    expect(cut.isError).toBe(true);
+    expect(cut.text).toContain("bad_image");
+  });
+
   test("permissions: read-only tokens cannot write; only process tokens verify", async () => {
     const { app } = setup();
     const writer = await connect(app);
@@ -276,6 +300,8 @@ describe("MCP server", () => {
       }
       // SOF0: 8-bit, 2000 high, 3000 wide, one component.
       parts.push(0xff, 0xc0, 0x00, 0x0b, 0x08, 0x07, 0xd0, 0x0b, 0xb8, 0x01, 0x01, 0x11, 0x00);
+      // SOS and a byte of image data: attachments are checked on write (TEMPRA-152).
+      parts.push(0xff, 0xda, 0x00, 0x08, 0x01, 0x01, 0x00, 0x00, 0x3f, 0x00, 0x00);
       parts.push(0xff, 0xd9);
       return new Uint8Array(parts);
     };
