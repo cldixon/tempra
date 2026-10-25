@@ -2929,9 +2929,12 @@ button.tree-name {
     padding: 0 4px;
   }
 
-  /* The bar's controls keep their desktop shape; each answers a 44px touch around it. */
+  /* The bar's controls, and the drawer's head's (the switcher, search), keep their desktop
+     shape; each answers a 44px touch around it. */
   .topbar-page .icon-button::after,
-  .topbar-page .avatar::after {
+  .topbar-page .avatar::after,
+  .drawer-head .lib-switch::after,
+  .drawer-head .search-button::after {
     content: "";
     position: absolute;
     inset: min(0px, calc((100% - var(--tempra-touch)) / 2));
@@ -3010,9 +3013,12 @@ button.tree-name {
     min-height: var(--tempra-touch);
   }
 
-  .icon-button.touch,
   .drawer-head .lib-switch,
   .drawer-head .search-button {
+    position: relative;
+  }
+
+  .icon-button.touch {
     width: var(--tempra-touch);
     height: var(--tempra-touch);
   }

@@ -1779,6 +1779,16 @@ async function browserRenders(
         .locator("main.ws-main")
         .getByRole("heading", { level: 1, name: "Inbox", exact: true })
         .waitFor({ timeout: 15_000 });
+      // An account page's bar over the sidebar, as the drawer's head has it: the mark and
+      // "Tempra", search, no switcher (TEMPRA-145).
+      const accountBrand = page.locator(".topbar-brand");
+      if ((await accountBrand.locator("a.brand-name").innerText()).trim() !== "Tempra") {
+        throw new Error("an account page's bar does not read Tempra");
+      }
+      await accountBrand.getByRole("button", { name: "Search", exact: true }).waitFor();
+      if ((await accountBrand.getByRole("button", { name: "Switch library" }).count()) > 0) {
+        throw new Error("an account page's bar has a library switcher");
+      }
       await row.waitFor({ timeout: 10_000 });
       await row.getByText("To check").waitFor({ timeout: 5000 });
       await row.getByText(/^1 edit by .+ since you checked$/).waitFor({ timeout: 5000 });
