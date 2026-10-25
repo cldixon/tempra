@@ -296,7 +296,18 @@ export function setup() {
   const ownerSession = sessionFor(OWNER.id);
   const bucket = memoryBucket();
   const pitr = fakeRecovery();
+  /**
+   * The web as the Worker's outbound fetch sees it (TEMPRA-157): a handler per URL, anything
+   * else 404s; `fetched` lists what was asked for. Nothing leaves the process.
+   */
+  const web = new Map<string, (init?: RequestInit) => Response | Promise<Response>>();
+  const fetched: string[] = [];
   const deps: Deps = {
+    fetch: async (url, init) => {
+      fetched.push(url);
+      const h = web.get(url);
+      return h ? h(init) : new Response("not found", { status: 404 });
+    },
     health: async () => ({ d1: "ok", r2: "ok", durable_objects: "ok" }),
     maintain: async (doId) => {
       clientFor(doId);
@@ -485,6 +496,8 @@ export function setup() {
     deps,
     bucket,
     pitr,
+    web,
+    fetched,
     usage,
     limits,
     stranger,

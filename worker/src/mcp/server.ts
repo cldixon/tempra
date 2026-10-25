@@ -4,6 +4,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { TokenInfo } from "../auth";
 import { type BlobStore, type LibraryClient, mediaFor, putBlob, withDimensions } from "../client";
+import { type FetchFn, fetchBlob, selfHosts } from "../fetch-source";
 import {
   IMAGE_BYTES_PER_CALL,
   IMAGES_PER_CALL,
@@ -18,7 +19,13 @@ import { normalizePath, underPrefix } from "../okf/paths";
 import type { LintWarning } from "../okf/types";
 import type { CommentAction, CommentResult } from "../store/comments";
 import { OkfError } from "../store/errors";
-import type { LibraryHealth, RequestContext, WriteOp, WriteResult } from "../store/store";
+import {
+  checkDescription,
+  type LibraryHealth,
+  type RequestContext,
+  type WriteOp,
+  type WriteResult,
+} from "../store/store";
 import { requireOwner } from "../tenancy";
 import { checkBytes, checkDeclared, decodeBase64, prepareUpload } from "../uploads";
 
@@ -57,8 +64,13 @@ export interface McpContext {
   blobs: BlobStore;
   /** Attachment images scaled for the model (images.ts); without it, small originals only. */
   images?: Images;
-  /** Meters what a call sends beyond a request (an image: `read_image`). */
-  meter?(e: { kind: "read_image"; library: string; bytes: number }): void;
+  /**
+   * Meters what a call costs beyond a request: an image sent (`read_image`), a file fetched from
+   * a URL (`fetch`, TEMPRA-157).
+   */
+  meter?(e: { kind: "read_image" | "fetch"; library: string; bytes: number }): void;
+  /** Outbound fetch for `attach` with `source_url` (fetch-source.ts); tests pass a double. */
+  fetch?: FetchFn;
   /** The Worker's origin, for download URLs. */
   origin: string;
 }
@@ -77,7 +89,7 @@ How to work:
 1. Call \`start\` first. It opens your library, or lists the libraries you can reach when there are several; then pass \`library\` (owner/slug) on every call. When the person asks for a new library, \`create_library\` makes one they own and opens it (only on a connection they allowed to). Then \`browse\` a directory before reading, follow links, and \`read\` what you need. Check frontmatter (type, status, trust tier, stale) before relying on a body. \`read\` lists a concept's figures; ask for their images with \`images: true\` (or \`figures: [n]\`) when you review a page, change a figure or its caption, or answer a comment on one.
 2. Write conformant concepts: a non-empty \`type\` naming what kind of thing it is (Metric, Protocol, Decision; never a generic word like concept, page or note, and reuse the types \`start\` lists), a \`title\` and one-line \`description\`, absolute links like [x](/dir/x.md), footnotes [^id] keyed to \`sources[].id\`, diagrams as Mermaid in a \`mermaid\` fence (drawn in the app; an unknown type, an empty body or an unclosed bracket or quote comes back as \`diagram_invalid\` lint), one idea per concept.
    Figures: a plain image is \`![alt](/path "caption")\`; for a width, a placement or a group, wrap one to four images in \`:::figure[group caption]{width=480|60% layout=column|wide|full frame}\` and a closing \`:::\` line (markup that does not parse comes back as \`figure_invalid\` lint).
-3. Prefer \`edit\` for small changes, \`write\` for new concepts or rewrites, \`batch\` for related changes so they land as one request. Pass \`if_match\` (the hash from your last read); on a conflict, re-read and reapply. Bodies are stored in a canonical form (\`-\` bullets, \`*\` emphasis, padded tables): what you write reads back normalized, so \`edit\` the text as \`read\` shows it. To add a file (an image, a PDF): with a shell, \`prepare_upload\` and run the curl line it returns; without one, \`attach\` small files (under about 200 KB) as base64 with their \`sha256\`.
+3. Prefer \`edit\` for small changes, \`write\` for new concepts or rewrites, \`batch\` for related changes so they land as one request. Pass \`if_match\` (the hash from your last read); on a conflict, re-read and reapply. Bodies are stored in a canonical form (\`-\` bullets, \`*\` emphasis, padded tables): what you write reads back normalized, so \`edit\` the text as \`read\` shows it. To add a file (an image, a PDF): an image on the public web, \`attach\` with \`source_url\` (the server fetches it and records where from; still cite the original in \`sources\`, and never hotlink it); a file you made, with a shell, \`prepare_upload\` and run the curl line it returns; without one, \`attach\` small files (under about 200 KB) as base64 with their \`sha256\`.
 4. Put a one-line \`note\` on every write. Read the \`lint\` in every write result and fix what it reports; the result's notes say what else to know (ignored fields, the stored form, open comments). A concept with no frontmatter, invalid YAML or no \`type\` is refused. Figures come back as lint, never refused: \`image_no_alt\` (say what the image shows in its alt text), \`image_external\` (hotlinked; bring it in with \`attach\` and \`source_url\`, cite the original in \`sources\`), \`image_large\` (over 2 MB or 4000 px; attach a smaller one), \`image_not_image\` (\`![…](x)\` on a file that is not an image, video, audio or PDF). Keep concepts under 100 KB; split big ones into linked concepts.
 5. Never write index.md or log.md (the server synthesizes them). Never set \`generated\` (the server stamps it) or \`verified\` (not yours to claim). Set \`status\` and \`stale_after\` honestly. Timestamps are full ISO 8601 datetimes with an offset (\`stale_after: 2026-12-31T00:00:00Z\`); a plain date is flagged.
 6. Use \`work\` to find what needs doing: open comments, stale concepts, broken links, lint, and structure (a directory's index.md made poor by its concepts: missing, long or title-repeating descriptions, duplicate titles, concepts nothing links to, a directory with one concept, none, or too many); \`work\` with kind stale_soon lists what goes stale within 14 days. Only a new \`stale_after\` resets a concept's clock; other edits leave it stale.
@@ -627,6 +639,12 @@ export function buildServer(ctx: McpContext): McpServer {
               `seq: ${view.seq}`,
               `size: ${view.size} bytes · media: ${view.media ?? "unknown"}`,
               ...(view.width && view.height ? [`dimensions: ${view.width}×${view.height} px`] : []),
+              ...(view.source
+                ? [
+                    `source: ${view.source.url}, fetched ${view.source.fetched_at}${view.source.final_url ? ` (from ${view.source.final_url} after redirects)` : ""}; cite it in \`sources\` where you use it`,
+                  ]
+                : []),
+              ...(view.description ? [`description: ${view.description}`] : []),
               `download (15 minutes): ${url}`,
             ].join("\n"),
           );
@@ -823,10 +841,23 @@ export function buildServer(ctx: McpContext): McpServer {
     {
       title: "Add an attachment",
       description:
-        "Store a small non-markdown file (an image, a script, a PDF) at a path, e.g. `references/attesters/check.py`, from its bytes as base64. Base64 is for small files (under about 200 KB): every character is typed out, and a long run gets cut short or garbled. If you can run a shell, use `prepare_upload` instead and PUT the real file; it takes up to 10 MB. Pass `sha256` (hex; `sha256sum file`, or `hashlib.sha256(data).hexdigest()`) or at least `size` in bytes, so bytes that arrive damaged are refused (`checksum_mismatch`, with what arrived) instead of stored. Images (PNG, JPEG, GIF, WebP, AVIF, SVG) are checked on write: a broken or truncated one is refused with `bad_image`, and an image's type is taken from its bytes, not from `media` or the extension. Replacing needs `if_match`. Reading it back with `read` returns a short-lived download URL.",
+        "Store a non-markdown file (an image, a script, a PDF) at a path, e.g. `figures/latency.png`, from exactly one of `source_url` or `content_base64`. An image on the public web goes in with `source_url`: the server fetches it (https only, no credentials in the URL, at most 3 redirects, 10 s, up to 10 MB; images, video, audio and PDF only, judged by the bytes), so nothing passes through you, and records the URL and fetch time as the file's source; a refused fetch is `fetch_refused` naming the rule. That source is not a citation: cite the original in the concept's `sources` too. Never hotlink a web image in a concept; bring it in this way. `content_base64` is for small files you made (under about 200 KB): every character is typed out, and a long run gets cut short or garbled. If you can run a shell, use `prepare_upload` instead and PUT the real file; it takes up to 10 MB. Pass `sha256` (hex; `sha256sum file`, or `hashlib.sha256(data).hexdigest()`) or at least `size` in bytes, so bytes that arrive damaged are refused (`checksum_mismatch`, with what arrived) instead of stored. Images (PNG, JPEG, GIF, WebP, AVIF, SVG) are checked on write: a broken or truncated one is refused with `bad_image`, and an image's type is taken from its bytes, not from `media` or the extension. `description` says in a line what the file shows (up to 500 characters). Replacing needs `if_match`. Reading it back with `read` returns its facts (source and description included) and a short-lived download URL.",
       inputSchema: {
         path: z.string(),
-        content_base64: z.string(),
+        source_url: z
+          .string()
+          .optional()
+          .describe(
+            "A public https URL the server fetches the file from; instead of content_base64.",
+          ),
+        content_base64: z
+          .string()
+          .optional()
+          .describe("The file's bytes as base64, for small files; instead of source_url."),
+        description: z
+          .string()
+          .optional()
+          .describe("What the file shows, in a line (at most 500 characters)."),
         media: z.string().optional().describe("MIME type; guessed from the extension if omitted."),
         sha256: z
           .string()
@@ -839,16 +870,82 @@ export function buildServer(ctx: McpContext): McpServer {
       },
       annotations: writes,
     },
-    guarded(async ({ path, content_base64, media, sha256, size, if_match, note, library }) => {
-      const { token, lib } = pick(library);
-      checkWrite(token, path);
-      const declared = checkDeclared({ size, sha256 });
-      const bytes = decodeBase64(content_base64);
-      checkBytes(bytes, declared);
-      const blob = await putBlob(ctx.blobs, bytes, media ?? mediaFor(path), path);
-      const res = await lib.apply(request(note), [{ op: "attach", path, blob, if_match }]);
-      return text(writeText("Stored", res));
-    }),
+    guarded(
+      async ({
+        path,
+        source_url,
+        content_base64,
+        description,
+        media,
+        sha256,
+        size,
+        if_match,
+        note,
+        library,
+      }) => {
+        const { token, lib } = pick(library);
+        checkWrite(token, path);
+        if ((source_url === undefined) === (content_base64 === undefined)) {
+          throw new OkfError(
+            400,
+            "bad_attach",
+            "Pass exactly one of `source_url` (a public https URL the server fetches) or `content_base64` (a small file's bytes).",
+          );
+        }
+        const declared = checkDeclared({ size, sha256 });
+        const desc = checkDescription(description);
+        const clean = normalizePath(path) ?? path;
+        if (source_url !== undefined) {
+          if (!clean || clean.endsWith(".md")) {
+            throw new OkfError(
+              400,
+              "bad_attachment",
+              "Markdown files are concepts, not attachments.",
+            );
+          }
+          const got = await fetchBlob(
+            {
+              fetch: ctx.fetch ?? ((u, i) => fetch(u, i)),
+              blobs: ctx.blobs,
+              selfHosts: selfHosts(ctx.origin),
+            },
+            source_url,
+            clean,
+          );
+          ctx.meter?.({ kind: "fetch", library: token.library.id, bytes: got.bytes.byteLength });
+          checkBytes(got.bytes, declared);
+          const res = await lib.apply(request(note), [
+            {
+              op: "attach",
+              path,
+              blob: got.blob,
+              if_match,
+              source: got.source,
+              ...(desc !== undefined ? { description: desc } : {}),
+            },
+          ]);
+          return text(
+            [
+              writeText("Stored", res),
+              `Fetched ${got.bytes.byteLength} bytes from ${got.source.final_url ?? got.source.url} as ${got.blob.media ?? "unknown"}. Cite the original in the concept's \`sources\` too.`,
+            ].join("\n"),
+          );
+        }
+        const bytes = decodeBase64(content_base64 as string);
+        checkBytes(bytes, declared);
+        const blob = await putBlob(ctx.blobs, bytes, media ?? mediaFor(path), path);
+        const res = await lib.apply(request(note), [
+          {
+            op: "attach",
+            path,
+            blob,
+            if_match,
+            ...(desc !== undefined ? { description: desc } : {}),
+          },
+        ]);
+        return text(writeText("Stored", res));
+      },
+    ),
   );
 
   server.registerTool(
@@ -863,12 +960,16 @@ export function buildServer(ctx: McpContext): McpServer {
         size: z.number().int().optional().describe("The file's length in bytes."),
         sha256: z.string().optional().describe("The file's SHA-256 as hex."),
         if_match: z.string().optional().describe("Replacing a file: its current hash."),
+        description: z
+          .string()
+          .optional()
+          .describe("What the file shows, in a line (at most 500 characters)."),
         note: z.string().optional().describe("One line for the ledger."),
         ...libArg,
       },
       annotations: writes,
     },
-    guarded(async ({ path, media, size, sha256, if_match, note, library }) => {
+    guarded(async ({ path, media, size, sha256, if_match, description, note, library }) => {
       const picked = pick(library);
       checkWrite(picked.token, path);
       const clean = normalizePath(path);
@@ -880,11 +981,13 @@ export function buildServer(ctx: McpContext): McpServer {
         );
       }
       const req = request(note);
+      const desc = checkDescription(description);
       const up = await prepareUpload(picked.lib, ctx.origin, {
         path: clean,
         media: media ?? mediaFor(clean),
         ...checkDeclared({ size, sha256 }),
         if_match,
+        ...(desc !== undefined ? { description: desc } : {}),
         note: req.note ?? null,
         actor: req.actor,
         by: req.by,
