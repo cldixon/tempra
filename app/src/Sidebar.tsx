@@ -140,12 +140,15 @@ export function settingsTabs(urls: Urls, role: string | null) {
   return all.filter(([, , , shown]) => shown).map(([label, href, view]) => ({ label, href, view }));
 }
 
-/** The settings' sidebar: back to the library, then its tabs. */
-export function SettingsSidebar({ urls, name, place }: { urls: Urls; name: string; place: Place }) {
+/**
+ * The settings' sidebar: back to the library (its name is already over the sidebar, so the row
+ * does not say it again), then its tabs.
+ */
+export function SettingsSidebar({ urls, place }: { urls: Urls; place: Place }) {
   const role = useRole(urls);
   return (
     <nav className="nav" aria-label="Library settings">
-      <Row href={urls.tree("")} icon="previous" label={`Back to ${name}`} className="back" />
+      <Row href={urls.tree("")} icon="previous" label="Back to library" className="back" />
       {settingsTabs(urls, role).map((t) => (
         <Row key={t.view} href={t.href} current={place.view === t.view} label={t.label} />
       ))}

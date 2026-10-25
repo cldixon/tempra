@@ -508,7 +508,7 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
   const settings = SETTINGS_VIEWS.has(place.view);
   const shared = library !== undefined && (library.role ?? "owner") !== "owner";
   const sidebarContent = settings ? (
-    <SettingsSidebar urls={urls} name={name} place={place} />
+    <SettingsSidebar urls={urls} place={place} />
   ) : (
     <LibrarySidebar
       urls={urls}

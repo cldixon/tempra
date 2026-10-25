@@ -34,22 +34,27 @@ const ancestors = (path: string) => {
   return out;
 };
 
-const expandedKey = (urls: Urls) => `tempra:tree:${urls.owner}/${urls.slug}`;
+/*
+ * Every folder starts open, the library laid out as a docs site's sidebar is (TEMPRA-146); what
+ * is remembered is the folders the person closed. (The key changed with it: the old one listed
+ * the open folders.)
+ */
+const closedKey = (urls: Urls) => `tempra:tree-closed:${urls.owner}/${urls.slug}`;
 
-function loadExpanded(urls: Urls): Set<string> {
+function loadClosed(urls: Urls): Set<string> {
   try {
-    const v = JSON.parse(localStorage.getItem(expandedKey(urls)) ?? "[]") as unknown;
+    const v = JSON.parse(localStorage.getItem(closedKey(urls)) ?? "[]") as unknown;
     return new Set(Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : []);
   } catch {
     return new Set();
   }
 }
 
-function saveExpanded(urls: Urls, dirs: Set<string>) {
+function saveClosed(urls: Urls, dirs: Set<string>) {
   try {
-    localStorage.setItem(expandedKey(urls), JSON.stringify([...dirs]));
+    localStorage.setItem(closedKey(urls), JSON.stringify([...dirs]));
   } catch {
-    // Storage off: folders open again collapsed next time.
+    // Storage off: every folder opens again next time.
   }
 }
 
@@ -121,8 +126,8 @@ function insideDirs(files: Entry[]): Map<string, Entry[]> {
  * The library's file tree (tempra-dev: app/workspace). The whole index (paths, titles,
  * sequences; no bodies) arrives in one small request when the workspace opens, so opening a
  * folder never waits. A folder (named for people, with its count of concepts) is a group, not a
- * page: its row opens and closes it (TEMPRA-138), and a folder's address reveals it here. Open
- * folders are remembered on this browser, the open file is revealed and marked, and the change feed
+ * page: its row opens and closes it (TEMPRA-138), and a folder's address reveals it here. Every
+ * folder starts open; the ones the person closed are remembered on this browser, the open file is revealed and marked, and the change feed
  * refreshes the index once per burst of writes. The change dot marks a file: pulsing while an
  * agent writes it now, solid when it changed since the person last looked; a closed folder rolls
  * up the marks of what is inside it.
@@ -139,7 +144,8 @@ export function Tree(props: {
 }) {
   const { urls, changes, now } = props;
   const [files, setFiles] = useState<Entry[] | null>(null);
-  const [expanded, setExpanded] = useState(() => loadExpanded(urls));
+  const [closed, setClosed] = useState(() => loadClosed(urls));
+  const isOpen = (dir: string) => !closed.has(dir);
   const [seq, setSeq] = useState<number | null>(null);
   // Agents named for their person (TEMPRA-77): "Claude for @ann changed this just now".
   const actorName = useAgentNames(
@@ -187,10 +193,10 @@ export function Tree(props: {
     if (props.file === null) revealing.current = current;
     const up = props.file !== null ? ancestors(props.file) : [...ancestors(current), current];
     const want = up.filter((d) => d !== "");
-    setExpanded((e) => {
-      if (want.every((d) => e.has(d))) return e;
-      const next = new Set([...e, ...want]);
-      saveExpanded(urls, next);
+    setClosed((c) => {
+      if (!want.some((d) => c.has(d))) return c;
+      const next = new Set([...c].filter((d) => !want.includes(d)));
+      saveClosed(urls, next);
       return next;
     });
   }, [current, props.file, urls]);
@@ -218,11 +224,11 @@ export function Tree(props: {
     },
   );
   const toggle = (dir: string) =>
-    setExpanded((e) => {
-      const next = new Set(e);
+    setClosed((c) => {
+      const next = new Set(c);
       if (next.has(dir)) next.delete(dir);
       else next.add(dir);
-      saveExpanded(urls, next);
+      saveClosed(urls, next);
       return next;
     });
 
@@ -349,14 +355,14 @@ export function Tree(props: {
       e.kind === "dir" ? (
         <li key={e.path}>
           {/* A folder is a group, not a page (TEMPRA-138): its whole row opens and closes it. */}
-          <div className={expanded.has(e.path) ? "tree-row dir open" : "tree-row dir"}>
+          <div className={isOpen(e.path) ? "tree-row dir open" : "tree-row dir"}>
             <span className="tree-chevron" aria-hidden="true">
               <Icon name="chevron" />
             </span>
             <button
               type="button"
               className="tree-name"
-              aria-expanded={expanded.has(e.path)}
+              aria-expanded={isOpen(e.path)}
               title={folderName(e.path)}
               ref={(el) => {
                 if (el && revealing.current === e.path) {
@@ -376,9 +382,9 @@ export function Tree(props: {
                 {counts.get(e.path)}
               </span>
             )}
-            {!expanded.has(e.path) && rolledUp(e.path)}
+            {!isOpen(e.path) && rolledUp(e.path)}
           </div>
-          {expanded.has(e.path) && <ul>{rows(e.path)}</ul>}
+          {isOpen(e.path) && <ul>{rows(e.path)}</ul>}
         </li>
       ) : (
         <li key={e.path}>

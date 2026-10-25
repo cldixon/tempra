@@ -736,6 +736,9 @@ async function browserRenders(
         // group, not a page (TEMPRA-138): its whole row opens and closes it, in place.
         const files = sidebar.getByRole("navigation", { name: "Files" });
         const row = files.locator(`button.tree-name[title="${folderName(folder)}"]`).first();
+        // On first entry every folder is open, the library laid out (TEMPRA-146).
+        const shut = await files.locator('button.tree-name[aria-expanded="false"]').count();
+        if (shut > 0) throw new Error(`${shut} folder(s) start closed in the tree`);
         const at = page.url();
         const open = (await row.getAttribute("aria-expanded")) === "true";
         if (open) await row.click();
@@ -1196,7 +1199,7 @@ async function browserRenders(
       await page.locator("#library-title").fill("The gate's library");
       await page.getByRole("button", { name: "Save", exact: true }).click();
       await page.getByText("Saved.").waitFor({ timeout: 15_000 });
-      await sidebar.getByRole("link", { name: /^Back to / }).click();
+      await sidebar.getByRole("link", { name: "Back to library", exact: true }).click();
       await page.waitForURL(`${lib}/`);
       await main
         .getByRole("heading", { level: 1, name: "The gate's library", exact: true })
@@ -1387,7 +1390,7 @@ async function browserRenders(
           await menu.click();
           await sidebar.waitFor({ state: "visible" });
           const tabs = sidebar.getByRole("navigation", { name: "Library settings" });
-          for (const tab of [`Back to ${libraryName}`, "General", "Members", "Connect"]) {
+          for (const tab of ["Back to library", "General", "Members", "Connect"]) {
             await tabs.getByRole("link", { name: tab, exact: true }).waitFor({ timeout: 5000 });
           }
           await sidebar.getByRole("button", { name: "Close menu" }).waitFor();
