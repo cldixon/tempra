@@ -4,6 +4,7 @@
  * IDs, the document's text and comment anchors, link rules and figure numbering. The Worker imports only this entry.
  */
 export * from "./anchor";
+export * from "./figure";
 export * from "./figures";
 export * from "./links";
 export * from "./reconcile";

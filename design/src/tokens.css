@@ -117,6 +117,8 @@
   /* A concept's columns (take 4): the text, centred; on the right its contents, or a panel */
   --tempra-column-text: 620px;
   --tempra-contents: 200px;
+  --tempra-figure-wide: 960px; /* a wide figure (`layout=wide`), past the text's measure */
+  --tempra-figure-gap: 12px; /* between a group's images */
   --tempra-page-width: 760px; /* home, Activity, a folder, the Inbox */
 
   /* Shape: squarer than take 2 */

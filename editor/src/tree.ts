@@ -5,10 +5,13 @@
  * no DOM.
  */
 import type { Nodes, Parent, Root, RootContent, Text } from "mdast";
+import { directiveFromMarkdown, directiveToMarkdown } from "mdast-util-directive";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { gfmFromMarkdown, gfmToMarkdown } from "mdast-util-gfm";
 import { toMarkdown as write } from "mdast-util-to-markdown";
+import { directive } from "micromark-extension-directive";
 import { gfm } from "micromark-extension-gfm";
+import { canonicalDirective, isDirectiveLabel } from "./figure";
 
 /** A concept body: the root of the tree. Every block in it carries an `id`. */
 export type Doc = Root;
@@ -20,7 +23,14 @@ export type DocNode = Nodes;
 export type Block = RootContent;
 
 /** Block containers: their children are blocks with IDs. Tables, rows and cells are not. */
-const CONTAINERS = new Set(["root", "blockquote", "list", "listItem", "footnoteDefinition"]);
+const CONTAINERS = new Set([
+  "root",
+  "blockquote",
+  "list",
+  "listItem",
+  "footnoteDefinition",
+  "containerDirective",
+]);
 
 /** The block children of a node (empty for a leaf block or inline content). */
 export function blocksOf(node: DocNode): RootContent[] {
@@ -41,9 +51,36 @@ export function signature(node: DocNode): string {
   return JSON.stringify(node, (k, v) => (k === "id" ? undefined : v));
 }
 
+/**
+ * Directives (tempra-dev: app/media, Figure markup): the container form (`:::name[label]{…}`) only.
+ * Text (`:name`) and leaf (`::name`) directives stay off, so prose like `ratio 3:1` or `see:here`
+ * never changes meaning.
+ */
+const containerDirectives = (() => {
+  const flow = (directive().flow?.[58] ?? []) as { concrete?: boolean }[];
+  return { flow: { 58: flow.filter((c) => c.concrete) } };
+})();
+
+/**
+ * Writing container directives: attributes unquoted where they can be (`{width=480 frame}`), and
+ * none of the package's escapes for text directives (which are off), so `see:here` stays as it is.
+ * A line of text that would open a directive (`:::x`) is escaped (`::\:x`) so it stays text.
+ */
+const directiveOut = (() => {
+  const d = directiveToMarkdown({ preferUnquoted: true });
+  return {
+    handlers: { containerDirective: d.handlers?.containerDirective },
+    unsafe: [
+      { character: "\r", inConstruct: ["containerDirectiveLabel"] },
+      { character: "\n", inConstruct: ["containerDirectiveLabel"] },
+      { atBreak: true, before: "::", character: ":" },
+    ],
+  };
+})();
+
 /** The canonical markdown: ATX headings, `-` bullets, `*` emphasis, fenced code, `---` rules. */
 const OPTIONS = {
-  extensions: [gfmToMarkdown()],
+  extensions: [gfmToMarkdown(), directiveOut],
   bullet: "-",
   emphasis: "*",
   strong: "*",
@@ -61,12 +98,14 @@ const OPTIONS = {
  */
 export function parseMarkdown(markdown: string): Doc {
   const tree = fromMarkdown(markdown, {
-    extensions: [gfm()],
-    mdastExtensions: [gfmFromMarkdown()],
+    extensions: [gfm(), containerDirectives as never],
+    mdastExtensions: [gfmFromMarkdown(), directiveFromMarkdown()],
   });
   const clean = (node: DocNode) => {
     delete node.position;
-    delete node.data;
+    // A directive's label is the one node that keeps its data (mdast-util-directive's mark).
+    if (isDirectiveLabel(node)) node.data = { directiveLabel: true } as never;
+    else delete node.data;
     if (!("children" in node)) return;
     const out: DocNode[] = [];
     for (const child of node.children as DocNode[]) {
@@ -75,6 +114,7 @@ export function parseMarkdown(markdown: string): Doc {
       clean(child);
     }
     (node as Parent).children = out as Parent["children"];
+    if (node.type === "containerDirective") canonicalDirective(node);
   };
   clean(tree);
   return tree;

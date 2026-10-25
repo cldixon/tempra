@@ -1,9 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import type { ContainerDirective } from "mdast-util-directive";
 import {
+  checkFigure,
   type Doc,
   docText,
+  findFigures,
   linkTarget,
   normalize,
   parseMarkdown,
@@ -99,6 +102,121 @@ describe("constructs the tree does not model are kept", () => {
   test("an empty body is empty", () => {
     expect(normalize("")).toBe("");
     expect(stored("")).toEqual({ type: "root", children: [] });
+  });
+});
+
+/** Figure markup in each form (tempra-dev: app/media, Figure markup), canonical as written. */
+export const FIGURE_FORMS: Record<string, string> = {
+  sized: ':::figure{width=480 frame}\n![The sign-in page](/app/signin.png "Sign-in")\n:::\n',
+  share: ":::figure{width=60%}\n![A chart](/app/chart.png)\n:::\n",
+  wide: ':::figure{layout=wide}\n![The workspace](/app/wide.png "The whole frame")\n:::\n',
+  full: ":::figure{layout=full frame}\n![The page](/app/full.png)\n:::\n",
+  group:
+    ':::figure[The top bar *before* and after]{layout=wide}\n![Crumbs](/app/before.png "Before")\n![The path](/app/after.png "After")\n:::\n',
+  "group of four":
+    ":::figure[Four]\n![1](/a/1.png)\n![2](/a/2.png)\n![3](/a/3.png)\n![4](/a/4.png)\n:::\n",
+};
+
+describe("figure markup", () => {
+  for (const [name, md] of Object.entries(FIGURE_FORMS)) {
+    test(name, () => {
+      // Canonical as written, byte-stable, and the same tree.
+      expect(normalize(md)).toBe(md);
+      expect(parseMarkdown(normalize(md))).toEqual(parseMarkdown(md));
+      expect(toMarkdown(stored(md))).toBe(md);
+      // One block in the tree; each image one atom, the group caption nothing.
+      const doc = stored(md);
+      expect(doc.children).toHaveLength(1);
+      const fig = doc.children[0] as never as ContainerDirective;
+      expect(fig.type).toBe("containerDirective");
+      const check = checkFigure(fig);
+      expect(check.ok).toBe(true);
+      const n = check.ok ? check.spec.images.length : 0;
+      expect(docText(doc).text).toBe(Array(n).fill("\uFFFC").join("\n"));
+    });
+  }
+
+  test("what was written is made canonical: attribute order, quotes, one image a line", () => {
+    expect(
+      normalize(':::figure{frame layout="wide" width="480"}\n![a](/a.png)\n\n![b](/b.png)  \n:::'),
+    ).toBe(":::figure{width=480 layout=wide frame}\n![a](/a.png)\n![b](/b.png)\n:::\n");
+    expect(normalize(":::figure\n![a](/a.png) ![b](/b.png)\n:::")).toBe(
+      ":::figure\n![a](/a.png)\n![b](/b.png)\n:::\n",
+    );
+  });
+
+  test("each image of a figure counts in the numbering the reader and MCP share", () => {
+    const doc = stored(
+      `![Plain](/p.png)\n\n${FIGURE_FORMS.group}\n:::figure{layout=side}\n![Bad markup](/b.png)\n:::\n`,
+    );
+    const found = findFigures(doc);
+    expect(
+      found.map((f) => [
+        f.n,
+        f.kind === "image" ? f.image.alt : "",
+        f.kind === "image" && !!f.markup,
+      ]),
+    ).toEqual([
+      [1, "Plain", false],
+      [2, "Crumbs", true],
+      [3, "The path", true],
+      [4, "Bad markup", false],
+    ]);
+  });
+
+  test("what it says", () => {
+    const spec = (md: string) => {
+      const c = checkFigure(parseMarkdown(md).children[0] as never);
+      return c.ok ? c.spec : null;
+    };
+    expect(spec(FIGURE_FORMS.sized as string)).toMatchObject({
+      width: { value: 480, unit: "px" },
+      layout: "column",
+      frame: true,
+    });
+    expect(spec(FIGURE_FORMS.share as string)?.width).toEqual({ value: 60, unit: "%" });
+    expect(spec(FIGURE_FORMS.group as string)?.layout).toBe("wide");
+    expect(spec(FIGURE_FORMS.group as string)?.images).toHaveLength(2);
+    expect(spec(FIGURE_FORMS.group as string)?.label).not.toBeNull();
+  });
+
+  test("markup that does not parse is kept as written and says why", () => {
+    const bad = [
+      [":::figure{width=wide}\n![a](/a.png)\n:::\n", /not a width/],
+      [":::figure{layout=side}\n![a](/a.png)\n:::\n", /not a layout/],
+      [":::figure{frame=yes}\n![a](/a.png)\n:::\n", /takes no value/],
+      [":::figure{.big}\n![a](/a.png)\n:::\n", /not a figure attribute/],
+      [":::figure\nJust words.\n:::\n", /images only/],
+      [":::figure\n:::\n", /no images/],
+      [`:::figure\n${"![a](/a.png)\n".repeat(5)}:::\n`, /at most 4/],
+    ] as const;
+    for (const [md, why] of bad) {
+      expect(normalize(md)).toBe(md);
+      const c = checkFigure(parseMarkdown(md).children[0] as never);
+      expect(c.ok).toBe(false);
+      expect(c.ok ? "" : c.problems.join("; ")).toMatch(why);
+    }
+  });
+
+  test("other directives are kept as written; text and leaf directives are off", () => {
+    for (const md of [
+      ':::note{#x .y z="a b"}\nHello *there*\n:::\n',
+      "::::figure\n:::aside\nNested.\n:::\n::::\n",
+    ]) {
+      expect(normalize(md)).toBe(md);
+      expect(normalize(normalize(md))).toBe(normalize(md));
+    }
+    expect(docText(stored(':::note[Label]{z="a b"}\nHello *there*\n:::\n')).text).toBe(
+      "Hello there",
+    );
+    // Colons in prose never change meaning, and nothing is escaped for them.
+    const prose = "A ratio 3:1, see:here, ::leaf and :name[x]{y}.\n\n::leaf\n";
+    expect(normalize(prose)).toBe("A ratio 3:1, see:here, ::leaf and :name\\[x]{y}.\n\n::leaf\n");
+    expect(parseMarkdown(prose).children.every((c) => c.type === "paragraph")).toBe(true);
+    // A line of text that would open a directive stays text.
+    expect(normalize("\\:::figure\ntext")).toBe("::\\:figure\ntext\n");
+    expect(normalize("::\\:figure\ntext")).toBe("::\\:figure\ntext\n");
+    expect(parseMarkdown("\\:::figure\ntext").children[0]?.type).toBe("paragraph");
   });
 });
 

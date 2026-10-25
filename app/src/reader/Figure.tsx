@@ -7,8 +7,20 @@
  * is one element marked `data-atom`, so it counts one character as `docText` does. The caption sits
  * outside the paragraph's `data-text` element and is marked `data-skip`: it is not the document's
  * text, so selections, comment anchors and the diff never count it.
+ *
+ * Figure markup (`:::figure`, tempra-dev: app/media) draws one to four images in one figure
+ * (FigureBox): each image still one atom and one figure in the numbering, a group's images side by
+ * side with their titles as small labels (`data-skip`), and one caption, the directive's label.
  */
-import { createContext, useContext, useState } from "react";
+import type { FigureSpec } from "@tempra/editor";
+import {
+  createContext,
+  type ReactNode,
+  useContext,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { Icon } from "../chrome";
 import type { Figure, ImageFigure } from "./prepare";
 
@@ -22,6 +34,47 @@ export function Caption({ figure, id }: { figure: Figure; id?: string }) {
       <span className="figure-number">Figure {figure.n}.</span>
       {figure.caption && ` ${figure.caption}`}
     </figcaption>
+  );
+}
+
+/** "Figure 3.", or for a group "Figures 3 and 4." and "Figures 3–5.": each image counts one. */
+export function figureNumber(first: number, count: number): string {
+  if (count <= 1) return `Figure ${first}.`;
+  const last = first + count - 1;
+  return count === 2 ? `Figures ${first} and ${last}.` : `Figures ${first}–${last}.`;
+}
+
+/**
+ * The frame of a figure drawn from its markup (`:::figure`, tempra-dev: app/media): its placement,
+ * frame and group as classes (prose.css), and its width as `--figure-width`, set through the
+ * CSSOM, as the reader's popovers set `--float-x`, so no style attribute is written (CSP).
+ */
+export function FigureBox(props: {
+  spec: FigureSpec;
+  count: number;
+  block: string | undefined;
+  children: ReactNode;
+}) {
+  const { spec, count } = props;
+  const ref = useRef<HTMLElement>(null);
+  const width = spec.width ? `${spec.width.value}${spec.width.unit}` : null;
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (width) el.style.setProperty("--figure-width", width);
+    else el.style.removeProperty("--figure-width");
+  }, [width]);
+  const cls = [
+    "figure",
+    spec.layout !== "column" ? `figure-${spec.layout}` : "",
+    spec.frame ? "figure-framed" : "",
+    width ? "figure-sized" : "",
+    count > 1 ? `figure-group figure-n-${count}` : "",
+  ];
+  return (
+    <figure ref={ref} className={cls.filter(Boolean).join(" ")} data-block={props.block}>
+      {props.children}
+    </figure>
   );
 }
 

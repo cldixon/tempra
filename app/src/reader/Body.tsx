@@ -8,11 +8,19 @@
  * is one image is a figure (Figure.tsx): the paragraph keeps its `data-text` element holding the
  * image's atom, and its caption is drawn beside it, outside the text, marked `data-skip`.
  */
-import { type DocNode, idOf, toMarkdown, type WordDiff } from "@tempra/editor";
+import {
+  type ContainerDirective,
+  type DocNode,
+  directiveContent,
+  directiveLabel,
+  idOf,
+  toMarkdown,
+  type WordDiff,
+} from "@tempra/editor";
 import type { PhrasingContent, RootContent, TableCell } from "mdast";
 import type { ReactNode } from "react";
-import { Caption, FigureImage, InlineImage } from "./Figure";
-import { imageSrc, linkInfo, type Prepared } from "./prepare";
+import { Caption, FigureBox, FigureImage, figureNumber, InlineImage } from "./Figure";
+import { type FigureMarkup, imageSrc, linkInfo, type Prepared } from "./prepare";
 import { type BlockProps, CodeBlock, code as codeBlocks, node as nodeBlocks } from "./registry";
 
 /** What draws one body: the prepared tree, the diff over it, whether text offsets are drawn. */
@@ -230,6 +238,100 @@ function textblock(ctx: Ctx, n: DocNode, nodes: readonly PhrasingContent[]): Rea
   return out;
 }
 
+/**
+ * A figure drawn from its markup (`:::figure`, tempra-dev: app/media): its images' paragraph keeps
+ * its `data-text`, each image one atom; in a group each image is a cell with its title as a small
+ * label (`data-skip`), and the newlines between them are drawn hidden, counted as docText counts
+ * them. The caption (the label, else the one image's caption) is outside the text.
+ */
+function markupFigure(ctx: Ctx, n: ContainerDirective, m: FigureMarkup, key: string | number) {
+  const group = m.figures.length > 1;
+  const label = directiveLabel(n);
+  const rows = directiveContent(n).map((c) => {
+    if (c.type !== "paragraph") return null;
+    const r = run(ctx, c);
+    const out: ReactNode[] = [];
+    for (const child of c.children) {
+      const k = ctx.key++;
+      if (child.type === "text") {
+        out.push(
+          <span key={k} className="figure-gap">
+            {r.text(child.value)}
+          </span>,
+        );
+        continue;
+      }
+      const f = child.type === "image" ? ctx.p.figureOf.get(child) : undefined;
+      if (f?.kind !== "image") continue;
+      r.atom(
+        out,
+        group ? (
+          <span key={k} className="figure-cell">
+            <FigureImage figure={f} />
+            {f.image.title?.trim() && (
+              <span className="figure-label" data-skip="">
+                {f.image.title.trim()}
+              </span>
+            )}
+          </span>
+        ) : (
+          <FigureImage key={k} figure={f} />
+        ),
+      );
+    }
+    r.end(out);
+    return (
+      <p
+        key={idOf(c) ?? ctx.key++}
+        className={group ? "figure-row" : undefined}
+        data-block={idOf(c)}
+        data-text={offsetOf(ctx, c)}
+      >
+        {out}
+      </p>
+    );
+  });
+  const first = m.figures[0];
+  const caption = label
+    ? inline(
+        { ...ctx, offsets: false, diff: null },
+        run({ ...ctx, offsets: false }, label),
+        label.children,
+      )
+    : group
+      ? null
+      : first?.caption;
+  return (
+    <FigureBox key={key} spec={m.spec} count={m.figures.length} block={idOf(n)}>
+      {rows}
+      <figcaption data-skip="" data-block={label ? idOf(label) : undefined}>
+        <span className="figure-number">{figureNumber(first?.n ?? 1, m.figures.length)}</span>
+        {caption && <> {caption}</>}
+      </figcaption>
+    </FigureBox>
+  );
+}
+
+/**
+ * A directive the reader does not draw (another name, or figure markup that does not parse): its
+ * opening and closing lines as their markdown, outside the text, and its content drawn as usual.
+ */
+function rawDirective(ctx: Ctx, n: ContainerDirective, key: string | number) {
+  const lines = rawText(n).split("\n");
+  const label = directiveLabel(n);
+  return (
+    <div key={key} className="directive" data-block={idOf(n)}>
+      <p className="raw-fence" data-skip="" data-block={label ? idOf(label) : undefined}>
+        <code className="raw">{lines[0]}</code>
+      </p>
+      {blocks(ctx, directiveContent(n))}
+      <p className="raw-fence" data-skip="">
+        <code className="raw">{lines.at(-1)}</code>
+      </p>
+    </div>
+  );
+}
+
 function cell(ctx: Ctx, c: TableCell, header: boolean, align: string | null | undefined) {
   const Tag = header ? "th" : "td";
   return (
@@ -364,6 +466,10 @@ function block(ctx: Ctx, n: RootContent, hidden = false): ReactNode {
     case "footnoteDefinition":
       // Shown beside the body (Contents & sources, the marker's card), not in it.
       return null;
+    case "containerDirective": {
+      const m = ctx.offsets ? ctx.p.markup.get(n) : undefined;
+      return m ? markupFigure(ctx, n, m, key) : rawDirective(ctx, n, key);
+    }
     default:
       if ("children" in n) {
         return (

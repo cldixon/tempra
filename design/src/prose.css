@@ -405,6 +405,100 @@
   font-weight: var(--tempra-weight-medium);
 }
 
+/*
+ * Figure markup (TEMPRA-161; tempra-dev: app/media, Figure markup). Width: `--figure-width`, set on
+ * the figure through the CSSOM, caps its images (max-width only, so an image is never drawn wider
+ * than its own pixels). Placement, on a concept's page: wide and full reach past the text,
+ * centred on the text's column (the page's width, 100cqi of `page`, less --concept-side; the
+ * text is --doc-max wide at most with --doc-pad each side, concept.css), never past its padding;
+ * wide stops at --tempra-figure-wide. Elsewhere they keep the text's width.
+ */
+.prose figure.figure-sized:not(.figure-group) .figure-media,
+.prose figure.figure-sized:not(.figure-group) .figure-broken {
+  max-width: min(100%, var(--figure-width));
+}
+
+.prose figure.figure-group.figure-sized .figure-row {
+  max-width: min(100%, var(--figure-width));
+}
+
+.concept .prose figure.figure-wide {
+  --figure-reach: min(var(--tempra-figure-wide), var(--figure-column) - 2 * var(--doc-pad));
+}
+
+.concept .prose figure.figure-full {
+  --figure-reach: calc(var(--figure-column) - 2 * var(--doc-pad));
+}
+
+@container page (width >= 0px) {
+  .concept .prose figure:is(.figure-wide, .figure-full) {
+    --figure-column: calc(100cqi - var(--concept-side));
+    --figure-w: max(100%, var(--figure-reach));
+    width: var(--figure-w);
+    max-width: none;
+    margin-left: calc(
+      (min(var(--figure-column), var(--doc-max)) - var(--figure-w)) /
+      2 -
+      var(--doc-pad)
+    );
+  }
+}
+
+/* A frame for screenshots whose edges vanish on the page: a hairline, nothing more. */
+.prose figure.figure-framed .figure-media img {
+  border: 1px solid var(--tempra-color-border);
+}
+
+/* A group: its images side by side in equal columns, each with its title under it; stacked on a
+   phone. The newlines between them are text (they count) and are not drawn. */
+.prose .figure-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--tempra-figure-gap);
+  align-items: start;
+}
+
+.prose .figure-n-3 .figure-row {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.prose .figure-n-4 .figure-row {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.prose .figure-gap {
+  display: none;
+}
+
+.prose .figure-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.prose .figure-label {
+  color: var(--tempra-color-muted);
+  font-family: var(--tempra-font-text);
+  font-size: var(--tempra-text-meta);
+  line-height: var(--tempra-line-height);
+  user-select: none;
+}
+
+@media (max-width: 900px) {
+  .prose .figure-row,
+  .prose .figure-n-3 .figure-row,
+  .prose .figure-n-4 .figure-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* A directive the reader does not draw: its opening and closing lines, quiet, as markdown. */
+.prose .directive > .raw-fence {
+  margin: 0.4em 0;
+  font-size: var(--tempra-text-meta);
+}
+
 /* An image that can't be shown: a dashed box where it would be, saying so, its path and alt. */
 .figure-broken {
   display: flex;
