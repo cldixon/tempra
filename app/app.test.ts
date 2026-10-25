@@ -90,7 +90,8 @@ describe("routes follow the server's URLs (tempra-dev: v2/urls-and-handles)", ()
       to: "/agents?new=token&library=ann%2Fnotes",
     });
     expect(at("/account?done=email")).toEqual({ page: "account", done: "email" });
-    expect(at("/ann/notes/-/work?kind=lint")).toMatchObject({ page: "work", kind: "lint" });
+    // For agents is retired (TEMPRA-144): its address lands on the library's home.
+    expect(at("/ann/notes/-/work?kind=lint")).toEqual({ page: "redirect", to: "/ann/notes/" });
     expect(at("/ann/notes/-/revert/req_1")).toMatchObject({ page: "revert", request: "req_1" });
     expect(at("/ann/notes/-/restore/a/b.md?to=4")).toMatchObject({
       page: "restore",

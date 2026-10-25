@@ -21,7 +21,6 @@ import {
 } from "../inbox";
 import { useFeed, useSeenCursor, useTrailing } from "../live";
 import { Moment } from "../Moment";
-import { type Needs, useNeeds } from "../needs";
 import { libraryLabel, type Role, useLibraries, useRole } from "../role";
 import { fileLabel, type OutlineFile } from "../Tree";
 import { clip, plural, Status, useCopy, useMe, useTitle } from "../ui";
@@ -41,9 +40,9 @@ const SINCE_READ = 1000;
  * The library's home (take 4, TEMPRA-117, TEMPRA-121; tempra-dev: app/home): its title and
  * description, one quiet line (who works here, the page count, the guide), one line on what
  * changed since the person last looked, up to three of their open Inbox items here with the way
- * to the Inbox, the pages changed most recently, and at the foot the agents' housekeeping
- * (`GET …/needs`). No sections: the tree beside it lists the folders (TEMPRA-138). An empty library shows how
- * to connect an agent instead (to those who can). Each part loads on its own, so one that fails
+ * to the Inbox, and the pages changed most recently. No sections: the tree beside it lists the
+ * folders (TEMPRA-138); no housekeeping, which is the agents' (TEMPRA-144). An empty library
+ * shows how to connect an agent instead (to those who can). Each part loads on its own, so one that fails
  * leaves the rest (H-7). It does not move the seen cursor (Activity does).
  */
 export function Home({ urls }: { urls: Urls }) {
@@ -96,7 +95,6 @@ export function Home({ urls }: { urls: Urls }) {
   };
   const reload = useTrailing(reloadAll, 1500);
   useFeed(urls, loaded.state === "ready" ? loaded.data.head : null, reload, reload);
-  const needs = useNeeds(urls);
   const inbox = useLibraryInbox(`${urls.owner}/${urls.slug}`);
   // A reply's item names its page by path; the tree's outline has its title.
   const titles = useMemo(() => {
@@ -199,12 +197,6 @@ export function Home({ urls }: { urls: Urls }) {
                       changed={recentlyChanged(home.requests, files)}
                       view={(a, by) => actors.view(a, by)}
                     />
-                  )}
-                  {needs.state === "ready" && <HomeFoot urls={urls} needs={needs.data} />}
-                  {needs.state === "error" && (
-                    <p className="home-foot view-meta home-failed">
-                      Couldn't load the agents' housekeeping.
-                    </p>
                   )}
                 </>
               )}
@@ -425,20 +417,6 @@ export function ForYou(props: { urls: Urls; inbox: InboxPage; titles?: PageTitle
         ))}
       </ul>
     </section>
-  );
-}
-
-/** The foot, quietly: the agents' housekeeping, linking For agents. */
-export function HomeFoot({ urls, needs }: { urls: Urls; needs: Needs }) {
-  const n = needs.housekeeping.total;
-  if (n === 0) return null;
-  return (
-    <p className="home-foot">
-      <a href={urls.work()}>
-        {plural(n, "housekeeping item")} for agents
-        <Icon name="chevron" size={14} />
-      </a>
-    </p>
   );
 }
 

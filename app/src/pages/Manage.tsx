@@ -7,14 +7,14 @@ import { useFeed, useTrailing } from "../live";
 import { Moment } from "../Moment";
 import { librariesChanged, type Role, useLibraries, useLibraryLabel, useRole } from "../role";
 import { navigate } from "../router";
-import { day, type Health, healthWords, localTime, plural, Status, useMe, useTitle } from "../ui";
+import { day, localTime, plural, Status, useMe, useTitle } from "../ui";
 import { dirOf, enc, folderName, type Urls } from "../urls";
 import { useTitleOf } from "../Workspace";
 import { ConnectSteps } from "./Account";
 
 /**
- * A library's management pages (TEMPRA-14; take 4 follow-ups, TEMPRA-124 and 135): For agents,
- * import and export, recovery, revert and restore, connecting an agent, members, deleting it.
+ * A library's management pages (TEMPRA-14; take 4 follow-ups, TEMPRA-124 and 135): import and
+ * export, recovery, revert and restore, connecting an agent, members, deleting it.
  * Each acts through the REST API as the signed-in person, and speaks to people: agents by name,
  * pages by title, local times, no sequence numbers or storage words.
  */
@@ -44,124 +44,6 @@ function OwnerOnly({ urls, children }: { urls: Urls; children: ReactNode }) {
     );
   }
   return <>{children}</>;
-}
-
-// ---------------------------------------------------------------- for agents
-
-interface WorkItem {
-  kind: string;
-  path: string;
-  since: string;
-  detail: string;
-  suggested_action: string;
-  inbound_links: number;
-  /** For a comment: its thread. */
-  thread?: string;
-}
-
-const KINDS: [string | undefined, string][] = [
-  [undefined, "Everything"],
-  ["comment", "Comments"],
-  ["stale", "Stale"],
-  ["stale_soon", "Stale soon"],
-  ["broken_link", "Broken links"],
-  ["lint", "Lint"],
-  ["structure", "Structure"],
-];
-
-const KIND_WORDS: Record<string, string> = {
-  comment: "Open comment",
-  stale: "Stale",
-  stale_soon: "Stale soon",
-  broken_link: "Broken link",
-  lint: "Lint",
-  structure: "Structure",
-};
-
-/**
- * For agents (S-7): the housekeeping agents pick up with the `work` tool (open comments, stale
- * pages, broken links, lint, structure), a quiet list in the views' style under the daily
- * check's line (TEMPRA-66).
- */
-export function Work({ urls, kind }: { urls: Urls; kind?: string }) {
-  useTitle(`For agents · ${useLibraryLabel(urls)}`);
-  const titleOf = useTitleOf();
-  const loaded = useLoad(`work ${urls.work(kind)}`, async () => {
-    const [w, stats, health] = await Promise.all([
-      api<{ items: WorkItem[]; total: number }>(urls.api("work", { kind, limit: 200 })),
-      api<{ seq: number }>(urls.api("stats")),
-      api<Health>(urls.api("health")),
-    ]);
-    return { ...w, head: stats.seq, health };
-  });
-  useLive(urls, loaded.state === "ready" ? loaded.data.head : null, loaded.reload);
-  return (
-    <div className="folder">
-      <header className="view-head">
-        <div className="view-head-main">
-          <h1 className="view-title">For agents</h1>
-          <p className="view-meta">Housekeeping your agents pick up when they work here.</p>
-        </div>
-        <select
-          className="pill-select"
-          aria-label="Kind"
-          value={kind ?? ""}
-          onChange={(e) => navigate(urls.work(e.currentTarget.value || undefined))}
-        >
-          {KINDS.map(([k, label]) => (
-            <option key={label} value={k ?? ""}>
-              {label}
-            </option>
-          ))}
-        </select>
-      </header>
-      <Status loaded={loaded}>
-        {({ items, total, health }) => (
-          <>
-            <HealthLine health={health} />
-            {items.length === 0 ? (
-              <p className="view-empty">Nothing to do.</p>
-            ) : (
-              <ul className="folder-list">
-                {items.map((i) => (
-                  <li key={i.thread ?? `${i.kind} ${i.path} ${i.detail}`}>
-                    {/* A comment opens on its thread. */}
-                    <a
-                      className="folder-row"
-                      href={i.thread ? urls.thread(i.path, i.thread) : urls.file(i.path)}
-                    >
-                      <span className="folder-main">
-                        <span className="folder-title">{titleOf(i.path)}</span>
-                        <span className="folder-desc">{i.detail}</span>
-                      </span>
-                      <span className="folder-count">{KIND_WORDS[i.kind] ?? i.kind}</span>
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            )}
-            {total > items.length && (
-              <p className="folder-foot">{total - items.length} more not shown.</p>
-            )}
-          </>
-        )}
-      </Status>
-    </div>
-  );
-}
-
-/**
- * The daily check's summary, quietly: when it ran and what it counted. The list below is live;
- * this line is as of the check. Pages nobody verified are not housekeeping, so they are not
- * listed here (TEMPRA-111, S-7).
- */
-function HealthLine({ health: h }: { health: Health }) {
-  const words = healthWords(h.counts);
-  return (
-    <p className="small muted">
-      Looked over <Moment ts={h.at} />: {words || "nothing open"}.
-    </p>
-  );
 }
 
 // ---------------------------------------------------------------- import and export
@@ -219,7 +101,7 @@ function TransferPage({ urls }: { urls: Urls }) {
     void action.run(async () => {
       if (!file) throw new Error("Choose a .tar or .tar.gz file to import.");
       setResult(null);
-      const res = await api<{ files: number; seq: number; warnings: unknown[] }>(
+      const res = await api<{ files: number; seq: number }>(
         urls.api("import", { strip, source: `upload:${file.name}` }),
         {
           method: "POST",
@@ -230,16 +112,10 @@ function TransferPage({ urls }: { urls: Urls }) {
           },
         },
       );
-      const linted = res.warnings.length;
       setResult(
         <>
-          Imported {plural(res.files, "file")} from {file.name} as one change
-          {linted > 0 && (
-            <>
-              ; {plural(linted, "file")} need tidying, listed <a href={urls.work()}>for agents</a>
-            </>
-          )}
-          . <a href={urls.activity({ view: "events" })}>See it in Activity</a>.
+          Imported {plural(res.files, "file")} from {file.name} as one change.{" "}
+          <a href={urls.activity({ view: "events" })}>See it in Activity</a>.
         </>,
       );
       form.reset();

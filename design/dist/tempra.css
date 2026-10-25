@@ -3349,19 +3349,6 @@ ul.events {
   margin-top: 0;
 }
 
-/* For agents (n): a closed disclosure at the foot of Properties. */
-.for-agents summary {
-  cursor: pointer;
-}
-
-.for-agents[open] summary {
-  margin-bottom: 8px;
-}
-
-.for-agents .facts {
-  margin-bottom: 12px;
-}
-
 .doc-head {
   margin-bottom: 32px;
 }
@@ -3698,16 +3685,9 @@ ul.events {
   padding-left: 18px;
 }
 
-.linked li,
-.notes-list li {
+.linked li {
   margin-bottom: 8px;
   font-size: var(--tempra-text-meta);
-}
-
-.notes-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
 }
 
 /* ---------- What fits: the page's width decides ---------- */
@@ -4377,24 +4357,6 @@ section.thread.open {
   font-size: var(--tempra-text-ui);
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-/* The foot: the agents' housekeeping, quiet. */
-.home-foot {
-  margin: var(--tempra-space-4) 0 0;
-  font-size: var(--tempra-text-ui);
-}
-
-.home-foot a {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--tempra-space-1);
-  color: var(--tempra-color-muted);
-  text-decoration: none;
-}
-
-.home-foot a:hover {
-  color: var(--tempra-color-text);
 }
 
 /* An empty library (board 31): one box with the steps and the waiting line, Import below. */

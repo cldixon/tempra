@@ -13,7 +13,6 @@ export type Route =
   /** A page that moved: the app replaces the URL with `to` (as the server answers with a 308). */
   | { page: "redirect"; to: string }
   | { page: "members"; owner: string; slug: string }
-  | { page: "work"; owner: string; slug: string; kind?: string }
   | { page: "settings"; owner: string; slug: string }
   | { page: "activity"; owner: string; slug: string; filters: ActivityFilters; done: Done }
   | { page: "transfer"; owner: string; slug: string }
@@ -143,8 +142,9 @@ export function match(url: URL): Route | null {
           from: int(q.get("from")),
           to: int(q.get("to")),
         };
+      // The For agents page is retired (TEMPRA-144): its address lands on the library's home.
       case "work":
-        return tail === "" ? { page: "work", owner, slug, kind: q.get("kind") || undefined } : null;
+        return tail === "" ? { page: "redirect", to: `/${owner}/${slug}/` } : null;
       // The old `-/needs` URL: the Inbox, filtered to the library (TEMPRA-116).
       case "needs":
         return tail === ""

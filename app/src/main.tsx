@@ -15,7 +15,6 @@ import {
   Restore,
   Revert,
   Transfer,
-  Work,
 } from "./pages/Manage";
 import { interceptLinks, match, navigate, pageKey, useLocation } from "./router";
 import { PageBoundary, useMe } from "./ui";
@@ -25,7 +24,7 @@ import { AccountFrame, type AccountPage, PageColumn, type Place, Workspace } fro
 /** The pages that lay out their column themselves (a concept's columns, the person's views). */
 const OWN_COLUMN = new Set(["file", "directory", "activity"]);
 
-/** A page that moved (`-/needs`, into the Inbox): the URL is replaced, as the server's 308 does. */
+/** A page that moved (`-/needs` into the Inbox, `-/work` to the home): the URL is replaced, as the server's 308 does. */
 function Redirect({ to }: { to: string }) {
   useEffect(() => navigate(to, { replace: true }), [to]);
   return null;
@@ -141,9 +140,6 @@ function App() {
         // The take 3 Diff page is retired (TEMPRA-124): its address opens the concept's own
         // version view.
         page = <Redirect to={urls.diff(route.path, route.from, route.to)} />;
-        break;
-      case "work":
-        page = <Work urls={urls} kind={route.kind} />;
         break;
       case "settings":
         page = <General urls={urls} />;

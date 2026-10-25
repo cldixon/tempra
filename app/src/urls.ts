@@ -84,9 +84,6 @@ export class Urls {
     const view = filters.view === "events" ? "events" : undefined;
     return `${this.page("activity")}${activityQuery(filters, view)}`;
   }
-  work(kind?: string) {
-    return `${this.page("work")}${query({ kind })}`;
-  }
   /** The export download (a server redirect to a signed link). */
   exportTar(at?: number) {
     return `${this.page("export")}${query({ at })}`;

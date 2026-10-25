@@ -252,7 +252,6 @@ export function ConceptPage(props: {
     if (urls.at === undefined) pushRecent(urls, { path: c.path, title });
   }, [urls, c.path, title]);
 
-  const work = data.work.filter((w) => w.kind !== "comment" && w.kind !== "lint");
   const moved = live && (live.change.op === "move" || live.change.op === "delete");
   const dir = dirOf(c.path);
   const folders = dir ? dir.split("/").map((_, i, all) => all.slice(0, i + 1).join("/")) : [];
@@ -420,7 +419,6 @@ export function ConceptPage(props: {
                 head={head}
                 standing={s}
                 name={name}
-                work={work}
                 current={current}
                 reviewing={compare?.kind === "review"}
                 mayVerify={mayVerify}

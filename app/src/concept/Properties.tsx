@@ -1,6 +1,5 @@
-import { Fragment, type ReactNode, useState } from "react";
+import { type ReactNode, useState } from "react";
 import { AgentName } from "../AgentName";
-import { actorText } from "../agents";
 import { ApiError } from "../api";
 import { Moment } from "../Moment";
 import { day, plural } from "../ui";
@@ -8,14 +7,14 @@ import type { Urls } from "../urls";
 import { useTitleOf } from "../Workspace";
 import type { Namer } from "./Byline";
 import { changesSince, markChecked } from "./Checked";
-import { actedBy, type Concept, type Json, type Links, type Standing, type WorkItem } from "./data";
+import { actedBy, type Concept, type Json, type Links, type Standing } from "./data";
 
 /**
  * The Properties panel (take 4, TEMPRA-114; TEMPRA-122 and 134; tempra-dev: app/reader, The
  * panels): short and in people's words. What a reader needs (status, stale or not, who changed
  * it last, type, tags, sources, what links here by title), then Check when there is something to
- * do, then For agents (n), closed: the path, who generated it, its lint and work items in plain
- * words, its broken links (decisions/take4-followups-ui-only).
+ * do (decisions/take4-followups-ui-only). What agents would fix (lint, work items, broken links)
+ * is theirs, through `work`, not the panel's (TEMPRA-144).
  */
 export function PropertiesList(props: {
   urls: Urls;
@@ -24,7 +23,6 @@ export function PropertiesList(props: {
   head: number;
   standing: Standing;
   name: Namer;
-  work: WorkItem[];
   /** The page is current (not a pinned old version), so it can be checked. */
   current: boolean;
   /** Review mode is on (the changes since the last check are drawn). */
@@ -49,7 +47,6 @@ export function PropertiesList(props: {
           onVerified={props.onVerified}
         />
       )}
-      <ForAgents concept={c} links={props.links} work={props.work} name={props.name} />
     </>
   );
 }
@@ -207,89 +204,5 @@ function LinkedFrom({ urls, links, head }: { urls: Urls; links: Links; head: num
         </p>
       )}
     </section>
-  );
-}
-
-/** A note's text with its `code` spans drawn as code, not as backticks. */
-function Words({ text: t }: { text: string }) {
-  const parts = t.split("`");
-  return (
-    <>
-      {parts.map((p, i) =>
-        // biome-ignore lint/suspicious/noArrayIndexKey: the parts of one string, in order.
-        i % 2 === 1 ? <code key={i}>{p}</code> : <Fragment key={i}>{p}</Fragment>,
-      )}
-    </>
-  );
-}
-
-/** `generated: { by, at }`, if it is there. */
-function stamp(v: Json | undefined): { by: string; at: string } | null {
-  if (!v || typeof v !== "object" || Array.isArray(v)) return null;
-  return { by: String(v.by ?? ""), at: String(v.at ?? "") };
-}
-
-/**
- * For agents (n), closed: what an agent reads about the page and would fix (its path, who
- * generated it, its lint and work items, its broken links). People can look; the page's own
- * words stay above. View Markdown shows the file itself.
- */
-function ForAgents(props: { concept: Concept; links: Links; work: WorkItem[]; name: Namer }) {
-  const { concept: c, links, work, name } = props;
-  const generated = stamp(c.frontmatter.generated);
-  const notes = c.lint.length + work.length + (links.broken.length > 0 ? 1 : 0);
-  return (
-    <details className="panel-section for-agents">
-      <summary className="label">For agents{notes > 0 ? ` (${notes})` : ""}</summary>
-      <dl className="facts">
-        <div className="fact">
-          <dt>Path</dt>
-          <dd>
-            <code>{c.path}</code>
-          </dd>
-        </div>
-        {generated?.by && (
-          <div className="fact">
-            <dt>Generated</dt>
-            <dd>
-              {actorText(name(generated.by))}
-              {generated.at && (
-                <>
-                  , <Moment ts={generated.at} />
-                </>
-              )}
-            </dd>
-          </div>
-        )}
-      </dl>
-      {notes > 0 ? (
-        <ul className="notes-list">
-          {c.lint.map((l, i) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: lint warnings have no id.
-            <li key={i}>
-              <Words text={l.message} />
-            </li>
-          ))}
-          {work.map((w) => (
-            <li key={`${w.kind} ${w.detail}`}>
-              <Words text={w.detail} />
-            </li>
-          ))}
-          {links.broken.length > 0 && (
-            <li>
-              {links.broken.length === 1 ? "A link leads nowhere: " : "Links that lead nowhere: "}
-              {links.broken.map((b, i) => (
-                <span key={`${b.raw} ${b.path}`}>
-                  {i > 0 && ", "}
-                  <code>{b.raw}</code>
-                </span>
-              ))}
-            </li>
-          )}
-        </ul>
-      ) : (
-        <p className="small muted">Nothing for agents to fix here.</p>
-      )}
-    </details>
   );
 }
