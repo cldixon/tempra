@@ -1,4 +1,5 @@
 import type { BlobStore } from "./client";
+import { imageInfo } from "./media";
 
 /**
  * Attachment images scaled through Cloudflare Images (the `IMAGES` binding; TEMPRA-153, and the
@@ -101,6 +102,13 @@ export interface Images {
    * binding, the original when it is within MODEL_BYTES, else `tooLarge`.
    */
   forModel(blob: { hash: string; size: number; media: string | null }): Promise<ModelImage>;
+  /**
+   * Bytes that are not a stored blob (a drawn diagram's PNG, TEMPRA-166) as a model should get
+   * them: as they are when the long edge is within MODEL_EDGE and the bytes within MODEL_BYTES,
+   * else scaled down the same ladder as `forModel` (not cached: the render Worker caches the
+   * PNG); without the binding, as they are when within MODEL_BYTES, else `tooLarge`.
+   */
+  fitForModel(bytes: Uint8Array, media: string): Promise<ModelImage>;
 }
 
 export function imagesService(d: {
@@ -133,8 +141,40 @@ export function imagesService(d: {
     }
   };
 
+  /** One scale of bytes held in memory; null when Images refuses or is not bound. */
+  const scaleBytes = async (bytes: Uint8Array, edge: number): Promise<ScaledImage | null> => {
+    if (!d.transformer) return null;
+    try {
+      const out = await d.transformer
+        .input(toStream(bytes))
+        .transform({ width: edge, height: edge, fit: "scale-down" })
+        .output({ format: MEDIA.webp, quality: QUALITY.webp });
+      return { bytes: await readBytes(out.image()), media: out.contentType() || MEDIA.webp };
+    } catch (e) {
+      console.error(JSON.stringify({ image_transform_failed: String(e), edge }));
+      return null;
+    }
+  };
+
   return {
     scaled,
+    async fitForModel(bytes, media) {
+      const info = imageInfo(bytes);
+      const edge = info?.ok ? Math.max(info.width, info.height) : Number.POSITIVE_INFINITY;
+      if (edge <= MODEL_EDGE && bytes.byteLength <= MODEL_BYTES) {
+        return { bytes, media, scaled: false };
+      }
+      let last: ScaledImage | null = null;
+      for (const e of MODEL_LADDER) {
+        const s = await scaleBytes(bytes, e);
+        if (!s) break;
+        last = s;
+        if (s.bytes.byteLength <= MODEL_BYTES) return { ...s, scaled: true };
+      }
+      if (last) return { ...last, scaled: true };
+      if (bytes.byteLength > MODEL_BYTES) return { tooLarge: true, size: bytes.byteLength };
+      return { bytes, media, scaled: false };
+    },
     async forModel(blob) {
       let last: ScaledImage | null = null;
       for (const edge of MODEL_LADDER) {

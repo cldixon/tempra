@@ -26,7 +26,11 @@ export interface UsageEvent {
 
 export interface UsageDeps {
   /** True when the call may go ahead; absent means no limits (tests, local dev). */
-  rateLimit?: (kind: "write" | "request" | "session", key: string) => Promise<boolean>;
+  /**
+   * One against a limiter; `render` is the MCP render cap per account (TEMPRA-166), keyed
+   * `render:<account>` on WRITE_LIMITER, whose limit (60 a minute) is the render limit too.
+   */
+  rateLimit?: (kind: "write" | "request" | "session" | "render", key: string) => Promise<boolean>;
   /** Records a data point; never throws, never blocks. */
   meter?: (e: UsageEvent) => void;
 }

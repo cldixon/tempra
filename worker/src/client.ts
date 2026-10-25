@@ -1,4 +1,5 @@
 import { checkAttachment, formatOf, imageInfo } from "./media";
+import type { FigureFact } from "./okf/figures";
 import { sha256Hex } from "./okf/hash";
 import { normalizePath } from "./okf/paths";
 import { OkfError } from "./store/errors";
@@ -302,13 +303,64 @@ export async function withDimensions<V extends { kind: string }>(
   if (a.kind !== "attachment" || a.width !== undefined || !a.media?.startsWith("image/")) {
     return view;
   }
-  const bytes = await blobBytes(blobs, a.hash);
-  if (!bytes) return view;
-  const info = imageInfo(bytes, formatOf(a.media));
+  const dims = await workOutDimensions(lib, blobs, a.hash, a.media);
+  return dims && dims.width > 0 && dims.height > 0 ? { ...view, ...dims } : view;
+}
+
+/** An image's width and height from its bytes, kept with `setDimensions` (0 by 0 if it does not decode). */
+async function workOutDimensions(
+  lib: Pick<LibraryClient, "setDimensions">,
+  blobs: BlobStore,
+  hash: string,
+  media: string,
+): Promise<{ width: number; height: number } | null> {
+  const bytes = await blobBytes(blobs, hash);
+  if (!bytes) return null;
+  const info = imageInfo(bytes, formatOf(media));
   const width = info?.ok ? info.width : 0;
   const height = info?.ok ? info.height : 0;
-  await lib.setDimensions(a.hash, width, height);
-  return width > 0 && height > 0 ? { ...view, width, height } : view;
+  await lib.setDimensions(hash, width, height);
+  return { width, height };
+}
+
+/** At most this many images a `read` of a concept works out the size of (two at a time). */
+export const FIGURE_DIMENSIONS_PER_READ = 6;
+
+/**
+ * A concept's figures with the width and height of images stored before TEMPRA-152 worked out
+ * (`blob.width` null), as `withDimensions` does for one attachment: each blob once, at most
+ * FIGURE_DIMENSIONS_PER_READ a read, two at a time so a page of large images is not all in
+ * memory at once; the rest are worked out by later reads.
+ */
+export async function figuresWithDimensions(
+  lib: Pick<LibraryClient, "setDimensions">,
+  blobs: BlobStore,
+  figures: FigureFact[],
+): Promise<FigureFact[]> {
+  const todo = new Map<string, string>();
+  for (const f of figures) {
+    if (f.kind !== "image" || f.status !== "ok" || !f.blob || f.blob.width !== null) continue;
+    if (!f.blob.media?.startsWith("image/")) continue;
+    if (todo.size >= FIGURE_DIMENSIONS_PER_READ) break;
+    todo.set(f.blob.hash, f.blob.media);
+  }
+  if (todo.size === 0) return figures;
+  const found = new Map<string, { width: number; height: number }>();
+  const hashes = [...todo.keys()];
+  for (let i = 0; i < hashes.length; i += 2) {
+    await Promise.all(
+      hashes.slice(i, i + 2).map(async (h) => {
+        const dims = await workOutDimensions(lib, blobs, h, todo.get(h) as string).catch(
+          () => null,
+        );
+        if (dims) found.set(h, dims);
+      }),
+    );
+  }
+  return figures.map((f) => {
+    const dims = f.kind === "image" && f.blob ? found.get(f.blob.hash) : undefined;
+    return dims && f.kind === "image" && f.blob ? { ...f, blob: { ...f.blob, ...dims } } : f;
+  });
 }
 
 const MEDIA: Record<string, string> = {
