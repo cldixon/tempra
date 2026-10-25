@@ -4,7 +4,9 @@
  * its own D1, R2 bucket, KV namespace and Queue, so it never touches staging or production data.
  *
  *   bun run preview up --pr N [--email <operator>]   create what is missing, migrate, deploy, seed, smoke
- *   bun run preview down --pr N                      delete the Worker, D1, R2 (emptied first), KV and Queue
+ *   bun run preview down --pr N                      delete the Workers (tempra-pr-N, then its render
+ *                                                    Worker tempra-render-pr-N), D1, R2 (emptied
+ *                                                    first), KV and Queue
  *   bun run preview sweep --keep 3,7                 tear down every preview whose PR is not listed
  *   bun run preview agents --pr N [--agents 3] [--scenario live] [--pace 2000] [--rounds 5]
  *                              [--patient] [--keep-files] [--email E]
@@ -392,13 +394,19 @@ async function down(pr: string) {
   const names = previewDeployment(pr);
   if (dryRun) {
     console.log(
-      `Would delete PR ${pr}: ${names.name}, ${names.d1.name}, ${names.r2}, tempra-oauth-pr-${pr}, ${names.queue}`,
+      `Would delete PR ${pr}: ${names.name}, ${names.render}, ${names.d1.name}, ${names.r2}, tempra-oauth-pr-${pr}, ${names.queue}`,
     );
     return;
   }
-  if ((await workers()).includes(names.name)) {
+  const running = await workers();
+  if (running.includes(names.name)) {
     console.log(`Deleting Worker ${names.name}`);
     await cf(["workers", "delete", names.name, "--force"]);
+  }
+  // After the Worker that binds to it (TEMPRA-165).
+  if (running.includes(names.render)) {
+    console.log(`Deleting Worker ${names.render}`);
+    await cf(["workers", "delete", names.render, "--force"]);
   }
   const d1 = await d1Id(names.d1.name);
   if (d1) {
@@ -465,7 +473,10 @@ async function previews(): Promise<string[]> {
     const m = pattern.exec(name);
     if (m?.[1]) found.add(m[1]);
   };
-  for (const w of await workers()) add(w, /^tempra-pr-([0-9]+)$/);
+  for (const w of await workers()) {
+    add(w, /^tempra-pr-([0-9]+)$/);
+    add(w, /^tempra-render-pr-([0-9]+)$/);
+  }
   for (const d of await json<{ name: string }[]>(["d1", "list", "--name", "tempra-accounts-pr-"]))
     add(d.name, /^tempra-accounts-pr-([0-9]+)$/);
   for (const b of await buckets()) add(b, /^tempra-blobs-pr-([0-9]+)$/);

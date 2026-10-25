@@ -4,7 +4,8 @@
   "type": "module",
   "exports": {
     ".": "./dist/tempra.ts",
-    "./tempra.css": "./dist/tempra.css"
+    "./tempra.css": "./dist/tempra.css",
+    "./pele": "./dist/pele.ts"
   },
   "scripts": {
     "build": "bun build.ts",

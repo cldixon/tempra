@@ -28,6 +28,7 @@ import { normalizePath, underPrefix } from "./okf/paths";
 import type { JsonObject } from "./okf/types";
 import { fromThisSite } from "./origin";
 import type { RestoreOutcome, RestoreRecord } from "./recovery";
+import type { RenderDiagram } from "./render";
 import { readCookie, SESSION_COOKIE, type Sessions } from "./session";
 import { type Mailer, registerSignInRoutes } from "./signin";
 import { OkfError } from "./store/errors";
@@ -95,6 +96,11 @@ export interface Deps extends UsageDeps {
   ) => Promise<Response>;
   /** The inbox, read cursors and mail settings in D1 (notify.ts); absent, nobody is notified. */
   notifications?: Notifications | null;
+  /**
+   * Draws a Mermaid source to SVG (and PNG) through the render Worker (render.ts, TEMPRA-165);
+   * absent, or with no RENDER binding, it answers "render unavailable".
+   */
+  renderDiagram?: RenderDiagram;
 }
 
 export interface RecoveryDeps {

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import config, { previewDeployment } from "../cloudflare.config";
+import config, { deploymentFor, previewDeployment } from "../cloudflare.config";
+import renderConfig from "../render/cloudflare.config";
 
 /** The metering and rate-limit bindings one deployment gets from cloudflare.config.ts. */
 async function counters(mode: string) {
@@ -94,6 +95,71 @@ describe("the landing page's calls to action match production's SIGNUP", () => {
       expect(text).toContain("/request-access");
       expect(text).toContain("/sign-in");
       expect(text).not.toMatch(/Sign up|Get started/);
+    }
+  });
+});
+
+// TEMPRA-165: each deployment has its own diagram render Worker, bound as RENDER, on its own bucket.
+describe("each deployment has its own render Worker", () => {
+  type Binding = { type?: string; worker?: string; exportName?: string; name?: string };
+  async function workers(mode: string | undefined) {
+    const main = (await (
+      await config({ isPreview: false, mode } as never)
+    ).worker) as {
+      name: string;
+      env: Record<string, Binding>;
+    };
+    const render = (await (
+      await renderConfig({ isPreview: false, mode } as never)
+    ).worker) as {
+      name: string;
+      domains?: string[];
+      workersDev?: boolean;
+      exports: Record<string, unknown>;
+      env: Record<string, Binding>;
+    };
+    return { main, render };
+  }
+
+  test("production and staging: names, the binding and the bucket", async () => {
+    for (const [mode, name] of [
+      ["production", "tempra-render"],
+      ["staging", "tempra-render-staging"],
+    ] as const) {
+      const { main, render } = await workers(mode);
+      expect(render.name).toBe(name);
+      expect(main.env.RENDER).toMatchObject({ worker: name, exportName: "Renderer" });
+      // The render Worker caches in its deployment's own bucket, under renders/.
+      expect(render.env.BLOBS?.name).toBe(main.env.BLOBS?.name as string);
+      expect(render.env.BROWSER?.type).toBe("browser");
+      expect(Object.keys(render.exports)).toEqual(["Renderer"]);
+      // Reached only through the binding.
+      expect(render.domains).toEqual([]);
+      expect(render.workersDev).toBe(false);
+    }
+    expect(deploymentFor("production").render).toBe("tempra-render");
+    expect(previewDeployment("7").render).toBe("tempra-render-pr-7");
+  });
+
+  test("no mode (cf dev, types, dry runs): no RENDER binding, so renders are unavailable", async () => {
+    const { main, render } = await workers(undefined);
+    expect(main.env.RENDER).toBeUndefined();
+    expect(render.name).toBe("tempra-render");
+  });
+
+  test("a preview's render Worker is named by TEMPRA_PR, on the preview's bucket", async () => {
+    const before = process.env.TEMPRA_PR;
+    process.env.TEMPRA_PR = "42";
+    try {
+      // The render Worker needs no D1 or KV ids, so it resolves before they exist.
+      const render = (await (
+        await renderConfig({ isPreview: false, mode: "preview" } as never)
+      ).worker) as { name: string; env: Record<string, Binding> };
+      expect(render.name).toBe("tempra-render-pr-42");
+      expect(render.env.BLOBS?.name).toBe("tempra-blobs-pr-42");
+    } finally {
+      if (before === undefined) Reflect.deleteProperty(process.env, "TEMPRA_PR");
+      else process.env.TEMPRA_PR = before;
     }
   });
 });

@@ -82,10 +82,14 @@ jobs:
           dest="$RUNNER_TEMP/standalone"
           mkdir -p "$dest"
           git ls-files worker design editor app | tar -cf - -T - | tar -xf - -C "$dest"
-          echo '{"private":true,"workspaces":["worker","design","editor","app"],"scripts":{"postinstall":"bun run --filter @tempra/app build"}}' > "$dest/package.json"
+          echo '{"private":true,"workspaces":["worker","worker/render","design","editor","app"],"scripts":{"postinstall":"bun run --filter @tempra/app build"}}' > "$dest/package.json"
           cd "$dest"
           bun install
           cd worker
+          bunx cf deploy --dry-run
+          bun run typecheck
+          # The diagram render Worker (TEMPRA-165), which scripts/deploy.ts deploys first.
+          cd render
           bunx cf deploy --dry-run
           bun run typecheck
         env:
