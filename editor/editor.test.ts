@@ -6,6 +6,7 @@ import {
   checkFigure,
   type Doc,
   docText,
+  findFigures,
   linkTarget,
   normalize,
   parseMarkdown,
@@ -142,6 +143,25 @@ describe("figure markup", () => {
     expect(normalize(":::figure\n![a](/a.png) ![b](/b.png)\n:::")).toBe(
       ":::figure\n![a](/a.png)\n![b](/b.png)\n:::\n",
     );
+  });
+
+  test("each image of a figure counts in the numbering the reader and MCP share", () => {
+    const doc = stored(
+      `![Plain](/p.png)\n\n${FIGURE_FORMS.group}\n:::figure{layout=side}\n![Bad markup](/b.png)\n:::\n`,
+    );
+    const found = findFigures(doc);
+    expect(
+      found.map((f) => [
+        f.n,
+        f.kind === "image" ? f.image.alt : "",
+        f.kind === "image" && !!f.markup,
+      ]),
+    ).toEqual([
+      [1, "Plain", false],
+      [2, "Crumbs", true],
+      [3, "The path", true],
+      [4, "Bad markup", false],
+    ]);
   });
 
   test("what it says", () => {
