@@ -3,9 +3,9 @@
  * bar): the text (title, description, byline, body, sources) centred in its column, and on the
  * right its contents, or one panel in their place (Comments, History, Properties). The page's
  * width decides what fits (container queries on `page`, the page's scroller): under 1100px the
- * contents hide (On this page under the byline), and a panel takes their column down to 960px
- * and overlays the page below that; on a phone (900px and under, the window's call) a panel is
- * a sheet from the bottom.
+ * contents keep a narrower column of their own down to 700px (TEMPRA-150), and hide below that
+ * (On this page under the byline); a panel takes the column down to 960px and overlays the page
+ * below that; on a phone (900px and under, the window's call) a panel is a sheet from the bottom.
  */
 
 /* The right column is the panel's width whether it holds the contents or a panel, so opening a
@@ -569,6 +569,35 @@
     width: min(var(--tempra-panel), 100vw);
     height: auto;
     box-shadow: var(--tempra-shadow);
+  }
+}
+
+/* Room for the text and the contents, not a panel's width as well (a laptop window, about 964
+   to 1364px with the sidebar shown; TEMPRA-150): the contents keep a column of their own, the
+   contents' width and a gutter, as Linear's docs do, and the page's padding tightens a little. An
+   open panel still takes the column from 960px and overlays below that (the rules around this),
+   and the text moves over for it. */
+@container page (700px <= width < 1100px) {
+  .concept:not(.panel-open):not(.markdown-on) .concept-grid {
+    grid-template-columns: [text] minmax(0, 1fr) [side] calc(var(--tempra-contents) + 24px);
+  }
+
+  .concept:not(.panel-open):not(.markdown-on) .concept-side {
+    display: block;
+  }
+
+  .concept:not(.panel-open) .concept-contents {
+    display: block;
+    padding-right: 24px;
+  }
+
+  .concept:not(.panel-open):not(.markdown-on) .toc-inline {
+    display: none;
+  }
+
+  .concept .doc {
+    padding-right: 32px;
+    padding-left: 32px;
   }
 }
 

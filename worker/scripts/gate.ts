@@ -2754,13 +2754,34 @@ async function browserRenders(
       await contentsNav.waitFor({ timeout: 15_000 });
       await page.waitForTimeout(300);
       await back("a plain reload");
-      // Under 1100px the contents hide (On this page under the byline). At 1280px a panel takes
-      // their column and the text moves over for it: nothing runs under it (TEMPRA-128, C-5).
+      // Under 1100px of page the contents keep a narrower column of their own down to 700px
+      // (TEMPRA-150), as Linear's docs do: at 1280px and at a 1000px window they are beside the
+      // text, not On this page. Below that they hide (On this page under the byline). At 1280px a
+      // panel takes their column and the text moves over for it: nothing runs under it
+      // (TEMPRA-128, C-5).
+      const inline = main.locator(".toc-inline");
+      const besideText = async (where: string) => {
+        await contentsNav.waitFor({ timeout: 5000 });
+        if (await inline.isVisible()) throw new Error(`On this page shows ${where}`);
+        const toc = await contentsNav.boundingBox();
+        const text = await main.locator(".concept .doc").boundingBox();
+        if (!toc || !text || toc.x < text.x + text.width - 1) {
+          throw new Error(`the contents are not beside the text ${where}`);
+        }
+      };
+      await page.setViewportSize({ width: 1000, height: 720 });
+      try {
+        await besideText("at a 1000px window");
+        if (shots) await page.screenshot({ path: `${shots}/contents-1000.png` });
+        await page.setViewportSize({ width: 940, height: 720 });
+        await contentsNav.waitFor({ state: "hidden", timeout: 5000 });
+        await inline.locator("summary").waitFor({ timeout: 5000 });
+      } finally {
+        await wide();
+      }
       await usual();
       try {
-        await contentsNav.waitFor({ state: "hidden", timeout: 5000 });
-        const inline = main.locator(".toc-inline");
-        await inline.locator("summary").waitFor({ timeout: 5000 });
+        await besideText("at 1280px");
         await commentsToggle().click();
         await comments.waitFor({ timeout: 5000 });
         const position = () =>
