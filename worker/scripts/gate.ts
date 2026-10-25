@@ -1422,6 +1422,33 @@ async function browserRenders(
           await found.waitFor({ timeout: 5000 });
           await page.keyboard.press("Escape");
           await found.waitFor({ state: "hidden", timeout: 5000 });
+          // New library floats at the screen's bottom right, not in the top bar (TEMPRA-148).
+          if (
+            (await page
+              .locator("header.ws-topbar")
+              .getByRole("button", { name: "New library" })
+              .filter({ visible: true })
+              .count()) > 0
+          ) {
+            throw new Error("New library is in the phone's top bar");
+          }
+          const fab = page.locator("button.fab", { hasText: "New library" });
+          const fabBox = await fab.boundingBox();
+          if (
+            !fabBox ||
+            fabBox.x + fabBox.width < 390 - 32 ||
+            fabBox.y + fabBox.height < 844 - 32
+          ) {
+            throw new Error(
+              `New library does not float at the bottom right: ${JSON.stringify(fabBox)}`,
+            );
+          }
+          if (shots) await page.screenshot({ path: `${shots}/libraries-phone.png` });
+          await fab.click();
+          const making = page.getByRole("dialog", { name: "New library" });
+          await making.waitFor({ timeout: 5000 });
+          await page.keyboard.press("Escape");
+          await making.waitFor({ state: "hidden", timeout: 5000 });
           await page.goto(`${lib}/-/members`);
           await phoneNamed("Members");
         } finally {

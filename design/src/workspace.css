@@ -1492,6 +1492,34 @@ button.tree-name {
   }
 }
 
+/* ---------- A floating action (TEMPRA-148) ---------- */
+
+/* A page's one making action on a phone (New library), floating at the screen's bottom right
+   over the page, in place of its pill in the top bar. In the page, so the drawer dims it and
+   makes it inert with the rest; under the drawer's scrim. The desktop keeps the bar's pill. */
+.fab {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .topbar-tools .bar-new {
+    display: none;
+  }
+
+  .fab {
+    position: fixed;
+    right: max(16px, env(safe-area-inset-right));
+    bottom: max(16px, env(safe-area-inset-bottom));
+    z-index: 5;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: var(--tempra-touch);
+    padding: 0 20px;
+    box-shadow: var(--tempra-shadow);
+  }
+}
+
 /* ---------- Page pieces: lists, tables, forms ---------- */
 
 /* A command or URL to copy (the connect pages): an inset that wraps rather than widening the page. */
