@@ -35,6 +35,8 @@ export const LIBRARY_METHODS = [
   "needs",
   "signDownload",
   "openDownload",
+  "signUpload",
+  "openUpload",
   "dump",
   "pruneUsage",
   "maintenance",

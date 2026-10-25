@@ -69,6 +69,7 @@ Gross margin equals recognized [revenue](/metrics/revenue.md) minus full COGS.[^
 - `batch` for related changes (a new concept plus the links to it; a rename plus fixes) so they land as one request.
 - `attach` stores a non-markdown file. Images (PNG, JPEG, GIF, WebP, AVIF, SVG) are checked on write: a broken or truncated one is refused with `bad_image` saying what is wrong, and an image's type is taken from its bytes, not from `media` or the extension.
 - `move` renames a file or a whole directory. Links keep working; do not fix them by hand.
+- Adding a file (an image, a chart, a PDF): with a shell, call `prepare_upload` and run the `curl -T <file> '<url>'` line it returns (one PUT within 15 minutes, up to 10 MB; curl prints the write result). Without one, `attach` takes base64, for small files only (under about 200 KB); pass `sha256` (or `size`) so damaged bytes are refused, not stored.
 - Put a one-line `note` on every write, saying why. Humans read the ledger.
 - Read the `lint` in every write result and fix it in the same session. The result's notes say what else to know: ignored fields, the stored form, the concept's open comment threads and any your edit left outdated, and after a delete, the concepts whose links it broke.
 

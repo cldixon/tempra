@@ -1,10 +1,11 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, setSystemTime, test } from "bun:test";
 import { type Doc, parseMarkdown, toMarkdown } from "@tempra/editor/doc";
 import { parseConcept } from "../src/okf/concept";
 import { readTar, writeTar } from "../src/util/tar";
 import { compareBundle } from "./compare";
 import { BUNDLES, loadBundle } from "./fixtures";
 import { setup } from "./harness";
+import { makePng } from "./images";
 
 const doc = (body: string, extra = "") => `---\ntype: Note\n${extra}---\n${body}`;
 
@@ -309,5 +310,161 @@ describe("GET /api/v1/libraries (TEMPRA-23)", () => {
     const [row] = await list(s2);
     expect(row?.unavailable).toBeUndefined();
     expect(row?.tally).toEqual({ changes: 0 });
+  });
+});
+
+describe("upload URLs (TEMPRA-158)", () => {
+  const PNG = makePng(4, 3);
+  const hex = (b: Uint8Array) => new Bun.CryptoHasher("sha256").update(b).digest("hex");
+  type S = ReturnType<typeof setup>;
+  type Prepared = { url: string; method: string; expires: string; curl: string; code?: string };
+  const prepare = async (s: S, body: Record<string, unknown>, token?: string) => {
+    const r = await s.req("/uploads", {
+      method: "POST",
+      token,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    return { status: r.status, body: (await r.json()) as Prepared };
+  };
+  const put = (s: S, url: string, bytes: Uint8Array, type?: string) =>
+    s.anon.request(url, {
+      method: "PUT",
+      body: bytes,
+      headers: type ? { "Content-Type": type } : {},
+    });
+  const code = async (r: Response) => ((await r.json()) as { code: string }).code;
+
+  test("prepare, PUT the bytes: attached as the caller, with its note, answered as a write", async () => {
+    const s = setup();
+    const p = await prepare(s, {
+      path: "figures/chart.png",
+      size: PNG.length,
+      sha256: hex(PNG),
+      note: "The latency chart.",
+    });
+    expect(p.status).toBe(201);
+    expect(p.body.url).toStartWith("http://localhost/ul/lib-1/");
+    expect(p.body.curl).toBe(`curl -sS -T chart.png '${p.body.url}'`);
+    const r = await put(s, p.body.url, PNG);
+    expect(r.status).toBe(200);
+    const res = (await r.json()) as { path: string; hash: string; seq: number; lint: unknown[] };
+    expect(res.path).toBe("figures/chart.png");
+    expect(res.hash).toBe(hex(PNG));
+    const back = await s.req("/files/figures/chart.png");
+    expect(back.headers.get("Content-Type")).toBe("image/png");
+    expect(new Uint8Array(await back.arrayBuffer())).toEqual(PNG);
+    const reqs = (await (await s.req("/requests")).json()) as {
+      requests: { actor: string; note: string | null }[];
+    };
+    expect(reqs.requests[0]).toMatchObject({
+      actor: "claude-code/test",
+      note: "The latency chart.",
+    });
+    // Recorded for the blob sweep as any attach is.
+    expect(s.db.query("SELECT 1 FROM blob_refs WHERE hash = ?").get(hex(PNG))).toBeTruthy();
+
+    // One PUT per link.
+    const again = await put(s, p.body.url, PNG);
+    expect(again.status).toBe(403);
+    expect(await code(again)).toBe("upload_used");
+  });
+
+  test("bytes or a type that do not match are refused, and the link is not spent", async () => {
+    const s = setup();
+    const p = await prepare(s, { path: "a.png", size: PNG.length, sha256: hex(PNG) });
+    const short = await put(s, p.body.url, PNG.slice(0, 5));
+    expect(short.status).toBe(400);
+    expect(await short.json()).toMatchObject({ code: "checksum_mismatch", received_size: 5 });
+    const garbled = PNG.slice();
+    garbled[10] = 9;
+    const bad = await put(s, p.body.url, garbled);
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toMatchObject({
+      code: "checksum_mismatch",
+      received_sha256: hex(garbled),
+    });
+    const type = await put(s, p.body.url, PNG, "image/jpeg");
+    expect(type.status).toBe(400);
+    expect(await code(type)).toBe("media_mismatch");
+    expect((await s.req("/files/a.png")).status).toBe(404);
+    expect((await put(s, p.body.url, PNG, "image/png")).status).toBe(200);
+  });
+
+  test("a truncated image is refused with bad_image and nothing is written", async () => {
+    const s = setup();
+    const p = await prepare(s, { path: "figures/cut.png", note: "Cut short." });
+    const seq = s.store().headSeq();
+    const cut = await put(s, p.body.url, PNG.slice(0, PNG.length - 20));
+    expect(cut.status).toBe(400);
+    expect(await code(cut)).toBe("bad_image");
+    expect((await s.req("/files/figures/cut.png")).status).toBe(404);
+    expect(s.store().headSeq()).toBe(seq);
+    // The link is still good for the whole file, which comes back with its dimensions.
+    expect((await put(s, p.body.url, PNG)).status).toBe(200);
+    const view = (await (
+      await s.req("/files/figures/cut.png", { headers: { Accept: "application/json" } })
+    ).json()) as { width?: number; height?: number };
+    expect(view).toMatchObject({ width: 4, height: 3 });
+  });
+
+  test("expired, tampered or foreign links are refused; download links do not upload", async () => {
+    const s = setup();
+    const p = await prepare(s, { path: "a.bin" });
+    expect((await put(s, `${p.body.url.slice(0, -2)}xx`, PNG)).status).toBe(403);
+    expect((await put(s, p.body.url.replace("/ul/lib-1/", "/ul/other/"), PNG)).status).toBe(403);
+    // A download token never opens as an upload, nor the other way round.
+    const dl = s.store().signDownload({ k: "export", at: 0 });
+    expect((await put(s, `/ul/lib-1/${dl}`, PNG)).status).toBe(403);
+    const ul = p.body.url.split("/").pop();
+    expect((await s.anon.request(`/dl/lib-1/${ul}`)).status).toBe(403);
+    setSystemTime(new Date(Date.now() + 16 * 60_000));
+    try {
+      const late = await put(s, p.body.url, PNG);
+      expect(late.status).toBe(403);
+      expect(await code(late)).toBe("bad_upload");
+    } finally {
+      setSystemTime();
+    }
+  });
+
+  test("read access is refused at prepare, and so are a path outside a prefix and a size over the cap", async () => {
+    const s = setup();
+    const r = await prepare(s, { path: "a.bin" }, "reader");
+    expect(r.status).toBe(403);
+    expect(r.body.code).toBe("read_only");
+    expect((await prepare(s, { path: "elsewhere/a.bin" }, "scoped")).status).toBe(403);
+    expect((await prepare(s, { path: "a.bin", size: 11 * 1024 * 1024 })).status).toBe(413);
+    expect((await prepare(s, { path: "a.bin", sha256: "abc" })).status).toBe(400);
+  });
+
+  test("a member demoted to read before the PUT lands nothing", async () => {
+    const s = setup();
+    const friend = await s.stranger("friend@example.com");
+    await s.accounts.share("lib-1", friend.user.id, "write", "user_1");
+    const r = await friend.app.request("/api/v1/libraries/owner/demo/uploads", {
+      method: "POST",
+      headers: { Origin: "http://localhost", "Content-Type": "application/json" },
+      body: JSON.stringify({ path: "f.bin" }),
+    });
+    expect(r.status).toBe(201);
+    const { url } = (await r.json()) as Prepared;
+    await s.accounts.share("lib-1", friend.user.id, "read", "user_1");
+    const got = await put(s, url, PNG);
+    expect(got.status).toBe(403);
+    expect((await s.req("/files/f.bin")).status).toBe(404);
+  });
+
+  test("blob first: a link without a path stores the bytes for X-Blob", async () => {
+    const s = setup();
+    const p = await prepare(s, { sha256: hex(PNG) });
+    expect(p.status).toBe(201);
+    const r = await put(s, p.body.url, PNG);
+    expect(r.status).toBe(201);
+    const blob = (await r.json()) as { hash: string; size: number };
+    expect(blob).toMatchObject({ hash: hex(PNG), size: PNG.length });
+    const w = await s.req("/files/x/pic.png", { method: "PUT", headers: { "X-Blob": blob.hash } });
+    expect(w.status).toBe(200);
+    expect(new Uint8Array(await (await s.req("/files/x/pic.png")).arrayBuffer())).toEqual(PNG);
   });
 });

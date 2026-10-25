@@ -42,6 +42,7 @@ describe("MCP server", () => {
       "edit",
       "grep",
       "move",
+      "prepare_upload",
       "read",
       "start",
       "write",
@@ -255,6 +256,95 @@ describe("MCP server", () => {
     });
     expect(cut.isError).toBe(true);
     expect(cut.text).toContain("bad_image");
+  });
+
+  describe("adding files (TEMPRA-156, TEMPRA-158)", () => {
+    const bytes = makePng(4, 3);
+    const b64 = base64(bytes);
+    const sha = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
+
+    test("prepare_upload: a curl line whose PUT attaches the file as the caller", async () => {
+      const { app, store } = setup();
+      const { call } = await connect(app);
+      const r = await call("prepare_upload", {
+        path: "figures/plot.png",
+        sha256: sha,
+        size: bytes.length,
+        note: "Plot from the run.",
+      });
+      expect(r.isError).toBe(false);
+      const line = /^curl -sS -T plot\.png '(\S+)'$/m.exec(r.text);
+      expect(line).not.toBeNull();
+      const url = line?.[1] ?? "";
+      expect(url).toStartWith("http://localhost/ul/lib-1/");
+      const put = await app.request(url, { method: "PUT", body: bytes });
+      expect(put.status).toBe(200);
+      const res = (await put.json()) as { path: string; hash: string; lint: unknown[] };
+      expect(res).toMatchObject({ path: "figures/plot.png", hash: sha });
+      const read = (await call("read", { path: "figures/plot.png" })).text;
+      expect(read).toContain("image/png");
+      const last = store().requests({ limit: 1 }).requests[0];
+      expect(last).toMatchObject({ actor: "claude-code/test", note: "Plot from the run." });
+      expect((await app.request(url, { method: "PUT", body: bytes })).status).toBe(403);
+    });
+
+    test("prepare_upload: read access is refused, and markdown goes through write", async () => {
+      const { app } = setup();
+      const reader = await connect(app, "reader");
+      const r = await reader.call("prepare_upload", { path: "a.png" });
+      expect(r.isError).toBe(true);
+      expect(r.text).toContain("read_only");
+      const { call } = await connect(app);
+      expect((await call("prepare_upload", { path: "a.md" })).text).toContain("bad_path");
+    });
+
+    test("attach: a matching checksum stores, a mismatch says what arrived", async () => {
+      const { app } = setup();
+      const { call } = await connect(app);
+      const ok = await call("attach", { path: "a.png", content_base64: b64, sha256: sha });
+      expect(ok.isError).toBe(false);
+      const sized = await call("attach", {
+        path: "b.png",
+        content_base64: b64,
+        size: bytes.length,
+      });
+      expect(sized.isError).toBe(false);
+
+      const wrong = await call("attach", {
+        path: "c.png",
+        content_base64: b64,
+        sha256: "0".repeat(64),
+      });
+      expect(wrong.isError).toBe(true);
+      expect(wrong.text).toContain("checksum_mismatch");
+      expect(wrong.text).toContain(`received ${bytes.length} bytes, sha256 ${sha}`);
+      const short = await call("attach", { path: "c.png", content_base64: b64, size: 99 });
+      expect(short.text).toContain("checksum_mismatch");
+      expect((await call("read", { path: "c.png" })).isError).toBe(true);
+    });
+
+    test("attach: truncated or sloppy base64 is refused", async () => {
+      const { app } = setup();
+      const { call } = await connect(app);
+      // Cut short: not a multiple of 4.
+      const cut = await call("attach", { path: "a.png", content_base64: b64.slice(0, -3) });
+      expect(cut.isError).toBe(true);
+      expect(cut.text).toContain("bad_base64");
+      // Unpadded, which atob alone accepts.
+      const unpadded = await call("attach", { path: "a.bin", content_base64: "AAE" });
+      expect(unpadded.text).toContain("bad_base64");
+      // Characters outside the alphabet, and padding in the middle.
+      for (const s of ["AA$A", "AA=A", "AAAA-_AA"]) {
+        expect((await call("attach", { path: "a.bin", content_base64: s })).text).toContain(
+          "bad_base64",
+        );
+      }
+      // Whitespace (line-wrapped base64) is fine.
+      const wrapped = `${b64.slice(0, 8)}\n${b64.slice(8)}\n`;
+      expect((await call("attach", { path: "a.png", content_base64: wrapped })).isError).toBe(
+        false,
+      );
+    });
   });
 
   test("permissions: read-only tokens cannot write; only process tokens verify", async () => {
