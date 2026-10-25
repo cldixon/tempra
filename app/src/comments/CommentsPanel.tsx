@@ -6,7 +6,8 @@ import { NewComment, ThreadView } from "./Thread";
 
 /**
  * The Comments panel's list (take 4, TEMPRA-114; tempra-dev: app/comments, In the app): Open and
- * Resolved n, a draft at the top while one is being written, then the threads in document order
+ * Resolved n, a box to start a comment on the page (TEMPRA-172), or the draft in its place while
+ * one is being written, then the threads in document order
  * (those on the whole concept and outdated ones first), the active one as a card, the others
  * compact. Its frame (title, count, ×) is the concept's Panel.
  */
@@ -92,9 +93,12 @@ export function CommentsList(props: {
         />
       )}
       {tab === "open" && props.writable && !draft && !composing && (
-        <button type="button" className="new-thread" onClick={() => setComposing(true)}>
-          Comment on the page
-        </button>
+        <div className="new-thread-box">
+          <button type="button" className="new-thread" onClick={() => setComposing(true)}>
+            Comment on the page…
+          </button>
+          <p className="small muted">Or select text to comment on it</p>
+        </div>
       )}
       {threads.map((t) => (
         <ThreadView
@@ -110,11 +114,7 @@ export function CommentsList(props: {
       {props.loading && <p className="small muted">Loading…</p>}
       {!props.loading && threads.length === 0 && !draft && !composing && (
         <p className="small muted">
-          {tab === "resolved"
-            ? "No resolved threads."
-            : props.writable
-              ? "No open threads. Select text to comment on it."
-              : "No open threads."}
+          {tab === "resolved" ? "No resolved threads." : "No open threads."}
         </p>
       )}
     </div>

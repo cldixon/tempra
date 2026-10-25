@@ -668,12 +668,6 @@
     font-size: var(--tempra-text-page);
   }
 
-  /* On a phone the top bar has Comments and ⋯. Comments reads as its word and count, without
-     the glyph, to leave the library's name room. */
-  .comments-toggle svg {
-    display: none;
-  }
-
   .toc-inline summary {
     min-height: var(--tempra-touch);
     font-size: var(--tempra-text-name);
@@ -736,5 +730,89 @@
 @media (min-width: 901px) {
   .panel-grip {
     display: none;
+  }
+}
+
+/* ---------- A page's actions (TEMPRA-172; tempra-dev: decisions/a-pages-actions-float) ---------- */
+
+/* One round + at the page's bottom right, in ink, the one raised thing on a flat page; its menu
+   opens upward (Comment, Check). Aside while a panel is open (the app sets `hidden`). In the
+   page, so an overlaid panel or the phone's drawer dims it with the rest; under their scrims. */
+.page-actions {
+  position: fixed;
+  right: max(28px, env(safe-area-inset-right));
+  bottom: max(28px, env(safe-area-inset-bottom));
+  z-index: 3;
+}
+
+.page-actions[hidden] {
+  display: none;
+}
+
+.page-fab {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: var(--tempra-color-text);
+  color: var(--tempra-color-bg);
+  box-shadow: var(--tempra-shadow);
+}
+
+.page-fab:hover:not(:disabled) {
+  background: var(--tempra-color-text);
+  color: var(--tempra-color-bg);
+}
+
+.page-fab svg {
+  transition: transform 0.15s ease;
+}
+
+/* Open, the + turns into × over its menu. */
+.page-fab[aria-expanded="true"] svg {
+  transform: rotate(45deg);
+}
+
+/* Something waits in the menu (open comments, changes since the check): a small ringed dot on
+   the button's corner. Greys only. */
+.page-fab-dot {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 12px;
+  height: 12px;
+  box-sizing: border-box;
+  border: 2px solid var(--tempra-color-text);
+  border-radius: 50%;
+  background: var(--tempra-color-bg);
+}
+
+.page-actions-list {
+  min-width: 240px;
+}
+
+.menu-list .menu-count {
+  margin-left: auto;
+  padding-left: 12px;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+}
+
+/* Who checked the page, when there is nothing to do about it. */
+.menu-list .menu-line {
+  margin: 0;
+  padding: 6px 10px;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+}
+
+@media (max-width: 900px) {
+  .page-actions {
+    right: max(16px, env(safe-area-inset-right));
+    bottom: max(24px, env(safe-area-inset-bottom));
   }
 }

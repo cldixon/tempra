@@ -605,8 +605,25 @@ async function browserRenders(
       await newVersion().click();
       await page.getByRole("button", { name: "Show new version" }).click();
     };
-    /** The concept's comments toggle ("Comments" or "Comments n open"). */
-    const commentsToggle = () => sheetBar.getByRole("button", { name: /^Comments( \d+ open)?$/ });
+    /**
+     * A page's actions (TEMPRA-172): the + at its bottom right ("Actions", or "Actions, n open
+     * comments"), opening a menu upward with Comment and the page's check.
+     */
+    const actionsFab = () => main.locator(".page-actions .page-fab");
+    const actionsMenu = page.locator(".page-actions-list");
+    /** Comments from the page's actions: + then Comment. */
+    const openComments = async () => {
+      await actionsFab().click();
+      await actionsMenu.getByRole("button", { name: /^Comment/ }).click();
+    };
+    /** From the keyboard: the + focused, Enter opens its menu, Down to Comment, Enter. */
+    const openCommentsByKeys = async () => {
+      await actionsFab().focus();
+      await page.keyboard.press("Enter");
+      await actionsMenu.waitFor({ timeout: 5000 });
+      await page.keyboard.press("ArrowDown");
+      await page.keyboard.press("Enter");
+    };
     /** The concept's panels (take 4): one at a time, in place of the contents. */
     const comments = page.locator("aside#panel-comments.concept-panel");
     const historyPanel = page.locator("aside#panel-history.concept-panel");
@@ -1481,7 +1498,7 @@ async function browserRenders(
         const body = page.locator(".body .prose");
         await body.waitFor({ timeout: 15_000 });
         await sheetBar.getByRole("button", { name: "More", exact: true }).waitFor();
-        await commentsToggle().waitFor();
+        await actionsFab().waitFor();
         // Read and comment only (TEMPRA-99): nothing in the page edits.
         if ((await page.locator("[contenteditable]").count()) > 0) throw new Error("editable");
         if ((await page.getByRole("button", { name: "Edit", exact: true }).count()) > 0) {
@@ -1498,16 +1515,16 @@ async function browserRenders(
             el.scrollTop = 0;
           });
           await page.screenshot({ path: `${shots}/reader-${name}.png` });
-          await commentsToggle().click();
+          await openComments();
           await comments.waitFor({ timeout: 5000 });
           await page.screenshot({ path: `${shots}/reader-${name}-comments.png` });
-          await commentsToggle().click();
+          await page.getByRole("button", { name: "Close comments" }).click();
           await comments.waitFor({ state: "detached", timeout: 5000 });
           await page.setViewportSize({ width: 390, height: 844 });
           await page.waitForTimeout(200);
           await page.screenshot({ path: `${shots}/reader-${name}-phone.png` });
-          // On a phone the comments are a bottom sheet, opened from the toggle.
-          await commentsToggle().click();
+          // On a phone the comments are a bottom sheet, opened from the page's actions.
+          await openComments();
           await comments.waitFor({ timeout: 5000 });
           await page.screenshot({ path: `${shots}/reader-${name}-phone-comments.png` });
           await page.getByRole("button", { name: "Close comments" }).click();
@@ -1756,7 +1773,11 @@ async function browserRenders(
         if ((await properties().getByText(/verif/i).count()) > 0) {
           throw new Error("Properties says verify");
         }
-        await mark.click();
+        // Checked from the page's actions (TEMPRA-172), the + aside until Properties closes.
+        await page.keyboard.press("Escape");
+        await properties().waitFor({ state: "detached", timeout: 5000 });
+        await actionsFab().click();
+        await actionsMenu.getByRole("button", { name: "Mark as checked" }).click();
         await page.waitForURL(`${url}?done=verify`, { timeout: 10_000 });
         await page
           .getByText("Checked. It stays checked until the next edit.")
@@ -1771,9 +1792,26 @@ async function browserRenders(
         await check().waitFor({ state: "detached", timeout: 10_000 });
         await page.keyboard.press("Escape");
         await properties().waitFor({ state: "detached", timeout: 5000 });
-        // An agent edits it: "· changed since", which opens review mode.
+        // The page's actions say who checked it, with nothing to do there.
+        await actionsFab().click();
+        await actionsMenu.getByText(/^Checked by you, /).waitFor({ timeout: 5000 });
+        if ((await actionsMenu.getByRole("button", { name: "Mark as checked" }).count()) > 0) {
+          throw new Error("a checked page still offers Mark as checked");
+        }
+        await page.keyboard.press("Escape");
+        await actionsMenu.waitFor({ state: "detached", timeout: 5000 });
+        // An agent edits it: "· changed since", which opens review mode; the page's actions
+        // offer the same, Review changes with how many.
         await agentAppends("A sentence the gate added.");
         await page.goto(url);
+        await actionsFab().click();
+        const reviewChanges = actionsMenu.getByRole("link", { name: /^Review changes/ });
+        await reviewChanges.waitFor({ timeout: 10_000 });
+        if (!(await reviewChanges.innerText()).includes("1 change")) {
+          throw new Error(`the page's actions say ${await reviewChanges.innerText()}`);
+        }
+        await page.keyboard.press("Escape");
+        await actionsMenu.waitFor({ state: "detached", timeout: 5000 });
         await checkedLine.getByRole("link", { name: "changed since" }).click();
         await page.waitForURL(`${url}?review=1`);
         const bar = page.getByRole("region", { name: "Review" });
@@ -2243,9 +2281,9 @@ async function browserRenders(
         await comments.getByRole("button", { name: "Resolved 1" }).waitFor({ timeout: 10_000 });
         await highlight("tempra-comment", true);
         await highlight("tempra-comment-active", true);
-        if ((await commentsToggle().innerText()).trim() !== "Comments") {
+        if ((await actionsFab().getAttribute("aria-label")) !== "Actions") {
           throw new Error(
-            `the toggle still counts open threads: ${await commentsToggle().innerText()}`,
+            `the actions still count open threads: ${await actionsFab().getAttribute("aria-label")}`,
           );
         }
         // Under Resolved it is there, with Reopen.
@@ -2374,13 +2412,27 @@ async function browserRenders(
           await page.locator(".body .prose").waitFor({ timeout: 15_000 });
           const title = (await main.locator("h1.doc-title").innerText()).trim();
           await phoneNamed(title);
-          const toggle = commentsToggle();
-          await toggle.waitFor({ timeout: 5000 });
+          // The page's actions float at the bottom right (TEMPRA-172); the bar has ⋯ and, with
+          // Comments gone from it, the bell again.
+          await actionsFab().waitFor({ timeout: 5000 });
+          const fabBox = await actionsFab().boundingBox();
+          if (
+            !fabBox ||
+            fabBox.x + fabBox.width < 390 - 40 ||
+            fabBox.y + fabBox.height < 844 - 48
+          ) {
+            throw new Error(
+              `the page's actions are not at the bottom right: ${JSON.stringify(fabBox)}`,
+            );
+          }
           const moreButton = sheetBar.getByRole("button", { name: "More", exact: true });
           if (!(await moreButton.isVisible())) throw new Error("no ⋯ in the phone's top bar");
+          if (!(await sheetBar.getByRole("button", { name: /^Inbox/ }).isVisible())) {
+            throw new Error("no bell in the concept's phone bar");
+          }
           for (const gone of [
             sheetBar.getByRole("button", { name: "Search", exact: true }),
-            sheetBar.getByRole("button", { name: /^Inbox/ }),
+            sheetBar.getByRole("button", { name: /^Comments/ }),
             sheetBar.getByRole("button", { name: /^Copy page$/ }),
           ]) {
             if (await gone.isVisible()) throw new Error(`the concept's phone bar shows ${gone}`);
@@ -2391,9 +2443,6 @@ async function browserRenders(
           }
           await page.waitForTimeout(500);
           if ((await comments.count()) > 0) throw new Error("the comments opened by themselves");
-          if ((await toggle.getAttribute("aria-pressed")) !== "false") {
-            throw new Error("the comments toggle is pressed with the comments closed");
-          }
           // On this page: a closed disclosure under the byline; it opens, and a heading closes it.
           const inline = main.locator("details.toc-inline");
           if ((await inline.count()) > 0) {
@@ -2448,9 +2497,9 @@ async function browserRenders(
               throw new Error(`${what} has no drag handle`);
             }
           };
-          await toggle.click();
+          await openComments();
           await isSheet(comments, "Comments");
-          await comments.getByRole("button", { name: "Comment on the page" }).waitFor();
+          await comments.getByRole("button", { name: "Comment on the page…" }).waitFor();
           if (shots) await page.screenshot({ path: `${shots}/comments-phone.png` });
           await comments.getByRole("button", { name: "Close comments" }).click();
           await comments.waitFor({ state: "detached", timeout: 5000 });
@@ -2504,14 +2553,14 @@ async function browserRenders(
           await page.waitForTimeout(50);
         }
       };
-      // Comments from its control: the focus to the panel's heading, and back on Escape.
-      await commentsToggle().focus();
-      await page.keyboard.press("Enter");
+      // Comments from the page's actions (TEMPRA-172): the focus to the panel's heading, and back
+      // to the + on Escape, once it is back from stepping aside.
+      await openCommentsByKeys();
       await comments.waitFor({ timeout: 5000 });
       await expectFocus("aside#panel-comments h2", "opening Comments");
       await page.keyboard.press("Escape");
       await comments.waitFor({ state: "detached", timeout: 5000 });
-      await expectFocus(".comments-toggle", "closing Comments");
+      await expectFocus(".page-actions .page-fab", "closing Comments");
       // ⋯ by its keys: Down opens it at Copy page (its head, TEMPRA-145), Down, End, Home move;
       // Enter on History opens it, whose heading takes the focus; Escape gives it back to ⋯.
       const moreButton = sheetBar.getByRole("button", { name: "More", exact: true });
@@ -2607,8 +2656,7 @@ async function browserRenders(
           throw new Error("the page stayed inert after the drawer closed");
         }
         // A panel's sheet: modal, its heading focused, closed by a tap on the dimmed page.
-        await commentsToggle().focus();
-        await page.keyboard.press("Enter");
+        await openCommentsByKeys();
         await comments.waitFor({ timeout: 5000 });
         await expectFocus("aside#panel-comments h2", "opening the sheet");
         if (!(await inert("main article.doc")) || !(await inert("header.ws-topbar"))) {
@@ -2705,25 +2753,55 @@ async function browserRenders(
           throw new Error(`a panel is still open after ${what}`);
         }
       };
-      // The control reads its word (TEMPRA-134, C-10), then opens and closes the panel; the text
-      // stays where it was (the panel takes the contents' space, C-17).
-      const toggle = commentsToggle();
-      if ((await toggle.innerText()).trim() !== "Comments") {
-        throw new Error(`the comments control reads "${await toggle.innerText()}"`);
+      // The page's actions (TEMPRA-172): no Comments in the top bar; the + at the bottom right
+      // opens its menu upward (Comment, then the check: Mark as checked on a page nobody
+      // checked), and Comment opens the panel; the text stays where it was (the panel takes the
+      // contents' space, C-17), and the + steps aside while the panel is open.
+      if ((await sheetBar.getByRole("button", { name: /^Comments/ }).count()) > 0) {
+        throw new Error("Comments is still in the top bar");
       }
+      const fab = actionsFab();
+      if ((await fab.getAttribute("aria-label")) !== "Actions") {
+        throw new Error(`the page's actions are named "${await fab.getAttribute("aria-label")}"`);
+      }
+      const fabAt = await fab.boundingBox();
+      const viewport = page.viewportSize();
+      if (
+        !fabAt ||
+        !viewport ||
+        fabAt.x + fabAt.width < viewport.width - 48 ||
+        fabAt.y + fabAt.height < viewport.height - 48
+      ) {
+        throw new Error(`the page's actions are not at the bottom right: ${JSON.stringify(fabAt)}`);
+      }
+      await fab.click();
+      await actionsMenu.waitFor({ timeout: 5000 });
+      const offered = (await actionsMenu.locator(".menu-item").allInnerTexts()).map((t) =>
+        t.replace(/\s+/g, " ").trim(),
+      );
+      if (JSON.stringify(offered) !== JSON.stringify(["Comment", "Mark as checked"])) {
+        throw new Error(`the page's actions offer ${JSON.stringify(offered)}`);
+      }
+      if (shots) await page.screenshot({ path: `${shots}/actions.png` });
+      await page.keyboard.press("Escape");
+      await actionsMenu.waitFor({ state: "detached", timeout: 5000 });
       const textX = async () => (await main.locator("article.doc").boundingBox())?.x ?? -1;
       const before = await textX();
-      await toggle.click();
+      await openComments();
       await comments.waitFor({ timeout: 5000 });
-      if ((await toggle.getAttribute("aria-pressed")) !== "true") throw new Error("not pressed");
+      if (await fab.isVisible()) throw new Error("the page's actions stay over an open panel");
       if ((await contentsNav.count()) > 0) throw new Error("the contents show beside a panel");
       const after = await textX();
       if (Math.abs(after - before) > 1) {
         throw new Error(`opening a panel moved the text from ${before} to ${after}`);
       }
-      await comments.getByText("No open threads. Select text to comment on it.").waitFor();
-      await toggle.click();
-      await back("the control again");
+      // The panel starts a comment on the page itself.
+      await comments.getByRole("button", { name: "Comment on the page…" }).waitFor();
+      await comments.getByText("Or select text to comment on it").waitFor();
+      await comments.getByText("No open threads.", { exact: true }).waitFor();
+      await page.getByRole("button", { name: "Close comments" }).click();
+      await back("×");
+      await fab.waitFor({ timeout: 5000 });
       // ⋯ → History, closed by ×; ⋯ → Properties, closed by Escape; one at a time.
       await more("History");
       await historyPanel.waitFor({ timeout: 5000 });
@@ -2756,7 +2834,7 @@ async function browserRenders(
       await page.keyboard.press("Escape");
       await back("Escape");
       // A link asks for a panel; a page opened plainly has none (nothing is remembered).
-      await commentsToggle().click();
+      await openComments();
       await comments.waitFor({ timeout: 5000 });
       await page.goto(`${here}?panel=history`);
       await historyPanel.waitFor({ timeout: 15_000 });
@@ -2792,7 +2870,7 @@ async function browserRenders(
       await usual();
       try {
         await besideText("at 1280px");
-        await commentsToggle().click();
+        await openComments();
         await comments.waitFor({ timeout: 5000 });
         const position = () =>
           page.evaluate<string>(
@@ -3121,7 +3199,7 @@ async function browserRenders(
           phone: true,
           ready: async () => {
             await main.locator(".body .prose").waitFor({ timeout: 15_000 });
-            await commentsToggle().click();
+            await openComments();
             await comments.waitFor({ timeout: 5000 });
           },
         },

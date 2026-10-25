@@ -146,22 +146,6 @@ body.ground {
   color: var(--tempra-color-text);
 }
 
-/* A button with a glyph and a short word or count beside it (the comments toggle). */
-.icon-button.with-count {
-  gap: 6px;
-  width: auto;
-  padding: 0 10px;
-  border-radius: var(--tempra-radius-row);
-  font-size: var(--tempra-text-meta);
-  font-variant-numeric: tabular-nums;
-}
-
-.icon-button.with-count[aria-pressed="true"],
-.icon-button.with-count[aria-pressed="true"]:hover:not(:disabled) {
-  background: var(--tempra-color-selected);
-  color: var(--tempra-color-text);
-}
-
 /* The change dot (the one colour): solid for changed since the person looked, pulsing (.live)
    for an agent writing now. */
 .change-dot {
@@ -679,8 +663,7 @@ a.button.pill-button {
   gap: 6px;
 }
 
-/* A control in the top bar that reads as a pill: Comments n, Copy page. */
-.topbar-tools .icon-button.with-count,
+/* A control in the top bar that reads as a pill (New library). */
 .tool-pill {
   height: 36px;
   padding: 0 14px;
@@ -697,18 +680,12 @@ a.button.pill-button {
   gap: 8px;
 }
 
-.topbar-tools .icon-button:not(.with-count),
+.topbar-tools .icon-button,
 .topbar-end .icon-button {
   width: 36px;
   height: 36px;
   border: 1px solid var(--tempra-color-border);
   border-radius: 50%;
-  color: var(--tempra-color-text);
-}
-
-.topbar-tools .icon-button.with-count[aria-pressed="true"],
-.topbar-tools .icon-button.with-count[aria-pressed="true"]:hover:not(:disabled) {
-  background: var(--tempra-color-selected);
   color: var(--tempra-color-text);
 }
 
@@ -1353,8 +1330,8 @@ button.tree-name {
       "main";
   }
 
-  /* The bar: the menu button, the mark and the library's name, then on a concept Comments n and
-     ⋯, on other pages the bell; the avatar last. Search and the switcher are the drawer's head's,
+  /* The bar: the menu button, the mark and the library's name, then a page's tools (a concept's
+     ⋯; its actions float at the bottom right, TEMPRA-172) and the bell; the avatar last. Search and the switcher are the drawer's head's,
      as on the desktop the bar's over the sidebar (TEMPRA-145). */
   .ws-topbar,
   .sidebar-hidden .ws-topbar {

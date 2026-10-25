@@ -16,14 +16,33 @@
   margin-bottom: 6px;
 }
 
-/* "Comment on the page": a quiet pill, outlined, at the top of the list. */
+/* "Comment on the page…": a box at the top of the list that opens a comment on the whole page
+   (TEMPRA-172), with "Or select text to comment on it" under it. */
+.new-thread-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+
+.new-thread-box p {
+  margin: 0;
+}
+
 .new-thread {
-  align-self: flex-start;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--tempra-color-border-strong);
+  border-radius: var(--tempra-radius-box);
+  background: var(--tempra-color-bg);
   color: var(--tempra-color-muted);
-  font-size: var(--tempra-text-meta);
+  font-size: var(--tempra-text-ui);
+  text-align: left;
 }
 
 .new-thread:hover:not(:disabled) {
+  border-color: var(--tempra-color-text);
   color: var(--tempra-color-text);
 }
 
