@@ -13,6 +13,7 @@ import {
   mediaFor,
   putBlob,
 } from "./client";
+import type { Images } from "./images";
 import { notificationsOf, registerInboxApi } from "./inbox-api";
 import { registerLegalRoutes } from "./legal";
 import { deleteLibrary } from "./lifecycle";
@@ -56,6 +57,11 @@ export interface Deps extends UsageDeps {
   /** The library a signed download URL names, or null when no such library exists. */
   libraryByDoId(doId: string): Promise<LibraryClient | null>;
   blobs: BlobStore;
+  /**
+   * Attachment images scaled for models and readers (images.ts, the IMAGES binding); absent,
+   * images go out as stored when they are small enough.
+   */
+  images?: Images;
   /** Checks for /healthz: each dependency's name and "ok" or what failed. */
   health?: () => Promise<Record<string, string>>;
   /** Nightly exports in R2 (spec: Backups and recovery), for the UI. */

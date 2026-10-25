@@ -5,6 +5,7 @@ import { d1Authenticate } from "./auth";
 import { d1BlobRefs } from "./blobrefs";
 import { makeClient, r2BlobStore, recordingBlobStore } from "./client";
 import { FEED_SOCKETS_PER_ACCOUNT } from "./feed";
+import { deleteVariants, imagesService, r2VariantCache } from "./images";
 import { type Library, refuseFeed } from "./library";
 import { DEFAULT_STORAGE_MB } from "./limits";
 import { exportsPrefix, listExports } from "./maintain";
@@ -112,6 +113,12 @@ const depsFor = (env: Env): Deps => {
     },
     // Each blob put is recorded in D1 first, so the sweep never lists the bucket (TEMPRA-81).
     blobs: recordingBlobStore(r2BlobStore(env.BLOBS), d1BlobRefs(env.DB)),
+    // Scaled copies under variants/ in the same bucket (TEMPRA-153); reads only, so no recording.
+    images: imagesService({
+      blobs: r2BlobStore(env.BLOBS),
+      transformer: env.IMAGES ?? null,
+      cache: r2VariantCache(env.BLOBS),
+    }),
     maintain: (doId) => libraryStub(env, doId).maintain(),
     async destroyLibrary(doId) {
       // destroy() ends by restarting the object, which fails the call by design.
@@ -262,7 +269,13 @@ export default {
     const result = await sweep({
       refs: d1BlobRefs(env.DB),
       queue: sweepQueue(env),
-      bucket: { delete: (keys) => env.BLOBS.delete(keys) },
+      // A blob's scaled copies (images.ts) go with it.
+      bucket: {
+        delete: async (keys) => {
+          await env.BLOBS.delete(keys);
+          await deleteVariants(env.BLOBS, keys);
+        },
+      },
       libraries: async () =>
         (
           await env.DB.prepare(

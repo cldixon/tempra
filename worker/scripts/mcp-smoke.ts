@@ -62,6 +62,30 @@ export async function mcpSmoke(opts: {
     await call("move", { from: path, to: moved, note: "mcp smoke move" });
     const hash = /hash: ([0-9a-f]{64})/.exec(await call("read", { path: moved }))?.[1];
     await call("delete", { path: moved, if_match: hash, note: "mcp smoke cleanup" });
+
+    // An image comes back as image content that decodes (TEMPRA-153): scaled through the
+    // IMAGES binding where there is one, else the original, which this 1x1 PNG is small enough for.
+    const png = `_smoke/dot-${Date.now()}.png`;
+    await call("attach", {
+      path: png,
+      content_base64:
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+      note: "mcp smoke image",
+    });
+    const r = await client.callTool({ name: "read", arguments: { path: png } });
+    const blocks = r.content as { type: string; text?: string; data?: string; mimeType?: string }[];
+    const img = blocks.find((b) => b.type === "image");
+    const bytes = img?.data ? Uint8Array.from(atob(img.data), (c) => c.charCodeAt(0)) : null;
+    const magic = bytes ? Array.from(bytes.subarray(0, 12), (b) => b.toString(16)).join(" ") : "";
+    const decodes =
+      !!bytes &&
+      (magic.startsWith("89 50 4e 47") || // PNG
+        magic.startsWith("ff d8") || // JPEG
+        (magic.startsWith("52 49 46 46") && magic.endsWith("57 45 42 50"))); // RIFF....WEBP
+    if (!decodes) failed = true;
+    log(`${decodes ? "ok  " : "FAIL"} mcp read image (${img?.mimeType ?? "no image block"})`);
+    const pngHash = /hash: ([0-9a-f]{64})/.exec(blocks[0]?.text ?? "")?.[1];
+    await call("delete", { path: png, if_match: pngHash, note: "mcp smoke cleanup" });
   }
 
   await client.close();

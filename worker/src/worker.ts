@@ -1,6 +1,7 @@
 import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { type AgentKey, agentName, connectionAgent, tokenAgent } from "./agents";
 import { actedBy, createApp, type Deps } from "./app";
+import { imagesService } from "./images";
 import { handleMcp, type McpContext } from "./mcp/server";
 import { notifying, postComment } from "./notify";
 import { type GrantProps, SCOPES } from "./oauth/routes";
@@ -142,6 +143,8 @@ export function createWorker(deps: (env: Cloudflare.Env) => Deps): {
             agentNames: async (ids) =>
               new Map((await d.accounts.agents(ids)).map((a) => [a.id, agentName(a)])),
             blobs: d.blobs,
+            images: d.images ?? imagesService({ blobs: d.blobs }),
+            meter: (e) => d.meter?.({ ...e, account: who.account }),
             origin,
           });
         },
