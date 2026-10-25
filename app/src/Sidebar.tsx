@@ -285,13 +285,16 @@ export function LibrarySwitcher(props: { urls: Urls; name: string; shared?: bool
   );
   return (
     <Menu
-      name={`${name}, switch library`}
       buttonClass="lib-switch"
       listClass="libraries"
       label={
         <>
+          {/* Named by its own words, the tile's initial aside (WCAG 2.5.3). */}
           <LibraryTile name={name} shared={props.shared} />
-          <span className="lib-name">{name}</span>
+          <span className="lib-name">
+            {name}
+            <span className="visually-hidden">, switch library</span>
+          </span>
           <Icon name="down" size={14} />
         </>
       }
