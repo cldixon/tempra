@@ -9,12 +9,12 @@ import type { AccountPage, Place } from "./Workspace";
 import { useFrame } from "./Workspace";
 
 /*
- * The frame's sidebars (take 4, TEMPRA-113; tempra-dev: app/workspace): a library's (Home,
- * Activity, a rule, the tree, Settings at the foot), its settings' (a way back, then the tabs by
- * role), the account's (Libraries, the Inbox, the person's libraries) and the account's
- * settings' (a way back, then each page). On a phone each is the drawer's content (take 4,
- * board 34): the frame puts the mark, the switcher and × at its head; the library's adds a
- * search field at its top and the Inbox at its foot.
+ * The frame's sidebars (take 4, TEMPRA-113; tempra-dev: app/workspace): a library's (the
+ * library switcher, Search, Home, Activity, a rule, the tree, Settings at the foot), its
+ * settings' (a way back, then the tabs by role), the account's (Search, Libraries, the Inbox, the
+ * person's libraries) and the account's settings' (a way back, then each page). The top bar over
+ * them is Tempra (TEMPRA-143). On a phone each is the drawer's content, the same rows under
+ * Tempra and × at its head; the library's adds the Inbox at its foot.
  */
 
 /** A library's tile: its initial on a dark square (a lighter round one for a shared library). */
@@ -51,6 +51,25 @@ function Row(props: {
 }
 
 /**
+ * Search as a row: the icon, "Search" (what it searches is the row above, or the page; TEMPRA-143)
+ * and the keys that open it too, which a phone has none of.
+ */
+function SearchRow({ onSearch }: { onSearch(): void }) {
+  return (
+    <button
+      type="button"
+      className="nav-row search-row"
+      aria-keyshortcuts="Control+K Meta+K"
+      onClick={onSearch}
+    >
+      <Icon name="search" />
+      <span className="nav-label">Search</span>
+      <kbd className="nav-key">{switcherKey()}</kbd>
+    </button>
+  );
+}
+
+/**
  * The Inbox's unread count at a row's end, read as "Inbox 2 unread": the name is the row's own
  * words, so it starts with what it shows (WCAG 2.5.3).
  */
@@ -67,10 +86,12 @@ function UnreadCount({ unread }: { unread: number }) {
   );
 }
 
-/** The library's sidebar: Home, Activity, a rule, the files, Settings at the foot. */
+/** The library's sidebar: the switcher, Search, Home, Activity, a rule, the files, Settings. */
 export function LibrarySidebar(props: {
   urls: Urls;
   name: string;
+  /** Shared with the person: the switcher's tile is the lighter, round one. */
+  shared?: boolean;
   place: Place;
   changes: Map<string, AgentChange>;
   now: number;
@@ -83,22 +104,13 @@ export function LibrarySidebar(props: {
   const unread = useUnread();
   return (
     <>
-      {/* On a phone the library switcher is the drawer's first row, under Tempra at its head
-          (TEMPRA-141); on the desktop it is over the sidebar. */}
-      <div className="drawer-switch">
-        <LibrarySwitcher urls={urls} name={props.name} />
+      {/* The library, then search in it, under Tempra in the top bar (or at the drawer's head)
+          (TEMPRA-143). */}
+      <div className="sidebar-switch">
+        <LibrarySwitcher urls={urls} name={props.name} shared={props.shared} />
       </div>
-      {/* On a phone, search as a field at the drawer's top (board 34); it opens the switcher. */}
-      <button
-        type="button"
-        className="drawer-search"
-        title={`Search (${switcherKey()})`}
-        onClick={props.onSearch}
-      >
-        <Icon name="search" />
-        <span>Search {props.name}</span>
-      </button>
       <nav className="nav" aria-label="Views">
+        <SearchRow onSearch={props.onSearch} />
         <Row href={urls.tree("")} current={place.view === "home"} icon="home" label="Home" />
         <Row
           href={urls.activity()}
@@ -172,8 +184,8 @@ export function SettingsSidebar({ urls, name, place }: { urls: Urls; name: strin
   );
 }
 
-/** The account's sidebar: Libraries, the Inbox, then the person's libraries by kind. */
-export function AccountSidebar({ page }: { page: AccountPage }) {
+/** The account's sidebar: Search, Libraries, the Inbox, then the person's libraries by kind. */
+export function AccountSidebar({ page, onSearch }: { page: AccountPage; onSearch(): void }) {
   const libs = useLibraries();
   const unread = useUnread();
   const list = libs.state === "ready" ? libs.data.libraries : [];
@@ -190,6 +202,7 @@ export function AccountSidebar({ page }: { page: AccountPage }) {
   return (
     <>
       <nav className="nav" aria-label="Account">
+        <SearchRow onSearch={onSearch} />
         <Row href="/" current={page === "libraries"} icon="libraries" label="Libraries" />
         <Row
           href="/inbox"
@@ -239,11 +252,13 @@ export function AccountSettingsSidebar({ page }: { page: AccountPage }) {
 }
 
 /**
- * The library switcher (take 4, board 07): the library's name and a chevron in the top bar; its
- * menu lists the person's libraries (Yours, then Shared with you with their role, this one
- * ticked), then All libraries, New library, and this library's settings.
+ * The library switcher (take 4, board 07): the sidebar's first row (TEMPRA-143), the library's
+ * tile, its name and a chevron; its menu lists the person's libraries (Yours, then Shared with
+ * you with their role, this one ticked), then All libraries, New library, and this library's
+ * settings.
  */
-export function LibrarySwitcher({ urls, name }: { urls: Urls; name: string }) {
+export function LibrarySwitcher(props: { urls: Urls; name: string; shared?: boolean }) {
+  const { urls, name } = props;
   const libs = useLibraries();
   const list = libs.state === "ready" ? libs.data.libraries : [];
   const yours = list.filter((l) => (l.role ?? "owner") === "owner");
@@ -275,6 +290,7 @@ export function LibrarySwitcher({ urls, name }: { urls: Urls; name: string }) {
       listClass="libraries"
       label={
         <>
+          <LibraryTile name={name} shared={props.shared} />
           <span className="lib-name">{name}</span>
           <Icon name="down" size={14} />
         </>

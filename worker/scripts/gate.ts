@@ -1043,11 +1043,8 @@ async function browserRenders(
       if (shots) await page.screenshot({ path: `${shots}/search-none.png` });
       await box.press("Escape");
       await dialog.waitFor({ state: "hidden", timeout: 5000 });
-      // The top bar's Search button opens it too.
-      await page
-        .locator(".topbar-brand")
-        .getByRole("button", { name: "Search", exact: true })
-        .click();
+      // The sidebar's Search row opens it too: "Search" alone, its keys after it (TEMPRA-143).
+      await sidebar.getByRole("button", { name: /^Search( |$)/ }).click();
       await box.waitFor({ timeout: 5000 });
       await box.fill(word);
       const option = page.locator('.switcher [role="option"]', { hasText: first }).first();
@@ -1085,10 +1082,7 @@ async function browserRenders(
     // New library, from the switcher's menu: a compose dialog over the library list, its address
     // following the name; Escape closes it and creates nothing.
     await step("New library: the compose dialog", async () => {
-      await page
-        .locator(".topbar-brand")
-        .getByRole("button", { name: /, switch library$/ })
-        .click();
+      await sidebar.getByRole("button", { name: /, switch library$/ }).click();
       await page
         .locator(".menu-list.libraries")
         .getByRole("link", { name: "New library", exact: true })
@@ -1110,8 +1104,33 @@ async function browserRenders(
     // The frame (take 4, TEMPRA-113): the switcher's menu, the library's settings with General
     // (TEMPRA-102), the bell, and the theme, chosen in the avatar's menu and kept on the account.
     await step("the frame: the switcher's menu, General, the bell and the theme", async () => {
+      // Over the sidebar Tempra alone, on every page; the library leads the sidebar: its
+      // switcher, then Search, then Home (TEMPRA-143).
       const brand = page.locator(".topbar-brand");
-      const switcher = () => brand.getByRole("button", { name: /, switch library$/ });
+      const brandIsTempra = async (where: string) => {
+        await brand
+          .locator("a.topbar-mark")
+          .filter({ hasText: /Tempra$/ })
+          .waitFor({ timeout: 5000 });
+        const text = (await brand.innerText()).trim();
+        if (!/^T\s*Tempra$/.test(text)) {
+          throw new Error(`the top bar over the sidebar reads "${text}" on ${where}`);
+        }
+      };
+      await brandIsTempra("a library's page");
+      const first = await sidebar
+        .locator(".sidebar-switch, .nav-row")
+        .evaluateAll((els) =>
+          els
+            .slice(0, 3)
+            .map((el) =>
+              (el as unknown as { innerText: string }).innerText.replace(/\s+/g, " ").trim(),
+            ),
+        );
+      if (!first[1]?.startsWith("Search") || first[1].includes(slug) || first[2] !== "Home") {
+        throw new Error(`the sidebar starts ${JSON.stringify(first)}`);
+      }
+      const switcher = () => sidebar.getByRole("button", { name: /, switch library$/ });
       await switcher().click();
       const menu = page.locator(".menu-list.libraries");
       await menu
@@ -1125,6 +1144,7 @@ async function browserRenders(
       await main
         .getByRole("heading", { level: 1, name: "General", exact: true })
         .waitFor({ timeout: 15_000 });
+      await brandIsTempra("the library's settings");
       // The settings' sidebar: a way back, then the tabs.
       for (const tab of ["General", "Members", "Connect", "Import & export", "Recovery"]) {
         await sidebar.getByRole("link", { name: tab, exact: true }).waitFor({ timeout: 5000 });
@@ -1183,11 +1203,14 @@ async function browserRenders(
         try {
           await menu.waitFor({ state: "visible", timeout: 5000 });
           if (await sidebar.isVisible()) throw new Error("the sidebar shows at phone width");
-          // The top bar on the home: the menu, Tempra, search, the bell, the avatar.
+          // The top bar on the home: the menu, Tempra, the bell, the avatar. No search button:
+          // search is the drawer's row, as on the desktop the sidebar's (TEMPRA-143).
           const libraryName = (await main.locator("h1").first().innerText()).trim();
           await phoneNamed(libraryName);
+          if (await topbar.getByRole("button", { name: /^Search/ }).isVisible()) {
+            throw new Error("the phone's top bar has a search button");
+          }
           for (const control of [
-            topbar.getByRole("button", { name: "Search", exact: true }),
             topbar.getByRole("button", { name: /^Inbox/ }),
             topbar.getByRole("button", { name: "Account menu" }),
           ]) {
@@ -1214,14 +1237,15 @@ async function browserRenders(
           );
           if (!focused) throw new Error("the drawer did not take the focus");
           // What it holds (board 34): at its head Tempra, as on the bar it covers, and ×
-          // (TEMPRA-141); then the switcher, search, Home, Activity, the tree, then Settings and
-          // the Inbox at its foot.
+          // (TEMPRA-141); then the desktop's sidebar (TEMPRA-143): the switcher, Search, Home,
+          // Activity, the tree, then Settings and the Inbox at its foot.
           await drawerHeadIsTempra(libraryName);
           const views = sidebar.getByRole("navigation", { name: "Views" });
+          const searchRow = sidebar.getByRole("button", { name: /^Search( |$)/ });
           for (const part of [
             sidebar.getByRole("button", { name: /, switch library$/ }),
             sidebar.getByRole("button", { name: "Close menu" }),
-            sidebar.getByRole("button", { name: `Search ${libraryName}`, exact: true }),
+            searchRow,
             views.getByRole("link", { name: "Home", exact: true }),
             views.getByRole("link", { name: /^Activity/ }),
             sidebar.locator(".tree-row").first(),
@@ -1229,6 +1253,19 @@ async function browserRenders(
             sidebar.locator(".sidebar-foot").getByRole("link", { name: /^Inbox/ }),
           ]) {
             if (!(await part.isVisible())) throw new Error(`the drawer lacks ${part}`);
+          }
+          // In the desktop's order, and Search does not repeat the library's name.
+          const order = await sidebar
+            .locator(".sidebar-switch, .nav-row")
+            .evaluateAll((els) =>
+              els
+                .slice(0, 3)
+                .map((el) =>
+                  (el as unknown as { innerText: string }).innerText.replace(/\s+/g, " ").trim(),
+                ),
+            );
+          if (order[1] !== "Search" || order[2] !== "Home") {
+            throw new Error(`the drawer starts ${JSON.stringify(order)}`);
           }
           if (shots) await page.screenshot({ path: `${shots}/drawer-phone.png` });
           // The switcher, the drawer's first row, opens its menu of libraries there.
@@ -1259,9 +1296,9 @@ async function browserRenders(
           await sidebar.waitFor({ state: "visible" });
           await page.mouse.click(Math.round(drawn.x + drawn.width + 20), 400);
           await sidebar.waitFor({ state: "hidden" });
-          // The drawer's search field opens the quick switcher.
+          // The drawer's Search row opens the quick switcher.
           await menu.click();
-          await sidebar.getByRole("button", { name: `Search ${libraryName}`, exact: true }).click();
+          await searchRow.click();
           const dialog = page.getByRole("dialog", { name: /^Search / });
           await dialog.waitFor({ timeout: 5000 });
           await page.keyboard.press("Escape");
@@ -1332,6 +1369,18 @@ async function browserRenders(
           await drawerHeadIsTempra("Settings");
           await page.keyboard.press("Escape");
           await sidebar.waitFor({ state: "hidden" });
+          // The library list's drawer: Search, Libraries and the Inbox, as on the desktop.
+          await page.goto(`${base}/`);
+          await menu.click();
+          await sidebar.waitFor({ state: "visible" });
+          const account = sidebar.getByRole("navigation", { name: "Account" });
+          await account.getByRole("button", { name: /^Search( |$)/ }).waitFor({ timeout: 5000 });
+          await account.getByRole("link", { name: "Libraries", exact: true }).waitFor();
+          await account.getByRole("button", { name: /^Search( |$)/ }).click();
+          const found = page.getByRole("dialog", { name: "Search libraries" });
+          await found.waitFor({ timeout: 5000 });
+          await page.keyboard.press("Escape");
+          await found.waitFor({ state: "hidden", timeout: 5000 });
           await page.goto(`${lib}/-/members`);
           await phoneNamed("Members");
         } finally {
