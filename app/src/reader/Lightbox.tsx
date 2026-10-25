@@ -9,10 +9,11 @@
  */
 import { useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { Icon } from "../chrome";
+import { LIGHTBOX_SIZES } from "../images";
 import { formatSize, relativeTime } from "../ui";
 import { baseName } from "../urls";
 import { useDiagram } from "./Diagram";
-import { BrokenImage } from "./Figure";
+import { BrokenImage, Img } from "./Figure";
 import type { DiagramFigure, Figure, ImageFigure } from "./prepare";
 
 /** What the page knows about an image in the library, for the line under it. All optional. */
@@ -35,6 +36,8 @@ export interface FigureView {
   describe?(path: string): Promise<ImageFacts | null>;
   /** The page of an image stored in the library (its attachment page), for Open file. */
   fileHref?(path: string): string;
+  /** The original of an image stored in the library, as a download, for Download. */
+  downloadHref?(path: string): string;
 }
 
 /** An image figure's quiet line: its file name (or URL), size, who added it and when. */
@@ -47,9 +50,17 @@ export function factsLine(f: ImageFigure, facts: ImageFacts | null): string {
 
 function ImageStage({ figure }: { figure: ImageFigure }) {
   const [failed, setFailed] = useState<string | null>(null);
-  const { src } = figure;
-  if (src === null || failed === src) return <BrokenImage figure={figure} />;
-  return <img src={src} alt={figure.alt} onError={() => setFailed(src)} />;
+  const { source } = figure;
+  if (source === null || failed === source.src) return <BrokenImage figure={figure} />;
+  return (
+    <Img
+      source={source}
+      alt={figure.alt}
+      sizes={LIGHTBOX_SIZES}
+      lazy={false}
+      onError={() => setFailed(source.src)}
+    />
+  );
 }
 
 function DiagramStage({ figure }: { figure: DiagramFigure }) {
@@ -162,7 +173,10 @@ export function Lightbox(props: {
         </span>
         <span className="lightbox-actions">
           {image?.src && (
-            <a href={image.src} download="">
+            <a
+              href={image.path && view?.downloadHref ? view.downloadHref(image.path) : image.src}
+              download=""
+            >
               <Icon name="download" /> Download
             </a>
           )}

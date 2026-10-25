@@ -22,6 +22,7 @@ import {
   useState,
 } from "react";
 import { Icon } from "../chrome";
+import { figureSizes, type ImageSource } from "../images";
 import type { Figure, ImageFigure } from "./prepare";
 
 /** Opens the full-screen view at figure `n`; null where the reader offers none. */
@@ -100,13 +101,60 @@ export function BrokenImage({ figure, atom }: { figure: ImageFigure; atom?: bool
 export const enlargeName = (f: ImageFigure) =>
   `Enlarge image: ${f.alt || f.caption || f.path || f.url}`;
 
+/**
+ * An image from its source (TEMPRA-162): the stored width and height, so its box is reserved
+ * before it loads (a quiet grey box, `.image-loading`, until it has), and its candidates with the
+ * `sizes` of where it is drawn. Without a known size, just the original.
+ */
+export function Img(props: {
+  source: ImageSource;
+  alt: string;
+  sizes?: string;
+  title?: string;
+  lazy?: boolean;
+  atom?: boolean;
+  onLoad?(img: HTMLImageElement): void;
+  onError(): void;
+}) {
+  const { source } = props;
+  const [loaded, setLoaded] = useState<string | null>(null);
+  const sized = source.width !== undefined && source.height !== undefined;
+  return (
+    <img
+      data-atom={props.atom ? "" : undefined}
+      className={sized && loaded !== source.src ? "image-loading" : undefined}
+      src={source.src}
+      srcSet={source.srcset}
+      sizes={source.srcset ? props.sizes : undefined}
+      width={source.width}
+      height={source.height}
+      alt={props.alt}
+      title={props.title}
+      loading={props.lazy === false ? undefined : "lazy"}
+      decoding="async"
+      onLoad={(e) => {
+        setLoaded(source.src);
+        props.onLoad?.(e.currentTarget);
+      }}
+      onError={props.onError}
+    />
+  );
+}
+
 /** A figure's image: a button opening the full-screen view, or the broken box once it fails. */
 export function FigureImage({ figure }: { figure: ImageFigure }) {
   const open = useContext(OpenFigure);
   const [failed, setFailed] = useState<string | null>(null);
-  const { src } = figure;
-  if (src === null || failed === src) return <BrokenImage figure={figure} atom />;
-  const img = <img src={src} alt={figure.alt} loading="lazy" onError={() => setFailed(src)} />;
+  const { source } = figure;
+  if (source === null || failed === source.src) return <BrokenImage figure={figure} atom />;
+  const img = (
+    <Img
+      source={source}
+      alt={figure.alt}
+      sizes={figureSizes(figure.markup?.spec ?? null, figure.markup?.figures.length ?? 1)}
+      onError={() => setFailed(source.src)}
+    />
+  );
   return (
     <span className="figure-media" data-atom="">
       {open ? (
@@ -130,9 +178,9 @@ export function FigureImage({ figure }: { figure: ImageFigure }) {
 }
 
 /** An image in running text: stays inline, with no caption; its alt text if it fails to load. */
-export function InlineImage(props: { src: string; alt: string; title: string | null }) {
+export function InlineImage(props: { source: ImageSource; alt: string; title: string | null }) {
   const [failed, setFailed] = useState<string | null>(null);
-  if (failed === props.src) {
+  if (failed === props.source.src) {
     return (
       <span className="image-broken" data-atom="" title="This image can't be shown">
         {props.alt || "image"}
@@ -140,13 +188,13 @@ export function InlineImage(props: { src: string; alt: string; title: string | n
     );
   }
   return (
-    <img
-      data-atom=""
-      src={props.src}
+    <Img
+      atom
+      source={props.source}
       alt={props.alt}
       title={props.title ?? undefined}
-      loading="lazy"
-      onError={() => setFailed(props.src)}
+      sizes={figureSizes(null)}
+      onError={() => setFailed(props.source.src)}
     />
   );
 }

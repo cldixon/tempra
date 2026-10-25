@@ -6,11 +6,13 @@ import {
   type Doc,
   docText,
   headingIds,
+  linkTarget,
   locate,
   occurrences,
   quoteText,
   selectorAt,
   toMarkdown,
+  walk as walkDoc,
 } from "@tempra/editor/doc";
 import { stringify as yamlStringify } from "yaml";
 import {
@@ -382,6 +384,14 @@ export interface ConceptRow {
   media?: string | null;
 }
 
+/** An attachment an image in a concept shows (FileView `images`). */
+export interface ImageRef {
+  hash: string;
+  media: string | null;
+  width?: number | null;
+  height?: number | null;
+}
+
 export type FileView =
   | {
       kind: "concept";
@@ -402,6 +412,12 @@ export type FileView =
       open_comments: number;
       /** Its figures from the stored blob rows, when asked for (`figures`; MCP `read`, TEMPRA-154). */
       figures?: FigureFact[];
+      /**
+       * The attachments its images show, by library path, from their blob rows, when asked for
+       * (`images`; the reader, TEMPRA-162): what the image route serves by hash and the size the
+       * reader reserves. `width` and `height` are absent when never worked out, null when unknown.
+       */
+      images?: Record<string, ImageRef>;
     }
   | {
       kind: "attachment";
@@ -658,6 +674,36 @@ export class LibraryStore {
         this.refreshImages(snap, r.from_id);
       }
     });
+  }
+
+  /**
+   * An image this library holds, current or past (a blob row of an attachment, which only a write
+   * in this library makes), for the reader's image route (TEMPRA-162): a hash alone grants
+   * nothing, so one this library never stored is null, as is a file that is not an image.
+   */
+  imageBlob(hash: string): {
+    hash: string;
+    size: number;
+    media: string;
+    width: number | null;
+    height: number | null;
+  } | null {
+    if (!/^[0-9a-f]{64}$/.test(hash)) return null;
+    const row = this.sql.all<{
+      size: number;
+      media: string | null;
+      width: number | null;
+      height: number | null;
+    }>("SELECT size, media, width, height FROM blobs WHERE hash = ? AND location = 'r2'", hash)[0];
+    if (!row?.media?.startsWith("image/")) return null;
+    const sized = (row.width ?? 0) > 0 && (row.height ?? 0) > 0;
+    return {
+      hash,
+      size: row.size,
+      media: row.media,
+      width: sized ? row.width : null,
+      height: sized ? row.height : null,
+    };
   }
 
   /**
@@ -2682,7 +2728,10 @@ export class LibraryStore {
   }
 
   /** GET /files/{path}: a concept, an attachment's metadata, or a synthesized index.md / log.md. */
-  read(input: string, opts: { at?: number; computed?: boolean; figures?: boolean } = {}): FileView {
+  read(
+    input: string,
+    opts: { at?: number; computed?: boolean; figures?: boolean; images?: boolean } = {},
+  ): FileView {
     const snap = this.snapshot(opts.at);
     const path = normalizePath(input) ?? "";
     const name = basename(path);
@@ -2756,7 +2805,28 @@ export class LibraryStore {
       inbound_links: atHead ? this.inboundCount(e.concept_id) : 0,
       open_comments: atHead ? this.openThreadsOf(e.concept_id) : 0,
       ...(opts.figures ? { figures: this.figuresOf(snap, e, doc) } : {}),
+      ...(opts.images ? { images: this.imagesOf(snap, e, doc) } : {}),
     };
+  }
+
+  /** The attachments a concept's images show, as of the snapshot (no bytes; TEMPRA-162). */
+  private imagesOf(snap: View, e: Entry, doc: Doc): Record<string, ImageRef> {
+    const out: Record<string, ImageRef> = {};
+    walkDoc(doc, (n) => {
+      if (n.type !== "image") return undefined;
+      const t = linkTarget(e.path, n.url);
+      if (t?.kind !== "internal" || t.dir || t.path === "" || t.path in out) return undefined;
+      const a = snap.lookup(t.path);
+      if (a?.kind !== "attachment") return undefined;
+      const info = this.blobInfo(a.hash);
+      out[t.path] = {
+        hash: a.hash,
+        media: info.media,
+        ...(info.dims ? { width: info.dims.width, height: info.dims.height } : {}),
+      };
+      return undefined;
+    });
+    return out;
   }
 
   /** A concept's figures, each attachment from its blob row (no bytes; TEMPRA-154). */

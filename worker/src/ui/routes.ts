@@ -3,6 +3,7 @@ import type { User } from "../accounts";
 import type { Deps } from "../app";
 import type { LibraryClient } from "../client";
 import { isRouteName } from "../handles";
+import { VARIANT_EDGES } from "../images";
 import { esc, messagePage, type Onward, PAGE_HEADERS, page } from "../oauth/pages";
 import { basename, dirname } from "../okf/paths";
 import { fromThisSite } from "../origin";
@@ -128,6 +129,68 @@ async function openLibrary(p: Page): Promise<{ urls: Urls; lib: LibraryClient; r
   const lib = await p.deps.libraryByDoId(ref.do_id);
   if (!lib) throw new OkfError(404, "no_library", `There is no library ${owner}/${slug}.`);
   return { urls: new Urls(ref.owner, ref.slug, atParam(p.c)), lib, ref };
+}
+
+/** Raster images the Images binding scales for the reader; GIF keeps its frames as stored. */
+const SCALABLE = new Set(["image/png", "image/jpeg", "image/webp"]);
+
+/**
+ * An image of the library, for the reader (TEMPRA-162; tempra-dev: app/media, How people see):
+ * only a hash this library stored as an attachment, now or before (a hash is not a capability),
+ * shown inline and cached for good by the browser alone (the hash names the bytes). With `w`, one
+ * of VARIANT_EDGES, a raster image comes scaled to that long edge, as AVIF when the browser takes
+ * it and WebP otherwise, never enlarged: an image already within it, an SVG, a GIF, or one the
+ * binding cannot scale comes as stored.
+ */
+async function imageResponse(
+  p: Page,
+  lib: LibraryClient,
+  hash: string,
+  w: string | undefined,
+): Promise<Response> {
+  const img = await lib.imageBlob(hash);
+  if (!img) throw new OkfError(404, "not_found", "This library has no such image.");
+  let edge: number | null = null;
+  if (w !== undefined) {
+    edge = Number(w);
+    if (!(VARIANT_EDGES as readonly number[]).includes(edge)) {
+      throw new OkfError(400, "bad_param", `\`w\` must be one of ${VARIANT_EDGES.join(", ")}.`);
+    }
+  }
+  const headers: Record<string, string> = {
+    "Cache-Control": "private, max-age=31536000, immutable",
+    "Content-Disposition": "inline",
+    "X-Content-Type-Options": "nosniff",
+  };
+  const long = img.width && img.height ? Math.max(img.width, img.height) : null;
+  if (edge !== null) {
+    // What is served depends on Accept from here, even when it is the original.
+    headers.Vary = "Accept";
+    const images = p.deps.images;
+    if (images && SCALABLE.has(img.media) && (long === null || edge < long)) {
+      const avif = (p.c.req.header("Accept") ?? "").includes("image/avif");
+      const scaled =
+        (avif ? await images.scaled(hash, { maxEdge: edge, format: "avif" }) : null) ??
+        (await images.scaled(hash, { maxEdge: edge, format: "webp" }));
+      if (scaled) {
+        return new Response(scaled.bytes, {
+          headers: {
+            ...headers,
+            "Content-Type": scaled.media,
+            "Content-Length": String(scaled.bytes.byteLength),
+          },
+        });
+      }
+    }
+  }
+  const obj = await p.deps.blobs.get(hash);
+  if (!obj) throw new OkfError(404, "not_found", "The image's bytes are missing.");
+  if (img.media === "image/svg+xml") {
+    headers["Content-Security-Policy"] = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
+  }
+  return new Response(obj.body as ReadableStream | Uint8Array, {
+    headers: { ...headers, "Content-Type": img.media, "Content-Length": String(obj.size) },
+  });
 }
 
 const ACCOUNT: Onward = { href: "/account", label: "Go to your account" };
@@ -318,6 +381,12 @@ export function registerUiRoutes<E extends AppEnv>(
       media: view.media ?? null,
     });
     return p.c.redirect(`/dl/${encodeURIComponent(ref.do_id)}/${token}`, 302);
+  });
+
+  // The reader's images by hash (TEMPRA-162; tempra-dev: app/media, How people see).
+  get("/:owner/:lib/-/image/:hash", async (p) => {
+    const { lib } = await openLibrary(p);
+    return imageResponse(p, lib, p.c.req.param("hash") ?? "", p.c.req.query("w"));
   });
 
   // Export: a redirect to a signed download, like the API's and MCP's export links.

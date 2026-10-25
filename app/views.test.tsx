@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { LedgerEvent, LedgerRequest } from "./src/activity";
 import { actorView } from "./src/agents";
 import { StatusPills } from "./src/concept/Byline";
-import { fateOf, typeName } from "./src/pages/File";
+import { AttachmentImage, fateOf, sizeFact, typeName } from "./src/pages/File";
 import { EmptyLibrary, recentlyChanged } from "./src/pages/Home";
 import type { OutlineFile } from "./src/Tree";
 import { Urls } from "./src/urls";
@@ -174,5 +174,43 @@ describe("a page's status pills (TEMPRA-139)", () => {
     expect(pills("stable", false)).toBe("");
     expect(pills(null, false)).toBe("");
     expect(pills(" Stable ", false)).toBe("");
+  });
+});
+
+describe("an attachment's image (TEMPRA-162)", () => {
+  const file = {
+    kind: "attachment" as const,
+    path: "app/shot.png",
+    seq: 7,
+    size: 1_258_291,
+    media: "image/png",
+    hash: "a".repeat(64),
+    width: 2400,
+    height: 1500,
+  };
+
+  test("from the image route, its size known before it loads; Size says it", () => {
+    const html = renderToStaticMarkup(
+      <AttachmentImage urls={urls} file={file} onError={() => {}} />,
+    );
+    expect(html).toContain(`src="/cl_dixon/tempra-dev/-/image/${file.hash}"`);
+    expect(html).toContain('width="2400"');
+    expect(html).toContain('height="1500"');
+    expect(html).toContain('class="image-loading"');
+    expect(html).toContain(`/-/image/${file.hash}?w=1920 1920w`);
+    expect(html).toContain('sizes="(max-width: 900px) 100vw, 70vw"');
+    expect(html).not.toContain('loading="lazy"');
+    expect(sizeFact(file, null)).toBe("1.2 MB · 2400 × 1500");
+  });
+
+  test("an image from before, not yet sized: the original, the size once drawn", () => {
+    const legacy = { ...file, width: null, height: null };
+    const html = renderToStaticMarkup(
+      <AttachmentImage urls={urls} file={legacy} onError={() => {}} />,
+    );
+    expect(html).not.toContain("width=");
+    expect(html).not.toContain("srcset");
+    expect(sizeFact(legacy, null)).toBe("1.2 MB");
+    expect(sizeFact(legacy, { w: 30, h: 20 })).toBe("1.2 MB · 30 × 20");
   });
 });

@@ -20,7 +20,7 @@ import {
 import type { PhrasingContent, RootContent, TableCell } from "mdast";
 import type { ReactNode } from "react";
 import { Caption, FigureBox, FigureImage, figureNumber, InlineImage } from "./Figure";
-import { type FigureMarkup, imageSrc, linkInfo, type Prepared } from "./prepare";
+import { type FigureMarkup, imageSource, linkInfo, type Prepared } from "./prepare";
 import { type BlockProps, CodeBlock, code as codeBlocks, node as nodeBlocks } from "./registry";
 
 /** What draws one body: the prepared tree, the diff over it, whether text offsets are drawn. */
@@ -178,17 +178,17 @@ function inline(ctx: Ctx, r: Run, nodes: readonly PhrasingContent[]): ReactNode[
       }
       case "image": {
         const figure = ctx.offsets ? ctx.p.figureOf.get(n) : undefined;
-        const src = imageSrc(ctx.p.options, n.url);
+        const source = imageSource(ctx.p.options, n.url);
         r.atom(
           out,
           figure?.kind === "image" ? (
             <FigureImage key={k} figure={figure} />
-          ) : src === null ? (
+          ) : source === null ? (
             <span key={k} className="image-dropped" data-atom="">
               {n.alt ?? ""}
             </span>
           ) : (
-            <InlineImage key={k} src={src} alt={n.alt ?? ""} title={n.title ?? null} />
+            <InlineImage key={k} source={source} alt={n.alt ?? ""} title={n.title ?? null} />
           ),
         );
         break;

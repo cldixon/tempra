@@ -529,6 +529,11 @@ img {
   max-width: 100%;
 }
 
+/* An image whose size is known, until it loads: a quiet grey box at that size (TEMPRA-162). */
+img.image-loading {
+  background: var(--tempra-color-ground);
+}
+
 details > summary {
   cursor: pointer;
 }
@@ -1527,8 +1532,12 @@ details > summary {
   grid-column: 3;
 }
 
+/* Its natural size within the stage (the width and height attributes only give its candidates'
+   proportions; nothing is beside it to move). */
 .lightbox-figure > img {
   display: block;
+  width: auto;
+  height: auto;
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;
@@ -4888,9 +4897,12 @@ a.activity-download {
   color: var(--tempra-color-frame-ink);
 }
 
+/* Its box from the stored width and height before it loads (TEMPRA-162); within 70vh, drawn
+   contained in it. */
 .attachment-frame img {
   display: block;
   max-width: 100%;
+  height: auto;
   max-height: 70vh;
   object-fit: contain;
 }

@@ -3,7 +3,7 @@ import type { FigureFact } from "./okf/figures";
 import { sha256Hex } from "./okf/hash";
 import { normalizePath } from "./okf/paths";
 import { OkfError } from "./store/errors";
-import type { BlobRef, ImportFile, LibraryStore, WriteOp } from "./store/store";
+import type { BlobRef, ImageRef, ImportFile, LibraryStore, WriteOp } from "./store/store";
 import { writeTar } from "./util/tar";
 
 /** Store methods the Worker may call on a library, over DO RPC or in process. */
@@ -47,6 +47,7 @@ export const LIBRARY_METHODS = [
   "activity",
   "digest",
   "setDimensions",
+  "imageBlob",
 ] as const;
 
 export type LibraryMethod = (typeof LIBRARY_METHODS)[number];
@@ -361,6 +362,30 @@ export async function figuresWithDimensions(
     const dims = f.kind === "image" && f.blob ? found.get(f.blob.hash) : undefined;
     return dims && f.kind === "image" && f.blob ? { ...f, blob: { ...f.blob, ...dims } } : f;
   });
+}
+
+/**
+ * A concept's `images` (FileView) with every image's size worked out, as `withDimensions` does for
+ * one attachment, so the reader can reserve each image's box (TEMPRA-162). Null when it does not
+ * decode.
+ */
+export async function imagesWithDimensions(
+  lib: Pick<LibraryClient, "setDimensions">,
+  blobs: BlobStore,
+  images: Record<string, ImageRef>,
+): Promise<Record<string, ImageRef>> {
+  const out: Record<string, ImageRef> = {};
+  await Promise.all(
+    Object.entries(images).map(async ([path, ref]) => {
+      if (ref.width !== undefined || !ref.media?.startsWith("image/")) {
+        out[path] = ref;
+        return;
+      }
+      const v = await withDimensions(lib, blobs, { kind: "attachment", path, ...ref });
+      out[path] = { ...ref, width: v.width ?? null, height: v.height ?? null };
+    }),
+  );
+  return out;
 }
 
 const MEDIA: Record<string, string> = {

@@ -29,7 +29,7 @@ import {
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { deflateSync } from "node:zlib";
-import { type Browser, chromium } from "playwright-core";
+import { type Browser, chromium, type Route } from "playwright-core";
 import { SESSION_REQUESTS_PER_MINUTE } from "../cloudflare.config";
 import { FEED_FULL, FEED_SOCKETS_PER_ACCOUNT, FEED_SOCKETS_PER_LIBRARY } from "../src/feed";
 import { readTar, writeTar } from "../src/util/tar";
@@ -529,6 +529,32 @@ const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
 
 /** A plain grey PNG, `width` by `height` (8-bit greyscale), for the gate's figures. */
 function greyPng(width: number, height: number, shade: number): Uint8Array {
+  return greyscalePng(width, height, () => shade);
+}
+
+/**
+ * A busy greyscale PNG, like a screenshot in bytes: tiles of shades with a little noise, so it
+ * compresses about as badly as one (1600 by 1000 is about a megabyte).
+ */
+function busyPng(width: number, height: number): Uint8Array {
+  let seed = 11;
+  const rand = () => {
+    seed = (Math.imul(seed, 1103515245) + 12345) >>> 0;
+    return seed >>> 24;
+  };
+  const tiles = Array.from({ length: Math.ceil(width / 24) * Math.ceil(height / 24) }, rand);
+  const across = Math.ceil(width / 24);
+  return greyscalePng(width, height, (x, y) => {
+    const tile = tiles[Math.floor(y / 24) * across + Math.floor(x / 24)] ?? 0;
+    return Math.max(0, Math.min(255, tile + (rand() % 24) - 12));
+  });
+}
+
+function greyscalePng(
+  width: number,
+  height: number,
+  shade: (x: number, y: number) => number,
+): Uint8Array {
   const crc = (bytes: Uint8Array) => {
     let c = 0xffffffff;
     for (const b of bytes) c = (CRC_TABLE[(c ^ b) & 0xff] ?? 0) ^ (c >>> 8);
@@ -549,7 +575,9 @@ function greyPng(width: number, height: number, shade: number): Uint8Array {
   h.setUint32(4, height);
   header.set([8, 0, 0, 0, 0], 8); // 8-bit greyscale, no interlace
   const raw = new Uint8Array(height * (width + 1));
-  for (let y = 0; y < height; y++) raw.fill(shade, y * (width + 1) + 1, (y + 1) * (width + 1));
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) raw[y * (width + 1) + 1 + x] = shade(x, y);
+  }
   const parts = [
     new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     chunk("IHDR", header),
@@ -1719,6 +1747,204 @@ async function browserRenders(
       await usual();
       for (const [path] of [["gate-markup.md"], ...images]) await agentDeletes(path);
     });
+
+    // Reader images (TEMPRA-162; tempra-dev: app/media, How people see): every image from the
+    // image route by hash, its box reserved from the stored size, so nothing moves as images
+    // load; a phone gets a scaled copy (cf dev's Images stand-in scales locally), far smaller
+    // than the original; the attachment page knows the size before the image draws. The page
+    // stays until after the busy minute, so that covers a page of figures.
+    const imagesPage = "gate-images.md";
+    /** What the gate reads of an img in the page (the scripts have no DOM types). */
+    type ImgLike = {
+      complete: boolean;
+      naturalWidth: number;
+      currentSrc: string;
+      getAttribute(name: string): string | null;
+      getBoundingClientRect(): { top: number; height: number };
+    };
+    const imagePaths = ["gate-image-big.png", "gate-image-small.png"];
+    await step(
+      "reader images: right-sized, from the image route, with no layout shift",
+      async () => {
+        const bytes = busyPng(1600, 1000);
+        for (const [path, body] of [
+          [imagePaths[0], bytes],
+          [imagePaths[1], greyPng(300, 200, 0xaa)],
+        ] as const) {
+          const put = await fetch(`${libApi}/files/${path}`, {
+            method: "PUT",
+            headers: { ...bearer, "Content-Type": "image/png", "X-Note": "gate: an image" },
+            body,
+          });
+          if (!put.ok) throw new Error(`upload ${path}: ${put.status} ${await put.text()}`);
+        }
+        const put = await fetch(`${libApi}/files/${imagesPage}`, {
+          method: "PUT",
+          headers: { ...bearer, "Content-Type": "text/markdown", "X-Note": "gate: images" },
+          body: [
+            "---\ntype: Note\ntitle: Gate images\ndescription: A page of figures.\n---",
+            "Before the figures.\n",
+            `![A busy screenshot](/${imagePaths[0]} "A big one")\n`,
+            "Between the figures.\n",
+            `![A small block](/${imagePaths[1]} "A small one")\n`,
+            `:::figure{layout=wide}\n![The busy one again](/${imagePaths[0]})\n:::\n`,
+            "After the figures, the paragraph whose place must not move.\n",
+          ].join("\n"),
+        });
+        if (!put.ok) throw new Error(`write: ${put.status} ${await put.text()}`);
+        const hash = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
+        // Images held back until the text is measured, so the measure is before they load.
+        let release = () => {};
+        const held = new Promise<void>((r) => {
+          release = r;
+        });
+        const hold = async (route: Route) => {
+          await held;
+          await route.continue();
+        };
+        await page.route("**/-/image/**", hold);
+        await wide();
+        await page.goto(`${lib}/${imagesPage}`, { waitUntil: "domcontentloaded" });
+        const after = page.locator(".body p[data-text]", { hasText: "After the figures" });
+        await after.waitFor({ timeout: 15_000 });
+        /** The paragraph's place in the body (the page scrolls inside main, so not the window). */
+        const top = () =>
+          after.evaluate((el) => {
+            const body = el.closest(".body");
+            return Math.round(
+              el.getBoundingClientRect().top - (body?.getBoundingClientRect().top ?? 0),
+            );
+          });
+        const imgs = page.locator(".body img");
+        const allIn = () =>
+          imgs.evaluateAll((els) =>
+            els.every((el) => {
+              const i = el as unknown as ImgLike;
+              return i.complete && i.naturalWidth > 0;
+            }),
+          );
+        const until = async (what: string, ok: () => Promise<boolean>) => {
+          for (let i = 0; !(await ok()); i++) {
+            if (i > 200) throw new Error(`timed out: ${what}`);
+            await page.waitForTimeout(100);
+          }
+        };
+        const first = await imgs.first().evaluate((el) => {
+          const img = el as unknown as ImgLike;
+          const style = (
+            globalThis as unknown as {
+              getComputedStyle(e: unknown): { backgroundColor: string };
+            }
+          ).getComputedStyle(el);
+          return {
+            src: img.getAttribute("src"),
+            width: img.getAttribute("width"),
+            height: img.getAttribute("height"),
+            srcset: img.getAttribute("srcset"),
+            complete: img.complete && img.naturalWidth > 0,
+            box: img.getBoundingClientRect().height,
+            background: style.backgroundColor,
+          };
+        });
+        if (first.src !== `/${owner}/${slug}/-/image/${hash}`) throw new Error(`src: ${first.src}`);
+        if (first.width !== "1600" || first.height !== "1000") {
+          throw new Error(`dimensions: ${first.width} × ${first.height}`);
+        }
+        if (!first.srcset?.includes("?w=640 640w") || first.srcset.includes("1920w")) {
+          throw new Error(`srcset: ${first.srcset}`);
+        }
+        if (first.complete || first.box < 100) {
+          throw new Error(`no box reserved before the image loads: ${JSON.stringify(first)}`);
+        }
+        if (/rgba\(0, 0, 0, 0\)|transparent/.test(first.background)) {
+          throw new Error("no grey box while the image loads");
+        }
+        const before = await top();
+        if (shots) await page.screenshot({ path: `${shots}/images-loading.png` });
+        release();
+        await page.unroute("**/-/image/**", hold);
+        // Every image in, the lazy ones too.
+        await main.evaluate((el) => {
+          el.scrollTop = el.scrollHeight;
+        });
+        await until("every image loaded", allIn);
+        const later = await top();
+        if (Math.abs(later - before) > 1) {
+          throw new Error(`the text moved ${later - before}px as the images loaded`);
+        }
+        if (shots) {
+          await main.evaluate((el) => {
+            el.scrollTop = 0;
+          });
+          await page.screenshot({ path: `${shots}/images-loaded.png`, fullPage: true });
+        }
+        // On a phone: a scaled copy, well under 200 KB, where the original is about a megabyte.
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.reload();
+        const big = page.locator(".body img").first();
+        await big.waitFor({ timeout: 15_000 });
+        await until("the phone's image loaded", () =>
+          big.evaluate((el) => {
+            const i = el as unknown as ImgLike;
+            return i.complete && i.naturalWidth > 0;
+          }),
+        );
+        const phone = await big.evaluate(async (el) => {
+          const url = (el as unknown as ImgLike).currentSrc;
+          const r = await fetch(url);
+          return {
+            url,
+            type: r.headers.get("Content-Type"),
+            bytes: (await r.arrayBuffer()).byteLength,
+          };
+        });
+        const original = await page.evaluate(async (url) => {
+          const r = await fetch(url);
+          return (await r.arrayBuffer()).byteLength;
+        }, `/${owner}/${slug}/-/image/${hash}`);
+        console.log(
+          `  reader images: the original ${Math.round(original / 1024)} KB; at phone width ${new URL(phone.url).search || "(original)"} as ${phone.type}, ${Math.round(phone.bytes / 1024)} KB (${Math.round((100 * (original - phone.bytes)) / original)}% saved)`,
+        );
+        if (!phone.url.includes("?w="))
+          throw new Error(`the phone loads the original: ${phone.url}`);
+        if (phone.bytes >= 200 * 1024) {
+          throw new Error(`the phone's image is ${Math.round(phone.bytes / 1024)} KB`);
+        }
+        // The attachment page: its size before the image draws, its box reserved.
+        await usual();
+        let releaseFile = () => {};
+        const heldFile = new Promise<void>((r) => {
+          releaseFile = r;
+        });
+        const holdFile = async (route: Route) => {
+          await heldFile;
+          await route.continue();
+        };
+        await page.route("**/-/image/**", holdFile);
+        await page.goto(`${lib}/${imagePaths[0]}`, { waitUntil: "domcontentloaded" });
+        const facts = main.locator(".attachment-facts");
+        await facts.locator("dd", { hasText: "1600 × 1000" }).waitFor({ timeout: 15_000 });
+        const pending = await main.locator(".attachment-frame img").evaluate((el) => {
+          const img = el as unknown as ImgLike;
+          return {
+            loaded: img.complete && img.naturalWidth > 0,
+            height: img.getBoundingClientRect().height,
+          };
+        });
+        if (pending.loaded || pending.height < 100) {
+          throw new Error(`the attachment page's image: ${JSON.stringify(pending)}`);
+        }
+        const download = await main
+          .locator(".attachment-side")
+          .getByRole("link", { name: "Download" })
+          .getAttribute("href");
+        if (download !== `/${owner}/${slug}/-/download/${imagePaths[0]}`) {
+          throw new Error(`Download: ${download}`);
+        }
+        releaseFile();
+        await page.unroute("**/-/image/**", holdFile);
+      },
+    );
 
     // Verify a concept as a person, let an agent change it, and see the change over the text.
     const concept = concepts[0] ?? "";
@@ -3100,6 +3326,9 @@ async function browserRenders(
         }
       },
     );
+    await step("reader images: the page of figures goes", async () => {
+      for (const path of [imagesPage, ...imagePaths]) await agentDeletes(path);
+    });
     // axe (TEMPRA-133): the gate's pages, light and dark, a concept with its Comments panel, and
     // the phone's drawer and sheet, with no serious or critical issue. After the busy minute, so
     // its loads are not counted there.

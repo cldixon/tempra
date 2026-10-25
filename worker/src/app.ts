@@ -10,6 +10,7 @@ import {
   bundleFiles,
   bundleTar,
   describeBlob,
+  imagesWithDimensions,
   type LibraryClient,
   mediaFor,
   putBlob,
@@ -445,9 +446,14 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
 
   app.get(`${BASE}/files/*`, async (c) => {
     const path = tail(c, "/files/");
-    const view = await c.var.lib.read(path, { at: num(c, "at"), computed: bool(c, "computed") });
-    c.header("X-Seq", String(view.seq));
     const wantsJson = (c.req.header("Accept") ?? "").includes("application/json");
+    const view = await c.var.lib.read(path, {
+      at: num(c, "at"),
+      computed: bool(c, "computed"),
+      // The reader's images: each one's hash and size (TEMPRA-162).
+      images: wantsJson,
+    });
+    c.header("X-Seq", String(view.seq));
     if (view.kind === "attachment" && wantsJson) {
       // A description, not the bytes: what the app shows on an attachment's page.
       const { kind, path, seq, hash, size, media, width, height, source, description } =
@@ -490,6 +496,9 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     c.header("ETag", `"${view.hash}"`);
     if (wantsJson) {
       const { markdown: _, ...rest } = view;
+      if (rest.images) {
+        rest.images = await imagesWithDimensions(c.var.lib, c.var.deps.blobs, rest.images);
+      }
       return c.json(rest);
     }
     return c.body(view.markdown, 200, { "Content-Type": "text/markdown; charset=utf-8" });
