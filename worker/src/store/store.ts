@@ -2769,8 +2769,9 @@ export class LibraryStore {
         hash: a.hash,
         size: info.size,
         media: info.media,
-        width: info.dims?.width ?? null,
-        height: info.dims?.height ?? null,
+        // Null when never worked out, 0 when worked out and unknown (blobInfo's dims).
+        width: info.dims === null ? null : (info.dims.width ?? 0),
+        height: info.dims === null ? null : (info.dims.height ?? 0),
       };
     });
   }
