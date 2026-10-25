@@ -1,0 +1,433 @@
+import { OkfError } from "./store/errors";
+
+/**
+ * What attachment bytes are (TEMPRA-152): the image formats the app draws, checked from their
+ * bytes alone (signature, header, the container's lengths through its end), DOM-free and with no
+ * WASM, so a write can refuse a broken image before the synchronous write transaction. The type
+ * of an image comes from its bytes, never from a header or an extension, and its width and
+ * height from its header. Free of Worker APIs.
+ */
+
+export type ImageFormat = "png" | "jpeg" | "gif" | "webp" | "avif" | "svg";
+
+export const IMAGE_MEDIA: Record<ImageFormat, string> = {
+  png: "image/png",
+  jpeg: "image/jpeg",
+  gif: "image/gif",
+  webp: "image/webp",
+  avif: "image/avif",
+  svg: "image/svg+xml",
+};
+
+const FORMAT_NAME: Record<ImageFormat, string> = {
+  png: "PNG",
+  jpeg: "JPEG",
+  gif: "GIF",
+  webp: "WebP",
+  avif: "AVIF",
+  svg: "SVG",
+};
+
+/** A recognised image: its format and size in pixels, or what is wrong with it. */
+export type ImageInfo =
+  | { ok: true; format: ImageFormat; width: number; height: number }
+  | { ok: false; format: ImageFormat; problem: string };
+
+/** What a checked attachment is stored as. */
+export interface AttachmentInfo {
+  media: string | null;
+  width?: number;
+  height?: number;
+  /** Set when the declared type was ignored for the one the bytes have. */
+  note?: string;
+}
+
+class Broken extends Error {}
+const broken = (problem: string): never => {
+  throw new Broken(problem);
+};
+
+const ascii = (b: Uint8Array, at: number, n: number) =>
+  at + n > b.length ? "" : String.fromCharCode(...b.subarray(at, at + n));
+
+const startsWith = (b: Uint8Array, sig: number[]) =>
+  b.length >= sig.length && sig.every((x, i) => b[i] === x);
+
+/** The format the bytes announce by their signature, before any further check. */
+export function sniffImage(b: Uint8Array): ImageFormat | null {
+  if (startsWith(b, [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])) return "png";
+  if (startsWith(b, [0xff, 0xd8, 0xff])) return "jpeg";
+  if (ascii(b, 0, 6) === "GIF87a" || ascii(b, 0, 6) === "GIF89a") return "gif";
+  if (ascii(b, 0, 4) === "RIFF" && ascii(b, 8, 4) === "WEBP") return "webp";
+  if (ascii(b, 4, 4) === "ftyp" && avifBrand(b)) return "avif";
+  const root = svgRoot(b);
+  if (root !== null && attr(root, "xmlns") === SVG_NS) return "svg";
+  return null;
+}
+
+/**
+ * Checks bytes as an image: the format their signature names, or `expect` (the declared one) when
+ * they have none, in which case they are not that image. Null when neither names an image format.
+ */
+export function imageInfo(b: Uint8Array, expect?: ImageFormat | null): ImageInfo | null {
+  const format = sniffImage(b) ?? expect ?? null;
+  if (!format) return null;
+  try {
+    if (!sniffImage(b) && format !== "svg") {
+      broken(`it does not start with a ${FORMAT_NAME[format]} signature`);
+    }
+    const { width, height } = CHECKS[format](b);
+    // An SVG need not say its size; every other format does.
+    if (format !== "svg" && !(width > 0 && height > 0))
+      broken("its header gives no width and height");
+    return { ok: true, format, width, height };
+  } catch (e) {
+    if (e instanceof Broken) return { ok: false, format, problem: e.message };
+    if (e instanceof RangeError) return { ok: false, format, problem: "it ends early" };
+    throw e;
+  }
+}
+
+/** The image format a media type names, if it is one this module checks. */
+export function formatOf(media: string | null | undefined): ImageFormat | null {
+  const m = media?.split(";")[0]?.trim().toLowerCase();
+  if (m === "image/jpg" || m === "image/pjpeg") return "jpeg";
+  for (const [f, t] of Object.entries(IMAGE_MEDIA)) if (t === m) return f as ImageFormat;
+  return null;
+}
+
+/**
+ * The one check every way an attachment comes in goes through (MCP `attach`, REST `PUT`,
+ * import, uploads; `putBlob` in client.ts calls it): an image is refused when broken (400
+ * `bad_image`, naming what is wrong) and otherwise stored with the type its bytes have and its
+ * width and height; other bytes keep the declared type.
+ */
+export function checkAttachment(
+  bytes: Uint8Array,
+  declared: string | null,
+  path?: string,
+): AttachmentInfo {
+  const info = imageInfo(bytes, formatOf(declared));
+  if (!info) return { media: declared };
+  const what = path ? `${path} is not a valid ${FORMAT_NAME[info.format]}` : "Not a valid image";
+  if (!info.ok) {
+    throw new OkfError(400, "bad_image", `${what}: ${info.problem}.`, {
+      format: info.format,
+      problem: info.problem,
+    });
+  }
+  const media = IMAGE_MEDIA[info.format];
+  const out: AttachmentInfo = { media };
+  if (info.width > 0 && info.height > 0) {
+    out.width = info.width;
+    out.height = info.height;
+  }
+  if (declared && formatOf(declared) !== info.format) {
+    out.note = `The bytes are a ${FORMAT_NAME[info.format]} image, so it is stored as ${media}; the declared ${declared} was ignored.`;
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------------------- PNG
+
+const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
+  let c = n;
+  for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+  return c >>> 0;
+});
+
+function crc32(b: Uint8Array, from: number, to: number): number {
+  let c = 0xffffffff;
+  for (let i = from; i < to; i++)
+    c = (CRC_TABLE[(c ^ (b[i] as number)) & 0xff] as number) ^ (c >>> 8);
+  return (c ^ 0xffffffff) >>> 0;
+}
+
+function png(b: Uint8Array) {
+  const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  let at = 8;
+  let width = 0;
+  let height = 0;
+  let idat = false;
+  for (let n = 0; ; n++) {
+    if (at + 12 > b.length) broken(`it ends at byte ${b.length} before IEND`);
+    const len = v.getUint32(at);
+    const type = ascii(b, at + 4, 4);
+    if (!/^[A-Za-z]{4}$/.test(type)) broken(`the bytes at ${at} are not a PNG chunk`);
+    if (at + 12 + len > b.length) {
+      broken(
+        `its ${type} chunk declares ${len} bytes but the file ends ${at + 12 + len - b.length} bytes short`,
+      );
+    }
+    if (crc32(b, at + 4, at + 8 + len) !== v.getUint32(at + 8 + len)) {
+      broken(`its ${type} chunk at byte ${at} fails its checksum`);
+    }
+    if (n === 0) {
+      if (type !== "IHDR" || len !== 13) broken("its first chunk is not IHDR");
+      width = v.getUint32(at + 8);
+      height = v.getUint32(at + 12);
+    }
+    if (type === "IDAT") idat = true;
+    at += 12 + len;
+    if (type === "IEND") break;
+  }
+  if (!idat) broken("it has no image data (IDAT)");
+  return { width, height };
+}
+
+// --------------------------------------------------------------------------------------- JPEG
+
+function jpeg(b: Uint8Array) {
+  let at = 2;
+  let size: { width: number; height: number } | null = null;
+  let scanned = false;
+  for (;;) {
+    if (at >= b.length)
+      broken(scanned ? "it ends before its end marker (EOI)" : "it ends before its image data");
+    if (b[at] !== 0xff) broken(`the bytes at ${at} are not a JPEG marker`);
+    while (b[at] === 0xff) at++; // fill bytes
+    if (at >= b.length) broken("it ends before its end marker (EOI)");
+    const m = b[at++] as number;
+    if (m === 0xd9) break; // EOI
+    if (m === 0x01 || (m >= 0xd0 && m <= 0xd7)) continue; // standalone markers
+    if (at + 2 > b.length) broken("it ends inside a segment");
+    const len = ((b[at] as number) << 8) | (b[at + 1] as number);
+    if (len < 2 || at + len > b.length) broken(`a segment at byte ${at - 2} runs past the end`);
+    if (m >= 0xc0 && m <= 0xcf && m !== 0xc4 && m !== 0xc8 && m !== 0xcc) {
+      if (len < 8) broken("its frame header (SOF) is too short");
+      const height = ((b[at + 3] as number) << 8) | (b[at + 4] as number);
+      const width = ((b[at + 5] as number) << 8) | (b[at + 6] as number);
+      size ??= { width, height };
+    }
+    at += len;
+    if (m === 0xda) {
+      if (!size) broken("its image data comes before a frame header (SOF)");
+      scanned = true;
+      // Entropy-coded data runs to the next marker that is not a stuffed 0xFF00 or a restart.
+      for (;;) {
+        if (at + 1 >= b.length)
+          broken("it ends inside its image data, before its end marker (EOI)");
+        if (b[at] === 0xff) {
+          const n = b[at + 1] as number;
+          if (n !== 0x00 && !(n >= 0xd0 && n <= 0xd7) && n !== 0xff) break;
+        }
+        at++;
+      }
+    }
+  }
+  if (!size) broken("it has no frame header (SOF)");
+  if (!scanned) broken("it has no image data (SOS)");
+  return size as { width: number; height: number };
+}
+
+// ---------------------------------------------------------------------------------------- GIF
+
+function gif(b: Uint8Array) {
+  const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const width = v.getUint16(6, true);
+  const height = v.getUint16(8, true);
+  const flags = b[10] as number;
+  let at = 13 + (flags & 0x80 ? 3 * (1 << ((flags & 7) + 1)) : 0);
+  const subBlocks = () => {
+    for (;;) {
+      if (at >= b.length) broken("it ends inside a block, before its trailer");
+      const n = b[at++] as number;
+      if (n === 0) return;
+      at += n;
+    }
+  };
+  let images = 0;
+  for (;;) {
+    if (at >= b.length) broken("it ends before its trailer");
+    const k = b[at++];
+    if (k === 0x3b) break;
+    if (k === 0x21) {
+      at++; // label
+      subBlocks();
+    } else if (k === 0x2c) {
+      if (at + 9 > b.length) broken("it ends inside an image descriptor");
+      const local = b[at + 8] as number;
+      at += 9 + (local & 0x80 ? 3 * (1 << ((local & 7) + 1)) : 0);
+      at++; // LZW minimum code size
+      subBlocks();
+      images++;
+    } else broken(`the byte at ${at - 1} is not a GIF block`);
+  }
+  if (images === 0) broken("it has no image");
+  return { width, height };
+}
+
+// --------------------------------------------------------------------------------------- WebP
+
+function webp(b: Uint8Array) {
+  const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const riff = v.getUint32(4, true);
+  if (riff + 8 > b.length)
+    broken(`its RIFF header declares ${riff + 8} bytes but it has ${b.length}`);
+  const end = riff + 8;
+  let at = 12;
+  let size: { width: number; height: number } | null = null;
+  while (at < end) {
+    if (at + 8 > end) broken("a chunk header runs past the RIFF size");
+    const type = ascii(b, at, 4);
+    const len = v.getUint32(at + 4, true);
+    const data = at + 8;
+    if (data + len > end) broken(`its ${type.trim()} chunk runs past the RIFF size`);
+    if (!size) {
+      if (type === "VP8X") {
+        if (len < 10) broken("its VP8X chunk is too short");
+        size = {
+          width:
+            1 +
+            (b[data + 4] as number) +
+            ((b[data + 5] as number) << 8) +
+            ((b[data + 6] as number) << 16),
+          height:
+            1 +
+            (b[data + 7] as number) +
+            ((b[data + 8] as number) << 8) +
+            ((b[data + 9] as number) << 16),
+        };
+      } else if (type === "VP8 ") {
+        if (len < 10 || b[data + 3] !== 0x9d || b[data + 4] !== 0x01 || b[data + 5] !== 0x2a) {
+          broken("its VP8 frame has no start code");
+        }
+        size = {
+          width: v.getUint16(data + 6, true) & 0x3fff,
+          height: v.getUint16(data + 8, true) & 0x3fff,
+        };
+      } else if (type === "VP8L") {
+        if (len < 5 || b[data] !== 0x2f) broken("its VP8L frame has no signature");
+        const bits = v.getUint32(data + 1, true);
+        size = { width: (bits & 0x3fff) + 1, height: ((bits >>> 14) & 0x3fff) + 1 };
+      } else broken(`its first chunk is ${JSON.stringify(type)}, not VP8, VP8L or VP8X`);
+    }
+    at = data + len + (len & 1);
+  }
+  if (!size) broken("it has no image chunk");
+  return size as { width: number; height: number };
+}
+
+// --------------------------------------------------------------------------------------- AVIF
+
+function avifBrand(b: Uint8Array): boolean {
+  if (b.length < 16) return false;
+  const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const size = Math.min(v.getUint32(0), b.length);
+  for (let at = 8; at + 4 <= size; at += 4) {
+    if (at === 12) continue; // minor version
+    const brand = ascii(b, at, 4);
+    if (brand === "avif" || brand === "avis") return true;
+  }
+  return false;
+}
+
+/** ISO-BMFF boxes from `from` to `to`, each as [type, start of its payload, end]. */
+function boxes(b: Uint8Array, from: number, to: number): [string, number, number][] {
+  const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const out: [string, number, number][] = [];
+  let at = from;
+  while (at < to) {
+    if (at + 8 > to) broken(`a box header at byte ${at} runs past its container`);
+    let size = v.getUint32(at);
+    const type = ascii(b, at + 4, 4);
+    let head = 8;
+    if (size === 1) {
+      if (at + 16 > to) broken(`the ${type} box's size runs past its container`);
+      size = Number(v.getBigUint64(at + 8));
+      head = 16;
+    } else if (size === 0) size = to - at;
+    if (size < head || at + size > to) {
+      broken(`its ${type} box declares ${size} bytes but ${to - at} remain`);
+    }
+    out.push([type, at + head, at + size]);
+    at += size;
+  }
+  return out;
+}
+
+function avif(b: Uint8Array) {
+  const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const top = boxes(b, 0, b.length);
+  if (top[0]?.[0] !== "ftyp") broken("it does not start with an ftyp box");
+  const meta = top.find((x) => x[0] === "meta");
+  if (!meta) broken("it has no meta box");
+  if (!top.some((x) => x[0] === "mdat")) broken("it has no image data (mdat)");
+  const [, mStart, mEnd] = meta as [string, number, number];
+  let best = { width: 0, height: 0 };
+  // meta is a full box (4 bytes of version and flags); the sizes are in iprp > ipco > ispe.
+  for (const [t, s, e] of boxes(b, mStart + 4, mEnd)) {
+    if (t !== "iprp") continue;
+    for (const [t2, s2, e2] of boxes(b, s, e)) {
+      if (t2 !== "ipco") continue;
+      for (const [t3, s3, e3] of boxes(b, s2, e2)) {
+        if (t3 !== "ispe" || e3 - s3 < 12) continue;
+        const width = v.getUint32(s3 + 4);
+        const height = v.getUint32(s3 + 8);
+        // The primary image is the largest (a grid's tiles and an alpha plane are no bigger).
+        if (width * height > best.width * best.height) best = { width, height };
+      }
+    }
+  }
+  return best;
+}
+
+// ---------------------------------------------------------------------------------------- SVG
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+
+/** The SVG's root start tag, if the text's first element is `<svg>` (prolog skipped). */
+function svgRoot(b: Uint8Array): string | null {
+  const head = b.subarray(0, 4096);
+  if (head.includes(0)) return null;
+  const text = new TextDecoder().decode(head);
+  const m =
+    /^﻿?\s*(?:<\?xml[^>]*\?>\s*)?(?:(?:<!--[\s\S]*?-->|<!DOCTYPE[^>[]*(?:\[[\s\S]*?\])?\s*>)\s*)*<svg(?=[\s/>])([^>]*)>/i.exec(
+      text,
+    );
+  return m ? (m[1] ?? "") : null;
+}
+
+const attr = (tag: string, name: string) =>
+  new RegExp(`(?:^|\\s)${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`)
+    .exec(tag)
+    ?.slice(1)
+    .find((x) => x !== undefined);
+
+const length = (s: string | undefined) => {
+  const m = s ? /^\s*([0-9]*\.?[0-9]+)\s*(px)?\s*$/.exec(s) : null;
+  return m ? Math.round(Number(m[1])) : 0;
+};
+
+function svg(b: Uint8Array) {
+  const tag = svgRoot(b);
+  if (tag === null) broken("its root element is not <svg>");
+  const root = tag as string;
+  if (attr(root, "xmlns") !== SVG_NS) broken(`its <svg> root does not declare xmlns="${SVG_NS}"`);
+  const text = new TextDecoder().decode(b);
+  const selfClosed = root.trimEnd().endsWith("/");
+  const rest = text.replace(/(?:\s|<!--[\s\S]*?-->)*$/, "");
+  if (!selfClosed && !/<\/svg\s*>$/i.test(rest)) broken("it does not end with </svg>");
+  let width = length(attr(root, "width"));
+  let height = length(attr(root, "height"));
+  if (!width || !height) {
+    const box = attr(root, "viewBox")
+      ?.trim()
+      .split(/[\s,]+/)
+      .map(Number);
+    if (box?.length === 4 && box.every(Number.isFinite)) {
+      width ||= Math.round(box[2] as number);
+      height ||= Math.round(box[3] as number);
+    }
+  }
+  return width > 0 && height > 0 ? { width, height } : { width: 0, height: 0 };
+}
+
+const CHECKS: Record<ImageFormat, (b: Uint8Array) => { width: number; height: number }> = {
+  png,
+  jpeg,
+  gif,
+  webp,
+  avif,
+  svg,
+};

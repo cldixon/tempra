@@ -3,7 +3,7 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { TokenInfo } from "../auth";
-import { type BlobStore, type LibraryClient, mediaFor, putBlob } from "../client";
+import { type BlobStore, type LibraryClient, mediaFor, putBlob, withDimensions } from "../client";
 import { type Images, imagesService, RASTER_MEDIA, readBytes, toBase64 } from "../images";
 import { normalizePath, underPrefix } from "../okf/paths";
 import type { LintWarning } from "../okf/types";
@@ -501,7 +501,11 @@ export function buildServer(ctx: McpContext): McpServer {
     },
     guarded(async (args: { path: string; image?: boolean; at?: number; library?: string }) => {
       const picked = pick(args.library);
-      const view = await picked.lib.read(args.path, { at: args.at });
+      const view = await withDimensions(
+        picked.lib,
+        ctx.blobs,
+        await picked.lib.read(args.path, { at: args.at }),
+      );
       if (view.kind === "derived") return text(view.markdown);
       if (view.kind === "attachment") {
         const url = await downloadUrl(picked, {
@@ -516,6 +520,7 @@ export function buildServer(ctx: McpContext): McpServer {
             `hash: ${view.hash}`,
             `seq: ${view.seq}`,
             `size: ${view.size} bytes · media: ${view.media ?? "unknown"}`,
+            ...(view.width && view.height ? [`dimensions: ${view.width}×${view.height} px`] : []),
             `download (15 minutes): ${url}`,
           ].join("\n"),
         );
@@ -706,7 +711,7 @@ export function buildServer(ctx: McpContext): McpServer {
     {
       title: "Add an attachment",
       description:
-        "Store a small non-markdown file (an image, a script, a PDF; up to 10 MB) at a path, e.g. `references/attesters/check.py`. Send the bytes base64-encoded. Replacing needs `if_match`. Reading it back with `read` returns a short-lived download URL.",
+        "Store a small non-markdown file (an image, a script, a PDF; up to 10 MB) at a path, e.g. `references/attesters/check.py`. Send the bytes base64-encoded. Images (PNG, JPEG, GIF, WebP, AVIF, SVG) are checked on write: a broken or truncated one is refused with `bad_image`, and an image's type is taken from its bytes, not from `media` or the extension. Replacing needs `if_match`. Reading it back with `read` returns a short-lived download URL.",
       inputSchema: {
         path: z.string(),
         content_base64: z.string(),
@@ -726,7 +731,7 @@ export function buildServer(ctx: McpContext): McpServer {
       } catch {
         throw new OkfError(400, "bad_base64", "content_base64 is not valid base64.");
       }
-      const blob = await putBlob(ctx.blobs, bytes, media ?? mediaFor(path));
+      const blob = await putBlob(ctx.blobs, bytes, media ?? mediaFor(path), path);
       const res = await lib.apply(request(note), [{ op: "attach", path, blob, if_match }]);
       return text(writeText("Stored", res));
     }),

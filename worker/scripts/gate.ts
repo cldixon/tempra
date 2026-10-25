@@ -1646,6 +1646,16 @@ async function browserRenders(
       const facts = side.locator(".attachment-facts");
       await facts.locator("dd", { hasText: /^PNG image$/ }).waitFor({ timeout: 5000 });
       await facts.locator("div", { has: page.locator("dt", { hasText: "Size" }) }).waitFor();
+      // Its size in pixels from the server, read from the image's header (TEMPRA-152).
+      const described = (await (
+        await fetch(`${libApi}/files/gate-figure-2.png`, {
+          headers: { ...bearer, Accept: "application/json" },
+        })
+      ).json()) as { width?: number; height?: number };
+      if (described.width !== 240 || described.height !== 160) {
+        throw new Error(`attachment dimensions: ${JSON.stringify(described)}`);
+      }
+      await facts.locator("dd", { hasText: "240 × 160" }).waitFor({ timeout: 5000 });
       await facts.locator("div", { has: page.locator("dt", { hasText: "Added" }) }).waitFor();
       await facts
         .locator("dd")

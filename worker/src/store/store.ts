@@ -107,6 +107,11 @@ export interface BlobRef {
   hash: string;
   size: number;
   media: string | null;
+  /** An image's size in pixels, from its header (TEMPRA-152; `checkAttachment` in media.ts). */
+  width?: number;
+  height?: number;
+  /** What the writer should know about the type (the declared one was ignored); not stored. */
+  note?: string;
 }
 
 /**
@@ -346,6 +351,12 @@ export type FileView =
       seq: number;
       size: number;
       media: string | null;
+      /**
+       * An image's size in pixels; null when it has none (not an image, or an SVG that does not
+       * say), absent when never worked out (an attachment from before TEMPRA-152).
+       */
+      width?: number | null;
+      height?: number | null;
     }
   | { kind: "derived"; path: string; seq: number; markdown: string };
 
@@ -537,6 +548,37 @@ export class LibraryStore {
     this.addStructure();
     this.addLedgerCounts();
     this.addFtsRows();
+    this.addBlobDimensions();
+  }
+
+  /**
+   * Images keep their width and height beside size and media (TEMPRA-152). Libraries from before
+   * get the columns once, empty: each image's size is worked out on its first read
+   * (`withDimensions` in client.ts, then `setDimensions`).
+   */
+  private addBlobDimensions() {
+    if (this.sql.all("SELECT 1 FROM meta WHERE key = 'blob_dimensions'").length > 0) return;
+    this.sql.transaction(() => {
+      const cols = this.sql.all<{ name: string }>("PRAGMA table_info(blobs)");
+      if (!cols.some((c) => c.name === "width")) {
+        this.sql.run("ALTER TABLE blobs ADD COLUMN width INTEGER");
+        this.sql.run("ALTER TABLE blobs ADD COLUMN height INTEGER");
+      }
+      this.sql.run("INSERT INTO meta (key, value) VALUES ('blob_dimensions', '1')");
+    });
+  }
+
+  /**
+   * Keeps an image's size worked out from its bytes after it was stored (an attachment from
+   * before TEMPRA-152); 0 by 0 for one that does not decode. Never overwrites a known size.
+   */
+  setDimensions(hash: string, width: number, height: number): void {
+    this.sql.run(
+      "UPDATE blobs SET width = ?, height = ? WHERE hash = ? AND location = 'r2' AND width IS NULL",
+      Math.max(0, Math.floor(width)) || 0,
+      Math.max(0, Math.floor(height)) || 0,
+      hash,
+    );
   }
 
   /**
@@ -730,13 +772,40 @@ export class LibraryStore {
     return r;
   }
 
-  private blobInfo(hash: string): BlobRef & { location: string } {
-    const row = this.sql.all<{ size: number; media: string | null; location: string }>(
-      "SELECT size, media, location FROM blobs WHERE hash = ?",
-      hash,
-    )[0];
+  private blobInfo(hash: string): BlobRef & {
+    location: string;
+    /** Null when never worked out. */
+    dims: { width: number | null; height: number | null } | null;
+  } {
+    const row = this.sql.all<{
+      size: number;
+      media: string | null;
+      location: string;
+      width: number | null;
+      height: number | null;
+    }>("SELECT size, media, location, width, height FROM blobs WHERE hash = ?", hash)[0];
     if (!row) throw new Error(`missing blob ${hash}`);
-    return { hash, size: row.size, media: row.media, location: row.location };
+    const sized = row.width !== null && row.width > 0 && row.height !== null && row.height > 0;
+    const out: BlobRef & {
+      location: string;
+      dims: { width: number | null; height: number | null } | null;
+    } = {
+      hash,
+      size: row.size,
+      media: row.media,
+      location: row.location,
+      dims:
+        row.width === null
+          ? null
+          : sized
+            ? { width: row.width, height: row.height }
+            : { width: null, height: null },
+    };
+    if (sized) {
+      out.width = row.width as number;
+      out.height = row.height as number;
+    }
+    return out;
   }
 
   private pathRow(path: string): PathRow | undefined {
@@ -1595,28 +1664,75 @@ export class LibraryStore {
     }
     const cur = this.pathRow(path);
     this.checkPreconditions(path, cur, ifMatch, ifNoneMatch, w.mode);
-    this.sql.run(
-      "INSERT OR IGNORE INTO blobs (hash, size, location, content, media) VALUES (?, ?, 'r2', NULL, ?)",
+    // An image's size from its header (TEMPRA-152). Without one it stays unknown (NULL), and the
+    // first read works it out from the bytes (`withDimensions` in client.ts).
+    const sized = !!blob.width && !!blob.height;
+    const width = sized ? (blob.width as number) : null;
+    const height = sized ? (blob.height as number) : null;
+    const before = this.sql.all<{ media: string | null }>(
+      "SELECT media FROM blobs WHERE hash = ?",
       blob.hash,
-      blob.size,
-      blob.media,
-    );
+    )[0];
+    // The type belongs to the bytes, so new bytes' type is stored with them, and a type that
+    // changes for the same bytes is a write of its own (TEMPRA-105 §2), not a no-op.
+    const retyped = !!before && !!blob.media && before.media !== blob.media;
+    if (!before) {
+      this.sql.run(
+        "INSERT INTO blobs (hash, size, location, content, media, width, height) VALUES (?, ?, 'r2', NULL, ?, ?, ?)",
+        blob.hash,
+        blob.size,
+        blob.media,
+        width,
+        height,
+      );
+    } else {
+      if (retyped) this.sql.run("UPDATE blobs SET media = ? WHERE hash = ?", blob.media, blob.hash);
+      if (width !== null) {
+        this.sql.run(
+          "UPDATE blobs SET width = ?, height = ? WHERE hash = ? AND (width IS NULL OR ?)",
+          width,
+          height,
+          blob.hash,
+          retyped ? 1 : 0,
+        );
+      }
+    }
     const conceptId = cur?.concept_id ?? w.pending.get(path) ?? crypto.randomUUID();
     let seq = cur?.seq ?? 0;
-    if (!cur || cur.hash !== blob.hash) {
+    const sameBytes = cur?.hash === blob.hash;
+    if (!cur || !sameBytes || retyped) {
+      const meta: JsonObject = {};
+      if (w.source) meta.source = w.source;
+      if (retyped) meta.media = { from: before?.media ?? null, to: blob.media };
       seq = this.appendEvent(w.ctx, w.now, {
         op: w.mode === "import" ? "import" : "put",
         path,
         prev_hash: cur?.hash ?? null,
         hash: blob.hash,
         concept_id: conceptId,
-        meta: w.source ? { source: w.source } : undefined,
+        meta: Object.keys(meta).length > 0 ? meta : undefined,
       });
       if (cur?.kind === "concept") this.unindex(cur.concept_id);
       this.setPath(path, conceptId, blob.hash, "attachment", seq, cur?.created_seq ?? seq);
-      this.healLinksTo(w, path, conceptId);
+      if (!sameBytes || !cur) this.healLinksTo(w, path, conceptId);
     }
-    return { op: w.mode === "import" ? "import" : "put", path, hash: blob.hash, seq, lint: [] };
+    const result: OpResult = {
+      op: w.mode === "import" ? "import" : "put",
+      path,
+      hash: blob.hash,
+      seq,
+      lint: [],
+    };
+    const notices: LintWarning[] = [];
+    if (blob.note) notices.push({ code: "media_from_bytes", message: blob.note });
+    if (retyped) {
+      notices.push({
+        code: "media_changed",
+        message: `Same bytes, new type: ${before?.media ?? "none"} → ${blob.media}.`,
+      });
+    }
+    if (notices.length > 0) result.notices = notices;
+    return result;
   }
 
   /** Find-and-replace on the rendered document, frontmatter included (spec: PATCH /files). */
@@ -2415,6 +2531,7 @@ export class LibraryStore {
         seq: e.seq,
         size: info.size,
         media: info.media,
+        ...(info.dims ?? {}),
       };
     }
     const markdown = this.renderEntry(snap, e, opts.computed ?? false);
@@ -2898,6 +3015,20 @@ export class LibraryStore {
               return [{ path: from.path, raw, anchor: l.anchor, kind: l.kind }];
             })
             .sort((a, b) => (a.path < b.path ? -1 : 1));
+    if (e.kind === "attachment") {
+      // What the attachment's page shows beside where it is used (TEMPRA-152).
+      const info = this.blobInfo(e.hash);
+      return {
+        path: e.path,
+        outbound,
+        inbound,
+        broken,
+        size: info.size,
+        media: info.media,
+        width: info.width ?? null,
+        height: info.height ?? null,
+      };
+    }
     return { path: e.path, outbound, inbound, broken };
   }
 
@@ -3029,7 +3160,8 @@ export class LibraryStore {
         files.push({ path: e.path, text: this.renderEntry(snap, e, false) });
       else {
         const info = this.blobInfo(e.hash);
-        files.push({ path: e.path, blob: { hash: e.hash, size: info.size, media: info.media } });
+        const { location: _, dims: __, ...blob } = info;
+        files.push({ path: e.path, blob });
       }
     }
     for (const d of [...dirs].sort()) {

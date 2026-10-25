@@ -137,7 +137,9 @@ function Attachment(props: { urls: Urls; head: number; file: AttachmentFile }) {
     for (const f of frame.index ?? []) out.set(f.path, fileLabel(f));
     return out;
   }, [frame.index]);
-  const [size, setSize] = useState<{ w: number; h: number } | null>(null);
+  const [loaded, setSize] = useState<{ w: number; h: number } | null>(null);
+  // The server's size from the image's header (TEMPRA-152), known before the image loads.
+  const size = file.width && file.height ? { w: file.width, h: file.height } : loaded;
   const [broken, setBroken] = useState(false);
   const copied = useCopy();
   const image = file.media?.startsWith("image/") && !broken;

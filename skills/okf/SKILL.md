@@ -67,6 +67,7 @@ Gross margin equals recognized [revenue](/metrics/revenue.md) minus full COGS.[^
 - Bodies are stored in a canonical form: `-` bullets, `*` emphasis, ATX headings, fenced code, padded tables; in the frontmatter, a list of mappings such as `sources` one key per line, and a list of scalars such as `tags` on one line (`[a, b]`). What you write reads back normalized, and is byte-stable after that; when it differs from what you sent, the write result says so and shows the diff. Quote `old` from what `read` shows, not from what you sent.
 - `write` for a new concept or a full rewrite. Replacing needs `if_match`.
 - `batch` for related changes (a new concept plus the links to it; a rename plus fixes) so they land as one request.
+- `attach` stores a non-markdown file. Images (PNG, JPEG, GIF, WebP, AVIF, SVG) are checked on write: a broken or truncated one is refused with `bad_image` saying what is wrong, and an image's type is taken from its bytes, not from `media` or the extension.
 - `move` renames a file or a whole directory. Links keep working; do not fix them by hand.
 - Put a one-line `note` on every write, saying why. Humans read the ledger.
 - Read the `lint` in every write result and fix it in the same session. The result's notes say what else to know: ignored fields, the stored form, the concept's open comment threads and any your edit left outdated, and after a delete, the concepts whose links it broke.

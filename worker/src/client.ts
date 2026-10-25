@@ -1,3 +1,4 @@
+import { checkAttachment, formatOf, imageInfo } from "./media";
 import { sha256Hex } from "./okf/hash";
 import { normalizePath } from "./okf/paths";
 import { OkfError } from "./store/errors";
@@ -42,6 +43,7 @@ export const LIBRARY_METHODS = [
   "contributors",
   "activity",
   "digest",
+  "setDimensions",
 ] as const;
 
 export type LibraryMethod = (typeof LIBRARY_METHODS)[number];
@@ -230,8 +232,19 @@ export async function callStore(
 /** Attachments that pass through the Worker (Phase 1 has no presigned uploads). */
 export const WORKER_ATTACHMENT_CAP = 10 * 1024 * 1024;
 
-/** Stores attachment bytes by hash (the key is content-addressed, so orphans are harmless). */
-export async function putBlob(blobs: BlobStore, bytes: Uint8Array, media: string | null) {
+/**
+ * Stores attachment bytes by hash (the key is content-addressed, so orphans are harmless), after
+ * `checkAttachment` (media.ts, TEMPRA-152): a broken image is refused with 400 `bad_image` before
+ * anything is stored, an image's type comes from its bytes (`declared`, the header's or the
+ * extension's, is ignored when it disagrees, and the returned `note` says so), and its width and
+ * height come back for the attach op. Every way bytes come in goes through here.
+ */
+export async function putBlob(
+  blobs: BlobStore,
+  bytes: Uint8Array,
+  declared: string | null,
+  path?: string,
+): Promise<BlobRef> {
   if (bytes.length > WORKER_ATTACHMENT_CAP) {
     throw new OkfError(
       413,
@@ -239,9 +252,61 @@ export async function putBlob(blobs: BlobStore, bytes: Uint8Array, media: string
       `Attachments through the Worker are capped at ${WORKER_ATTACHMENT_CAP} bytes.`,
     );
   }
+  const info = checkAttachment(bytes, declared, path);
   const hash = sha256Hex(bytes);
-  await blobs.put(hash, bytes, media);
-  return { hash, size: bytes.length, media };
+  await blobs.put(hash, bytes, info.media);
+  return { hash, size: bytes.length, ...info };
+}
+
+async function blobBytes(blobs: BlobStore, hash: string): Promise<Uint8Array | null> {
+  const obj = await blobs.get(hash);
+  if (!obj) return null;
+  return obj.body instanceof Uint8Array
+    ? obj.body
+    : new Uint8Array(await new Response(obj.body).arrayBuffer());
+}
+
+/**
+ * An attach op's blob for bytes uploaded before (by hash: REST `X-Blob`, a batch's `attach`),
+ * checked like `putBlob` checks new bytes; 400 `blob_missing` when nothing is stored there.
+ */
+export async function describeBlob(
+  blobs: BlobStore,
+  hash: string,
+  declared: string | null,
+  path?: string,
+): Promise<BlobRef> {
+  const bytes = /^[0-9a-f]{64}$/.test(hash) ? await blobBytes(blobs, hash) : null;
+  if (!bytes) throw new OkfError(400, "blob_missing", `No uploaded bytes for ${hash}.`);
+  return { hash, size: bytes.length, ...checkAttachment(bytes, declared, path) };
+}
+
+/**
+ * An attachment's view with its width and height, worked out once from its bytes for an image
+ * stored before dimensions were (TEMPRA-152) and kept with `setDimensions`; an image that does
+ * not decode is kept as 0 by 0, so it is not read again. Views of other files pass through.
+ */
+export async function withDimensions<V extends { kind: string }>(
+  lib: Pick<LibraryClient, "setDimensions">,
+  blobs: BlobStore,
+  view: V,
+): Promise<V> {
+  const a = view as unknown as {
+    kind: string;
+    hash: string;
+    media: string | null;
+    width?: number | null;
+  };
+  if (a.kind !== "attachment" || a.width !== undefined || !a.media?.startsWith("image/")) {
+    return view;
+  }
+  const bytes = await blobBytes(blobs, a.hash);
+  if (!bytes) return view;
+  const info = imageInfo(bytes, formatOf(a.media));
+  const width = info?.ok ? info.width : 0;
+  const height = info?.ok ? info.height : 0;
+  await lib.setDimensions(a.hash, width, height);
+  return width > 0 && height > 0 ? { ...view, width, height } : view;
 }
 
 const MEDIA: Record<string, string> = {
@@ -253,6 +318,13 @@ const MEDIA: Record<string, string> = {
   jpeg: "image/jpeg",
   gif: "image/gif",
   svg: "image/svg+xml",
+  webp: "image/webp",
+  avif: "image/avif",
+  mp4: "video/mp4",
+  webm: "video/webm",
+  mp3: "audio/mpeg",
+  ogg: "audio/ogg",
+  wav: "audio/wav",
   pdf: "application/pdf",
   txt: "text/plain",
   csv: "text/csv",
@@ -280,7 +352,7 @@ export async function bundleFiles(
     const path = normalizePath(f.path.split("/").slice(strip).join("/"));
     if (!path || path.split("/").some((s) => s.startsWith("."))) continue;
     if (path.endsWith(".md")) files.push({ path, markdown: new TextDecoder().decode(f.bytes) });
-    else files.push({ path, blob: await putBlob(blobs, f.bytes, mediaFor(path)) });
+    else files.push({ path, blob: await putBlob(blobs, f.bytes, mediaFor(path), path) });
   }
   if (files.length === 0) throw new OkfError(400, "empty_import", "No files found to import.");
   return files;
@@ -301,12 +373,8 @@ export async function bundleTar(
   for (const f of bundle.files) {
     if (f.text !== undefined) files.push({ path: f.path, bytes: enc.encode(f.text) });
     else if (f.blob) {
-      const obj = await blobs.get(f.blob.hash);
-      if (!obj) throw new OkfError(500, "blob_missing", `Bytes for ${f.path} are missing.`);
-      const bytes =
-        obj.body instanceof Uint8Array
-          ? obj.body
-          : new Uint8Array(await new Response(obj.body).arrayBuffer());
+      const bytes = await blobBytes(blobs, f.blob.hash);
+      if (!bytes) throw new OkfError(500, "blob_missing", `Bytes for ${f.path} are missing.`);
       files.push({ path: f.path, bytes });
     }
   }

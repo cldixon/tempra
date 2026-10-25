@@ -9,9 +9,11 @@ import {
   type BlobStore,
   bundleFiles,
   bundleTar,
+  describeBlob,
   type LibraryClient,
   mediaFor,
   putBlob,
+  withDimensions,
 } from "./client";
 import type { Images } from "./images";
 import { notificationsOf, registerInboxApi } from "./inbox-api";
@@ -364,9 +366,22 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     const wantsJson = (c.req.header("Accept") ?? "").includes("application/json");
     if (view.kind === "attachment" && wantsJson) {
       // A description, not the bytes: what the app shows on an attachment's page.
-      const { kind, path, seq, hash, size, media } = view;
+      const { kind, path, seq, hash, size, media, width, height } = await withDimensions(
+        c.var.lib,
+        c.var.deps.blobs,
+        view,
+      );
       c.header("ETag", `"${hash}"`);
-      return c.json({ kind, path, seq, hash, size, media: media ?? null });
+      return c.json({
+        kind,
+        path,
+        seq,
+        hash,
+        size,
+        media: media ?? null,
+        width: width ?? null,
+        height: height ?? null,
+      });
     }
     if (view.kind === "attachment") {
       c.header("ETag", `"${view.hash}"`);
@@ -404,12 +419,15 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     let op: WriteOp;
     const xblob = c.req.header("X-Blob");
     if (xblob) {
-      const head = await c.var.deps.blobs.head(xblob);
-      if (!head) throw new OkfError(400, "blob_missing", `No uploaded bytes for ${xblob}.`);
       op = {
         op: "attach",
         path,
-        blob: { hash: xblob, size: head.size, media: mediaFor(path, c.req.header("Content-Type")) },
+        blob: await describeBlob(
+          c.var.deps.blobs,
+          xblob,
+          mediaFor(path, c.req.header("Content-Type")),
+          path,
+        ),
         if_match: ifMatch,
         if_none_match: ifNoneMatch,
       };
@@ -425,6 +443,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
         c.var.deps.blobs,
         bytes,
         mediaFor(path, c.req.header("Content-Type")),
+        path,
       );
       op = { op: "attach", path, blob, if_match: ifMatch, if_none_match: ifNoneMatch };
     }
@@ -472,12 +491,10 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     const ops: WriteOp[] = [];
     for (const o of body.ops) {
       if (o.op === "attach") {
-        const head = await c.var.deps.blobs.head(o.blob);
-        if (!head) throw new OkfError(400, "blob_missing", `No uploaded bytes for ${o.blob}.`);
         ops.push({
           op: "attach",
           path: o.path,
-          blob: { hash: o.blob, size: head.size, media: o.media ?? mediaFor(o.path) },
+          blob: await describeBlob(c.var.deps.blobs, o.blob, o.media ?? mediaFor(o.path), o.path),
           if_match: o.if_match,
           if_none_match: o.if_none_match,
         });

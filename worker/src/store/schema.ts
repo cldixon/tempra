@@ -62,8 +62,14 @@ CREATE TABLE IF NOT EXISTS blobs (
   size      INTEGER NOT NULL,
   location  TEXT NOT NULL,
   content   BLOB,
-  media     TEXT
+  media     TEXT,
+  width     INTEGER,
+  height    INTEGER
 );
+-- blobs.width and height: an image's size in pixels from its header (TEMPRA-152); 0 when checked
+-- and unknown, NULL when never worked out (a library from before, filled on first read). Kept out
+-- of the CREATE TABLE, whose text SQLite rewrites on ALTER TABLE (a comment in it broke DROP
+-- COLUMN on the SQLite that bun 1.3 ships).
 
 CREATE TABLE IF NOT EXISTS events (
   seq         INTEGER PRIMARY KEY,

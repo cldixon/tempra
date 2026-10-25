@@ -43,6 +43,9 @@ export type FileJson =
       size: number;
       media: string | null;
       hash: string;
+      /** An image's size in pixels, from its header (TEMPRA-152); null when not known. */
+      width?: number | null;
+      height?: number | null;
     };
 
 export type Concept = Extract<FileJson, { kind: "concept" }>;

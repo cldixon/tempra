@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import * as app from "@tempra/app";
 import * as design from "@tempra/design";
 import { API, setup } from "./harness";
+import { makePng } from "./images";
 
 /** A one-paragraph body as the API returns it, for toMatchObject (block IDs aside). */
 const says = (text: string) => ({
@@ -165,7 +166,7 @@ describe("the app's pages (TEMPRA-9)", () => {
     });
     expect(await get(s, `/files/a.md?at=${seq}`)).toMatchObject(says("First words."));
     // An attachment: its description, not its bytes.
-    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+    const png = makePng(3, 2);
     const up = await s.req("/files/img/logo.png", {
       method: "PUT",
       headers: { "Content-Type": "image/png" },
@@ -176,7 +177,9 @@ describe("the app's pages (TEMPRA-9)", () => {
       kind: "attachment",
       path: "img/logo.png",
       media: "image/png",
-      size: 8,
+      size: png.length,
+      width: 3,
+      height: 2,
     });
     const bytes = await s.app.request(`${API}/files/img/logo.png`);
     expect(new Uint8Array(await bytes.arrayBuffer())).toEqual(png);
