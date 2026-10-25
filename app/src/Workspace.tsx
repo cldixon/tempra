@@ -16,17 +16,24 @@ import { inboxChanged } from "./inbox";
 import { useFeed, useFeedStatus } from "./live";
 import { libraryLabel, useLibraries } from "./role";
 import { lastNavigation } from "./router";
-import { AccountSettingsSidebar, AccountSidebar, LibrarySidebar, SettingsSidebar } from "./Sidebar";
+import {
+  AccountSettingsSidebar,
+  AccountSidebar,
+  LibrarySidebar,
+  LibrarySwitcher,
+  SettingsSidebar,
+} from "./Sidebar";
 import { LibrarySearch, Switcher } from "./Switcher";
 import type { OutlineFile } from "./Tree";
-import type { Me } from "./ui";
+import { type Me, switcherKey } from "./ui";
 import { baseName, type Urls } from "./urls";
 
 /*
  * The app's frame (take 4, TEMPRA-113; tempra-dev: app/workspace): a top bar across the window,
- * split at the sidebar's edge (Tempra over the sidebar, on every page; the page's tools, the bell
- * and the avatar over the page, and no crumbs), a navigation sidebar (in a library, the library
- * switcher and Search lead it, TEMPRA-143), and the page as a flat column. A library's pages, its settings and the account's pages all use
+ * split at the sidebar's edge (the Tempra mark, the library's name with its switcher, and search
+ * over the sidebar; the page's path, its tools, the bell and the avatar over the page), a
+ * navigation sidebar (the tree, and a fixed foot of the library's tools), and the page as a flat
+ * column: Linear's docs, translated (TEMPRA-145). A library's pages, its settings and the account's pages all use
  * it, each with its own sidebar. Under 900px the sidebar is a drawer behind the top bar.
  */
 
@@ -70,8 +77,8 @@ interface Frame {
   /** The latest of agents' recent changes, and the clock it is read against (changes.ts). */
   latest: AgentChange | undefined;
   now: number;
-  /** The top bar's slot a page fills through PageBar: its tools. */
-  slots: { tools: HTMLElement | null };
+  /** The top bar's slots a page fills through PageBar: its path, its tools. */
+  slots: { tools: HTMLElement | null; path: HTMLElement | null };
   /** Tells the frame a page has tools of its own (a concept's), which take the phone bar's end. */
   setOwnTools(own: boolean): void;
   /** A page's overlay (a concept's panel over the page) is modal: the top bar and sidebar go inert. */
@@ -86,7 +93,7 @@ const FrameContext = createContext<Frame>({
   index: null,
   latest: undefined,
   now: 0,
-  slots: { tools: null },
+  slots: { tools: null, path: null },
   setOwnTools: () => {},
   setModal: () => {},
   search: () => {},
@@ -142,8 +149,10 @@ function saveHidden(urls: Urls, hidden: boolean) {
   }
 }
 
-/** What the frame draws around a page: the sidebar and how search opens. */
+/** What the frame draws around a page: the library in the bar, the sidebar, how search opens. */
 interface Chrome {
+  /** The library the pages are in (the bar names it, with its switcher); none on account pages. */
+  library?: BrandLibrary;
   /** The sidebar's content (the drawer's on a phone). */
   sidebar: ReactNode;
   /** Opens search (Ctrl or Cmd+K too): the library's quick switcher, or the libraries'. */
@@ -172,6 +181,7 @@ function Shell(props: {
   const sidebar = useRef<HTMLElement>(null);
   const menuButton = useRef<HTMLButtonElement>(null);
   const [toolsSlot, setToolsSlot] = useState<HTMLElement | null>(null);
+  const [pathSlot, setPathSlot] = useState<HTMLElement | null>(null);
   const [ownTools, setOwnTools] = useState(false);
 
   const main = useRef<HTMLElement>(null);
@@ -283,12 +293,12 @@ function Shell(props: {
       ...props.frame,
       sidebar: beside,
       narrow,
-      slots: { tools: toolsSlot },
+      slots: { tools: toolsSlot, path: pathSlot },
       setOwnTools,
       setModal,
       search: chrome.onSearch ?? (() => {}),
     }),
-    [props.frame, beside, narrow, toolsSlot, chrome.onSearch, setModal],
+    [props.frame, beside, narrow, toolsSlot, pathSlot, chrome.onSearch, setModal],
   );
   const classes = [
     "workspace",
@@ -300,9 +310,9 @@ function Shell(props: {
     <FrameContext.Provider value={frame}>
       <div className={classes.join(" ")}>
         <header className="ws-topbar" ref={topbar}>
-          {/* Tempra over the sidebar on every page; the library leads the sidebar (TEMPRA-143). */}
+          {/* Over the sidebar: the mark, the library's name and its switcher, search (TEMPRA-145). */}
           <div className="topbar-brand">
-            <TempraMark className="topbar-mark" />
+            <Brand library={chrome.library} onSearch={chrome.onSearch} />
           </div>
           <div className="topbar-page">
             <button
@@ -315,9 +325,11 @@ function Shell(props: {
             >
               <Icon name="menu" />
             </button>
-            {/* On a phone, Tempra where the desktop has its mark; the page's title names the page
-                (TEMPRA-140). */}
-            <TempraMark className="ws-topbar-place" />
+            {/* On a phone, the mark and the library's name; the page's title names the page
+                (TEMPRA-140, TEMPRA-145). */}
+            <div className="ws-topbar-place">
+              <Brand library={chrome.library} short />
+            </div>
             {!showSidebar && onHide && (
               <button
                 type="button"
@@ -329,8 +341,8 @@ function Shell(props: {
                 <Icon name="sidebar" />
               </button>
             )}
-            {/* No crumbs (TEMPRA-139): the tree, the switcher and the page's title say where. */}
-            <div className="topbar-space" />
+            {/* The page's path, from the page (a concept's folders and title; TEMPRA-145). */}
+            <div className="topbar-path" ref={setPathSlot} />
             <div className="topbar-tools" ref={setToolsSlot} />
             <div className="topbar-end">
               {chrome.status}
@@ -348,10 +360,10 @@ function Shell(props: {
           aria-label="Navigation"
           hidden={!showSidebar}
         >
-          {/* On a phone the drawer's head: Tempra, as on the top bar it covers, and × (TEMPRA-141);
-              then the same sidebar as on the desktop (TEMPRA-143). */}
+          {/* On a phone the drawer's head: the desktop's bar over the sidebar (the mark, the
+              library and its switcher, search) and × (TEMPRA-141, TEMPRA-145); then its sidebar. */}
           <div className="drawer-head">
-            <TempraMark className="drawer-mark" />
+            <Brand library={chrome.library} onSearch={chrome.onSearch} />
             <button
               type="button"
               className="icon-button touch drawer-close"
@@ -376,15 +388,54 @@ function Shell(props: {
   );
 }
 
-/** Tempra's mark and wordmark, the way to the library list: the top bar, and the phone's drawer. */
-function TempraMark({ className }: { className: string }) {
+/** The library a frame is about: its name, its address, whether it is shared, on its home. */
+interface BrandLibrary {
+  urls: Urls;
+  name: string;
+  shared: boolean;
+  home: boolean;
+}
+
+/**
+ * Over the sidebar (and at the phone's drawer's head), as Linear's docs have it (TEMPRA-145): the
+ * Tempra mark (to the library list), the library's name (to its home) with its switcher, and
+ * search. Off a library, the mark and "Tempra". `short`: the phone's bar, the mark and the name.
+ */
+function Brand(props: { library?: BrandLibrary; onSearch?: () => void; short?: boolean }) {
+  const { library } = props;
   return (
-    <a className={className} href="/">
-      <span className="wordmark-tile" aria-hidden="true">
+    <>
+      <a className="wordmark-tile brand-mark" href="/" aria-label="Tempra" title="Tempra">
         T
-      </span>
-      Tempra
-    </a>
+      </a>
+      <span className="brand-sep" aria-hidden="true" />
+      {library ? (
+        <a
+          className="brand-name"
+          href={library.urls.tree("")}
+          aria-current={library.home ? "page" : undefined}
+        >
+          {library.name}
+        </a>
+      ) : (
+        <a className="brand-name" href="/">
+          Tempra
+        </a>
+      )}
+      {library && !props.short && <LibrarySwitcher urls={library.urls} name={library.name} />}
+      {props.onSearch && !props.short && (
+        <button
+          type="button"
+          className="icon-button search-button"
+          aria-label="Search"
+          aria-keyshortcuts="Control+K Meta+K"
+          title={`Search (${switcherKey()})`}
+          onClick={props.onSearch}
+        >
+          <Icon name="search" />
+        </button>
+      )}
+    </>
   );
 }
 
@@ -406,7 +457,7 @@ function useSearchKey(toggle: () => void) {
 
 /**
  * A library's frame, keyed by the library so it stays mounted while the person moves within it:
- * the library's sidebar (the switcher and Search at its top), or its settings' sidebar on a
+ * the library in the bar (its name, switcher and search), the library's sidebar, or its settings' sidebar on a
  * settings page, the quick switcher, and the feed's refresh of the inbox count.
  */
 export function Workspace(props: { urls: Urls; place: Place; me: Me | null; children: ReactNode }) {
@@ -457,20 +508,18 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
   const settings = SETTINGS_VIEWS.has(place.view);
   const shared = library !== undefined && (library.role ?? "owner") !== "owner";
   const sidebarContent = settings ? (
-    <SettingsSidebar urls={urls} name={name} place={place} />
+    <SettingsSidebar urls={urls} place={place} />
   ) : (
     <LibrarySidebar
       urls={urls}
-      name={name}
-      shared={shared}
       place={place}
       changes={agents.changes}
       now={agents.now}
-      onSearch={onSearch}
       onIndex={onIndex}
     />
   );
   const chrome: Chrome = {
+    library: { urls, name, shared, home: place.view === "home" },
     sidebar: sidebarContent,
     onSearch,
     // Only the library's own sidebar hides; the settings' is how the person moves between tabs.
@@ -543,11 +592,7 @@ export function AccountFrame(props: { page: AccountPage; me: Me | null; children
   useSearchKey(useCallback(() => setSearching((on) => !on), []));
   const onSearch = useCallback(() => setSearching(true), []);
   const chrome: Chrome = {
-    sidebar: settings ? (
-      <AccountSettingsSidebar page={page} />
-    ) : (
-      <AccountSidebar page={page} onSearch={onSearch} />
-    ),
+    sidebar: settings ? <AccountSettingsSidebar page={page} /> : <AccountSidebar page={page} />,
     onSearch,
   };
   return (
@@ -561,11 +606,12 @@ export function AccountFrame(props: { page: AccountPage; me: Me | null; children
 }
 
 /**
- * A page's part of the top bar: its tools (a concept's Comments, Copy page and ⋯), drawn into
- * the bar's slot from wherever the page is. The bar names no path (TEMPRA-139) and, on a phone,
- * no page: the page's own title does (TEMPRA-140).
+ * A page's part of the top bar: its path (a concept's folders and title, TEMPRA-145) and its
+ * tools (a concept's Comments and ⋯), drawn into the bar's slots from wherever the page is. On a
+ * phone the bar names no page and no path: the page's own title does (TEMPRA-140).
  */
 export function PageBar(props: {
+  path?: ReactNode;
   actions?: ReactNode;
   /** On a phone the tools take the place of the bell (a concept's, board 33). */
   phoneTools?: boolean;
@@ -577,7 +623,12 @@ export function PageBar(props: {
     setOwnTools(true);
     return () => setOwnTools(false);
   }, [tools, setOwnTools]);
-  return <>{props.actions && slots.tools && createPortal(props.actions, slots.tools)}</>;
+  return (
+    <>
+      {props.path && slots.path && createPortal(props.path, slots.path)}
+      {props.actions && slots.tools && createPortal(props.actions, slots.tools)}
+    </>
+  );
 }
 
 /** A page's column in the frame (everything but a concept, which lays out its own columns). */

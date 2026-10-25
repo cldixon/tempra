@@ -25,7 +25,7 @@ import { PropertiesList } from "./Properties";
 import { RawMarkdown } from "./RawMarkdown";
 import { ReviewBar, VersionBar } from "./ReviewBar";
 import { SourcesSection } from "./Sources";
-import { CopyPage, PageMenu } from "./Tools";
+import { PageMenu } from "./Tools";
 
 /**
  * A concept's page (take 4, TEMPRA-114; tempra-dev: app/reader, app/comments,
@@ -262,6 +262,20 @@ export function ConceptPage(props: {
     <div className={classes.filter(Boolean).join(" ")} ref={page}>
       <PageBar
         phoneTools
+        path={
+          // The page's path over it, as Linear's docs have it (TEMPRA-145): its folders, words
+          // and not links (folders are not pages), then its title.
+          <nav className="topbar-crumbs" aria-label="Path">
+            {folders.map((f) => (
+              <span key={f} className="crumb">
+                {folderName(f)}
+              </span>
+            ))}
+            <span className="crumb" aria-current="page">
+              {title}
+            </span>
+          </nav>
+        }
         actions={
           <>
             {live && !moved && <NewVersion urls={urls} live={live} />}
@@ -285,7 +299,6 @@ export function ConceptPage(props: {
                 </>
               )}
             </button>
-            <CopyPage urls={urls} path={c.path} />
             <PageMenu
               urls={urls}
               path={c.path}
@@ -326,8 +339,8 @@ export function ConceptPage(props: {
           {/* Kept mounted under the markdown, so comments keep their place. */}
           <div className="doc-page" hidden={markdown}>
             <header className="doc-head">
-              {/* Where the tree is out of sight (a phone, the sidebar hidden): the page's folders
-                  above its title (TEMPRA-139). */}
+              {/* On a phone, whose bar has no room for the path: the page's folders above its
+                  title (TEMPRA-139, TEMPRA-145). */}
               <nav className="doc-crumbs" aria-label="Folders">
                 {folders.map((f, i) => (
                   <span key={f}>

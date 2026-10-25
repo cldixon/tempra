@@ -29,7 +29,8 @@ interface Library {
 /**
  * The account's libraries (take 4, board 01): cards under Yours and Shared with you, each with
  * its title, what is for the person there, its description and one line of facts; New library
- * in the top bar (and from the switcher's menu, which lands here with ?new=1).
+ * in the top bar, and on a phone a button floating at the screen's bottom right instead
+ * (TEMPRA-148); the switcher's menu lands here with ?new=1.
  */
 export function Libraries({ create }: { create: boolean }) {
   useTitle("Libraries");
@@ -41,21 +42,21 @@ export function Libraries({ create }: { create: boolean }) {
     api<{ invitations: unknown[] }>("/api/v1/invitations"),
   );
   const waiting = invited.state === "ready" ? invited.data.invitations.length : 0;
+  const newLibrary = (className: string) => (
+    <button
+      type="button"
+      className={className}
+      aria-haspopup="dialog"
+      onClick={() => setCreating(true)}
+    >
+      <Icon name="plus" />
+      New library
+    </button>
+  );
   return (
     <>
-      <PageBar
-        actions={
-          <button
-            type="button"
-            className="tool-pill primary"
-            aria-haspopup="dialog"
-            onClick={() => setCreating(true)}
-          >
-            <Icon name="plus" />
-            New library
-          </button>
-        }
-      />
+      <PageBar actions={newLibrary("tool-pill primary bar-new")} />
+      {newLibrary("primary fab")}
       <h1>Libraries</h1>
       <NewLibrary open={creating} onClose={() => setCreating(false)} />
       {waiting > 0 && (

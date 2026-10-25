@@ -2087,77 +2087,73 @@ a.button.pill-button {
   grid-template-columns: auto minmax(0, 1fr);
 }
 
-/* Over the sidebar: Tempra, the mark and wordmark, on every page (TEMPRA-143). */
+/* Over the sidebar, as Linear's docs have it (TEMPRA-145): the Tempra mark, the library's name
+   (its home) with ⌄ for the switcher, and the round search button. */
 .topbar-brand {
   display: flex;
   align-items: center;
+  gap: 8px;
   min-width: 0;
   padding: 0 12px 0 16px;
   border-right: 1px solid var(--tempra-color-border);
 }
 
-.topbar-mark {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
+.brand-mark {
+  width: 28px;
+  height: 28px;
+  text-decoration: none;
+}
+
+/* A hairline between the mark and the library's name. */
+.brand-sep {
+  flex: none;
+  width: 1px;
+  height: 20px;
+  margin: 0 2px;
+  background: var(--tempra-color-border);
+}
+
+.brand-name {
   min-width: 0;
+  overflow: hidden;
   color: var(--tempra-color-text);
   font-size: var(--tempra-text-name);
   font-weight: var(--tempra-weight-strong);
   text-decoration: none;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.topbar-mark:visited {
+.brand-name:visited {
   color: var(--tempra-color-text);
 }
 
-/* The library switcher, a library sidebar's first row: its tile, its name and a chevron. */
-.sidebar-switch {
-  display: flex;
-  flex: none;
-  margin-bottom: 4px;
-}
-
+/* The switcher's ⌄, right beside the name. */
 .lib-switch {
-  display: flex;
-  flex: 1;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  min-height: var(--tempra-row);
-  padding: 4px 10px;
-  border: 0;
-  border-radius: var(--tempra-radius-row);
-  background: transparent;
-  color: var(--tempra-color-text);
-  font-size: var(--tempra-text-ui);
-  font-weight: var(--tempra-weight-strong);
-  text-align: left;
+  flex: none;
+  width: 28px;
+  height: 28px;
+  margin-left: -4px;
+  color: var(--tempra-color-muted);
 }
 
-.lib-switch:hover:not(:disabled),
 .lib-switch[aria-expanded="true"] {
   background: var(--tempra-color-hover);
 }
 
-.lib-switch .lib-name {
-  flex: 1;
-  min-width: 0;
-}
-
-.lib-switch svg {
+/* The round search button, at the bar's end over the sidebar. */
+.search-button {
   flex: none;
-  color: var(--tempra-color-faint);
+  width: 36px;
+  height: 36px;
+  margin-left: auto;
+  border: 1px solid var(--tempra-color-border);
+  border-radius: 50%;
+  background: var(--tempra-color-bg);
 }
 
-/* Search as a sidebar row: "Search" and its keys at the end (TEMPRA-143). */
-.search-row .nav-key {
-  flex: none;
-}
-
-/* Over the page: the way back to the sidebar when it is hidden, then the page's tools, the bell
-   and the avatar. No crumbs (TEMPRA-139): the tree, the switcher and the page's title say where. */
+/* Over the page: the way back to the sidebar when it is hidden, the page's path, then its tools,
+   the bell and the avatar (TEMPRA-145). */
 .topbar-page {
   display: flex;
   align-items: center;
@@ -2166,9 +2162,39 @@ a.button.pill-button {
   padding: 0 16px 0 20px;
 }
 
-.topbar-space {
+.topbar-path {
+  display: flex;
   flex: 1;
   min-width: 0;
+}
+
+/* A concept's path: its folders, words not links, then its title (TEMPRA-145). */
+.topbar-crumbs {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-name);
+  white-space: nowrap;
+}
+
+.topbar-crumbs .crumb {
+  flex: none;
+}
+
+.topbar-crumbs .crumb + .crumb::before {
+  content: "/";
+  margin: 0 8px;
+  color: var(--tempra-color-faint);
+}
+
+.topbar-crumbs .crumb[aria-current="page"] {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--tempra-color-text);
+  text-overflow: ellipsis;
 }
 
 /* The page's tools (a concept's Comments, Copy page and ⋯), from the page itself. */
@@ -2467,10 +2493,6 @@ a.button.pill-button {
   display: none;
 }
 
-.sidebar-rule {
-  margin: 10px 8px;
-}
-
 .sidebar-label {
   margin: 14px 10px 4px;
   color: var(--tempra-color-muted);
@@ -2484,11 +2506,15 @@ a.button.pill-button {
   padding-bottom: 16px;
 }
 
+/* The library's tools, fixed under the tree (TEMPRA-145): Activity, Settings. */
 .sidebar-foot {
   display: flex;
+  flex: none;
   flex-direction: column;
   gap: 2px;
-  padding-top: 8px;
+  margin: 0 -10px;
+  padding: 8px 10px 0;
+  border-top: 1px solid var(--tempra-color-border);
 }
 
 /* The way back at the top of a settings sidebar: "‹ Back to tempra-dev". */
@@ -2838,8 +2864,8 @@ button.tree-name {
 
 /* ---------- A phone: a top bar, the sidebar as a drawer (take 4, boards 33 to 36) ---------- */
 
-/* The phone's pieces of the top bar (the menu button, Tempra), of the drawer (its head, the
-   Inbox row at its foot) and the dimmed page behind it show only here. */
+/* The phone's pieces of the top bar (the menu button, the mark and the library), of the drawer
+   (its head, the Inbox row at its foot) and the dimmed page behind it show only here. */
 .ws-menu,
 .ws-topbar-place,
 .drawer-head,
@@ -2858,8 +2884,9 @@ button.tree-name {
       "main";
   }
 
-  /* The bar: the menu button, Tempra, then on a concept Comments n and ⋯, on other pages the
-     bell; the avatar last. Search is the drawer's row, as on the desktop the sidebar's. */
+  /* The bar: the menu button, the mark and the library's name, then on a concept Comments n and
+     ⋯, on other pages the bell; the avatar last. Search and the switcher are the drawer's head's,
+     as on the desktop the bar's over the sidebar (TEMPRA-145). */
   .ws-topbar,
   .sidebar-hidden .ws-topbar {
     display: flex;
@@ -2868,10 +2895,9 @@ button.tree-name {
   }
 
   .topbar-brand,
-  .topbar-space,
+  .topbar-path,
   .show-sidebar,
-  .has-tools .topbar-end .bell,
-  .nav-key {
+  .has-tools .topbar-end .bell {
     display: none;
   }
 
@@ -2892,26 +2918,23 @@ button.tree-name {
     display: flex;
   }
 
-  /* Tempra, where the desktop has its mark (TEMPRA-140): the page's own title names the page.
-     The drawer's head shows the same, so opening it changes nothing there (TEMPRA-141). */
-  .ws-topbar-place,
-  .drawer-mark {
-    display: inline-flex;
+  /* The mark and the library's name, where the desktop has them (TEMPRA-145); the page's own
+     title names the page (TEMPRA-140). The drawer's head starts the same way (TEMPRA-141). */
+  .ws-topbar-place {
+    display: flex;
     flex: 1;
     align-items: center;
     gap: 8px;
     min-width: 0;
     padding: 0 4px;
-    color: var(--tempra-color-text);
-    font-size: var(--tempra-text-name);
-    font-weight: var(--tempra-weight-strong);
-    text-decoration: none;
-    white-space: nowrap;
   }
 
-  /* The bar's controls keep their desktop shape; each answers a 44px touch around it. */
+  /* The bar's controls, and the drawer's head's (the switcher, search), keep their desktop
+     shape; each answers a 44px touch around it. */
   .topbar-page .icon-button::after,
-  .topbar-page .avatar::after {
+  .topbar-page .avatar::after,
+  .drawer-head .lib-switch::after,
+  .drawer-head .search-button::after {
     content: "";
     position: absolute;
     inset: min(0px, calc((100% - var(--tempra-touch)) / 2));
@@ -2924,9 +2947,9 @@ button.tree-name {
   }
 
   /* The drawer (board 34): about four fifths of the screen, over the top bar, the page dimmed
-     behind it. At its head Tempra and × (TEMPRA-141); then the desktop's sidebar (TEMPRA-143):
-     in a library the switcher, Search, Home, Activity, a rule, the tree; Settings and the Inbox
-     at its foot. */
+     behind it. At its head the desktop's bar over the sidebar (the mark, the library, its
+     switcher, search) and × (TEMPRA-141, TEMPRA-145); then the tree; Activity, Settings and the
+     Inbox at its foot. */
   .ws-scrim {
     position: fixed;
     inset: 0;
@@ -2974,7 +2997,6 @@ button.tree-name {
   }
 
   .ws-sidebar .nav-row,
-  .ws-sidebar .lib-switch,
   .ws-sidebar .tree-row {
     font-size: var(--tempra-text-name);
   }
@@ -2987,9 +3009,13 @@ button.tree-name {
 
   /* Touch targets: every row and control at least 44px tall. */
   .nav-row,
-  .tree-row,
-  .lib-switch {
+  .tree-row {
     min-height: var(--tempra-touch);
+  }
+
+  .drawer-head .lib-switch,
+  .drawer-head .search-button {
+    position: relative;
   }
 
   .icon-button.touch {
@@ -3000,6 +3026,34 @@ button.tree-name {
   .page-column,
   .page {
     padding: 32px 16px 72px;
+  }
+}
+
+/* ---------- A floating action (TEMPRA-148) ---------- */
+
+/* A page's one making action on a phone (New library), floating at the screen's bottom right
+   over the page, in place of its pill in the top bar. In the page, so the drawer dims it and
+   makes it inert with the rest; under the drawer's scrim. The desktop keeps the bar's pill. */
+.fab {
+  display: none;
+}
+
+@media (max-width: 900px) {
+  .topbar-tools .bar-new {
+    display: none;
+  }
+
+  .fab {
+    position: fixed;
+    right: max(16px, env(safe-area-inset-right));
+    bottom: max(16px, env(safe-area-inset-bottom));
+    z-index: 5;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-height: var(--tempra-touch);
+    padding: 0 20px;
+    box-shadow: var(--tempra-shadow);
   }
 }
 
@@ -3768,12 +3822,7 @@ ul.events {
   font-size: var(--tempra-text-ui);
 }
 
-.sidebar-hidden .doc-crumbs {
-  display: flex;
-}
-
-.doc-crumbs:empty,
-.sidebar-hidden .doc-crumbs:empty {
+.doc-crumbs:empty {
   display: none;
 }
 
@@ -3796,9 +3845,8 @@ ul.events {
     font-size: var(--tempra-text-page);
   }
 
-  /* On a phone the top bar has Comments and ⋯; Copy page heads ⋯ (TEMPRA-118). Comments
-     reads as its word and count, without the glyph, to leave the page's name room. */
-  .topbar-tools .copy-page,
+  /* On a phone the top bar has Comments and ⋯. Comments reads as its word and count, without
+     the glyph, to leave the library's name room. */
   .comments-toggle svg {
     display: none;
   }

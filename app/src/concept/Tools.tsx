@@ -2,13 +2,12 @@ import { useEffect, useState } from "react";
 import { ApiError } from "../api";
 import { Icon, Menu } from "../chrome";
 import { baseName, enc, type Urls } from "../urls";
-import { useFrame } from "../Workspace";
 import type { PanelName } from "./Panel";
 
 /*
- * A concept's tools in the top bar (take 4, TEMPRA-114; tempra-dev: app/reader, Layout): Copy
- * page and ⋯ (History, Properties, View Markdown, Copy link, Download .md; on a phone Copy page
- * moves to the head of ⋯, TEMPRA-118). Comments n is the page's own (it carries the open count).
+ * A concept's tools in the top bar (take 4, TEMPRA-114; tempra-dev: app/reader, Layout): ⋯, with
+ * Copy page at its head (TEMPRA-145; on a phone since TEMPRA-118), then History, Properties, View
+ * Markdown, Copy link and Download .md. Comments n is the page's own (it carries the open count).
  */
 
 /** The file as stored, frontmatter and body: what an agent reads (`GET …/files/{path}`). */
@@ -55,25 +54,7 @@ function useCopied() {
   return { state, run };
 }
 
-/** Copy page: the stored file to the clipboard, in one click. */
-export function CopyPage({ urls, path }: { urls: Urls; path: string }) {
-  const { state, run } = useCopied();
-  return (
-    <button
-      type="button"
-      className="tool-pill copy-page"
-      title="Copy the page as markdown"
-      onClick={() => run(() => storedFile(urls, path))}
-    >
-      <Icon name="copy" />
-      <span aria-live="polite">
-        {state === "copied" ? "Copied" : state === "failed" ? "Could not copy" : "Copy page"}
-      </span>
-    </button>
-  );
-}
-
-/** ⋯: the panels that are not Comments, the Markdown view, then the page's link and its file. */
+/** ⋯: Copy page, the panels that are not Comments, the Markdown view, the page's link and file. */
 export function PageMenu(props: {
   urls: Urls;
   path: string;
@@ -85,8 +66,6 @@ export function PageMenu(props: {
   const { urls, path } = props;
   const link = useCopied();
   const page = useCopied();
-  // On a phone Copy page has no room in the top bar: it heads ⋯ (and stays open to say so).
-  const { narrow } = useFrame();
   return (
     <Menu
       name="More"
@@ -95,26 +74,23 @@ export function PageMenu(props: {
       align="end"
       label={<Icon name="more" />}
     >
-      {narrow && (
-        <>
-          <button
-            type="button"
-            className="menu-item"
-            data-stay
-            onClick={() => page.run(() => storedFile(urls, path))}
-          >
-            <Icon name="copy" />{" "}
-            <span aria-live="polite">
-              {page.state === "copied"
-                ? "Copied"
-                : page.state === "failed"
-                  ? "Could not copy"
-                  : "Copy page"}
-            </span>
-          </button>
-          <hr />
-        </>
-      )}
+      {/* Copy page heads ⋯ (and stays open to say it copied). */}
+      <button
+        type="button"
+        className="menu-item"
+        data-stay
+        onClick={() => page.run(() => storedFile(urls, path))}
+      >
+        <Icon name="copy" />{" "}
+        <span aria-live="polite">
+          {page.state === "copied"
+            ? "Copied"
+            : page.state === "failed"
+              ? "Could not copy"
+              : "Copy page"}
+        </span>
+      </button>
+      <hr />
       <button
         type="button"
         className="menu-item"
