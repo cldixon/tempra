@@ -27,6 +27,7 @@ import {
 import { type LogRequest, renderIndex, renderLog } from "../okf/derived";
 import { diagramLint } from "../okf/diagrams";
 import { unifiedDiff } from "../okf/diff";
+import { type FigureFact, figureFacts } from "../okf/figures";
 import { sha256Hex } from "../okf/hash";
 import { lintFields } from "../okf/lint";
 import { scanDoc } from "../okf/markdown";
@@ -343,6 +344,8 @@ export type FileView =
       inbound_links: number;
       /** Open comment threads, at head (0 for an earlier version). */
       open_comments: number;
+      /** Its figures from the stored blob rows, when asked for (`figures`; MCP `read`, TEMPRA-154). */
+      figures?: FigureFact[];
     }
   | {
       kind: "attachment";
@@ -2499,7 +2502,7 @@ export class LibraryStore {
   }
 
   /** GET /files/{path}: a concept, an attachment's metadata, or a synthesized index.md / log.md. */
-  read(input: string, opts: { at?: number; computed?: boolean } = {}): FileView {
+  read(input: string, opts: { at?: number; computed?: boolean; figures?: boolean } = {}): FileView {
     const snap = this.snapshot(opts.at);
     const path = normalizePath(input) ?? "";
     const name = basename(path);
@@ -2556,6 +2559,7 @@ export class LibraryStore {
         : this.lintAt(snap, e, r, verified)),
       ...this.anchorLint(snap, e),
     ];
+    const doc = renderDoc(r, (l) => this.href(snap, e, l));
     return {
       kind: "concept",
       path: e.path,
@@ -2563,14 +2567,31 @@ export class LibraryStore {
       seq: e.seq,
       markdown,
       frontmatter,
-      doc: renderDoc(r, (l) => this.href(snap, e, l)),
+      doc,
       lint,
       trust_tier: trustTier(r.generated, verified),
       stale: isStale(field(r, "stale_after"), this.clock().getTime()),
       stale_soon: staleness(field(r, "stale_after"), this.clock().getTime()) === "stale_soon",
       inbound_links: atHead ? this.inboundCount(e.concept_id) : 0,
       open_comments: atHead ? this.openThreadsOf(e.concept_id) : 0,
+      ...(opts.figures ? { figures: this.figuresOf(snap, e, doc) } : {}),
     };
+  }
+
+  /** A concept's figures, each attachment from its blob row (no bytes; TEMPRA-154). */
+  private figuresOf(snap: View, e: Entry, doc: Doc): FigureFact[] {
+    return figureFacts(doc, e.path, (path) => {
+      const a = snap.lookup(path);
+      if (a?.kind !== "attachment") return null;
+      const info = this.blobInfo(a.hash);
+      return {
+        hash: a.hash,
+        size: info.size,
+        media: info.media,
+        width: info.dims?.width ?? null,
+        height: info.dims?.height ?? null,
+      };
+    });
   }
 
   /**
