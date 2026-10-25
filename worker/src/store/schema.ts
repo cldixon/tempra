@@ -55,7 +55,8 @@ END;
 `;
 
 /**
- * Pele's verdicts on diagram sources, by the SHA-256 of the source (TEMPRA-167): `error` is the
+ * Pele's verdicts on diagram sources, by Pele's version and the SHA-256 of the source
+ * (`<version>:<sha256>`, TEMPRA-167), so an upgrade asks again: `error` is the
  * render service's failure as JSON, NULL when it draws. A cache of answers from outside the
  * ledger, not derived from it: losing it only means asking the render service again. Libraries
  * from before get it on open.

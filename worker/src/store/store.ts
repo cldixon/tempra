@@ -15,6 +15,7 @@ import {
   walk as walkDoc,
 } from "@tempra/editor/doc";
 import { stringify as yamlStringify } from "yaml";
+import { PELE_VERSION } from "../../render/src/version";
 import {
   buildRecord,
   deserializeRecord,
@@ -221,7 +222,7 @@ export interface WriteResult {
 
 /**
  * The diagrams of one written concept version that the fast check passed and whose verdict from
- * Pele the library does not know yet (TEMPRA-167), by the SHA-256 of their source.
+ * Pele the library does not know yet (TEMPRA-167), keyed by Pele's version and their source's SHA-256.
  */
 export interface RenderJob {
   concept_id: string;
@@ -474,6 +475,8 @@ export interface StoreOptions {
   now?: () => Date;
   /** Bytes of storage the library uses; the Durable Object passes its SQLite size. */
   size?: () => number;
+  /** The render service's Pele version (render/src/version.ts); verdicts are kept per version. */
+  peleVersion?: string;
 }
 
 /** Reads are counted over this window for internal sources' usage (spec: What the service derives). */
@@ -624,6 +627,8 @@ export class LibraryStore {
   private readonly cap: number;
   private readonly clock: () => Date;
   private readonly size: (() => number) | null;
+  /** The Pele whose verdicts the library keeps (TEMPRA-167): another version asks again. */
+  private readonly peleVersion: string;
   private readonly records = new Map<string, ConceptRecord>();
   private readonly snapshots = new Map<number, Snapshot>();
   /** Missing-heading lint at head, by concept, for the seq it was worked out at (TEMPRA-86). */
@@ -644,6 +649,7 @@ export class LibraryStore {
     this.cap = opts.conceptCap ?? DEFAULT_CONCEPT_CAP;
     this.clock = opts.now ?? (() => new Date());
     this.size = opts.size ?? null;
+    this.peleVersion = opts.peleVersion ?? PELE_VERSION;
     migrate(sql);
     this.reindexSearch();
     this.addStaleTimes();
@@ -2635,7 +2641,7 @@ export class LibraryStore {
     const out: LintWarning[] = [];
     const unknown: { key: string; source: string }[] = [];
     for (const f of fences) {
-      const key = sha256Hex(f.source);
+      const key = `${this.peleVersion}:${sha256Hex(f.source)}`;
       const row = this.sql.all<{ error: string | null }>(
         "SELECT error FROM diagram_renders WHERE key = ?",
         key,

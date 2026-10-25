@@ -170,6 +170,38 @@ describe("diagram_unrendered (TEMPRA-167)", () => {
     expect(again.render?.[0]?.diagrams.length).toBe(1);
   });
 
+  test("verdicts are kept per Pele version: after an upgrade, the next write asks again", () => {
+    const sql = bunSqlHandle();
+    const ctx = (id: string) => ({ actor: "claude-code/test", request_id: id });
+    const old = new LibraryStore(sql, { peleVersion: "1.6.0" });
+    const a = old.apply(ctx("a"), [{ op: "write", path: "d.md", content: md(fence(SUBTLE)) }]);
+    const job = a.render?.[0];
+    expect(job?.diagrams[0]?.key.startsWith("1.6.0:")).toBe(true);
+    const error = { message: "Parse error on line 2:", line: 2, column: 8 };
+    old.setDiagramRenders([
+      {
+        concept_id: job?.concept_id ?? "",
+        hash: job?.hash ?? "",
+        verdicts: [{ key: job?.diagrams[0]?.key ?? "", error }],
+      },
+    ]);
+    const v = old.read("d");
+    expect(v.kind === "concept" && codes(v.lint)).toEqual(["diagram_unrendered"]);
+
+    // The same library under a newer Pele: the old failure is not trusted, and is asked again.
+    const upgraded = new LibraryStore(sql, { peleVersion: "1.7.0" });
+    const b = upgraded.apply(ctx("b"), [
+      {
+        op: "write",
+        path: "d.md",
+        content: md(`Text.\n\n${fence(SUBTLE)}`),
+        if_match: v.kind === "concept" ? v.hash : null,
+      },
+    ]);
+    expect(codes(b.results[0]?.lint ?? [])).toEqual([]);
+    expect(b.render?.[0]?.diagrams.map((d) => d.key.split(":")[0])).toEqual(["1.7.0"]);
+  });
+
   test(`at most ${RENDERS_PER_WRITE} renders per write`, async () => {
     const w = world();
     const body = Array.from({ length: RENDERS_PER_WRITE + 3 }, (_, i) =>
