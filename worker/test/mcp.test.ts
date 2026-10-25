@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { imagesService, MODEL_BYTES, MODEL_EDGE, variantKeysFor } from "../src/images";
 import { readTar } from "../src/util/tar";
 import { setup } from "./harness";
 import { approve, connectApp } from "./oauth-flow";
@@ -64,7 +65,7 @@ describe("MCP server", () => {
 
     const { client } = await connect(app, "files");
     const read = (await client.listTools()).tools.find((t) => t.name === "read");
-    expect(Object.keys(read?.inputSchema.properties ?? {})).toEqual(["path", "library"]);
+    expect(Object.keys(read?.inputSchema.properties ?? {})).toEqual(["path", "image", "library"]);
     const { client: full } = await connect(app, "writer");
     const tier2Tool = (await full.listTools()).tools.find((t) => t.name === "search");
     expect(tier2Tool?.description?.startsWith("Beyond files:")).toBe(true);
@@ -257,6 +258,177 @@ describe("MCP server", () => {
     expect(list.resources.map((r) => [r.uri, r.title])).toEqual([["okf://owner/demo/t/a.md", "A"]]);
     const res = await client.readResource({ uri: "okf://owner/demo/t/a.md" });
     expect((res.contents[0] as { text: string }).text).toContain("title: A");
+  });
+
+  describe("images and attachment bytes (TEMPRA-153, TEMPRA-155)", () => {
+    // A valid 1x1 PNG.
+    const PNG = Uint8Array.from(
+      atob(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
+      ),
+      (c) => c.charCodeAt(0),
+    );
+    /** A JPEG of 3000x2000 whose comments pad it past the model's cap. */
+    const bigJpeg = () => {
+      const parts: number[] = [0xff, 0xd8];
+      for (let i = 0; i < 10; i++) {
+        parts.push(0xff, 0xfe, 0xff, 0xfd, ...new Array(0xfffb).fill(0x20));
+      }
+      // SOF0: 8-bit, 2000 high, 3000 wide, one component.
+      parts.push(0xff, 0xc0, 0x00, 0x0b, 0x08, 0x07, 0xd0, 0x0b, 0xb8, 0x01, 0x01, 0x11, 0x00);
+      parts.push(0xff, 0xd9);
+      return new Uint8Array(parts);
+    };
+    const b64 = (bytes: Uint8Array) => {
+      let s = "";
+      for (let i = 0; i < bytes.length; i += 0x8000) {
+        s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+      }
+      return btoa(s);
+    };
+    const SCALED = new Uint8Array([0x52, 0x49, 0x46, 0x46, 4, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]);
+
+    /** A stand-in for the IMAGES binding: records each transform and answers a tiny WebP. */
+    const fakeImages = (s: ReturnType<typeof setup>) => {
+      const calls: { width: number; format: string }[] = [];
+      const cache = new Map<string, { bytes: Uint8Array; media: string }>();
+      s.deps.images = imagesService({
+        blobs: s.blobs,
+        cache: {
+          get: async (k) => cache.get(k) ?? null,
+          put: async (k, bytes, media) => {
+            cache.set(k, { bytes, media });
+          },
+        },
+        transformer: {
+          input: (stream) => ({
+            transform: (t) => ({
+              output: async (o) => {
+                await new Response(stream).arrayBuffer();
+                calls.push({ width: t.width, format: o.format });
+                return {
+                  image: () => new Response(SCALED).body as ReadableStream<Uint8Array>,
+                  contentType: () => o.format,
+                };
+              },
+            }),
+          }),
+        },
+      });
+      return { calls, cache };
+    };
+
+    const content = async (
+      client: Awaited<ReturnType<typeof connect>>["client"],
+      args: Record<string, unknown>,
+    ) =>
+      (await client.callTool({ name: "read", arguments: args })).content as (
+        | Text
+        | { type: "image"; data: string; mimeType: string }
+      )[];
+
+    test("read returns a PNG as an image block, with no binding", async () => {
+      const s = setup();
+      const { client, call } = await connect(s.app);
+      await call("attach", { path: "img/dot.png", content_base64: b64(PNG) });
+      const c = await content(client, { path: "img/dot.png" });
+      expect(c[0]?.type).toBe("text");
+      expect((c[0] as Text).text).toContain("media: image/png");
+      expect(c[1]).toEqual({ type: "image", data: b64(PNG), mimeType: "image/png" });
+      expect(s.usage.filter((e) => e.kind === "read_image").map((e) => e.bytes)).toEqual([
+        PNG.byteLength,
+      ]);
+      // image: false gives the facts alone.
+      const facts = await content(client, { path: "img/dot.png", image: false });
+      expect(facts.map((x) => x.type)).toEqual(["text"]);
+    });
+
+    test("a large JPEG is scaled for the model, once", async () => {
+      const s = setup();
+      const { calls, cache } = fakeImages(s);
+      const { client, call } = await connect(s.app);
+      const jpeg = bigJpeg();
+      expect(jpeg.byteLength).toBeGreaterThan(MODEL_BYTES);
+      await call("attach", { path: "img/big.jpg", content_base64: b64(jpeg) });
+      for (let i = 0; i < 2; i++) {
+        const c = await content(client, { path: "img/big.jpg" });
+        const img = c[1] as { type: string; data: string; mimeType: string };
+        expect(img.type).toBe("image");
+        expect(img.mimeType).toBe("image/webp");
+        const decoded = Uint8Array.from(atob(img.data), (ch) => ch.charCodeAt(0));
+        expect(decoded).toEqual(SCALED);
+        expect(decoded.byteLength).toBeLessThanOrEqual(MODEL_BYTES);
+      }
+      // Scaled once to the model's edge; the second read came from the cache.
+      expect(calls).toEqual([{ width: MODEL_EDGE, format: "image/webp" }]);
+      expect([...cache.keys()]).toEqual([
+        expect.stringMatching(/^variants\/[0-9a-f]{64}\/1568\.webp$/),
+      ]);
+    });
+
+    test("without the binding, a large image says it is too large", async () => {
+      const s = setup();
+      const { client, call } = await connect(s.app);
+      await call("attach", { path: "img/big.jpg", content_base64: b64(bigJpeg()) });
+      const c = await content(client, { path: "img/big.jpg" });
+      expect(c.map((x) => x.type)).toEqual(["text", "text"]);
+      expect((c[1] as Text).text).toContain("too large to show");
+      expect((c[0] as Text).text).toContain("download (15 minutes): http");
+    });
+
+    test("SVG comes back as its text; other files are unchanged", async () => {
+      const s = setup();
+      const { client, call } = await connect(s.app);
+      const svg = '<svg xmlns="http://www.w3.org/2000/svg"><circle r="4"/></svg>';
+      await call("attach", { path: "img/c.svg", content_base64: btoa(svg) });
+      const c = await content(client, { path: "img/c.svg" });
+      expect(c.map((x) => x.type)).toEqual(["text", "text"]);
+      expect((c[1] as Text).text).toContain("<circle");
+      await call("attach", { path: "refs/data.bin", content_base64: btoa("\u0001\u0002") });
+      const bin = await content(client, { path: "refs/data.bin" });
+      expect(bin.map((x) => x.type)).toEqual(["text"]);
+    });
+
+    test("resources carry an attachment's bytes, up to a cap", async () => {
+      const s = setup();
+      fakeImages(s);
+      const { client, call } = await connect(s.app);
+      await call("attach", { path: "img/big.jpg", content_base64: b64(bigJpeg()) });
+      await call("attach", { path: "refs/data.csv", content_base64: btoa("a,b\n1,2\n") });
+      const big = new Uint8Array(3 * 1024 * 1024).fill(7);
+      // Over MCP's request cap, so it goes up over REST.
+      const put = await s.req("/files/refs/huge.bin", {
+        method: "PUT",
+        headers: { "Content-Type": "application/octet-stream" },
+        body: big,
+      });
+      expect(put.status).toBeLessThan(300);
+
+      const list = await client.listResources();
+      expect(
+        Object.fromEntries(list.resources.map((r) => [r.name, r.mimeType ?? null])),
+      ).toMatchObject({ "img/big.jpg": "image/jpeg", "refs/data.csv": "text/csv" });
+
+      const img = (await client.readResource({ uri: "okf://owner/demo/img/big.jpg" }))
+        .contents[0] as { mimeType: string; blob: string };
+      expect(img.mimeType).toBe("image/webp");
+      expect(Uint8Array.from(atob(img.blob), (ch) => ch.charCodeAt(0))).toEqual(SCALED);
+
+      const csv = (await client.readResource({ uri: "okf://owner/demo/refs/data.csv" }))
+        .contents[0] as { mimeType: string; blob: string };
+      expect(csv).toMatchObject({ mimeType: "text/csv", blob: btoa("a,b\n1,2\n") });
+
+      const huge = (await client.readResource({ uri: "okf://owner/demo/refs/huge.bin" }))
+        .contents[0] as { mimeType: string; text: string };
+      expect(huge.mimeType).toBe("text/plain");
+      expect(huge.text).toContain("Attachment; download: http");
+    });
+
+    test("the sweep's variant keys cover every edge and format of a blob", () => {
+      const keys = variantKeysFor(["blobs/abc", "exports/x"]);
+      expect(keys).toContain("variants/abc/1568.webp");
+      expect(keys.every((k) => k.startsWith("variants/abc/"))).toBe(true);
+    });
   });
 
   test("rejects requests without a valid token", async () => {

@@ -4,6 +4,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { TokenInfo } from "../auth";
 import { type BlobStore, type LibraryClient, mediaFor, putBlob } from "../client";
+import { type Images, imagesService, RASTER_MEDIA, readBytes, toBase64 } from "../images";
 import { normalizePath, underPrefix } from "../okf/paths";
 import type { LintWarning } from "../okf/types";
 import type { CommentAction, CommentResult } from "../store/comments";
@@ -44,6 +45,10 @@ export interface McpContext {
   /** A library's title and description as its creator gave them, for `start`. */
   about?(libraryId: string): Promise<{ title: string | null; description: string | null } | null>;
   blobs: BlobStore;
+  /** Attachment images scaled for the model (images.ts); without it, small originals only. */
+  images?: Images;
+  /** Meters what a call sends beyond a request (an image: `read_image`). */
+  meter?(e: { kind: "read_image"; library: string; bytes: number }): void;
   /** The Worker's origin, for download URLs. */
   origin: string;
 }
@@ -68,6 +73,12 @@ How to work:
 7. Comments are how people ask you for changes. Before editing a concept, read its open threads with \`comments\`; make the change a comment asks for, then answer it with \`comment\` (reply, and resolve what you fixed). Ask with a reply when unsure; never resolve a thread you did not address. A concept with open threads cannot be deleted until they are resolved.`;
 
 const text = (t: string): CallToolResult => ({ content: [{ type: "text", text: t }] });
+const line = (t: string) => ({ type: "text" as const, text: t });
+
+/** SVG text `read` returns as is (models read it well enough until TEMPRA-165 rasterizes it). */
+const SVG_TEXT_BYTES = 100 * 1024;
+/** Files an `okf://` resource carries as bytes (TEMPRA-155); above it, the download link. */
+const RESOURCE_BYTES = 2 * 1024 * 1024;
 
 /**
  * The library's health summary for `start` (TEMPRA-66): the daily check's counts by kind, and
@@ -279,6 +290,33 @@ export function buildServer(ctx: McpContext): McpServer {
   ) =>
     `${ctx.origin}/dl/${encodeURIComponent(token.library.do_id)}/${await lib.signDownload(payload)}`;
 
+  const images = ctx.images ?? imagesService({ blobs: ctx.blobs });
+
+  /** What `read` adds for an image attachment (TEMPRA-153): the image itself, or why not. */
+  const shown = async (
+    token: TokenInfo,
+    blob: { hash: string; size: number; media: string | null },
+  ): Promise<CallToolResult["content"]> => {
+    if (blob.media === "image/svg+xml") {
+      if (blob.size > SVG_TEXT_BYTES) {
+        return [
+          line(`SVG too large to show here (over ${SVG_TEXT_BYTES / 1024} KB); download it.`),
+        ];
+      }
+      const obj = await ctx.blobs.get(blob.hash);
+      if (!obj) return [];
+      return [line(`SVG source:\n${new TextDecoder().decode(await readBytes(obj.body))}`)];
+    }
+    if (!blob.media || !RASTER_MEDIA.has(blob.media)) return [];
+    const img = await images.forModel(blob);
+    if ("missing" in img) return [];
+    if ("tooLarge" in img) {
+      return [line("Image too large to show here; download it from the URL above.")];
+    }
+    ctx.meter?.({ kind: "read_image", library: token.library.id, bytes: img.bytes.byteLength });
+    return [{ type: "image", data: toBase64(img.bytes), mimeType: img.media }];
+  };
+
   const readOnly = { readOnlyHint: true, openWorldHint: false };
   const writes = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
 
@@ -435,6 +473,10 @@ export function buildServer(ctx: McpContext): McpServer {
     path: z
       .string()
       .describe("Concept or file path, e.g. `tables/orders.md` (the .md is optional)."),
+    image: z
+      .boolean()
+      .optional()
+      .describe("For an image attachment: false returns only its facts, without the image itself."),
     ...(tier2
       ? {
           at: z
@@ -453,11 +495,11 @@ export function buildServer(ctx: McpContext): McpServer {
     {
       title: "Read a file",
       description:
-        "Read a concept as OKF markdown (frontmatter and body), with its hash, sequence, trust tier, staleness, lint and inbound link count above it. Pass the hash as `if_match` when you edit, replace or delete. Check trust tier and `stale` before relying on the content. Also reads index.md and log.md (the latest 200 requests; `log` pages back further); for an attachment returns its size and a short-lived download URL.",
+        "Read a concept as OKF markdown (frontmatter and body), with its hash, sequence, trust tier, staleness, lint and inbound link count above it. Pass the hash as `if_match` when you edit, replace or delete. Check trust tier and `stale` before relying on the content. Also reads index.md and log.md (the latest 200 requests; `log` pages back further); for an attachment returns its size and a short-lived download URL, and for an image (PNG, JPEG, GIF, WebP) the image itself, scaled to at most 1568 px (SVG as its text).",
       inputSchema: readSchema,
       annotations: readOnly,
     },
-    guarded(async (args: { path: string; at?: number; library?: string }) => {
+    guarded(async (args: { path: string; image?: boolean; at?: number; library?: string }) => {
       const picked = pick(args.library);
       const view = await picked.lib.read(args.path, { at: args.at });
       if (view.kind === "derived") return text(view.markdown);
@@ -468,7 +510,7 @@ export function buildServer(ctx: McpContext): McpServer {
           hash: view.hash,
           media: view.media,
         });
-        return text(
+        const facts = text(
           [
             `path: ${view.path}`,
             `hash: ${view.hash}`,
@@ -477,6 +519,8 @@ export function buildServer(ctx: McpContext): McpServer {
             `download (15 minutes): ${url}`,
           ].join("\n"),
         );
+        if (args.image !== false) facts.content.push(...(await shown(picked.token, view)));
+        return facts;
       }
       const status =
         typeof view.frontmatter.status === "string"
@@ -1072,7 +1116,7 @@ export function buildServer(ctx: McpContext): McpServer {
     {
       title: "Library files",
       description:
-        "Concepts in your libraries as OKF markdown, addressable by owner, library and path.",
+        "Concepts in your libraries as OKF markdown, and attachments as their bytes (images scaled for the model), addressable by owner, library and path.",
       mimeType: "text/markdown",
     },
     async (uri, vars) => {
@@ -1087,9 +1131,32 @@ export function buildServer(ctx: McpContext): McpServer {
           hash: view.hash,
           media: view.media,
         });
-        return {
+        const link = {
           contents: [
             { uri: uri.href, mimeType: "text/plain", text: `Attachment; download: ${url}` },
+          ],
+        };
+        // The bytes themselves (TEMPRA-155): images scaled for the model, other files up to a cap.
+        if (view.media && RASTER_MEDIA.has(view.media)) {
+          const img = await images.forModel(view);
+          if (!("bytes" in img)) return link;
+          ctx.meter?.({
+            kind: "read_image",
+            library: picked.token.library.id,
+            bytes: img.bytes.byteLength,
+          });
+          return { contents: [{ uri: uri.href, mimeType: img.media, blob: toBase64(img.bytes) }] };
+        }
+        if (view.size > RESOURCE_BYTES) return link;
+        const obj = await ctx.blobs.get(view.hash);
+        if (!obj) return link;
+        return {
+          contents: [
+            {
+              uri: uri.href,
+              mimeType: view.media ?? "application/octet-stream",
+              blob: toBase64(await readBytes(obj.body)),
+            },
           ],
         };
       }

@@ -1,0 +1,200 @@
+import type { BlobStore } from "./client";
+
+/**
+ * Attachment images scaled through Cloudflare Images (the `IMAGES` binding; TEMPRA-153, and the
+ * reader's variants, TEMPRA-162). A scaled copy is cached in R2 at
+ * `variants/<hash>/<edge>.<ext>`, outside `blobs/`, so the blob sweep never counts it as a blob;
+ * the sweep deletes a blob's variants with it (variantKeysFor). Free of Worker APIs: the binding
+ * and the cache come in as interfaces, so tests run under bun with a double.
+ */
+
+/** Formats a variant can take. */
+export type VariantFormat = "webp" | "jpeg" | "png";
+
+const MEDIA: Record<VariantFormat, "image/webp" | "image/jpeg" | "image/png"> = {
+  webp: "image/webp",
+  jpeg: "image/jpeg",
+  png: "image/png",
+};
+
+/** Output quality per format; part of what a cached variant is, so changing it needs new keys. */
+const QUALITY: Record<VariantFormat, number | undefined> = { webp: 80, jpeg: 80, png: undefined };
+
+/**
+ * The long edges a variant may have. A fixed set keeps the cache bounded and lets the sweep
+ * delete every variant of a blob without listing the bucket; add an edge here to offer it.
+ */
+export const VARIANT_EDGES = [320, 640, 768, 1092, 1280, 1568, 1920] as const;
+export const VARIANT_FORMATS = Object.keys(MEDIA) as VariantFormat[];
+
+/** Raster media models take as image content (and Images decodes). */
+export const RASTER_MEDIA = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+
+/** The long edge a model gets an image at: Claude's own downscale point. */
+export const MODEL_EDGE = 1568;
+/** At most this many bytes of image for a model; smaller edges are tried until it fits. */
+export const MODEL_BYTES = 400 * 1024;
+const MODEL_LADDER = [MODEL_EDGE, 1092, 768] as const;
+
+export const variantKey = (hash: string, edge: number, format: VariantFormat) =>
+  `variants/${hash}/${edge}.${format}`;
+
+/** Every variant key a blob can have, for the given `blobs/<hash>` keys. */
+export function variantKeysFor(blobKeys: string[]): string[] {
+  const out: string[] = [];
+  for (const k of blobKeys) {
+    if (!k.startsWith("blobs/")) continue;
+    const hash = k.slice("blobs/".length);
+    for (const e of VARIANT_EDGES)
+      for (const f of VARIANT_FORMATS) out.push(variantKey(hash, e, f));
+  }
+  return out;
+}
+
+/** The part of Cloudflare's ImagesBinding used here; tests pass a double. */
+export interface ImageTransformerLike {
+  input(stream: ReadableStream<Uint8Array>): {
+    transform(t: { width: number; height: number; fit: "scale-down" }): {
+      output(o: {
+        format: "image/webp" | "image/jpeg" | "image/png";
+        quality?: number;
+      }): Promise<{ image(): ReadableStream<Uint8Array>; contentType(): string }>;
+    };
+  };
+}
+
+/** Where scaled copies are kept (R2 in production). */
+export interface VariantCache {
+  get(key: string): Promise<{ bytes: Uint8Array; media: string } | null>;
+  put(key: string, bytes: Uint8Array, media: string): Promise<void>;
+}
+
+export interface ScaledImage {
+  bytes: Uint8Array;
+  media: string;
+}
+
+export type ModelImage =
+  | (ScaledImage & { scaled: boolean })
+  | { tooLarge: true; size: number }
+  | { missing: true };
+
+export interface Images {
+  /**
+   * The blob's image with its long edge at most `maxEdge` (never enlarged), in `format`; cached,
+   * so a second call costs one R2 read. Null when it cannot be scaled: no binding, the blob is
+   * gone, or Images refused it (not an image, the product not enabled).
+   */
+  scaled(
+    hash: string,
+    opts: { maxEdge: number; format: VariantFormat },
+  ): Promise<ScaledImage | null>;
+  /**
+   * The image as a model should get it: scaled to MODEL_EDGE within MODEL_BYTES; without the
+   * binding, the original when it is within MODEL_BYTES, else `tooLarge`.
+   */
+  forModel(blob: { hash: string; size: number; media: string | null }): Promise<ModelImage>;
+}
+
+export function imagesService(d: {
+  blobs: BlobStore;
+  transformer?: ImageTransformerLike | null;
+  cache?: VariantCache | null;
+}): Images {
+  const scaled: Images["scaled"] = async (hash, { maxEdge, format }) => {
+    if (!(VARIANT_EDGES as readonly number[]).includes(maxEdge)) {
+      throw new Error(`Not a variant edge: ${maxEdge}`);
+    }
+    if (!d.transformer) return null;
+    const key = variantKey(hash, maxEdge, format);
+    const hit = await d.cache?.get(key).catch(() => null);
+    if (hit) return hit;
+    const obj = await d.blobs.get(hash);
+    if (!obj) return null;
+    try {
+      const out = await d.transformer
+        .input(toStream(obj.body))
+        .transform({ width: maxEdge, height: maxEdge, fit: "scale-down" })
+        .output({ format: MEDIA[format], quality: QUALITY[format] });
+      const bytes = await readBytes(out.image());
+      const media = out.contentType() || MEDIA[format];
+      await d.cache?.put(key, bytes, media).catch((e) => console.error("variant cache put", e));
+      return { bytes, media };
+    } catch (e) {
+      console.error(JSON.stringify({ image_transform_failed: String(e), hash, maxEdge, format }));
+      return null;
+    }
+  };
+
+  return {
+    scaled,
+    async forModel(blob) {
+      let last: ScaledImage | null = null;
+      for (const edge of MODEL_LADDER) {
+        const s = await scaled(blob.hash, { maxEdge: edge, format: "webp" });
+        if (!s) break;
+        last = s;
+        if (s.bytes.byteLength <= MODEL_BYTES) return { ...s, scaled: true };
+      }
+      if (last) return { ...last, scaled: true };
+      if (blob.size > MODEL_BYTES) return { tooLarge: true, size: blob.size };
+      const obj = await d.blobs.get(blob.hash);
+      if (!obj) return { missing: true };
+      return {
+        bytes: await readBytes(obj.body),
+        media: blob.media ?? "application/octet-stream",
+        scaled: false,
+      };
+    },
+  };
+}
+
+/** Scaled copies in the blobs bucket, beside (not under) `blobs/`. */
+export function r2VariantCache(bucket: R2Bucket): VariantCache {
+  return {
+    async get(key) {
+      const obj = await bucket.get(key);
+      if (!obj) return null;
+      return {
+        bytes: new Uint8Array(await obj.arrayBuffer()),
+        media: obj.httpMetadata?.contentType ?? "application/octet-stream",
+      };
+    },
+    async put(key, bytes, media) {
+      await bucket.put(key, bytes, { httpMetadata: { contentType: media } });
+    },
+  };
+}
+
+/** Deletes the variants of the blobs at these keys, a thousand keys a call (R2's limit). */
+export async function deleteVariants(
+  bucket: { delete(keys: string[]): Promise<void> },
+  blobKeys: string[],
+): Promise<void> {
+  const keys = variantKeysFor(blobKeys);
+  for (let i = 0; i < keys.length; i += 1000) await bucket.delete(keys.slice(i, i + 1000));
+}
+
+export async function readBytes(body: ReadableStream | Uint8Array): Promise<Uint8Array> {
+  if (body instanceof Uint8Array) return body;
+  return new Uint8Array(await new Response(body).arrayBuffer());
+}
+
+function toStream(body: ReadableStream | Uint8Array): ReadableStream<Uint8Array> {
+  if (!(body instanceof Uint8Array)) return body as ReadableStream<Uint8Array>;
+  return new ReadableStream({
+    start(c) {
+      c.enqueue(body);
+      c.close();
+    },
+  });
+}
+
+/** Base64 without spreading megabytes onto the stack. */
+export function toBase64(bytes: Uint8Array): string {
+  let s = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    s += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(s);
+}

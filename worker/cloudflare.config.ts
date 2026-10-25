@@ -167,6 +167,11 @@ export default defineConfig(({ mode }) => {
         // The blob sweep's Queue: this Worker sends and consumes (src/index.ts queue()).
         SWEEP_QUEUE: bindings.queue({ name: d.queue }),
 
+        // Cloudflare Images (TEMPRA-153, images.ts): attachments scaled for models and readers,
+        // cached in BLOBS under variants/. No resource to create; the account needs the Images
+        // product enabled. Locally cf dev transforms with its own stand-in.
+        IMAGES: bindings.images(),
+
         // OAuth clients and grants for MCP apps (Cloudflare's OAuth provider library).
         OAUTH_KV: bindings.kv({ id: d.kv }),
 
