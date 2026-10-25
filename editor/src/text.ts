@@ -6,6 +6,7 @@
  * definitions are not part of it: they are shown beside the body.
  */
 import type { Nodes, PhrasingContent } from "mdast";
+import { isDirectiveLabel } from "./figure";
 import { type Doc, type DocNode, idOf, parseMarkdown } from "./tree";
 
 /** Stands for an atom in the text. */
@@ -53,6 +54,9 @@ export function docText(doc: Doc): DocText {
       case "footnoteDefinition":
         return;
       case "paragraph":
+        // A directive's label (a figure's group caption) is presentation, like a caption.
+        if (isDirectiveLabel(n)) return;
+        return add(id, inlineText(n.children));
       case "heading":
         return add(id, inlineText(n.children));
       case "code":

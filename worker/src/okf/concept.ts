@@ -19,6 +19,7 @@ import {
   type YAMLSeq,
 } from "yaml";
 import { diagramLint } from "./diagrams";
+import { figureLint } from "./figure-lint";
 import { imageLint } from "./images";
 import { lintFields } from "./lint";
 import { scanDoc, takeSection, targets } from "./markdown";
@@ -272,7 +273,7 @@ export function buildRecord(parsed: ParsedConcept, opts: BuildOptions): BuiltCon
   if (parsed.rawFm === null) {
     lint.push(...lintFields(entries, generated, verified, scan, { strict: opts.mode === "write" }));
   }
-  lint.push(...diagramLint(doc));
+  lint.push(...diagramLint(doc), ...figureLint(doc));
   lint.push(...imageLint(doc));
   const record: ConceptRecord = {
     fm: entries,

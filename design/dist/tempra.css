@@ -257,6 +257,8 @@
   /* A concept's columns (take 4): the text, centred; on the right its contents, or a panel */
   --tempra-column-text: 620px;
   --tempra-contents: 200px;
+  --tempra-figure-wide: 960px; /* a wide figure (`layout=wide`), past the text's measure */
+  --tempra-figure-gap: 12px; /* between a group's images */
   --tempra-page-width: 760px; /* home, Activity, a folder, the Inbox */
 
   /* Shape: squarer than take 2 */
@@ -1023,6 +1025,100 @@ details > summary {
 .prose .figure-number {
   color: var(--tempra-color-text);
   font-weight: var(--tempra-weight-medium);
+}
+
+/*
+ * Figure markup (TEMPRA-161; tempra-dev: app/media, Figure markup). Width: `--figure-width`, set on
+ * the figure through the CSSOM, caps its images (max-width only, so an image is never drawn wider
+ * than its own pixels). Placement, on a concept's page: wide and full reach past the text,
+ * centred on the text's column (the page's width, 100cqi of `page`, less --concept-side; the
+ * text is --doc-max wide at most with --doc-pad each side, concept.css), never past its padding;
+ * wide stops at --tempra-figure-wide. Elsewhere they keep the text's width.
+ */
+.prose figure.figure-sized:not(.figure-group) .figure-media,
+.prose figure.figure-sized:not(.figure-group) .figure-broken {
+  max-width: min(100%, var(--figure-width));
+}
+
+.prose figure.figure-group.figure-sized .figure-row {
+  max-width: min(100%, var(--figure-width));
+}
+
+.concept .prose figure.figure-wide {
+  --figure-reach: min(var(--tempra-figure-wide), var(--figure-column) - 2 * var(--doc-pad));
+}
+
+.concept .prose figure.figure-full {
+  --figure-reach: calc(var(--figure-column) - 2 * var(--doc-pad));
+}
+
+@container page (width >= 0px) {
+  .concept .prose figure:is(.figure-wide, .figure-full) {
+    --figure-column: calc(100cqi - var(--concept-side));
+    --figure-w: max(100%, var(--figure-reach));
+    width: var(--figure-w);
+    max-width: none;
+    margin-left: calc(
+      (min(var(--figure-column), var(--doc-max)) - var(--figure-w)) /
+      2 -
+      var(--doc-pad)
+    );
+  }
+}
+
+/* A frame for screenshots whose edges vanish on the page: a hairline, nothing more. */
+.prose figure.figure-framed .figure-media img {
+  border: 1px solid var(--tempra-color-border);
+}
+
+/* A group: its images side by side in equal columns, each with its title under it; stacked on a
+   phone. The newlines between them are text (they count) and are not drawn. */
+.prose .figure-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--tempra-figure-gap);
+  align-items: start;
+}
+
+.prose .figure-n-3 .figure-row {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.prose .figure-n-4 .figure-row {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.prose .figure-gap {
+  display: none;
+}
+
+.prose .figure-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.prose .figure-label {
+  color: var(--tempra-color-muted);
+  font-family: var(--tempra-font-text);
+  font-size: var(--tempra-text-meta);
+  line-height: var(--tempra-line-height);
+  user-select: none;
+}
+
+@media (max-width: 900px) {
+  .prose .figure-row,
+  .prose .figure-n-3 .figure-row,
+  .prose .figure-n-4 .figure-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* A directive the reader does not draw: its opening and closing lines, quiet, as markdown. */
+.prose .directive > .raw-fence {
+  margin: 0.4em 0;
+  font-size: var(--tempra-text-meta);
 }
 
 /* An image that can't be shown: a dashed box where it would be, saying so, its path and alt. */
@@ -3199,30 +3295,44 @@ ul.events {
 
 /* The right column is the panel's width whether it holds the contents or a panel, so opening a
    panel takes the contents' space and never moves the text (C-17). */
+/* --concept-side is the right column's width in each layout below, so a wide or full figure
+   (prose.css, TEMPRA-161) knows the text's column: the page's width (100cqi of `page`) less it. */
+.concept {
+  --concept-side: var(--tempra-panel);
+}
+
 .concept-grid {
   display: grid;
-  grid-template-columns: [text] minmax(0, 1fr) [side] var(--tempra-panel);
+  grid-template-columns: [text] minmax(0, 1fr) [side] var(--concept-side);
   min-height: 100%;
 }
 
 /* The Markdown view has no contents (its headings lead nowhere there): the file takes the room. */
+.concept.markdown-on:not(.panel-open) {
+  --concept-side: 0px;
+}
+
 .concept.markdown-on:not(.panel-open) .concept-grid {
   grid-template-columns: [text] minmax(0, 1fr);
 }
 
+/* The text, centred in its column, --doc-max wide at most (padding included), --doc-pad from its
+   edges; a wide or full figure reads both. */
 .concept .doc {
+  --doc-pad: var(--tempra-page-pad);
+  --doc-max: calc(var(--tempra-column-text) + 2 * var(--tempra-page-pad));
   grid-row: 1;
   grid-column: text;
   justify-self: center;
   width: 100%;
-  max-width: calc(var(--tempra-column-text) + 2 * var(--tempra-page-pad));
+  max-width: var(--doc-max);
   min-width: 0;
-  padding: 40px var(--tempra-page-pad) 140px;
+  padding: 40px var(--doc-pad) 140px;
 }
 
 /* The Markdown view is wider than the text: the file's lines are long. */
 .concept.markdown-on .doc {
-  max-width: calc(var(--tempra-measure) + 2 * var(--tempra-page-pad) + 200px);
+  --doc-max: calc(var(--tempra-measure) + 2 * var(--tempra-page-pad) + 200px);
 }
 
 .concept-side {
@@ -3731,6 +3841,10 @@ ul.events {
 
 /* No room beside the text: the contents move under the byline, and a panel overlays the page. */
 @container page (width < 1100px) {
+  .concept {
+    --concept-side: 0px;
+  }
+
   .concept-grid,
   .concept.panel-open .concept-grid {
     grid-template-columns: [text] minmax(0, 1fr);
@@ -3767,6 +3881,10 @@ ul.events {
    open panel still takes the column from 960px and overlays below that (the rules around this),
    and the text moves over for it. */
 @container page (700px <= width < 1100px) {
+  .concept:not(.panel-open):not(.markdown-on) {
+    --concept-side: calc(var(--tempra-contents) + 24px);
+  }
+
   .concept:not(.panel-open):not(.markdown-on) .concept-grid {
     grid-template-columns: [text] minmax(0, 1fr) [side] calc(var(--tempra-contents) + 24px);
   }
@@ -3785,8 +3903,7 @@ ul.events {
   }
 
   .concept .doc {
-    padding-right: 32px;
-    padding-left: 32px;
+    --doc-pad: 32px;
   }
 }
 
@@ -3803,6 +3920,10 @@ ul.events {
    sidebar shown): an open panel takes a column again and the text moves over for it, so nothing
    (On this page included) runs under it. Narrower than this, it overlays. */
 @container page (960px <= width < 1100px) {
+  .concept.panel-open {
+    --concept-side: var(--tempra-panel);
+  }
+
   .concept.panel-open .concept-grid {
     grid-template-columns: [text] minmax(0, 1fr) [side] var(--tempra-panel);
   }
@@ -3842,7 +3963,9 @@ ul.events {
    disclosure under the byline, and a panel as a sheet from the bottom, the page dimmed behind. */
 @media (max-width: 900px) {
   .concept .doc {
-    padding: 16px 16px 96px;
+    --doc-pad: 16px;
+    padding-top: 16px;
+    padding-bottom: 96px;
   }
 
   .doc-crumbs {

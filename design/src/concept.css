@@ -10,30 +10,44 @@
 
 /* The right column is the panel's width whether it holds the contents or a panel, so opening a
    panel takes the contents' space and never moves the text (C-17). */
+/* --concept-side is the right column's width in each layout below, so a wide or full figure
+   (prose.css, TEMPRA-161) knows the text's column: the page's width (100cqi of `page`) less it. */
+.concept {
+  --concept-side: var(--tempra-panel);
+}
+
 .concept-grid {
   display: grid;
-  grid-template-columns: [text] minmax(0, 1fr) [side] var(--tempra-panel);
+  grid-template-columns: [text] minmax(0, 1fr) [side] var(--concept-side);
   min-height: 100%;
 }
 
 /* The Markdown view has no contents (its headings lead nowhere there): the file takes the room. */
+.concept.markdown-on:not(.panel-open) {
+  --concept-side: 0px;
+}
+
 .concept.markdown-on:not(.panel-open) .concept-grid {
   grid-template-columns: [text] minmax(0, 1fr);
 }
 
+/* The text, centred in its column, --doc-max wide at most (padding included), --doc-pad from its
+   edges; a wide or full figure reads both. */
 .concept .doc {
+  --doc-pad: var(--tempra-page-pad);
+  --doc-max: calc(var(--tempra-column-text) + 2 * var(--tempra-page-pad));
   grid-row: 1;
   grid-column: text;
   justify-self: center;
   width: 100%;
-  max-width: calc(var(--tempra-column-text) + 2 * var(--tempra-page-pad));
+  max-width: var(--doc-max);
   min-width: 0;
-  padding: 40px var(--tempra-page-pad) 140px;
+  padding: 40px var(--doc-pad) 140px;
 }
 
 /* The Markdown view is wider than the text: the file's lines are long. */
 .concept.markdown-on .doc {
-  max-width: calc(var(--tempra-measure) + 2 * var(--tempra-page-pad) + 200px);
+  --doc-max: calc(var(--tempra-measure) + 2 * var(--tempra-page-pad) + 200px);
 }
 
 .concept-side {
@@ -542,6 +556,10 @@
 
 /* No room beside the text: the contents move under the byline, and a panel overlays the page. */
 @container page (width < 1100px) {
+  .concept {
+    --concept-side: 0px;
+  }
+
   .concept-grid,
   .concept.panel-open .concept-grid {
     grid-template-columns: [text] minmax(0, 1fr);
@@ -578,6 +596,10 @@
    open panel still takes the column from 960px and overlays below that (the rules around this),
    and the text moves over for it. */
 @container page (700px <= width < 1100px) {
+  .concept:not(.panel-open):not(.markdown-on) {
+    --concept-side: calc(var(--tempra-contents) + 24px);
+  }
+
   .concept:not(.panel-open):not(.markdown-on) .concept-grid {
     grid-template-columns: [text] minmax(0, 1fr) [side] calc(var(--tempra-contents) + 24px);
   }
@@ -596,8 +618,7 @@
   }
 
   .concept .doc {
-    padding-right: 32px;
-    padding-left: 32px;
+    --doc-pad: 32px;
   }
 }
 
@@ -614,6 +635,10 @@
    sidebar shown): an open panel takes a column again and the text moves over for it, so nothing
    (On this page included) runs under it. Narrower than this, it overlays. */
 @container page (960px <= width < 1100px) {
+  .concept.panel-open {
+    --concept-side: var(--tempra-panel);
+  }
+
   .concept.panel-open .concept-grid {
     grid-template-columns: [text] minmax(0, 1fr) [side] var(--tempra-panel);
   }
@@ -653,7 +678,9 @@
    disclosure under the byline, and a panel as a sheet from the bottom, the page dimmed behind. */
 @media (max-width: 900px) {
   .concept .doc {
-    padding: 16px 16px 96px;
+    --doc-pad: 16px;
+    padding-top: 16px;
+    padding-bottom: 96px;
   }
 
   .doc-crumbs {

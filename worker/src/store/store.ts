@@ -27,6 +27,7 @@ import {
 import { type LogRequest, renderIndex, renderLog } from "../okf/derived";
 import { diagramLint } from "../okf/diagrams";
 import { unifiedDiff } from "../okf/diff";
+import { figureLint } from "../okf/figure-lint";
 import { type FigureFact, figureFacts } from "../okf/figures";
 import { sha256Hex } from "../okf/hash";
 import { IMAGE_TARGET_CODES, imageLinks, imageLint, imageTargetLint } from "../okf/images";
@@ -2461,12 +2462,14 @@ export class LibraryStore {
       return [
         { code: "unparseable_frontmatter", message: "Frontmatter could not be parsed as YAML." },
         ...diagramLint(r.doc),
+        ...figureLint(r.doc),
         ...imageLint(r.doc),
       ];
     }
     return [
       ...lintFields(r.fm, r.generated, verified, scanDoc(r.doc, path), { strict }),
       ...diagramLint(r.doc),
+      ...figureLint(r.doc),
       ...imageLint(r.doc),
     ];
   }

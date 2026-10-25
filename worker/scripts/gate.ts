@@ -1684,6 +1684,88 @@ async function browserRenders(
       }
     });
 
+    // Figure markup (TEMPRA-161; tempra-dev: app/media, Figure markup): a wide figure reaches
+    // past the text, a group's images sit side by side under one caption, and on a phone they
+    // stack; the full-screen view steps through the group's images.
+    await step("figure markup: a wide figure and a group, stacked on a phone", async () => {
+      const images = [
+        ["gate-markup-wide.png", 1400, 500, 0x99],
+        ["gate-markup-a.png", 640, 400, 0x88],
+        ["gate-markup-b.png", 640, 400, 0xbb],
+      ] as const;
+      for (const [path, w, h, shade] of images) {
+        const put = await fetch(`${libApi}/files/${path}`, {
+          method: "PUT",
+          headers: { ...bearer, "Content-Type": "image/png", "X-Note": "gate: a figure" },
+          body: greyPng(w, h, shade),
+        });
+        if (!put.ok) throw new Error(`upload ${path}: ${put.status} ${await put.text()}`);
+      }
+      const put = await fetch(`${libApi}/files/gate-markup.md`, {
+        method: "PUT",
+        headers: { ...bearer, "Content-Type": "text/markdown", "X-Note": "gate: figure markup" },
+        body: [
+          "---\ntype: Note\ntitle: Gate figure markup\ndescription: A wide figure and a group.\n---",
+          "Before the figures, a paragraph long enough to show the text's measure on the page.\n",
+          ':::figure{layout=wide frame}\n![A wide grey band](/gate-markup-wide.png "The wide one")\n:::\n',
+          ':::figure[Before and after]\n![A darker block](/gate-markup-a.png "Before")\n![A lighter block](/gate-markup-b.png "After")\n:::\n',
+          "After.\n",
+        ].join("\n"),
+      });
+      if (!put.ok) throw new Error(`write: ${put.status} ${await put.text()}`);
+      const lint = ((await put.json()) as { lint?: { code: string }[] }).lint ?? [];
+      if (lint.some((l) => l.code === "figure_invalid")) throw new Error("figure_invalid lint");
+      await wide();
+      await page.goto(`${lib}/gate-markup.md`);
+      const body = page.locator(".body");
+      const wideFig = body.locator("figure.figure-wide");
+      const group = body.locator("figure.figure-group");
+      await group.locator("img").nth(1).waitFor({ timeout: 15_000 });
+      await wideFig.locator("img").waitFor({ timeout: 15_000 });
+      const box = async (l: ReturnType<typeof page.locator>) => {
+        const b = await l.boundingBox();
+        if (!b) throw new Error("not drawn");
+        return b;
+      };
+      const text = await box(body.locator("p[data-text]").first());
+      const wideBox = await box(wideFig.locator("img"));
+      if (wideBox.width <= text.width + 40) {
+        throw new Error(`the wide figure is ${wideBox.width}px, the text ${text.width}px`);
+      }
+      const caption = (await group.locator(":scope > figcaption").innerText()).trim();
+      if (!/^Figures 2 and 3\.\s*Before and after$/.test(caption)) {
+        throw new Error(`group caption: ${caption}`);
+      }
+      const cells = group.locator(".figure-cell");
+      const [a, b] = [await box(cells.nth(0)), await box(cells.nth(1))];
+      if (Math.abs(a.y - b.y) > 2 || b.x <= a.x + a.width - 1) {
+        throw new Error("the group's images are not side by side");
+      }
+      if (shots) await page.screenshot({ path: `${shots}/figure-markup.png`, fullPage: true });
+      // The full-screen view steps through the group's images.
+      await page.getByRole("button", { name: "Enlarge image: A darker block" }).click();
+      const view = page.locator("dialog.lightbox");
+      await view.getByText("fig. 2 of 3", { exact: true }).waitFor({ timeout: 5000 });
+      await view.getByRole("button", { name: "Next figure" }).click();
+      await view.getByText("fig. 3 of 3", { exact: true }).waitFor({ timeout: 5000 });
+      await page.keyboard.press("Escape");
+      await view.waitFor({ state: "hidden", timeout: 5000 });
+      // A phone: the group stacks.
+      await page.setViewportSize({ width: 390, height: 844 });
+      for (let i = 0; ; i++) {
+        const [x, y] = [await box(cells.nth(0)), await box(cells.nth(1))];
+        if (y.y >= x.y + x.height - 1) break;
+        if (i > 50) throw new Error("the group's images do not stack on a phone");
+        await page.waitForTimeout(100);
+      }
+      if (shots) {
+        await group.scrollIntoViewIfNeeded();
+        await page.screenshot({ path: `${shots}/figure-markup-phone.png` });
+      }
+      await usual();
+      for (const [path] of [["gate-markup.md"], ...images]) await agentDeletes(path);
+    });
+
     // Verify a concept as a person, let an agent change it, and see the change over the text.
     const concept = concepts[0] ?? "";
     const url = `${base}/${owner}/${slug}/${enc(concept)}`;

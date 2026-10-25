@@ -5,13 +5,16 @@
  * DOM-free: the renderer (Body.tsx) only reads it.
  */
 import {
+  type ContainerDirective,
   type Doc,
   type DocNode,
   type DocText,
   docText,
+  type FigureSpec,
   fenceTitle,
   findFigures,
   headingText,
+  isDirectiveLabel,
   type LinkTarget,
   linkTarget,
   slugger,
@@ -79,6 +82,19 @@ export interface ImageFigure extends FigureBase {
   src: string | null;
   /** The library path it resolves to, when it is internal. */
   path: string | null;
+  /** The figure markup it is drawn by (`:::figure`), when it has some that parses. */
+  markup?: FigureMarkup;
+}
+
+/**
+ * A `:::figure` that parses (tempra-dev: app/media, Figure markup): its width, placement and frame,
+ * and its images, each a figure of its own in the numbering (the full-screen view steps through
+ * them), drawn together with one caption when there are several.
+ */
+export interface FigureMarkup {
+  node: ContainerDirective;
+  spec: FigureSpec;
+  figures: ImageFigure[];
 }
 
 export interface DiagramFigure extends FigureBase {
@@ -105,6 +121,8 @@ export interface Prepared {
   figures: Figure[];
   /** Each figure by its paragraph or fence, and an image figure by its image too. */
   figureOf: Map<DocNode, Figure>;
+  /** Each `:::figure` that parses, by its directive. */
+  markup: Map<DocNode, FigureMarkup>;
 }
 
 /** The textblocks of a document in the order {@link docText} reads them. */
@@ -115,6 +133,8 @@ function textblocks(doc: Doc): DocNode[] {
       case "footnoteDefinition":
         return;
       case "paragraph":
+        if (!isDirectiveLabel(n)) out.push(n);
+        return;
       case "heading":
       case "code":
         out.push(n);
@@ -180,8 +200,10 @@ export function prepare(tree: Doc, options: BodyOptions = {}): Prepared {
   for (const f of footnotes) walk(f.node, (n) => void marker(n));
 
   // Figures, in document order, by the rule the Worker numbers them by too (findFigures).
+  // Figure markup (`:::figure`) that parses gathers its images, each a figure of its own.
   const figures: Figure[] = [];
   const figureOf = new Map<DocNode, Figure>();
+  const markup = new Map<DocNode, FigureMarkup>();
   for (const found of findFigures(tree)) {
     if (found.kind === "image") {
       const { image } = found;
@@ -198,8 +220,17 @@ export function prepare(tree: Doc, options: BodyOptions = {}): Prepared {
         path: target?.kind === "internal" ? target.path : null,
       };
       figures.push(f);
-      figureOf.set(found.node, f);
       figureOf.set(image, f);
+      if (found.markup) {
+        const { node, spec } = found.markup;
+        let m = markup.get(node);
+        if (!m) {
+          m = { node, spec, figures: [] };
+          markup.set(node, m);
+        }
+        f.markup = m;
+        m.figures.push(f);
+      } else figureOf.set(found.node, f);
     } else {
       const f: DiagramFigure = {
         n: found.n,
@@ -212,7 +243,26 @@ export function prepare(tree: Doc, options: BodyOptions = {}): Prepared {
       figureOf.set(found.node, f);
     }
   }
-  return { tree, text, options, starts, anchors, headings, markers, footnotes, figures, figureOf };
+  // One image under a label: the label is its caption.
+  for (const m of markup.values()) {
+    const only = m.figures.length === 1 ? m.figures[0] : undefined;
+    if (only && m.spec.label) {
+      only.caption = headingText(m.spec.label.children).trim() || only.caption;
+    }
+  }
+  return {
+    tree,
+    text,
+    options,
+    starts,
+    anchors,
+    headings,
+    markers,
+    footnotes,
+    figures,
+    figureOf,
+    markup,
+  };
 }
 
 /** Where a link written in the body points, as the reader draws it. */

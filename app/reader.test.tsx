@@ -596,3 +596,151 @@ describe("figures (tempra-dev: app/reader, Figures)", () => {
     });
   });
 });
+
+/** Figure markup in each form (TEMPRA-161; tempra-dev: app/media, Figure markup). */
+const MARKUP = [
+  "# Figure markup",
+  "Before the figures.",
+  ':::figure{width=480 frame}\n![The sign-in page](assets/signin.png "Sign-in")\n:::',
+  ":::figure{width=60%}\n![A chart](assets/chart.png)\n:::",
+  ':::figure{layout=wide}\n![The workspace](assets/wide.png "The whole frame")\n:::',
+  ":::figure[A labelled one]{layout=full}\n![The page](assets/full.png)\n:::",
+  ':::figure[The top bar *before* and after[^src]]{layout=wide}\n![Crumbs](assets/before.png "Before")\n![The path](assets/after.png "After")\n:::',
+  ":::figure[Four]\n![1](assets/1.png)\n![2](assets/2.png)\n![3](assets/3.png)\n![4](https://e.com/4.png)\n:::",
+  "Between ![an icon](assets/icon.png) the figures.",
+  ":::figure{layout=sideways}\n![Broken markup](assets/broken.png)\n:::",
+  ':::note{kind="aside"}\nAn unknown *directive*, kept as written.\n:::',
+  "- in a list\n\n  :::figure{layout=wide}\n  ![Listed](assets/listed.png)\n  :::",
+  '![A plain one](assets/plain.png "Plain")',
+  "After the figures.",
+].join("\n\n");
+
+describe("figure markup (TEMPRA-161)", () => {
+  test("the reader's counting holds with every form", () => {
+    counts("markup", stored(MARKUP), { href: hrefs, path: "c.md" });
+    counts("markup, no href", stored(MARKUP));
+    // And across a diff.
+    const older = stored(MARKUP.replace("Before the figures.", "Before figures."));
+    const { p, root } = draw(stored(MARKUP), { href: hrefs, path: "c.md" }, older);
+    for (const tb of textblocks(root)) {
+      const at = Number(tb.getAttribute("data-text"));
+      const b = p.text.blocks.find((x) => x.from === at);
+      expect(readText(tb)).toBe(p.text.text.slice(b?.from, b?.to));
+    }
+  });
+
+  test("each image is a figure in the numbering; a group has one caption", () => {
+    const { p, root } = draw(stored(MARKUP), { href: hrefs, path: "c.md" });
+    expect(p.figures.map((f) => [f.n, f.kind === "image" ? f.alt : ""])).toEqual([
+      [1, "The sign-in page"],
+      [2, "A chart"],
+      [3, "The workspace"],
+      [4, "The page"],
+      [5, "Crumbs"],
+      [6, "The path"],
+      [7, "1"],
+      [8, "2"],
+      [9, "3"],
+      [10, "4"],
+      [11, "Broken markup"],
+      [12, "Listed"],
+      [13, "A plain one"],
+    ]);
+    const figures = [...root.querySelectorAll("figure")];
+    expect(figures.map((f) => f.querySelector(":scope > figcaption")?.textContent)).toEqual([
+      "Figure 1. Sign-in",
+      "Figure 2. A chart",
+      "Figure 3. The whole frame",
+      "Figure 4. A labelled one",
+      "Figures 5 and 6. The top bar before and after[src]",
+      "Figures 7–10. Four",
+      "Figure 11. Broken markup",
+      "Figure 12. Listed",
+      "Figure 13. Plain",
+    ]);
+    expect(figures.map((f) => f.className)).toEqual([
+      "figure figure-framed figure-sized",
+      "figure figure-sized",
+      "figure figure-wide",
+      "figure figure-full",
+      "figure figure-wide figure-group figure-n-2",
+      "figure figure-group figure-n-4",
+      "figure",
+      "figure figure-wide",
+      "figure",
+    ]);
+    // No style attribute anywhere: the width goes through the CSSOM.
+    expect(root.querySelector("[style]")).toBeNull();
+    // A group: one textblock, its images one atom each, in cells with their labels.
+    const group = figures[4] as Element;
+    const row = group.querySelector(":scope > p.figure-row[data-text]") as Element;
+    expect(row.querySelectorAll("[data-atom]").length).toBe(2);
+    expect(readText(row)).toBe(`${ATOM}\n${ATOM}`);
+    expect([...row.querySelectorAll(".figure-label")].map((l) => l.textContent)).toEqual([
+      "Before",
+      "After",
+    ]);
+    expect(row.querySelector(".figure-label")?.hasAttribute("data-skip")).toBe(true);
+    // The group caption is outside the text and counts nothing.
+    const caption = group.querySelector("figcaption") as Element;
+    expect(caption.hasAttribute("data-skip")).toBe(true);
+    expect(caption.closest("[data-text]")).toBeNull();
+    expect(p.text.text).not.toContain("The top bar");
+    expect(p.text.text).not.toContain("Four");
+    expect(p.text.text).not.toContain("A labelled one");
+  });
+
+  test("markup that does not parse and other directives show their lines as markdown", () => {
+    const { root } = draw(stored(MARKUP), { href: hrefs, path: "c.md" });
+    const raw = [...root.querySelectorAll(".directive")];
+    expect(raw).toHaveLength(2);
+    expect(raw.map((d) => [...d.querySelectorAll(".raw-fence")].map((f) => f.textContent))).toEqual(
+      [
+        [":::figure{layout=sideways}", ":::"],
+        [":::note{kind=aside}", ":::"],
+      ],
+    );
+    for (const d of raw) {
+      for (const f of d.querySelectorAll(".raw-fence")) {
+        expect(f.hasAttribute("data-skip")).toBe(true);
+      }
+    }
+    // Their content draws as usual: the image as a plain figure, the text as a paragraph.
+    expect(raw[0]?.querySelector("figure img")?.getAttribute("alt")).toBe("Broken markup");
+    expect(raw[1]?.querySelector("p[data-text]")?.textContent).toBe(
+      "An unknown directive, kept as written.",
+    );
+  });
+
+  test("the width is set through the CSSOM; the full-screen view steps through a group", async () => {
+    await live(async (window) => {
+      const md = [
+        ':::figure{width=480}\n![One](assets/one.png "One")\n:::',
+        ':::figure[Two of them]\n![A](assets/a.png "A")\n![B](assets/b.png "B")\n:::',
+      ].join("\n\n");
+      const p = prepare(stored(md), { href: hrefs, path: "c.md" });
+      const { host, root } = await mount(
+        window,
+        <Reader prepared={p} diff={null} hideFirst={false} />,
+      );
+      const [one, two] = [...host.querySelectorAll("figure")] as HTMLElement[];
+      expect(one?.style.getPropertyValue("--figure-width")).toBe("480px");
+      expect(two?.style.getPropertyValue("--figure-width")).toBe("");
+      const buttons = [...host.querySelectorAll("button.figure-open")] as HTMLButtonElement[];
+      expect(buttons).toHaveLength(3);
+      await act(async () => buttons[1]?.click());
+      await act(() => new Promise((r) => setTimeout(r, 0)));
+      const d = host.querySelector("dialog.lightbox") as HTMLDialogElement;
+      const label = () =>
+        d.ownerDocument.getElementById(d.getAttribute("aria-labelledby") ?? "")?.textContent;
+      expect(label()).toBe("fig. 2 of 3");
+      expect(d.querySelector(".lightbox-caption")?.textContent).toBe("A");
+      await act(async () => (d.querySelector(".lightbox-next") as HTMLButtonElement).click());
+      expect(label()).toBe("fig. 3 of 3");
+      expect(d.querySelector(".lightbox-figure img")?.getAttribute("src")).toBe(
+        "/o/l/-/download/assets/b.png",
+      );
+      await act(async () => root.unmount());
+    });
+  });
+});
