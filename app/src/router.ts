@@ -63,6 +63,7 @@ const SERVER_ROOTS = new Set([
   "authorize",
   "connect",
   "dl",
+  "ul",
   "mcp",
   "sign-in",
   "sign-out",

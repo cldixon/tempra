@@ -203,7 +203,7 @@ export function messagePage(
  */
 export function wantsPage(req: Request): boolean {
   const path = new URL(req.url).pathname;
-  if (/^\/(api|mcp|token|register|dl|_design|_app|healthz)(\/|$)/.test(path)) return false;
+  if (/^\/(api|mcp|token|register|dl|ul|_design|_app|healthz)(\/|$)/.test(path)) return false;
   if (path.startsWith("/.well-known")) return false;
   return (req.headers.get("Accept") ?? "").includes("text/html");
 }

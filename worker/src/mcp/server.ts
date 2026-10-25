@@ -11,6 +11,7 @@ import type { CommentAction, CommentResult } from "../store/comments";
 import { OkfError } from "../store/errors";
 import type { LibraryHealth, RequestContext, WriteOp, WriteResult } from "../store/store";
 import { requireOwner } from "../tenancy";
+import { checkBytes, checkDeclared, decodeBase64, prepareUpload } from "../uploads";
 
 export interface McpContext {
   /** The ledger actor, access and tool tier: the same in every library the caller reaches. */
@@ -66,7 +67,7 @@ export const INSTRUCTIONS = `This server holds OKF (Open Knowledge Format) libra
 How to work:
 1. Call \`start\` first. It opens your library, or lists the libraries you can reach when there are several; then pass \`library\` (owner/slug) on every call. When the person asks for a new library, \`create_library\` makes one they own and opens it (only on a connection they allowed to). Then \`browse\` a directory before reading, follow links, and \`read\` what you need. Check frontmatter (type, status, trust tier, stale) before relying on a body.
 2. Write conformant concepts: a non-empty \`type\` naming what kind of thing it is (Metric, Protocol, Decision; never a generic word like concept, page or note, and reuse the types \`start\` lists), a \`title\` and one-line \`description\`, absolute links like [x](/dir/x.md), footnotes [^id] keyed to \`sources[].id\`, diagrams as Mermaid in a \`mermaid\` fence (drawn in the app; an unknown type, an empty body or an unclosed bracket or quote comes back as \`diagram_invalid\` lint), one idea per concept.
-3. Prefer \`edit\` for small changes, \`write\` for new concepts or rewrites, \`batch\` for related changes so they land as one request. Pass \`if_match\` (the hash from your last read); on a conflict, re-read and reapply. Bodies are stored in a canonical form (\`-\` bullets, \`*\` emphasis, padded tables): what you write reads back normalized, so \`edit\` the text as \`read\` shows it.
+3. Prefer \`edit\` for small changes, \`write\` for new concepts or rewrites, \`batch\` for related changes so they land as one request. Pass \`if_match\` (the hash from your last read); on a conflict, re-read and reapply. Bodies are stored in a canonical form (\`-\` bullets, \`*\` emphasis, padded tables): what you write reads back normalized, so \`edit\` the text as \`read\` shows it. To add a file (an image, a PDF): with a shell, \`prepare_upload\` and run the curl line it returns; without one, \`attach\` small files (under about 200 KB) as base64 with their \`sha256\`.
 4. Put a one-line \`note\` on every write. Read the \`lint\` in every write result and fix what it reports; the result's notes say what else to know (ignored fields, the stored form, open comments). A concept with no frontmatter, invalid YAML or no \`type\` is refused. Keep concepts under 100 KB; split big ones into linked concepts.
 5. Never write index.md or log.md (the server synthesizes them). Never set \`generated\` (the server stamps it) or \`verified\` (not yours to claim). Set \`status\` and \`stale_after\` honestly. Timestamps are full ISO 8601 datetimes with an offset (\`stale_after: 2026-12-31T00:00:00Z\`); a plain date is flagged.
 6. Use \`work\` to find what needs doing: open comments, stale concepts, broken links, lint, and structure (a directory's index.md made poor by its concepts: missing, long or title-repeating descriptions, duplicate titles, concepts nothing links to, a directory with one concept, none, or too many); \`work\` with kind stale_soon lists what goes stale within 14 days. Only a new \`stale_after\` resets a concept's clock; other edits leave it stale.
@@ -711,29 +712,84 @@ export function buildServer(ctx: McpContext): McpServer {
     {
       title: "Add an attachment",
       description:
-        "Store a small non-markdown file (an image, a script, a PDF; up to 10 MB) at a path, e.g. `references/attesters/check.py`. Send the bytes base64-encoded. Images (PNG, JPEG, GIF, WebP, AVIF, SVG) are checked on write: a broken or truncated one is refused with `bad_image`, and an image's type is taken from its bytes, not from `media` or the extension. Replacing needs `if_match`. Reading it back with `read` returns a short-lived download URL.",
+        "Store a small non-markdown file (an image, a script, a PDF) at a path, e.g. `references/attesters/check.py`, from its bytes as base64. Base64 is for small files (under about 200 KB): every character is typed out, and a long run gets cut short or garbled. If you can run a shell, use `prepare_upload` instead and PUT the real file; it takes up to 10 MB. Pass `sha256` (hex; `sha256sum file`, or `hashlib.sha256(data).hexdigest()`) or at least `size` in bytes, so bytes that arrive damaged are refused (`checksum_mismatch`, with what arrived) instead of stored. Images (PNG, JPEG, GIF, WebP, AVIF, SVG) are checked on write: a broken or truncated one is refused with `bad_image`, and an image's type is taken from its bytes, not from `media` or the extension. Replacing needs `if_match`. Reading it back with `read` returns a short-lived download URL.",
       inputSchema: {
         path: z.string(),
         content_base64: z.string(),
         media: z.string().optional().describe("MIME type; guessed from the extension if omitted."),
+        sha256: z
+          .string()
+          .optional()
+          .describe("The file's SHA-256 as hex; the decoded bytes must match."),
+        size: z.number().int().optional().describe("The file's length in bytes; checked likewise."),
         if_match: z.string().optional(),
         note: z.string().optional().describe("One line for the ledger."),
         ...libArg,
       },
       annotations: writes,
     },
-    guarded(async ({ path, content_base64, media, if_match, note, library }) => {
+    guarded(async ({ path, content_base64, media, sha256, size, if_match, note, library }) => {
       const { token, lib } = pick(library);
       checkWrite(token, path);
-      let bytes: Uint8Array;
-      try {
-        bytes = Uint8Array.from(atob(content_base64), (c) => c.charCodeAt(0));
-      } catch {
-        throw new OkfError(400, "bad_base64", "content_base64 is not valid base64.");
-      }
+      const declared = checkDeclared({ size, sha256 });
+      const bytes = decodeBase64(content_base64);
+      checkBytes(bytes, declared);
       const blob = await putBlob(ctx.blobs, bytes, media ?? mediaFor(path), path);
       const res = await lib.apply(request(note), [{ op: "attach", path, blob, if_match }]);
       return text(writeText("Stored", res));
+    }),
+  );
+
+  server.registerTool(
+    "prepare_upload",
+    {
+      title: "Upload a file from your shell",
+      description:
+        "The way to add a real file (a screenshot, a chart, a PDF; up to 10 MB) when you can run a shell: returns a URL, good for one PUT within 15 minutes, and a ready `curl -T <file> '<url>'` line. Run it; the server stores the bytes and attaches them at `path` as you, with your `note`, and curl prints the write result as JSON (path, hash, seq, lint). Pass `sha256` (`sha256sum file`) or `size` so damaged bytes are refused. The URL needs no token, so keep it to yourself. It only works where your shell can reach this server; from a sandbox that cannot, use `attach` with base64 for a small file.",
+      inputSchema: {
+        path: z.string().describe("Where the file goes, e.g. `figures/latency.png`."),
+        media: z.string().optional().describe("MIME type; guessed from the extension if omitted."),
+        size: z.number().int().optional().describe("The file's length in bytes."),
+        sha256: z.string().optional().describe("The file's SHA-256 as hex."),
+        if_match: z.string().optional().describe("Replacing a file: its current hash."),
+        note: z.string().optional().describe("One line for the ledger."),
+        ...libArg,
+      },
+      annotations: writes,
+    },
+    guarded(async ({ path, media, size, sha256, if_match, note, library }) => {
+      const picked = pick(library);
+      checkWrite(picked.token, path);
+      const clean = normalizePath(path);
+      if (!clean || clean.endsWith(".md")) {
+        throw new OkfError(
+          400,
+          "bad_path",
+          "prepare_upload is for attachments: a file path that is not markdown (use `write` for concepts).",
+        );
+      }
+      const req = request(note);
+      const up = await prepareUpload(picked.lib, ctx.origin, {
+        path: clean,
+        media: media ?? mediaFor(clean),
+        ...checkDeclared({ size, sha256 }),
+        if_match,
+        note: req.note ?? null,
+        actor: req.actor,
+        by: req.by,
+        token: picked.token,
+      });
+      return text(
+        [
+          `Upload URL for ${clean} (one PUT, until ${up.expires}):`,
+          up.url,
+          "",
+          "Run, from the directory holding the file (rename it to the file's real name if it differs):",
+          up.curl,
+          "",
+          "curl prints the write result as JSON; read its lint. An error comes back as JSON with a code (checksum_mismatch, media_mismatch, upload_used); prepare again and resend.",
+        ].join("\n"),
+      );
     }),
   );
 

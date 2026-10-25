@@ -8,6 +8,14 @@ import { parseArgs } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 
+/** A 1×1 grey PNG, a real image for the upload step. */
+const PIXEL_PNG = Uint8Array.from(
+  atob(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGNoAAAAggCBd81ytgAAAABJRU5ErkJggg==",
+  ),
+  (c) => c.charCodeAt(0),
+);
+
 /** Runs the smoke flow; returns true when every step behaved as expected. */
 export async function mcpSmoke(opts: {
   url: string;
@@ -86,6 +94,28 @@ export async function mcpSmoke(opts: {
     log(`${decodes ? "ok  " : "FAIL"} mcp read image (${img?.mimeType ?? "no image block"})`);
     const pngHash = /hash: ([0-9a-f]{64})/.exec(blocks[0]?.text ?? "")?.[1];
     await call("delete", { path: png, if_match: pngHash, note: "mcp smoke cleanup" });
+    // A real file's bytes over an upload URL (TEMPRA-158), as an agent with a shell sends one.
+    if (tools.includes("prepare_upload")) {
+      const png = PIXEL_PNG;
+      const sha = new Bun.CryptoHasher("sha256").update(png).digest("hex");
+      const file = `_smoke/pixel-${Date.now()}.png`;
+      const prep = await call("prepare_upload", {
+        path: file,
+        sha256: sha,
+        size: png.length,
+        note: "mcp smoke upload",
+      });
+      const url = /^curl -sS -T \S+ '(\S+)'$/m.exec(prep)?.[1];
+      const put = url ? await fetch(url, { method: "PUT", body: png }) : null;
+      const res = put ? ((await put.json().catch(() => null)) as { hash?: string } | null) : null;
+      const back = /download \(15 minutes\): (\S+)/.exec(await call("read", { path: file }))?.[1];
+      const got = back ? new Uint8Array(await (await fetch(back)).arrayBuffer()) : null;
+      const ok =
+        put?.status === 200 && res?.hash === sha && got !== null && Bun.deepEquals(got, png);
+      if (!ok) failed = true;
+      log(`${ok ? "ok  " : "FAIL"} mcp upload over prepare_upload (${put?.status})`);
+      await call("delete", { path: file, if_match: sha, note: "mcp smoke cleanup" });
+    }
   }
 
   await client.close();

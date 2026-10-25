@@ -4562,28 +4562,88 @@ export class LibraryStore {
 
   /** A short-lived token for a download URL: a file's bytes or an export at a seq. */
   signDownload(payload: DownloadPayload, ttlSeconds = 900): string {
-    const exp = Math.floor(this.clock().getTime() / 1000) + ttlSeconds;
-    const body = b64url(new TextEncoder().encode(JSON.stringify({ ...payload, exp })));
-    return `${body}.${b64url(hmac(sha256, this.signingKey(), new TextEncoder().encode(body)))}`;
+    return this.sign("", payload, ttlSeconds);
   }
 
   /** Checks a download token's signature and expiry. */
   openDownload(token: string): DownloadPayload {
-    const [body, sig] = token.split(".");
     const bad = new OkfError(403, "bad_download", "This download link is invalid or has expired.");
+    const payload = this.unsign<DownloadPayload>("", token, bad);
+    if (payload.k !== "file" && payload.k !== "export") throw bad;
+    return payload;
+  }
+
+  /**
+   * A short-lived token for an upload URL (TEMPRA-158): what the Worker writes when the bytes
+   * arrive, and as whom. Its MAC covers another domain than a download's, so neither kind of
+   * link opens as the other; each carries a nonce, so it can be spent once.
+   */
+  signUpload(payload: Record<string, unknown>, ttlSeconds = 900): string {
+    return this.sign(UPLOAD_DOMAIN, { ...payload, n: bytesToHex(randomBytes(12)) }, ttlSeconds);
+  }
+
+  /**
+   * Checks an upload token's signature, expiry and that it is unspent. With `claim` it is spent
+   * in this one synchronous call, so two uploads on one link cannot both pass.
+   */
+  openUpload(token: string, opts: { claim?: boolean } = {}): Record<string, unknown> {
+    const bad = new OkfError(
+      403,
+      "bad_upload",
+      "This upload link is invalid or has expired. Ask for a new one with prepare_upload.",
+    );
+    const payload = this.unsign<Record<string, unknown> & { n?: unknown }>(
+      UPLOAD_DOMAIN,
+      token,
+      bad,
+    );
+    if (typeof payload.n !== "string") throw bad;
+    const key = `upload:${payload.n}`;
+    if (this.sql.all("SELECT 1 FROM meta WHERE key = ?", key).length > 0) {
+      throw new OkfError(
+        403,
+        "upload_used",
+        "This upload link was already used. Ask for a new one with prepare_upload.",
+      );
+    }
+    if (opts.claim) {
+      // A spent link is remembered until it would have expired anyway.
+      const now = Math.floor(this.clock().getTime() / 1000);
+      this.sql.run(
+        "DELETE FROM meta WHERE key LIKE 'upload:%' AND CAST(value AS INTEGER) < ?",
+        now,
+      );
+      this.sql.run("INSERT INTO meta (key, value) VALUES (?, ?)", key, String(payload.exp));
+    }
+    return payload;
+  }
+
+  private sign(domain: string, payload: object, ttlSeconds: number): string {
+    const exp = Math.floor(this.clock().getTime() / 1000) + ttlSeconds;
+    const body = b64url(new TextEncoder().encode(JSON.stringify({ ...payload, exp })));
+    const mac = hmac(sha256, this.signingKey(), new TextEncoder().encode(domain + body));
+    return `${body}.${b64url(mac)}`;
+  }
+
+  private unsign<T>(domain: string, token: string, bad: OkfError): T & { exp: number } {
+    const [body, sig] = token.split(".");
     if (!body || !sig) throw bad;
-    const expected = b64url(hmac(sha256, this.signingKey(), new TextEncoder().encode(body)));
+    const mac = hmac(sha256, this.signingKey(), new TextEncoder().encode(domain + body));
+    const expected = b64url(mac);
     if (expected.length !== sig.length || !equalBytes(expected, sig)) throw bad;
-    let payload: DownloadPayload & { exp: number };
+    let payload: T & { exp: number };
     try {
       payload = JSON.parse(new TextDecoder().decode(fromB64url(body)));
     } catch {
       throw bad;
     }
-    if (payload.exp * 1000 < this.clock().getTime()) throw bad;
+    if (typeof payload?.exp !== "number" || payload.exp * 1000 < this.clock().getTime()) throw bad;
     return payload;
   }
 }
+
+/** What an upload token's MAC covers before its body; a download's covers the body alone. */
+const UPLOAD_DOMAIN = "upload.";
 
 export type DownloadPayload =
   | { k: "file"; path: string; hash: string; media: string | null }
