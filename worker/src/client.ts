@@ -49,6 +49,7 @@ export const LIBRARY_METHODS = [
   "digest",
   "setDimensions",
   "imageBlob",
+  "setDiagramRenders",
 ] as const;
 
 export type LibraryMethod = (typeof LIBRARY_METHODS)[number];

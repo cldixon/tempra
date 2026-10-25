@@ -409,8 +409,15 @@ export function setup() {
   const kv = memoryKV();
   // Tests sign up new accounts freely; sign-in tests set SIGNUP to try the other modes.
   const env = { OAUTH_KV: kv, SIGNUP: "open" } as unknown as Env;
+  /** What requests left running after their response (ctx.waitUntil), for tests to await. */
+  const waits: Promise<unknown>[] = [];
+  const settled = async () => {
+    while (waits.length > 0) await Promise.allSettled(waits.splice(0));
+  };
   const ctx = {
-    waitUntil() {},
+    waitUntil(p: Promise<unknown>) {
+      waits.push(p);
+    },
     passThroughOnException() {},
     props: {},
   } as unknown as ExecutionContext;
@@ -504,5 +511,7 @@ export function setup() {
     sessionFor,
     /** The cookie secret `app` sends. */
     ownerSession,
+    /** Awaits what requests left running after their responses. */
+    settled,
   };
 }

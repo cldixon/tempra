@@ -114,6 +114,11 @@ export interface Deps extends UsageDeps {
    * absent, or with no RENDER binding, it answers "render unavailable".
    */
   renderDiagram?: RenderDiagram;
+  /**
+   * How long a write's answer waits for its diagrams' verdicts from the render service
+   * (render-lint.ts, TEMPRA-167); RENDER_LINT_BUDGET_MS unless set.
+   */
+  renderBudgetMs?: number;
 }
 
 export interface RecoveryDeps {
@@ -138,6 +143,15 @@ type Env = {
   Variables: { token: TokenInfo; lib: LibraryClient; deps: Deps };
 };
 type C = Context<Env>;
+
+/** Keeps work going after the response (ctx.waitUntil); without an execution context, it runs on. */
+const afterResponse =
+  (c: C) =>
+  (p: Promise<unknown>): void => {
+    try {
+      c.executionCtx.waitUntil(p);
+    } catch {}
+  };
 
 /** A library's routes: {owner} is its owner's handle (v2 spec: Tenancy and authorization). */
 const BASE = "/api/v1/libraries/:owner/:lib";
@@ -438,7 +452,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     await admit(d, tokenAdmission(token), write, "token" in who);
     c.set("deps", d);
     c.set("token", token);
-    c.set("lib", notifying(d, token, d.library(token)));
+    c.set("lib", notifying(d, token, d.library(token), afterResponse(c)));
     await next();
   });
 
@@ -1207,7 +1221,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     const blob = await putBlob(d.blobs, bytes, media, grant.path ?? undefined);
     await lib.openUpload(raw, { claim: true });
     if (grant.path === null) return c.json(blob, 201);
-    const res = await notifying(d, token, d.library(token)).apply(
+    const res = await notifying(d, token, d.library(token), afterResponse(c)).apply(
       { actor: grant.actor, request_id: crypto.randomUUID(), note: grant.note, by: grant.by },
       [
         {

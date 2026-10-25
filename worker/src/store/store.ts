@@ -27,7 +27,7 @@ import {
   sourceCandidates,
 } from "../okf/concept";
 import { type LogRequest, renderIndex, renderLog } from "../okf/derived";
-import { diagramLint } from "../okf/diagrams";
+import { checkedFences, diagramLint, type RenderFailure, unrenderedWarning } from "../okf/diagrams";
 import { unifiedDiff } from "../okf/diff";
 import { figureLint } from "../okf/figure-lint";
 import { type FigureFact, figureFacts } from "../okf/figures";
@@ -91,7 +91,7 @@ import {
   type ThreadView,
 } from "./comments";
 import { notFound, OkfError } from "./errors";
-import { LEDGER_COUNTS, migrate } from "./schema";
+import { DIAGRAM_RENDERS, LEDGER_COUNTS, migrate } from "./schema";
 import type { SqlHandle, SqlValue } from "./sql";
 
 /** Concepts over this many bytes of rendered markdown are refused (spec: OKF conformance). */
@@ -215,7 +215,29 @@ export interface WriteResult {
   results: OpResult[];
   /** For the Worker's after-commit step (notify.ts), which strips it before answering. */
   notify?: WriteNotice;
+  /** Diagrams for the render service to try after the commit (render-lint.ts), also stripped. */
+  render?: RenderJob[];
 }
+
+/**
+ * The diagrams of one written concept version that the fast check passed and whose verdict from
+ * Pele the library does not know yet (TEMPRA-167), by the SHA-256 of their source.
+ */
+export interface RenderJob {
+  concept_id: string;
+  path: string;
+  hash: string;
+  diagrams: { key: string; source: string }[];
+}
+
+/** Pele's verdict on a diagram's source: null when it draws, else where and why it failed. */
+export interface RenderVerdict {
+  key: string;
+  error: RenderFailure | null;
+}
+
+/** At most this many diagrams of a request go to the render service; the rest wait for a write. */
+export const RENDERS_PER_WRITE = 10;
 
 /**
  * What a committed write means for the people of the library (TEMPRA-116; tempra-dev:
@@ -244,6 +266,7 @@ export interface ImportResult {
   skipped: string[];
   warnings: { path: string; lint: LintWarning[] }[];
   notify?: WriteNotice;
+  render?: RenderJob[];
 }
 
 export interface EventRow {
@@ -628,6 +651,7 @@ export class LibraryStore {
     this.addLedgerCounts();
     this.addFtsRows();
     this.addBlobDimensions();
+    this.sql.script(DIAGRAM_RENDERS);
   }
 
   /**
@@ -1020,6 +1044,7 @@ export class LibraryStore {
             request_id: ctx.request_id,
             seq: this.headSeq(),
             results: this.finish(w, results),
+            ...rendersOf(w),
           };
         }),
       );
@@ -1090,6 +1115,7 @@ export class LibraryStore {
           warnings: results
             .filter((r) => r.lint.length > 0)
             .map((r) => ({ path: r.path, lint: r.lint })),
+          ...rendersOf(w),
         };
       }),
     );
@@ -1120,6 +1146,7 @@ export class LibraryStore {
           request_id: ctx.request_id,
           seq: this.headSeq(),
           results: this.finish(w, results),
+          ...rendersOf(w),
         };
       }),
     );
@@ -1317,6 +1344,7 @@ export class LibraryStore {
       pending: new Map(),
       written: new Map(),
       affected: new Set(),
+      renders: [],
     };
   }
 
@@ -1603,6 +1631,7 @@ export class LibraryStore {
     }
     const hash = this.putRecord(built.record);
     const conceptId = cur?.concept_id ?? w.pending.get(path) ?? crypto.randomUUID();
+    built.lint.push(...this.renderLint(w, conceptId, path, hash, built.record.doc));
     let seq = cur?.seq ?? 0;
     if (!cur || cur.hash !== hash) {
       const meta: JsonObject = w.source ? { source: w.source } : {};
@@ -2212,6 +2241,7 @@ export class LibraryStore {
     if (kind === "concept") {
       const r = this.record(hash);
       lint = this.fieldLint(r, path, this.verifiedAt(conceptId, seq), true);
+      lint.push(...this.renderLint(w, conceptId, path, hash, r.doc));
       this.indexConcept(conceptId, path, r, lint, seq);
       w.written.set(path, conceptId);
     }
@@ -2383,18 +2413,7 @@ export class LibraryStore {
       id,
     );
 
-    const nonLink = lint.filter((l) => l.code !== "broken_link");
-    if (nonLink.length > 0) {
-      this.sql.run(
-        `INSERT INTO flags (concept_id, kind, since_seq, detail) VALUES (?, 'lint', ?, ?)
-         ON CONFLICT(concept_id, kind) DO UPDATE SET detail = excluded.detail`,
-        id,
-        seq,
-        JSON.stringify(nonLink),
-      );
-    } else {
-      this.sql.run("DELETE FROM flags WHERE concept_id = ? AND kind = 'lint'", id);
-    }
+    this.setLintFlag(id, lint, seq);
 
     // Only a new stale_after moves the clock (TEMPRA-63): any other write leaves the flags as
     // the staleness process last set them.
@@ -2596,6 +2615,115 @@ export class LibraryStore {
       });
     }
     return out;
+  }
+
+  /**
+   * `diagram_unrendered` lint for a concept version's diagrams from Pele's known verdicts
+   * (TEMPRA-167), and, inside a write, a render job for those the fast check passed whose verdict
+   * is not known yet (up to RENDERS_PER_WRITE in the request). Synchronous: the render itself is
+   * the Worker's, after the commit.
+   */
+  private renderLint(
+    w: WriteState | null,
+    conceptId: string,
+    path: string,
+    hash: string,
+    doc: Doc,
+  ): LintWarning[] {
+    const fences = checkedFences(doc);
+    if (fences.length === 0) return [];
+    const out: LintWarning[] = [];
+    const unknown: { key: string; source: string }[] = [];
+    for (const f of fences) {
+      const key = sha256Hex(f.source);
+      const row = this.sql.all<{ error: string | null }>(
+        "SELECT error FROM diagram_renders WHERE key = ?",
+        key,
+      )[0];
+      if (!row) {
+        if (!unknown.some((u) => u.key === key)) unknown.push({ key, source: f.source });
+      } else if (row.error) {
+        out.push(unrenderedWarning(f, JSON.parse(row.error) as RenderFailure));
+      }
+    }
+    if (w && unknown.length > 0) {
+      const room = RENDERS_PER_WRITE - w.renders.reduce((n, j) => n + j.diagrams.length, 0);
+      const diagrams = unknown.slice(0, Math.max(0, room));
+      if (diagrams.length > 0) w.renders.push({ concept_id: conceptId, path, hash, diagrams });
+    }
+    return out;
+  }
+
+  /**
+   * Keeps Pele's verdicts from the render service and, for each concept still at the version
+   * they were asked for, replaces its `diagram_unrendered` lint (TEMPRA-167); a concept that has
+   * moved on keeps its lint, as its newer write asked for its own. Not a write: no ledger event,
+   * no new version. Returns each updated concept's `diagram_unrendered` lint by path.
+   */
+  setDiagramRenders(
+    jobs: { concept_id: string; hash: string; verdicts: RenderVerdict[] }[],
+  ): { path: string; hash: string; lint: LintWarning[] }[] {
+    return this.sql.transaction(() => {
+      for (const j of jobs) {
+        for (const v of j.verdicts) {
+          this.sql.run(
+            "INSERT OR REPLACE INTO diagram_renders (key, error) VALUES (?, ?)",
+            v.key,
+            v.error ? JSON.stringify(v.error) : null,
+          );
+        }
+      }
+      const out: { path: string; hash: string; lint: LintWarning[] }[] = [];
+      for (const j of jobs) {
+        const row = this.sql.all<{ path: string; hash: string; kind: string; last_seq: number }>(
+          "SELECT path, hash, kind, last_seq FROM paths WHERE concept_id = ?",
+          j.concept_id,
+        )[0];
+        if (row?.kind !== "concept" || row.hash !== j.hash) continue;
+        const stored = this.sql.all<{ lint: string | null }>(
+          "SELECT lint FROM concepts WHERE concept_id = ?",
+          j.concept_id,
+        )[0];
+        if (!stored) continue;
+        const unrendered = this.renderLint(
+          null,
+          j.concept_id,
+          row.path,
+          row.hash,
+          this.record(row.hash).doc,
+        );
+        const lint = [
+          ...(JSON.parse(stored.lint ?? "[]") as LintWarning[]).filter(
+            (l) => l.code !== "diagram_unrendered",
+          ),
+          ...unrendered,
+        ];
+        this.sql.run(
+          "UPDATE concepts SET lint = ? WHERE concept_id = ?",
+          JSON.stringify(lint),
+          j.concept_id,
+        );
+        this.setLintFlag(j.concept_id, lint, row.last_seq);
+        out.push({ path: row.path, hash: row.hash, lint: unrendered });
+      }
+      return out;
+    });
+  }
+
+  /** The `lint` work flag from a concept's stored lint (broken links have their own flag). */
+  private setLintFlag(id: string, lint: LintWarning[], seq: number) {
+    const nonLink = lint.filter((l) => l.code !== "broken_link");
+    if (nonLink.length > 0) {
+      this.sql.run(
+        `INSERT INTO flags (concept_id, kind, since_seq, detail) VALUES (?, 'lint', ?, ?)
+         ON CONFLICT(concept_id, kind) DO UPDATE SET detail = excluded.detail`,
+        id,
+        seq,
+        JSON.stringify(nonLink),
+      );
+    } else {
+      this.sql.run("DELETE FROM flags WHERE concept_id = ? AND kind = 'lint'", id);
+    }
   }
 
   /** Field lint of a content version, as a write of it would report (spec: OKF conformance). */
@@ -5087,6 +5215,10 @@ interface ThreadRow extends Entry {
   replies: number;
 }
 
+/** A request's render jobs for its result, when it has any. */
+const rendersOf = (w: WriteState): { render?: RenderJob[] } =>
+  w.renders.length > 0 ? { render: w.renders } : {};
+
 interface WriteState {
   ctx: RequestContext;
   now: string;
@@ -5098,4 +5230,6 @@ interface WriteState {
   written: Map<string, string>;
   /** Concepts whose outbound links changed state, for flag refresh. */
   affected: Set<string>;
+  /** Diagrams for the render service after the commit, at most RENDERS_PER_WRITE in all. */
+  renders: RenderJob[];
 }

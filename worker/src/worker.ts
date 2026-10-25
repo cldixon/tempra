@@ -138,7 +138,7 @@ export function createWorker(deps: (env: Cloudflare.Env) => Deps): {
           }
           return handleMcp(request, {
             ...caller,
-            open: (t) => notifying(d, t, d.library(t)),
+            open: (t) => notifying(d, t, d.library(t), (p) => ctx.waitUntil(p)),
             comment: (t, req, action) => postComment(d, t, d.library(t), req, action),
             about: (id) => d.accounts.about(id),
             agentNames: async (ids) =>

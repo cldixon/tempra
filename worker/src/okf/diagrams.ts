@@ -269,18 +269,71 @@ export function diagramLint(doc: Doc): LintWarning[] {
   return out;
 }
 
-function diagramWarning(code: Code, n: number, p: DiagramProblem): LintWarning {
+/** "Mermaid diagram 2 (`flowchart LR`, block b7)": a diagram by its place, first line and block. */
+function diagramName(code: Code, n: number): string {
   const first =
     code.value
       .split("\n")
       .find((l) => l.trim() !== "")
       ?.trim() || "(empty)";
   const block = idOf(code);
-  const which = `Mermaid diagram ${n} (\`${first.slice(0, 40)}\`${block ? `, block ${block}` : ""})`;
+  return `Mermaid diagram ${n} (\`${first.slice(0, 40)}\`${block ? `, block ${block}` : ""})`;
+}
+
+function diagramWarning(code: Code, n: number, p: DiagramProblem): LintWarning {
   const kind = p.kind === "unsupported-diagram" ? "is not a diagram" : "has a syntax error";
   return {
     code: "diagram_invalid",
-    message: `${which} ${kind} at line ${p.line}, column ${p.column} of the fence: ${p.message} The app shows its source until it draws; fix the fence.`,
-    block,
+    message: `${diagramName(code, n)} ${kind} at line ${p.line}, column ${p.column} of the fence: ${p.message} The app shows its source until it draws; fix the fence.`,
+    block: idOf(code),
+  };
+}
+
+/**
+ * A diagram the fast check passed, for the render service to try (TEMPRA-167): its place among
+ * the body's diagrams, its block and its source.
+ */
+export interface CheckedFence {
+  n: number;
+  code: Code;
+  block: string | undefined;
+  source: string;
+}
+
+/** The body's diagrams that `diagramLint` finds nothing wrong with, in order. */
+export function checkedFences(doc: Doc): CheckedFence[] {
+  const out: CheckedFence[] = [];
+  let n = 0;
+  walk(doc, (node) => {
+    if (!isDiagram(node)) return undefined;
+    n++;
+    const code = node as Code;
+    if (!checkDiagram(code.value)) out.push({ n, code, block: idOf(code), source: code.value });
+    return false;
+  });
+  return out;
+}
+
+/** Where Pele failed and why, at a 1-based line and column of the fence (0 when it names none). */
+export interface RenderFailure {
+  message: string;
+  line: number;
+  column: number;
+}
+
+/**
+ * Lint for a diagram the fast check passed and Pele, on the render service, could not draw
+ * (TEMPRA-167): `diagram_unrendered`, with Pele's message and place in the fence.
+ */
+export function unrenderedWarning(f: CheckedFence, e: RenderFailure): LintWarning {
+  const at =
+    e.line > 0
+      ? ` at line ${e.line}${e.column > 0 ? `, column ${e.column}` : ""} of the fence`
+      : "";
+  const message = e.message.trim().replace(/\.?$/, ".");
+  return {
+    code: "diagram_unrendered",
+    message: `${diagramName(f.code, f.n)} could not be drawn by Pele${at}: ${message} The app shows its source until it draws; fix the fence.`,
+    block: f.block,
   };
 }
