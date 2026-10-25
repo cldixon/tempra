@@ -1422,7 +1422,10 @@ async function browserRenders(
           await found.waitFor({ timeout: 5000 });
           await page.keyboard.press("Escape");
           await found.waitFor({ state: "hidden", timeout: 5000 });
-          // New library floats at the screen's bottom right, not in the top bar (TEMPRA-148).
+          // New library floats at the screen's bottom right, not in the top bar (TEMPRA-148);
+          // under the drawer while it is open, so the drawer closes first.
+          await page.keyboard.press("Escape");
+          await sidebar.waitFor({ state: "hidden", timeout: 5000 });
           if (
             (await page
               .locator("header.ws-topbar")
