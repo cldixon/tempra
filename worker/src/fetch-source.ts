@@ -17,6 +17,13 @@ export type FetchFn = (input: string, init?: RequestInit) => Promise<Response>;
 
 export const MAX_REDIRECTS = 3;
 export const FETCH_TIMEOUT_MS = 10_000;
+/**
+ * Sent on every hop. A descriptive User-Agent with a contact URL, as sites such as Wikimedia
+ * require (they answer 400 or 403 without one).
+ */
+export const FETCH_USER_AGENT =
+  "Tempra/1.0 (+https://tempra.dev; fetches an image an agent named for a library)";
+export const FETCH_ACCEPT = "image/*, application/pdf, video/*, audio/*;q=0.8, */*;q=0.1";
 
 /** Where an attachment fetched from a URL came from, as the attach op records it. */
 export type UrlSource = AttachSource;
@@ -190,8 +197,8 @@ export async function fetchSource(
             redirect: "manual",
             signal: abort.signal,
             headers: {
-              Accept: "image/*, video/*, audio/*, application/pdf;q=0.9, */*;q=0.1",
-              "User-Agent": "Tempra (+https://tempra.dev)",
+              Accept: FETCH_ACCEPT,
+              "User-Agent": FETCH_USER_AGENT,
             },
           }),
           late,
@@ -221,7 +228,11 @@ export async function fetchSource(
       }
       if (!res.ok) {
         res.body?.cancel().catch(() => {});
-        throw refused("status", `source_url answered ${res.status}.`, { status: res.status });
+        throw refused(
+          "status",
+          `${url.host} answered ${res.status}${res.statusText ? ` ${res.statusText}` : ""} for ${url.href}; nothing was stored.`,
+          { status: res.status, host: url.host },
+        );
       }
       const cap = opts.cap ?? WORKER_ATTACHMENT_CAP;
       const bytes = await readBody(res.body, cap, late);

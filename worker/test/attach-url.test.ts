@@ -202,7 +202,7 @@ describe("attach from a URL (TEMPRA-157)", () => {
     });
     expect(broken.text).toContain("bad_image");
     const gone = await call("attach", { path: "g.png", source_url: "https://example.com/gone" });
-    expect(gone.text).toContain("answered 404");
+    expect(gone.text).toContain("example.com answered 404");
     const pdf = await call("attach", { path: "d.pdf", source_url: "https://example.com/doc" });
     expect(pdf.isError).toBe(false);
     expect((await describeFile(s, "d.pdf")).media).toBe("application/pdf");
@@ -365,6 +365,34 @@ describe("attach from a URL (TEMPRA-157)", () => {
     );
     expect(asReader.status).toBe(403);
     expect(s.fetched.length).toBe(fetchedBefore);
+  });
+
+  test("every hop sends a descriptive User-Agent and Accept (Wikimedia refuses requests without one)", async () => {
+    const s = setup();
+    const seen: { ua: string | null; accept: string | null }[] = [];
+    const strict = (next: () => Response) => (init?: RequestInit) => {
+      const h = new Headers(init?.headers);
+      seen.push({ ua: h.get("User-Agent"), accept: h.get("Accept") });
+      return (h.get("User-Agent") ?? "").includes("+https://tempra.dev")
+        ? next()
+        : new Response("Please set a user-agent", { status: 400 });
+    };
+    s.web.set("https://commons.example/a", strict(redirect("https://upload.example/b")));
+    s.web.set("https://upload.example/b", strict(png));
+    const call = await mcp(s);
+    const r = await call("attach", { path: "c.png", source_url: "https://commons.example/a" });
+    expect(r.isError).toBe(false);
+    expect(seen).toHaveLength(2);
+    for (const h of seen) {
+      expect(h.ua).toBe(
+        "Tempra/1.0 (+https://tempra.dev; fetches an image an agent named for a library)",
+      );
+      expect(h.accept).toBe("image/*, application/pdf, video/*, audio/*;q=0.8, */*;q=0.1");
+    }
+    // A refusal names the status and the host.
+    s.web.set("https://picky.example/x.png", () => new Response("no", { status: 400 }));
+    const no = await call("attach", { path: "p.png", source_url: "https://picky.example/x.png" });
+    expect(no.text).toContain("picky.example answered 400");
   });
 
   test("the design's other media are known by their bytes", () => {
