@@ -1,0 +1,19 @@
+{
+  "name": "@tempra/render",
+  "private": true,
+  "type": "module",
+  "description": "The diagram render Worker, tempra-render (TEMPRA-165): Pele to SVG, Browser Rendering to PNG. Deployed by worker/scripts/deploy.ts before the main Worker.",
+  "scripts": {
+    "typecheck": "cf workers types -q && tsc --noEmit"
+  },
+  "dependencies": {
+    "@cloudflare/puppeteer": "1.4.0",
+    "@tempra/design": "workspace:*",
+    "pele": "1.6.0"
+  },
+  "devDependencies": {
+    "cf": "1.0.0-beta.9",
+    "typescript": "^7.0.2",
+    "wrangler": "^4.142.0"
+  }
+}

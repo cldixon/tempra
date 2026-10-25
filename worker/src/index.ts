@@ -12,6 +12,7 @@ import { exportsPrefix, listExports } from "./maintain";
 import { d1Notifications } from "./notify";
 import { devMailer, flushMail, sendDigests } from "./notify-mail";
 import { listRestores, RESTORE_ID, restoresPrefix } from "./recovery";
+import { type RenderService, serviceRenderer } from "./render";
 import { d1Sessions } from "./session";
 import type { Mailer } from "./signin";
 import {
@@ -87,6 +88,15 @@ const depsFor = (env: Env): Deps => {
     const stub = libraryStub(env, doId);
     return makeClient((method, args) => stub.call(method, args));
   };
+  const meter: Deps["meter"] = (e) => {
+    try {
+      env.USAGE.writeDataPoint({
+        blobs: [e.kind, e.account, e.library ?? ""],
+        doubles: [1, e.bytes ?? 0],
+        indexes: [e.account.slice(0, 96)],
+      });
+    } catch {}
+  };
   return {
     authenticate,
     accounts: d1Accounts(env.DB),
@@ -102,15 +112,9 @@ const depsFor = (env: Env): Deps => {
             : env.REQUEST_LIMITER;
       return (await limiter.limit({ key })).success;
     },
-    meter(e) {
-      try {
-        env.USAGE.writeDataPoint({
-          blobs: [e.kind, e.account, e.library ?? ""],
-          doubles: [1, e.bytes ?? 0],
-          indexes: [e.account.slice(0, 96)],
-        });
-      } catch {}
-    },
+    meter,
+    // Not bound in local dev (cloudflare.config.ts): every render answers "render unavailable".
+    renderDiagram: serviceRenderer((env as unknown as { RENDER?: RenderService }).RENDER, meter),
     // Each blob put is recorded in D1 first, so the sweep never lists the bucket (TEMPRA-81).
     blobs: recordingBlobStore(r2BlobStore(env.BLOBS), d1BlobRefs(env.DB)),
     // Scaled copies under variants/ in the same bucket (TEMPRA-153); reads only, so no recording.

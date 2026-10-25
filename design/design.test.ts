@@ -1,13 +1,25 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { generate } from "./build";
+import { generate, generatePele } from "./build";
 import { css, fonts, hash, href } from "./dist/tempra";
 
 test("dist/ is up to date with src/ (run `bun run build` in design/)", () => {
   const fresh = generate();
   expect(readFileSync(join(import.meta.dir, "dist", "tempra.css"), "utf8")).toBe(fresh.css);
   expect(readFileSync(join(import.meta.dir, "dist", "tempra.ts"), "utf8")).toBe(fresh.ts);
+  expect(readFileSync(join(import.meta.dir, "dist", "pele.ts"), "utf8")).toBe(generatePele());
+});
+
+test("the diagram theme resolves every --pele-* to a concrete value, light and dark (TEMPRA-165)", async () => {
+  const { peleThemes } = await import("./dist/pele");
+  for (const scheme of ["light", "dark"] as const) {
+    const t = peleThemes[scheme];
+    expect(Object.keys(t).length).toBeGreaterThan(10);
+    for (const v of Object.values(t)) expect(v).not.toMatch(/var\(|light-dark\(/);
+  }
+  expect(peleThemes.light["--pele-bg"]).toBe("#ffffff");
+  expect(peleThemes.dark["--pele-fg"]).not.toBe(peleThemes.light["--pele-fg"]);
 });
 
 test("the stylesheet carries tokens, base and prose, and a hashed URL", () => {

@@ -409,6 +409,21 @@ describe("blob sweep (TEMPRA-81, TEMPRA-91)", () => {
     expect(w.db.query("SELECT 1 FROM blob_orphans WHERE hash = 'b7'").all()).toHaveLength(1);
   });
 
+  // TEMPRA-165: the render Worker caches diagrams in the same bucket under renders/.
+  test("diagram renders under renders/ are never listed, counted or deleted", async () => {
+    const w = world();
+    w.addLibrary("a", [], true);
+    await w.upload("old");
+    const renders = [`renders/${"a".repeat(64)}/pele-1.6.0/light-x/w0.svg`, "renders/b/w0.png"];
+    for (const k of renders) w.objects.set(k, at(-100));
+    for (const d of [0, 1, 32, FULL_RECOUNT_DAYS + 1, FULL_RECOUNT_DAYS * 2 + 40])
+      await w.day(at(d));
+    expect(w.objects.has("blobs/old")).toBe(false);
+    for (const k of renders) expect(w.objects.has(k)).toBe(true);
+    expect(w.calls.deleted.every((k) => k.startsWith("blobs/"))).toBe(true);
+    expect((await w.refs.counts()).stored).toBe(0);
+  });
+
   test("the digest's numbers come from D1 and its library checks still run", async () => {
     const w = world();
     w.addLibrary("a", ["h"], true);

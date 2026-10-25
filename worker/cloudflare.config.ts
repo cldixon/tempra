@@ -10,8 +10,13 @@ import { bindings, defineConfig, exports, triggers } from "cf/config";
  * sets them); no mode is local dev (`cf dev`), type generation and dry runs.
  */
 
-interface Deployment {
+export interface Deployment {
   name: string;
+  /**
+   * The diagram render Worker this deployment binds to as RENDER (TEMPRA-165, render/): its own
+   * per deployment, deployed before this one by scripts/deploy.ts.
+   */
+  render: string;
   /** The custom domain that serves everything: /app, /api, /mcp and OAuth. */
   host: string;
   d1: { name: string; id: string };
@@ -35,6 +40,7 @@ interface Deployment {
 
 const PRODUCTION: Deployment = {
   name: "tempra",
+  render: "tempra-render",
   host: "app.tempra.dev",
   d1: { name: "tempra-accounts", id: "60dcce9c-4a20-44db-8d49-1ee040225c4d" },
   r2: "tempra-blobs",
@@ -46,6 +52,7 @@ const PRODUCTION: Deployment = {
 
 const STAGING: Deployment = {
   name: "tempra-staging",
+  render: "tempra-render-staging",
   host: "staging.tempra.dev",
   d1: { name: "tempra-accounts-staging", id: "d66e1ceb-591e-419d-ba51-9cc32b87f658" },
   r2: "tempra-blobs-staging",
@@ -67,6 +74,7 @@ export function previewDeployment(pr: string, ids: { d1?: string; kv?: string } 
   if (!/^[1-9][0-9]*$/.test(pr)) throw new Error(`Not a pull request number: ${pr || "(unset)"}`);
   return {
     name: `tempra-pr-${pr}`,
+    render: `tempra-render-pr-${pr}`,
     host: `pr-${pr}.tempra.dev`,
     d1: { name: `tempra-accounts-pr-${pr}`, id: ids.d1 ?? "" },
     r2: `tempra-blobs-pr-${pr}`,
@@ -100,16 +108,26 @@ const COMPATIBILITY = {
   observability: { enabled: true },
 };
 
+/**
+ * The deployment a mode names: production for none (local dev, types, dry runs) and for
+ * "production". render/cloudflare.config.ts reads it too, for its name and bucket.
+ */
+export function deploymentFor(mode: string | undefined): Deployment {
+  return mode === "preview"
+    ? previewDeployment(env.TEMPRA_PR ?? "", {
+        d1: env.TEMPRA_PREVIEW_D1_ID,
+        kv: env.TEMPRA_PREVIEW_KV_ID,
+      })
+    : mode === "staging"
+      ? STAGING
+      : PRODUCTION;
+}
+
+/** Compatibility settings both Workers share. */
+export { COMPATIBILITY };
+
 export default defineConfig(({ mode }) => {
-  const d: Deployment =
-    mode === "preview"
-      ? previewDeployment(env.TEMPRA_PR ?? "", {
-          d1: env.TEMPRA_PREVIEW_D1_ID,
-          kv: env.TEMPRA_PREVIEW_KV_ID,
-        })
-      : mode === "staging"
-        ? STAGING
-        : PRODUCTION;
+  const d = deploymentFor(mode);
   // No mode: local dev, type generation and dry runs. `cf dev` would send local requests to the
   // custom domain, so the domain is attached only with an explicit --mode.
   const local = !mode;
@@ -213,6 +231,11 @@ export default defineConfig(({ mode }) => {
         ...(d.mailFrom
           ? { EMAIL: bindings.sendEmail({ allowedSenderAddresses: [d.mailFrom] }) }
           : {}),
+
+        // The diagram render Worker (TEMPRA-165, render/), by service binding to its Renderer
+        // entrypoint. Not bound locally: `cf dev` runs this Worker alone, and src/render.ts
+        // answers "render unavailable" without it.
+        ...(local ? {} : { RENDER: bindings.worker({ worker: d.render, exportName: "Renderer" }) }),
 
         // Secrets (typed in src/env.d.ts): OPERATOR_EMAIL. For local dev, copy .dev.vars.sample to
         // .dev.vars.

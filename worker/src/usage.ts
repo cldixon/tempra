@@ -13,10 +13,11 @@ export const RETRY_AFTER_S = 60;
 
 export interface UsageEvent {
   /**
-   * A request, a write, a sign-in email, a change-feed connection opened, or an image handed to
-   * a model over MCP (TEMPRA-153; bytes: what was sent).
+   * A request, a write, a sign-in email, a change-feed connection opened, an image handed to a
+   * model over MCP (TEMPRA-153; bytes: what was sent), or a diagram drawn by the render Worker
+   * (TEMPRA-165).
    */
-  kind: "request" | "write" | "email" | "feed" | "read_image";
+  kind: "request" | "write" | "email" | "feed" | "read_image" | "render";
   /** The account: a library owner's handle, or an email for sign-in mail. */
   account: string;
   library?: string;
