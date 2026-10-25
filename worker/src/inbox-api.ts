@@ -25,12 +25,9 @@ export function notificationsOf(d: Deps): Notifications {
 export function itemActions(kind: ItemKind): string[] {
   switch (kind) {
     case "reply":
-    case "thread":
       return ["reply", "resolve"];
     case "mention":
       return ["reply"];
-    case "verify":
-      return ["review", "dismiss"];
     case "invitation":
       return ["accept", "decline"];
     default:

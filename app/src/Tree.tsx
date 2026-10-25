@@ -1,9 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useAgentNames } from "./agents";
 import { api } from "./api";
-import { type AgentChange, isLive } from "./changes";
 import { Icon } from "./chrome";
-import { useFeed, useLastSeen } from "./live";
+import { useFeed } from "./live";
 import { prefetchFile } from "./prefetch";
 import { plural } from "./ui";
 import { baseName, dirOf, folderName, type Urls } from "./urls";
@@ -128,31 +126,21 @@ function insideDirs(files: Entry[]): Map<string, Entry[]> {
  * folder never waits. A folder (named for people, with its count of concepts) is a group, not a
  * page: its row opens and closes it (TEMPRA-138), and a folder's address reveals it here. Every
  * folder starts open; the ones the person closed are remembered on this browser, the open file is revealed and marked, and the change feed
- * refreshes the index once per burst of writes. The change dot marks a file: pulsing while an
- * agent writes it now, solid when it changed since the person last looked; a closed folder rolls
- * up the marks of what is inside it.
+ * refreshes the index once per burst of writes. A closed folder rolls up the marks of what is
+ * inside it. Change is not marked here (TEMPRA-173): Activity is where a person looks for it.
  */
 export function Tree(props: {
   urls: Urls;
   file: string | null;
   dir: string | null;
-  /** Agents' recent changes by path, and the clock they are read against (changes.ts). */
-  changes: Map<string, AgentChange>;
-  now: number;
   /** The index and its sequence, for the quick switcher and the feed's start. */
   onIndex?(files: OutlineFile[], seq: number): void;
 }) {
-  const { urls, changes, now } = props;
+  const { urls } = props;
   const [files, setFiles] = useState<Entry[] | null>(null);
   const [closed, setClosed] = useState(() => loadClosed(urls));
   const isOpen = (dir: string) => !closed.has(dir);
   const [seq, setSeq] = useState<number | null>(null);
-  // Agents named for their person (TEMPRA-77): "Claude for @ann changed this just now".
-  const actorName = useAgentNames(
-    urls,
-    [...changes.values()].map((a) => a.by?.agent),
-  );
-  const seen = useLastSeen(urls);
   const dirs = useMemo(() => (files ? buildDirs(files) : null), [files]);
   const counts = useMemo(() => (files ? countConcepts(files) : new Map<string, number>()), [files]);
   const inside = useMemo(() => (files ? insideDirs(files) : new Map<string, Entry[]>()), [files]);
@@ -266,9 +254,8 @@ export function Tree(props: {
     },
   });
 
-  const mark = (e: Entry, comments = e.comments, stale = e.stale, dot = change(e)) => (
+  const mark = (e: Entry, comments = e.comments, stale = e.stale) => (
     <>
-      {dot}
       {comments ? (
         <span className="tree-mark" title={`${comments} open comment${comments === 1 ? "" : "s"}`}>
           <span aria-hidden="true">{comments}</span>
@@ -288,8 +275,8 @@ export function Tree(props: {
     </>
   );
   /**
-   * A closed folder's marks: the dot of the newest file inside that has one, the open comments
-   * added up, and stale if anything inside is (else stale soon).
+   * A closed folder's marks: the open comments added up, and stale if anything inside is (else
+   * stale soon).
    */
   const rolledUp = (dir: string) => {
     const all = inside.get(dir) ?? [];
@@ -299,42 +286,7 @@ export function Tree(props: {
       comments += f.comments ?? 0;
       if (f.stale === "stale" || (f.stale && !stale)) stale = f.stale;
     }
-    let dot: React.ReactNode = null;
-    for (const f of [...all].sort((a, b) => (b.seq ?? 0) - (a.seq ?? 0))) {
-      dot = change(f, true);
-      if (dot) break;
-    }
-    return mark({ path: dir, kind: "dir" }, comments, stale, dot);
-  };
-  /** A file's change dot; `inner` words it for the closed folder that holds the file. */
-  const change = (e: Entry, inner = false) => {
-    const what = inner ? "something in here" : "this";
-    const a = changes.get(e.path);
-    if (a && isLive(a, now)) {
-      const said = `${actorName(a.actor, a.by)} is editing ${what} now`;
-      return (
-        <span className="tree-mark" title={said}>
-          <span className="change-dot live" aria-hidden="true" />
-          <span className="visually-hidden">{said}</span>
-        </span>
-      );
-    }
-    // Solid past the seen cursor (an agent's write seen live counts before the index reloads).
-    const at = Math.max(typeof e.seq === "number" ? e.seq : 0, a?.seq ?? 0);
-    if (seen !== null && at > seen) {
-      return (
-        <span
-          className="tree-mark"
-          title={inner ? "Changed inside since you last looked" : "Changed since you last looked"}
-        >
-          <span className="change-dot" aria-hidden="true" />
-          <span className="visually-hidden">
-            {inner ? "changed inside since you last looked" : "changed since you last looked"}
-          </span>
-        </span>
-      );
-    }
-    return null;
+    return mark({ path: dir, kind: "dir" }, comments, stale);
   };
 
   const rows = (dir: string): React.ReactNode => {

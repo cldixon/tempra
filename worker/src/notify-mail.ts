@@ -35,11 +35,7 @@ export function wants(prefs: Prefs, library: string | null, kind: "immediate" | 
 const KIND_TEXT: Record<string, string> = {
   reply: "replied",
   mention: "mentioned you",
-  thread: "opened a thread",
-  access: "changed your access",
   invitation: "invited you",
-  report: "reported",
-  verify: "changed a page you verified",
 };
 
 /** Who did it, as people read it: @ann for a person, the actor otherwise. */
@@ -50,8 +46,6 @@ export function itemLink(origin: string, i: Pick<Item, "kind" | "place" | "path"
   if (i.kind === "invitation") return `${origin}/invitations`;
   if (!i.path) return `${origin}/${i.place}/`;
   const path = i.path.split("/").map(encodeURIComponent).join("/");
-  // A page to verify opens in review mode (TEMPRA-116).
-  if (i.kind === "verify") return `${origin}/${i.place}/${path}?review=1`;
   return `${origin}/${i.place}/${path}#comments`;
 }
 

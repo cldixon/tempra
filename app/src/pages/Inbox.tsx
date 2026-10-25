@@ -28,8 +28,8 @@ import { inboxUrl, Urls } from "../urls";
 /**
  * The Inbox (take 4, boards 02, 13; TEMPRA-116; tempra-dev: v2/notifications): the one place for
  * what the person should do or answer across their libraries, newest first, kept until done:
- * replies on their threads, mentions, new threads on what they wrote, pages they verified that
- * changed since, invitations and access changes. Open and Done tabs, one
+ * invitations, mentions and replies on their threads, and nothing else (TEMPRA-173). Open and
+ * Done tabs, one
  * library or all; read and done are kept on the server, so they follow the person. "Older" pages
  * back past the first hundred.
  */
@@ -248,12 +248,8 @@ function Row(props: {
               done(`${urls.api(`comments/${encodeURIComponent(i.thread)}`)}/resolve`),
             )
           : null;
-      case "review":
-        return link(a, "Review", href, true);
       case "open":
         return link(a, "Open", href);
-      case "dismiss":
-        return button(a, "Dismiss", done(`/api/v1/inbox/${encodeURIComponent(i.id)}/done`));
       case "accept":
         return i.invitation ? button(a, "Accept", () => props.onAccept(i), true) : null;
       case "decline":

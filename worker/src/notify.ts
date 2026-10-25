@@ -12,21 +12,18 @@ import type { RequestContext, WriteNotice } from "./store/store";
  * library the person reaches. General activity is never an item: it is counted from each
  * library's ledger after the person's cursor ("seen up to seq N", here too).
  *
- * Who is told: a reply goes to everyone who opened or wrote in the thread, a new thread to the
- * people who wrote or verified the concept, a mention to the person mentioned; never to the
- * person who acted in the app themselves (their agents acting for them do notify them), and
- * only to people who can reach the library at that moment.
- *
- * Take 4 (TEMPRA-116) adds a keyed kind, so the Inbox holds what Needs you did: `verify`, from
- * the content write path after it commits (a concept the person verified changed since). Items
- * are also closed by what resolves them: a verification or a delete, a resolved thread. Staleness
- * is the agents' housekeeping (their `work`), never an item (TEMPRA-142).
+ * Who is told (TEMPRA-173; tempra-dev: decisions/notifications-from-zero): a person hears of
+ * three things only, an invitation, a mention and a reply. A reply goes to everyone who opened or
+ * wrote in the thread, a mention to the person mentioned; never to the person who acted in the
+ * app themselves (their agents acting for them do notify them), and only to people who can reach
+ * the library at that moment. Items are closed by what resolves them: a resolved thread, an
+ * answered invitation; open items follow a moved page.
  */
 
-export type ItemKind = "reply" | "mention" | "thread" | "invitation" | "access" | "verify";
+export type ItemKind = "reply" | "mention" | "invitation";
 
 /** Kinds that are mailed at once (batched): the ones addressed to the person. */
-export const MAILED: ReadonlySet<ItemKind> = new Set(["reply", "mention", "thread", "access"]);
+export const MAILED: ReadonlySet<ItemKind> = new Set(["reply", "mention"]);
 
 export interface NewItem {
   user: string;
@@ -71,12 +68,8 @@ export interface Item {
   count: number | null;
 }
 
-/** What resolves items in a library after a write (TEMPRA-116): see `closeAfterWrite`. */
+/** What a committed write changes for a library's open items: see `closeAfterWrite`. */
 export interface Closes {
-  /** Verified by a person: the page's open `verify` items, for everyone. */
-  verified: string[];
-  /** Deleted: the page's open `verify` items, for everyone. */
-  deleted: string[];
   /** Moved: open items on the old path follow the page. */
   moved: { from: string; to: string }[];
 }
@@ -105,9 +98,9 @@ export interface Notifications {
     user: string,
     opts?: { all?: boolean; done?: boolean; library?: string; before?: string; limit?: number },
   ): Promise<{ items: Item[]; next: string | null; open: number }>;
-  /** Closes what a committed write resolved in a library (TEMPRA-116). */
+  /** Carries a library's open items along with the pages a committed write moved. */
   closeAfterWrite(library: string, closes: Closes): Promise<void>;
-  /** Closes a resolved thread's reply, thread and mention items, for everyone. */
+  /** Closes a resolved thread's reply and mention items, for everyone. */
   closeThread(library: string, thread: string): Promise<void>;
   /** Unread items, in all and per library. */
   unread(user: string): Promise<{ total: number; libraries: Record<string, number> }>;
@@ -234,13 +227,6 @@ export function d1Notifications(db: D1Database): Notifications {
       const done = "done_at = ?1, read_at = COALESCE(read_at, ?1)";
       const open = "library = ?2 AND path = ?3 AND done_at IS NULL";
       const stmts: D1PreparedStatement[] = [];
-      for (const path of [...closes.verified, ...closes.deleted]) {
-        stmts.push(
-          db
-            .prepare(`UPDATE notifications SET ${done} WHERE ${open} AND kind = 'verify'`)
-            .bind(now, library, path),
-        );
-      }
       for (const m of closes.moved) {
         // Open items follow the page; a keyed one that would meet an open one at the new path
         // is closed instead, so the key stays unique.
@@ -270,7 +256,7 @@ export function d1Notifications(db: D1Database): Notifications {
         .prepare(
           `UPDATE notifications SET done_at = ?1, read_at = COALESCE(read_at, ?1)
            WHERE library = ?2 AND thread = ?3 AND done_at IS NULL
-             AND kind IN ('reply', 'thread', 'mention')`,
+             AND kind IN ('reply', 'mention')`,
         )
         .bind(now, library, thread)
         .run();
@@ -635,9 +621,8 @@ async function fanOut(
   const reach = new Set(people.map((p) => p.id));
   const kinds = new Map<string, ItemKind>();
   const said = typeof action.body === "string" && action.body.trim() !== "";
-  if (action.kind === "open") {
-    for (const p of res.people.writers) kinds.set(p, "thread");
-  } else if (said) {
+  // A new thread tells no one but whom it mentions; a reply tells the thread's people.
+  if (action.kind !== "open" && said) {
     for (const p of res.people.participants) kinds.set(p, "reply");
   }
   for (const m of mentions) if ("user" in m) kinds.set(m.user, "mention");
@@ -668,15 +653,15 @@ async function fanOut(
   await d.notifications.add(items);
 }
 
-// ---------------------------------------------------------------- verify (TEMPRA-116)
+// ---------------------------------------------------------------- after a content write
 
 /** The content writes whose results carry a WriteNotice for the after-commit step. */
 const NOTICED = ["apply", "import", "revert", "verify"] as const;
 
 /**
  * The library's client as the routes and MCP tools use it: each content write, once committed,
- * goes through `afterWrite` (verify items, and the closes it resolves), and its notice is
- * stripped from what the caller sees. A failure there is logged, never an error on the write.
+ * goes through `afterWrite` (open items follow a moved page), and its notice is stripped from
+ * what the caller sees. A failure there is logged, never an error on the write.
  */
 export function notifying(d: NotifyDeps, token: TokenInfo, lib: LibraryClient): LibraryClient {
   const out = { ...lib };
@@ -689,7 +674,7 @@ export function notifying(d: NotifyDeps, token: TokenInfo, lib: LibraryClient): 
       const { notify, ...res } = await call(ctx, ...rest);
       if (notify) {
         try {
-          await afterWrite(d, token, ctx, res.seq, notify);
+          await afterWrite(d, token, notify);
         } catch (e) {
           console.error(JSON.stringify({ notify_failed: ctx.request_id, error: String(e) }));
         }
@@ -700,60 +685,16 @@ export function notifying(d: NotifyDeps, token: TokenInfo, lib: LibraryClient): 
   return out;
 }
 
-/** "3 edits since you verified". */
-export const editsSince = (n: number) => `${n} ${n === 1 ? "edit" : "edits"} since you verified`;
-
 /**
- * After a content write commits: a `verify` item for each person whose verification it
- * superseded (keyed, so a repeated edit updates the one item), never for the person acting in
- * the app themselves and only for people who reach the library now; then the closes the write
- * resolves (a verification, a delete, a move).
+ * After a content write commits: open items on a moved page follow it. Content writes tell no
+ * one anything (TEMPRA-173): a page someone checked that changed shows so on the page.
  */
 export async function afterWrite(
   d: NotifyDeps,
   token: TokenInfo,
-  ctx: RequestContext,
-  seq: number,
   notice: WriteNotice,
 ): Promise<void> {
-  const n = d.notifications;
-  if (!n) return;
-  const ref = token.library;
-  const items: NewItem[] = [];
-  if (notice.changed.some((c) => c.verifiers.length > 0)) {
-    const people = await libraryPeople(d.accounts, ref);
-    const byId = new Set(people.map((p) => p.id));
-    const byHandle = new Map(people.map((p) => [`human:${p.handle}`, p.id]));
-    const self = ctx.by?.person && !ctx.by.agent ? ctx.by.person : null;
-    for (const c of notice.changed) {
-      for (const v of c.verifiers) {
-        const user = v.person && byId.has(v.person) ? v.person : byHandle.get(v.actor);
-        if (!user || user === self) continue;
-        items.push({
-          user,
-          library: ref.id,
-          kind: "verify",
-          place: `${ref.owner}/${ref.slug}`,
-          path: c.path,
-          seq,
-          actor: ctx.actor,
-          by_user: ctx.by?.person ?? null,
-          by_agent: ctx.by?.agent ?? null,
-          excerpt: editsSince(v.changes),
-          key: `verify:${c.path}`,
-          title: c.title,
-          count: v.changes,
-        });
-      }
-    }
-  }
-  await n.add(items);
-  const closes: Closes = {
-    verified: notice.verified.map((v) => v.path),
-    deleted: notice.changed.filter((c) => c.deleted).map((c) => c.path),
-    moved: notice.moved,
-  };
-  if (closes.verified.length || closes.deleted.length || closes.moved.length) {
-    await n.closeAfterWrite(ref.id, closes);
+  if (d.notifications && notice.moved.length) {
+    await d.notifications.closeAfterWrite(token.library.id, { moved: notice.moved });
   }
 }

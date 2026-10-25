@@ -151,23 +151,8 @@
   margin-top: var(--tempra-space-4);
 }
 
-.home-who a,
-.home-since a {
+.home-who a {
   color: var(--tempra-color-text);
-}
-
-/* Since you last looked (TEMPRA-121): one quiet line under the header's. */
-.home-since {
-  margin-top: var(--tempra-space-1);
-}
-
-/* A part of the home that could not load says so, quietly (H-7). */
-.home-failed {
-  color: var(--tempra-color-muted);
-}
-
-.home-failed button {
-  margin-left: var(--tempra-space-1);
 }
 
 /* Recently changed: a row per page, the title, then where, who and when. */
@@ -200,51 +185,6 @@
 .home-recent-meta {
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
-}
-
-/* For you here: up to three cards in a row, each one link. */
-.home-cards {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr));
-  gap: var(--tempra-space-2);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.home-card {
-  display: flex;
-  flex-direction: column;
-  gap: var(--tempra-space-1);
-  height: 100%;
-  padding: var(--tempra-space-3);
-  border: 1px solid var(--tempra-color-border);
-  border-radius: var(--tempra-radius-card);
-  color: var(--tempra-color-text);
-  text-decoration: none;
-}
-
-.home-card:hover {
-  border-color: var(--tempra-color-border-strong);
-  background: var(--tempra-color-hover);
-}
-
-.home-card-kind {
-  color: var(--tempra-color-muted);
-  font-size: var(--tempra-text-meta);
-}
-
-.home-card-title {
-  font-weight: var(--tempra-weight-medium);
-  overflow-wrap: anywhere;
-}
-
-.home-card-detail {
-  overflow: hidden;
-  color: var(--tempra-color-muted);
-  font-size: var(--tempra-text-ui);
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* An empty library (board 31): one box with the steps and the waiting line, Import below. */
@@ -360,25 +300,6 @@
 .activity-day .entry {
   border-bottom: 1px solid var(--tempra-color-border);
   border-radius: 0;
-}
-
-/* Where the new entries end (TEMPRA-121): the label, then a rule under the last new entry. */
-.entry-divider {
-  margin: 0;
-  display: flex;
-  align-items: center;
-  gap: var(--tempra-space-2);
-  padding: var(--tempra-space-2) 10px 0;
-  border-bottom: 1px solid var(--tempra-color-border-strong);
-  color: var(--tempra-color-muted);
-  font-size: var(--tempra-text-meta);
-}
-
-.entry-divider > span {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--tempra-space-2);
-  padding-bottom: var(--tempra-space-1);
 }
 
 .entry > .avatar-mark {
