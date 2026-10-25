@@ -182,9 +182,7 @@ async function uiPages(owner: string, slug: string, paths: string[]): Promise<st
   const pages = [
     `${lib}/`,
     `${lib}/-/ledger`,
-    ...["work", "activity", "transfer", "recovery", "connect", "delete"].map(
-      (p) => `${lib}/-/${p}`,
-    ),
+    ...["activity", "transfer", "recovery", "connect", "delete"].map((p) => `${lib}/-/${p}`),
     ...[...dirs].map((d) => `${lib}/${enc(d)}/`),
     ...concepts.map((p) => `${lib}/${enc(p)}`),
   ];
@@ -193,6 +191,11 @@ async function uiPages(owner: string, slug: string, paths: string[]): Promise<st
   const needs = await ui(`${lib}/-/needs`);
   if (needs.status !== 308 || needs.headers.get("Location") !== `/inbox?library=${owner}/${slug}`) {
     problems.push(`-/needs: ${needs.status} ${needs.headers.get("Location")}`);
+  }
+  // For agents is retired (TEMPRA-144): its URL lands on the library's home.
+  const work = await ui(`${lib}/-/work`);
+  if (work.status !== 308 || work.headers.get("Location") !== `/${owner}/${slug}/`) {
+    problems.push(`-/work: ${work.status} ${work.headers.get("Location")}`);
   }
   for (const url of pages) {
     const r = await ui(url);
