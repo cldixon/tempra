@@ -1,9 +1,10 @@
 /**
  * `bun run build` in design/: bundles src/*.css (fonts, tokens, base, prose, reader, workspace,
  * concept, comments, views, inbox, public, in that order) into dist/tempra.css for the site, and
- * dist/tempra.ts for the app's Worker, which serves it at a content-hashed URL with the fonts
- * (design/fonts/*.woff2) beside it, each at its own content-hashed URL. Both outputs are committed;
- * design.test.ts fails when they are stale.
+ * dist/tempra.ts for the app: the stylesheet with its fonts (design/fonts/*.woff2) at
+ * content-hashed URLs, and which font file each URL names. The app's build writes them, with
+ * favicon.svg, into the Worker's static assets (TEMPRA-174); the Worker itself takes only `href`.
+ * Both outputs are committed; design.test.ts fails when they are stale.
  */
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -37,7 +38,7 @@ export function generate(): { css: string; ts: string } {
     .sort()) {
     const bytes = readFileSync(join(ROOT, "fonts", file));
     const served = file.replace(/\.woff2$/, `.${sha(bytes)}.woff2`);
-    fonts[served] = bytes.toString("base64");
+    fonts[served] = file;
     appCss = appCss.replaceAll(`url("../fonts/${file}")`, `url("/_design/${served}")`);
   }
   const hash = sha(appCss);
@@ -52,7 +53,10 @@ export const hash = ${JSON.stringify(hash)};
 /** Where the app serves it. */
 export const href = \`/_design/tempra.\${hash}.css\`;
 
-/** The fonts the stylesheet names, by the file name it asks for under /_design/, as base64. */
+/**
+ * The fonts the stylesheet names: the file name it asks for under /_design/, to the file in
+ * design/fonts/ (\`@tempra/design/fonts/<file>\`) that holds its bytes.
+ */
 export const fonts: Record<string, string> = ${JSON.stringify(fonts)};
 `;
   return { css, ts };

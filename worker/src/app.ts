@@ -1,4 +1,3 @@
-import * as design from "@tempra/design";
 import { type Doc, parseMarkdown } from "@tempra/editor/doc";
 import { type Context, Hono } from "hono";
 import { registerAccountApi } from "./account-api";
@@ -40,9 +39,7 @@ import {
   createLibraryForGrant,
   requireOwner,
 } from "./tenancy";
-import { faviconResponse } from "./ui/favicon";
 import { registerUiRoutes } from "./ui/routes";
-import { appScript } from "./ui/spa";
 import { STARTER } from "./ui/starter";
 import {
   checkBytes,
@@ -325,31 +322,17 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     return c.json({ ok, checks }, ok ? 200 : 503);
   });
 
-  // The shared design stylesheet (@tempra/design, TEMPRA-8) and its fonts (Inter), each at a
-  // content-hashed URL: a new file gets a new URL, so the old one can be cached for good.
-  app.get("/_design/:file", (c) => {
-    const file = c.req.param("file");
-    const immutable = {
-      "Cache-Control": "public, max-age=31536000, immutable",
-      "X-Content-Type-Options": "nosniff",
-    };
-    if (file === `tempra.${design.hash}.css`) {
-      return c.body(design.css, 200, { "Content-Type": "text/css; charset=utf-8", ...immutable });
-    }
-    const font = designFont(file);
-    if (!font) return c.notFound();
-    return c.body(font, 200, { "Content-Type": "font/woff2", ...immutable });
-  });
-
-  // The app's client bundle (TEMPRA-9), at a content-hashed URL like the stylesheet.
-  app.get("/_app/:file", (c) => appScript(c.req.param("file")) ?? c.notFound());
-
-  // The tab's icon, linked from every page's head.
-  app.get("/favicon.svg", () => faviconResponse());
+  // The static assets' prefixes (TEMPRA-174): a file there is served before the Worker runs, so
+  // what reaches it is a name no build wrote (an old hash, a typo). A plain 404, never a page or a
+  // handle's redirect, and before the session's limit.
+  app.get("/_app/*", (c) => c.notFound());
+  app.get("/_design/*", (c) => c.notFound());
 
   // Everything below (pages, the API, downloads, feed upgrades) counts against a browser
-  // session's limit when it carries the session cookie and no bearer token (TEMPRA-80); the
-  // static files above do not. A request with a token is limited per token instead.
+  // session's limit when it carries the session cookie and no bearer token (TEMPRA-80). The
+  // static files (/_app/, /_design/, /favicon.svg) are Workers static assets served before the
+  // Worker runs (TEMPRA-174), so they never get here. A request with a token is limited per token
+  // instead.
   app.use("*", async (c, next) => {
     const secret =
       c.req.header("Authorization") === undefined ? readCookie(c.req.raw, SESSION_COOKIE) : null;
@@ -1633,16 +1616,4 @@ function writeResponse(c: C, res: WriteResult) {
         }
       : {}),
   });
-}
-
-/** A design font's bytes by its served name, decoded once per isolate. */
-const decodedFonts = new Map<string, Uint8Array<ArrayBuffer>>();
-function designFont(file: string): Uint8Array<ArrayBuffer> | null {
-  const cached = decodedFonts.get(file);
-  if (cached) return cached;
-  const base64 = Object.hasOwn(design.fonts, file) ? design.fonts[file] : undefined;
-  if (base64 === undefined) return null;
-  const bytes = Uint8Array.from(atob(base64), (ch) => ch.charCodeAt(0));
-  decodedFonts.set(file, bytes);
-  return bytes;
 }

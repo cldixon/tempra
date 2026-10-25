@@ -148,7 +148,9 @@ test("the generated module names the bundle by its content hash", () => {
   // Code-split: the entry keeps the name Vite hashed it by, which its chunks import it by.
   const b = moduleSource("x", { "pele-abc.js": "y" }, "app.BHyq_u-v.js");
   expect(b).toContain('export const hash = "BHyq_u-v";');
-  expect(b).toContain('"pele-abc.js":"y"');
+  expect(b).toContain('export const chunks: string[] = ["pele-abc.js"];');
+  // Names only: the code is a static asset (TEMPRA-174), not a string in the Worker.
+  expect(b).not.toContain('"y"');
 });
 
 describe("links followed in place (TEMPRA-129)", () => {
