@@ -16,6 +16,7 @@ import {
   WORKER_ATTACHMENT_CAP,
   withDimensions,
 } from "./client";
+import { type FetchFn, fetchBlob } from "./fetch-source";
 import type { Images } from "./images";
 import { notificationsOf, registerInboxApi } from "./inbox-api";
 import { registerLegalRoutes } from "./legal";
@@ -32,7 +33,13 @@ import type { RenderDiagram } from "./render";
 import { readCookie, SESSION_COOKIE, type Sessions } from "./session";
 import { type Mailer, registerSignInRoutes } from "./signin";
 import { OkfError } from "./store/errors";
-import type { ConceptContent, RequestContext, WriteOp, WriteResult } from "./store/store";
+import {
+  type ConceptContent,
+  checkDescription,
+  type RequestContext,
+  type WriteOp,
+  type WriteResult,
+} from "./store/store";
 import {
   type AccountGrant,
   type Authorized,
@@ -74,6 +81,11 @@ export interface Deps extends UsageDeps {
    * images go out as stored when they are small enough.
    */
   images?: Images;
+  /**
+   * Outbound fetch for attaching from a URL (TEMPRA-157, fetch-source.ts); absent, the global
+   * fetch. Tests pass a double.
+   */
+  fetch?: FetchFn;
   /** Checks for /healthz: each dependency's name and "ok" or what failed. */
   health?: () => Promise<Record<string, string>>;
   /** Nightly exports in R2 (spec: Backups and recovery), for the UI. */
@@ -276,6 +288,63 @@ type WireOp =
       if_none_match?: boolean;
     };
 
+/**
+ * `POST …/files/{path}?from=<url>`, or a JSON body `{ source_url, description?, note? }`
+ * (TEMPRA-157): the Worker fetches a public https file and attaches it at `path`, as MCP `attach`
+ * with `source_url` does, with the URL and fetch time in the ledger. A write: it counts against
+ * the caller's write limit like any POST, and the fetch is metered as `fetch`.
+ */
+async function attachFromUrl(c: C, path: string): Promise<Response> {
+  requireWrite(c, path);
+  const type = (c.req.header("Content-Type") ?? "").toLowerCase();
+  const body = type.startsWith("application/json")
+    ? await json<{ source_url?: unknown; description?: unknown; note?: unknown }>(c)
+    : {};
+  const from = c.req.query("from") ?? body.source_url;
+  if (typeof from !== "string" || from === "") {
+    throw new OkfError(
+      400,
+      "bad_attach",
+      "POST /files/{path} attaches from a URL: pass ?from=<https URL> or a JSON body { source_url }; or POST /files/{path}/move.",
+    );
+  }
+  const clean = normalizePath(path);
+  if (!clean || clean.endsWith(".md")) {
+    throw new OkfError(400, "bad_attachment", "Markdown files are concepts, not attachments.");
+  }
+  const description = checkDescription(c.req.query("description") ?? body.description);
+  const d = c.var.deps;
+  const got = await fetchBlob(
+    {
+      fetch: d.fetch ?? ((u, i) => fetch(u, i)),
+      blobs: d.blobs,
+      selfHosts: [new URL(c.req.url).hostname],
+    },
+    from,
+    clean,
+  );
+  d.meter?.({
+    kind: "fetch",
+    account: tokenAdmission(c.var.token).account,
+    library: c.var.token.library.id,
+    bytes: got.bytes.byteLength,
+  });
+  const ifMatch = etag(c.req.header("If-Match"));
+  const ifNoneMatch = c.req.header("If-None-Match")?.trim() === "*";
+  const res = await c.var.lib.apply(requestContext(c, body.note), [
+    {
+      op: "attach",
+      path: clean,
+      blob: got.blob,
+      if_match: ifMatch,
+      if_none_match: ifNoneMatch,
+      source: got.source,
+      ...(description !== undefined ? { description } : {}),
+    },
+  ]);
+  return writeResponse(c, res);
+}
+
 export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   const app = new Hono<Env>();
 
@@ -381,11 +450,8 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     const wantsJson = (c.req.header("Accept") ?? "").includes("application/json");
     if (view.kind === "attachment" && wantsJson) {
       // A description, not the bytes: what the app shows on an attachment's page.
-      const { kind, path, seq, hash, size, media, width, height } = await withDimensions(
-        c.var.lib,
-        c.var.deps.blobs,
-        view,
-      );
+      const { kind, path, seq, hash, size, media, width, height, source, description } =
+        await withDimensions(c.var.lib, c.var.deps.blobs, view);
       c.header("ETag", `"${hash}"`);
       return c.json({
         kind,
@@ -396,6 +462,9 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
         media: media ?? null,
         width: width ?? null,
         height: height ?? null,
+        // Where the bytes were fetched from, and what the file shows (TEMPRA-157, TEMPRA-170).
+        source: source ?? null,
+        description: description ?? null,
       });
     }
     if (view.kind === "attachment") {
@@ -487,8 +556,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
 
   app.post(`${BASE}/files/*`, async (c) => {
     const path = tail(c, "/files/");
-    if (!path.endsWith("/move"))
-      throw new OkfError(404, "no_route", "POST /files/{path}/move only.");
+    if (!path.endsWith("/move")) return attachFromUrl(c, path);
     const from = path.slice(0, -"/move".length);
     const body = await json<{ to: string; note?: string }>(c);
     if (typeof body.to !== "string") throw new OkfError(400, "bad_move", "Send { to }.");
@@ -508,6 +576,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
       size?: unknown;
       sha256?: unknown;
       if_match?: unknown;
+      description?: unknown;
       note?: unknown;
     }>(c);
     const path = typeof body.path === "string" && body.path !== "" ? body.path : null;
@@ -518,12 +587,14 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
       sha256: typeof body.sha256 === "string" ? body.sha256 : undefined,
     });
     const media = typeof body.media === "string" && body.media ? body.media : null;
+    const description = path ? checkDescription(body.description) : undefined;
     const ctx = requestContext(c, body.note);
     const prepared = await prepareUpload(c.var.lib, new URL(c.req.url).origin, {
       path,
       media: media ?? (path ? mediaFor(path) : null),
       ...declared,
       if_match: typeof body.if_match === "string" ? body.if_match : undefined,
+      ...(description !== undefined ? { description } : {}),
       note: ctx.note ?? null,
       actor: ctx.actor,
       by: ctx.by,
@@ -1144,7 +1215,15 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     if (grant.path === null) return c.json(blob, 201);
     const res = await notifying(d, token, d.library(token)).apply(
       { actor: grant.actor, request_id: crypto.randomUUID(), note: grant.note, by: grant.by },
-      [{ op: "attach", path: grant.path, blob, if_match: grant.if_match }],
+      [
+        {
+          op: "attach",
+          path: grant.path,
+          blob,
+          if_match: grant.if_match,
+          ...(grant.description ? { description: grant.description } : {}),
+        },
+      ],
     );
     return writeResponse(c, res);
   });

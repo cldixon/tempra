@@ -97,7 +97,8 @@ describe("figure lint (TEMPRA-159)", () => {
     expect(w?.target).toBe("https://example.com/logo.png");
     expect(w?.message).toContain("example.com");
     expect(w?.message).toContain("`attach`");
-    expect(w?.message).toContain("`source_url`");
+    expect(w?.message).toContain('`source_url: "https://example.com/logo.png"`');
+    expect(w?.message).toContain("the server fetches it");
     expect(w?.message).toContain("`sources`");
     expect(work(s, "a/page.md")).toContain("hotlinked");
     // A link to another site is not an image.

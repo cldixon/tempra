@@ -145,6 +145,7 @@ export function createWorker(deps: (env: Cloudflare.Env) => Deps): {
             blobs: d.blobs,
             images: d.images ?? imagesService({ blobs: d.blobs }),
             meter: (e) => d.meter?.({ ...e, account: who.account }),
+            fetch: d.fetch,
             origin,
           });
         },

@@ -66,6 +66,27 @@ export function sniffImage(b: Uint8Array): ImageFormat | null {
 }
 
 /**
+ * The other media the design draws (tempra-dev app/media.md, Kinds: video, audio, PDF), by their
+ * signature alone; null for anything else. Used where the type must come from the bytes and
+ * nothing else is accepted (a fetched `source_url`, TEMPRA-157). Images are `sniffImage`'s.
+ */
+export function sniffMedia(b: Uint8Array): string | null {
+  if (ascii(b, 0, 5) === "%PDF-") return "application/pdf";
+  if (ascii(b, 0, 4) === "OggS") return "audio/ogg";
+  if (ascii(b, 0, 4) === "RIFF" && ascii(b, 8, 4) === "WAVE") return "audio/wav";
+  if (ascii(b, 0, 3) === "ID3") return "audio/mpeg";
+  // An MPEG audio frame: 11 sync bits, MPEG 1, 2 or 2.5, layer III.
+  if (b.length >= 2 && b[0] === 0xff && ((b[1] as number) & 0xe6) === 0xe2) return "audio/mpeg";
+  if (
+    startsWith(b, [0x1a, 0x45, 0xdf, 0xa3]) &&
+    ascii(b, 0, Math.min(64, b.length)).includes("webm")
+  )
+    return "video/webm";
+  if (ascii(b, 4, 4) === "ftyp" && !avifBrand(b)) return "video/mp4";
+  return null;
+}
+
+/**
  * Checks bytes as an image: the format their signature names, or `expect` (the declared one) when
  * they have none, in which case they are not that image. Null when neither names an image format.
  */
