@@ -197,19 +197,6 @@
   margin-top: 0;
 }
 
-/* For agents (n): a closed disclosure at the foot of Properties. */
-.for-agents summary {
-  cursor: pointer;
-}
-
-.for-agents[open] summary {
-  margin-bottom: 8px;
-}
-
-.for-agents .facts {
-  margin-bottom: 12px;
-}
-
 .doc-head {
   margin-bottom: 32px;
 }
@@ -546,16 +533,9 @@
   padding-left: 18px;
 }
 
-.linked li,
-.notes-list li {
+.linked li {
   margin-bottom: 8px;
   font-size: var(--tempra-text-meta);
-}
-
-.notes-list {
-  margin: 0;
-  padding: 0;
-  list-style: none;
 }
 
 /* ---------- What fits: the page's width decides ---------- */

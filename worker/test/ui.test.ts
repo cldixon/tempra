@@ -50,7 +50,6 @@ describe("the app's pages (TEMPRA-9)", () => {
       `${LIB}/-/files/notes/a.md`,
       `${LIB}/-/ledger?actor=x`,
       `${LIB}/-/diff/notes/a.md?from=0`,
-      `${LIB}/-/work?kind=stale`,
       `${LIB}/-/activity`,
       `${LIB}/-/revert/some-request`,
       `${LIB}/-/restore/notes/a.md?to=1`,
@@ -89,6 +88,15 @@ describe("the app's pages (TEMPRA-9)", () => {
     expect(r.headers.get("Location")).toBe("/inbox?library=owner/demo");
     const stranger = await s.stranger("needs@example.com");
     expect((await stranger.app.request(`${LIB}/-/needs`)).status).toBe(404);
+  });
+
+  test("For agents' URL lands on the library's home (TEMPRA-144)", async () => {
+    const s = setup();
+    const r = await page(s, `${LIB}/-/work?kind=stale`);
+    expect(r.status).toBe(308);
+    expect(r.headers.get("Location")).toBe("/owner/demo/");
+    const stranger = await s.stranger("work@example.com");
+    expect((await stranger.app.request(`${LIB}/-/work`)).status).toBe(404);
   });
 
   test("the bundle is served at its hashed path, immutable; any other name is a 404", async () => {

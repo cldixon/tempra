@@ -37,7 +37,6 @@ export interface Place {
   view:
     | "home"
     | "activity"
-    | "work"
     | "settings"
     | "transfer"
     | "recovery"

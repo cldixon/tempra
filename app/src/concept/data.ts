@@ -73,21 +73,12 @@ export function actedBy(e: Pick<HistoryEvent, "meta">): ActedBy | null {
     : { person: by.person };
 }
 
-export interface WorkItem {
-  kind: string;
-  path: string;
-  since: string;
-  detail: string;
-  suggested_action: string;
-}
-
 /** What a concept's page shows around its body. */
 export interface ConceptData {
   concept: Concept;
   sources: Sources;
   links: Links;
   history: HistoryEvent[];
-  work: WorkItem[];
 }
 
 /** What a file's page shows: the file, the head, and for a concept its context. */
@@ -120,7 +111,7 @@ export function bodyHref(urls: Urls) {
 
 /**
  * Everything a file's page shows, in one round of requests: the file and, for a concept, its
- * sources, links, history and own work items (asked for in parallel; a file that is not a
+ * sources, links and history (asked for in parallel; a file that is not a
  * concept answers those with errors, which are then ignored).
  */
 export async function loadFile(urls: Urls, path: string): Promise<FileData> {
@@ -133,21 +124,18 @@ export async function loadFile(urls: Urls, path: string): Promise<FileData> {
   const skip = Promise.resolve({ e: null });
   // Only a concept has sources, links and history; the name says which files can be one.
   const concept = isConceptPath(path);
-  const [file, stats, sources, links, history, work] = await Promise.all([
+  const [file, stats, sources, links, history] = await Promise.all([
     api<FileJson>(urls.api(`files/${p}`, { at: urls.at })),
     api<{ seq: number }>(urls.api("stats")),
     concept ? extra(api<Sources>(urls.api(`sources/${p}`, { at: urls.at }))) : skip,
     concept ? extra(api<Links>(urls.api(`links/${p}`, { at: urls.at }))) : skip,
     concept ? extra(api<{ events: HistoryEvent[] }>(urls.api(`history/${p}`))) : skip,
-    concept && urls.at === undefined
-      ? extra(api<{ items: WorkItem[] }>(urls.api("work", { path, limit: 500 })))
-      : Promise.resolve({ v: { items: [] as WorkItem[] } }),
   ]);
   const head = stats.seq;
   if (file.kind !== "concept") return { file, head, extra: null };
   // A concept reached by another spelling of its path: ask again by its own.
   if (!concept) return loadFile(urls, file.path);
-  for (const r of [sources, links, history, work]) if ("e" in r) throw r.e;
+  for (const r of [sources, links, history]) if ("e" in r) throw r.e;
   const got = <T>(r: { v: T } | { e: unknown }) => (r as { v: T }).v;
   return {
     file,
@@ -157,7 +145,6 @@ export async function loadFile(urls: Urls, path: string): Promise<FileData> {
       sources: got(sources),
       links: got(links),
       history: got(history).events,
-      work: got(work).items,
     },
   };
 }

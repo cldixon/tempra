@@ -247,24 +247,6 @@
   white-space: nowrap;
 }
 
-/* The foot: the agents' housekeeping, quiet. */
-.home-foot {
-  margin: var(--tempra-space-4) 0 0;
-  font-size: var(--tempra-text-ui);
-}
-
-.home-foot a {
-  display: inline-flex;
-  align-items: center;
-  gap: var(--tempra-space-1);
-  color: var(--tempra-color-muted);
-  text-decoration: none;
-}
-
-.home-foot a:hover {
-  color: var(--tempra-color-text);
-}
-
 /* An empty library (board 31): one box with the steps and the waiting line, Import below. */
 .empty-library {
   display: flex;

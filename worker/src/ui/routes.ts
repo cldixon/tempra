@@ -265,7 +265,6 @@ export function registerUiRoutes<E extends AppEnv>(
     "ledger",
     "revert/:request",
     "restore/*",
-    "work",
     "settings",
     "activity",
     "transfer",
@@ -276,6 +275,13 @@ export function registerUiRoutes<E extends AppEnv>(
   ]) {
     get(`/:owner/:lib/-/${page}`, library);
   }
+
+  // For agents is retired (TEMPRA-144): the agents' housekeeping is theirs, through `work`; its
+  // URL lands on the library's home, after the same check as the library's pages.
+  get("/:owner/:lib/-/work", async (p) => {
+    const { ref } = await openLibrary(p);
+    return p.c.redirect(`/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.slug)}/`, 308);
+  });
 
   // Needs you retired into the Inbox (take 4, TEMPRA-116): its URL lands on the Inbox filtered
   // to the library, after the same check as the library's pages.

@@ -670,25 +670,30 @@ async function browserRenders(
         throw new Error(`the drawer's head names "${not}" where the top bar shows Tempra`);
       }
     };
-    await step("the library's root is its home: no sections, the agents' line", async () => {
+    await step("the library's root is its home: no sections, no housekeeping", async () => {
       await home();
       // No sections: the tree beside it lists the folders (TEMPRA-138).
       await main.locator(".home-section").first().waitFor({ timeout: 15_000 });
       if ((await main.getByRole("heading", { level: 2, name: "Sections" }).count()) > 0) {
         throw new Error("the home still lists sections");
       }
-      // The foot: the agents' housekeeping, linking the work queue, when there is any.
-      const { housekeeping } = (await (
-        await apiAs(devCookie, `/api/v1/libraries/${owner}/${slug}/needs`)
-      ).json()) as { housekeeping: { total: number } };
-      if (housekeeping.total > 0) {
-        const foot = main.locator(`.home-foot a[href="/${owner}/${slug}/-/work"]`);
-        await foot.waitFor({ timeout: 10_000 });
-        const text = await foot.innerText();
-        if (!text.includes(`${housekeeping.total} housekeeping item`)) {
-          throw new Error(`the foot line reads "${text}" for ${housekeeping.total} items`);
-        }
+      // No agents' housekeeping, though the work queue has some (TEMPRA-144): it is theirs.
+      const work = (await (
+        await fetch(`${base}/api/v1/libraries/${owner}/${slug}/work`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+      ).json()) as { total: number };
+      if (work.total === 0) throw new Error("the bundle left the agents nothing to do");
+      if ((await main.getByText(/housekeeping|for agents/i).count()) > 0) {
+        throw new Error("the home shows the agents' housekeeping");
       }
+      if ((await page.locator(`a[href*="/-/work"]`).count()) > 0) {
+        throw new Error("a link to the retired For agents page");
+      }
+      // Its old address lands here.
+      await page.goto(`${base}/${owner}/${slug}/-/work?kind=lint`);
+      await page.waitForURL(`${base}/${owner}/${slug}/`);
+      await home();
       if (shots) await page.screenshot({ path: `${shots}/home.png` });
     });
     const bearer = { Authorization: `Bearer ${token}` };
@@ -2629,7 +2634,7 @@ async function browserRenders(
         throw new Error("two panels at once");
       }
       // Properties in people's words (TEMPRA-134, C-12, C-13): Status "not set", no lint codes,
-      // suggested actions or path until For agents is opened.
+      // suggested actions or path, and no For agents section (TEMPRA-144).
       await properties()
         .locator("dd", { hasText: /^not set$/ })
         .first()
@@ -2638,12 +2643,13 @@ async function browserRenders(
       if (/\b[a-z]+_[a-z_]+\b|→|suggested|trust|human-reviewed|unverified/.test(said)) {
         throw new Error(`Properties shows agents' words: ${said}`);
       }
-      if (await properties().getByText(path, { exact: true }).isVisible()) {
-        throw new Error("Properties shows the path before For agents is opened");
+      if ((await properties().getByText(path, { exact: true }).count()) > 0) {
+        throw new Error("Properties shows the page's path");
+      }
+      if (/for agents|nothing for agents/i.test(said)) {
+        throw new Error("Properties has a For agents section");
       }
       if (shots) await page.screenshot({ path: `${shots}/properties.png` });
-      await properties().locator("details.for-agents summary").click();
-      await properties().getByText(path, { exact: true }).waitFor();
       await page.getByRole("button", { name: "Close properties" }).click();
       await back("×");
       await more("History");
@@ -3391,16 +3397,10 @@ async function freshAccountConnects(): Promise<string[]> {
       await page.locator(".menu-list").getByRole("link", { name, exact: true }).click();
     };
     /**
-     * A library view: For agents by its URL (the home's foot line links it once agents have
-     * housekeeping); a settings tab from the settings' sidebar, reached through the switcher's
-     * menu (take 4) unless the settings are already open.
+     * A settings tab from the settings' sidebar, reached through the switcher's menu (take 4)
+     * unless the settings are already open.
      */
     const libraryLink = async (name: string) => {
-      if (name === "For agents") {
-        await page.goto(`${lib}/-/work`);
-        await page.waitForURL(`${lib}/-/work`);
-        return;
-      }
       const tab = page.locator(".ws-sidebar").getByRole("link", { name, exact: true });
       if ((await tab.count()) === 0) {
         await page.getByRole("button", { name: /, switch library$/ }).click();
@@ -3460,7 +3460,6 @@ async function freshAccountConnects(): Promise<string[]> {
       await page.waitForURL(`${lib}/`);
     });
     for (const [tab, text] of [
-      ["For agents", "For agents"],
       ["Import & export", "Nightly exports"],
       ["Recovery", "Past restores"],
     ] as const) {

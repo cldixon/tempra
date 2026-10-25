@@ -5,7 +5,7 @@ import { ComposeDialog } from "../Dialog";
 import { libraryLabel } from "../role";
 import { navigate } from "../router";
 import { LibraryTile } from "../Sidebar";
-import { type Health, plural, Status, useMe, useTitle } from "../ui";
+import { plural, Status, useMe, useTitle } from "../ui";
 import { Urls } from "../urls";
 import { PageBar } from "../Workspace";
 
@@ -20,9 +20,6 @@ interface Library {
   seq?: number;
   concepts?: number;
   attachments?: number;
-  open_work?: number;
-  /** The daily check's summary: open work by kind (TEMPRA-66). */
-  health?: Health;
   /** Since the person last looked (TEMPRA-72): changes by others, and items for them here. */
   tally?: { changes: number; for_you?: number };
   /** Its summary could not be read just now (TEMPRA-23): listed and linked, without counts. */

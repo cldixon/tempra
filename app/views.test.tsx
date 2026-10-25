@@ -4,12 +4,10 @@ import type { LedgerEvent, LedgerRequest } from "./src/activity";
 import { actorView } from "./src/agents";
 import { StatusPills } from "./src/concept/Byline";
 import { forYouCards, type InboxItem, type InboxPage } from "./src/inbox";
-import type { Needs } from "./src/needs";
 import { fateOf, typeName } from "./src/pages/File";
 import {
   EmptyLibrary,
   ForYou,
-  HomeFoot,
   inboxHref,
   recentlyChanged,
   SinceLine,
@@ -32,16 +30,6 @@ const agents = {
 const view = (actor: string, by?: { person: string; agent?: string } | null) =>
   actorView(actor, by, agents, me);
 const hour = (h: number) => new Date(Date.now() - h * 3_600_000).toISOString();
-
-const needs = (over: Partial<Needs> = {}): Needs => ({
-  seq: 40,
-  replies: [],
-  verify: { total: 0, items: [], next_offset: null },
-  unverified: { total: 0 },
-  housekeeping: { stale: 0, lint: 0, structure: 0, broken_link: 0, total: 0 },
-  count: 0,
-  ...over,
-});
 
 describe("the library's home (take 4)", () => {
   const files: OutlineFile[] = [
@@ -116,20 +104,6 @@ describe("the library's home (take 4)", () => {
     expect(html).toContain("All 5 in Inbox");
     // Done in the Inbox, gone from the home: nothing open, nothing shown.
     expect(renderToStaticMarkup(<ForYou urls={urls} inbox={page([])} />)).toBe("");
-  });
-
-  test("the foot: the agents' housekeeping, to their work queue; absent when none", () => {
-    const html = renderToStaticMarkup(
-      <HomeFoot
-        urls={urls}
-        needs={needs({
-          housekeeping: { stale: 2, lint: 1, structure: 9, broken_link: 0, total: 12 },
-        })}
-      />,
-    );
-    expect(html).toContain("12 housekeeping items for agents");
-    expect(html).toContain(`href="${urls.work()}"`);
-    expect(renderToStaticMarkup(<HomeFoot urls={urls} needs={needs()} />)).toBe("");
   });
 
   test("an empty library: the connect steps, waiting with the pulsing dot, Import a bundle", () => {
