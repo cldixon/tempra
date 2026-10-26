@@ -20,10 +20,7 @@
   let { urls, path }: { urls: Urls; path: string } = $props();
   useTitle(() => "Not found");
   const me = useMe();
-  const actors = useActors(
-    () => urls,
-    () => me.current?.actor ?? null,
-  );
+  const actors = useActors(() => urls);
   const frame = useFrame();
   const fate = useLoad(
     () => `fate ${urls.base} ${path}`,

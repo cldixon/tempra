@@ -8,6 +8,7 @@ import {
 } from "./agents";
 import { api } from "./api";
 import { useLoad } from "./load.svelte.ts";
+import { useMe } from "./ui.svelte.ts";
 import type { Urls } from "./urls";
 
 /**
@@ -48,14 +49,15 @@ function useContributors(urls: () => Urls) {
 
 /**
  * Who acted, as an ActorView, for pages that draw people and agents apart (the byline, home,
- * Activity, the Inbox). `me` is the signed-in person's actor (`human:handle`).
+ * Activity, the Inbox). The signed-in person is "You".
  */
-export function useActors(urls: () => Urls, me: () => string | null) {
+export function useActors(urls: () => Urls) {
   const c = useContributors(urls);
+  const me = useMe();
   return {
     view: (actor: string, by?: ActedBy | null) => {
       c.note(by?.agent);
-      return actorView(actor, by, c.byId, me());
+      return actorView(actor, by, c.byId, me.current?.actor ?? null);
     },
     /** Everyone who has worked here: people and agents. */
     get contributors() {

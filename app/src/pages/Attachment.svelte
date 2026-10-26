@@ -32,10 +32,7 @@
   const label = useLibraryLabel(() => urls);
   useTitle(() => `${baseName(file.path)} · ${label.current}`);
   const me = useMe();
-  const actors = useActors(
-    () => urls,
-    () => me.current?.actor ?? null,
-  );
+  const actors = useActors(() => urls);
   const frame = useFrame();
   const extra = useLoad(
     () => `attachment ${urls.base} ${file.path} ${file.seq}`,

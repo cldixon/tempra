@@ -60,6 +60,10 @@ export async function api<T>(url: string, init: RequestInit = {}): Promise<T> {
   return (await res.json()) as T;
 }
 
+/** A JSON write to the API (POST unless said otherwise), with its body as JSON. */
+export const post = <T = unknown>(url: string, body?: unknown, method = "POST") =>
+  api<T>(url, { method, body: body === undefined ? undefined : JSON.stringify(body) });
+
 /** The value of a form field, trimmed. */
 export const field = (form: HTMLFormElement, name: string) =>
   String(new FormData(form).get(name) ?? "").trim();

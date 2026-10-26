@@ -12,8 +12,6 @@ export interface Frame {
   readonly index: OutlineFile[] | null;
   /** The top bar's slots a page fills through PageBar: its path, its tools. */
   readonly slots: { tools: HTMLElement | null; path: HTMLElement | null };
-  /** Tells the frame a page has tools of its own (a concept's), which take the phone bar's end. */
-  setOwnTools(own: boolean): void;
   /** A page's overlay (a concept's panel over the page) is modal: the top bar and sidebar go inert. */
   setModal(on: boolean): void;
   /** Opens search: a library's quick switcher, or the search of the person's libraries. */
@@ -25,7 +23,6 @@ const NONE: Frame = {
   narrow: false,
   index: null,
   slots: { tools: null, path: null },
-  setOwnTools: () => {},
   setModal: () => {},
   search: () => {},
 };

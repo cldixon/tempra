@@ -34,10 +34,7 @@
     now: number;
   } = $props();
 
-  const actors = useActors(
-    () => urls,
-    () => me || null,
-  );
+  const actors = useActors(() => urls);
   const entries = $derived.by(() => {
     const ids = new Set<string>();
     const out: Entry[] = [];

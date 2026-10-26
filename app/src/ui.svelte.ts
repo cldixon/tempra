@@ -1,6 +1,7 @@
 import { api } from "./api";
 import { useLoad } from "./load.svelte.ts";
 import type { Me } from "./ui";
+import { copyText } from "./ui";
 
 /** The signed-in person, loaded once for the whole app (the same load App.svelte makes). */
 export function useMe() {
@@ -38,13 +39,18 @@ export function useScrollToHash(ready: () => boolean) {
   });
 }
 
-/** The clock relative times are read against, ticking so "2 min ago" stays true. */
-export function useNow(ms = 30_000) {
+/**
+ * The clock relative times are read against, ticking so "2 min ago" stays true. `ms` may follow
+ * state (quick while something reads as live, slow otherwise): the timer is set again only when
+ * the interval itself changes.
+ */
+export function useNow(ms: number | (() => number) = 30_000) {
   let now = $state(Date.now());
+  const interval = $derived(typeof ms === "number" ? ms : ms());
   $effect(() => {
     const t = setInterval(() => {
       now = Date.now();
-    }, ms);
+    }, interval);
     return () => clearInterval(t);
   });
   return {
@@ -54,7 +60,37 @@ export function useNow(ms = 30_000) {
   };
 }
 
-/** Copies text from a click; `state` says "copied" (or "failed") for a moment after. */
+/**
+ * One clock for every Moment on the page, ticking every 30 s while any is drawn: a list of a
+ * hundred times keeps one timer, not a hundred.
+ */
+const shared = $state({ now: Date.now() });
+let readers = 0;
+let sharedTimer: ReturnType<typeof setInterval> | undefined;
+
+export function useSharedNow() {
+  $effect(() => {
+    if (readers++ === 0) {
+      shared.now = Date.now();
+      sharedTimer = setInterval(() => {
+        shared.now = Date.now();
+      }, 30_000);
+    }
+    return () => {
+      if (--readers === 0) clearInterval(sharedTimer);
+    };
+  });
+  return {
+    get current() {
+      return shared.now;
+    },
+  };
+}
+
+/**
+ * Copies text from a click (or text fetched for it, as Copy page fetches the file); `state` says
+ * "copied" (or "failed") for a moment after.
+ */
 export function useCopy() {
   let state = $state<"idle" | "copied" | "failed">("idle");
   $effect(() => {
@@ -68,8 +104,8 @@ export function useCopy() {
     get state() {
       return state;
     },
-    copy: (text: string) =>
-      navigator.clipboard.writeText(text).then(
+    copy: (text: string | (() => Promise<string>)) =>
+      (typeof text === "string" ? navigator.clipboard.writeText(text) : copyText(text)).then(
         () => {
           state = "copied";
         },

@@ -9,8 +9,6 @@ export interface Me {
   theme?: "light" | "dark" | null;
 }
 
-export type Tone = "" | "ok" | "warn" | "bad";
-
 /** An actor as a person reads it: a handle for a person (`human:cl_dixon` → `cl_dixon`), an agent as is. */
 export const who = (actor: string) => actor.replace(/^human:/, "");
 
@@ -107,3 +105,21 @@ export const anchorId = (prefix: string, label: string) =>
   `${prefix}-${label.replace(/[^\w.-]/g, "_")}`;
 
 export { baseName };
+
+/**
+ * Writes text to the clipboard from a click. Where the browser takes a promise (a
+ * ClipboardItem), the text is fetched inside the click's permission; else it is fetched first.
+ */
+export async function copyText(text: () => Promise<string>): Promise<void> {
+  const C = (globalThis as { ClipboardItem?: typeof ClipboardItem }).ClipboardItem;
+  if (C && navigator.clipboard?.write) {
+    try {
+      const blob = text().then((t) => new Blob([t], { type: "text/plain" }));
+      await navigator.clipboard.write([new C({ "text/plain": blob })]);
+      return;
+    } catch {
+      // Fall through to writeText.
+    }
+  }
+  await navigator.clipboard.writeText(await text());
+}

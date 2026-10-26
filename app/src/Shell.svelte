@@ -63,7 +63,6 @@
   let menuButton: HTMLButtonElement | undefined = $state();
   let toolsSlot: HTMLElement | undefined = $state();
   let pathSlot: HTMLElement | undefined = $state();
-  let ownTools = $state(false);
   let main: HTMLElement | undefined = $state();
   let topbar: HTMLElement | undefined = $state();
 
@@ -181,9 +180,6 @@
     get slots() {
       return slots;
     },
-    setOwnTools(own: boolean) {
-      ownTools = own;
-    },
     setModal(on: boolean) {
       modal = on;
       applyInert();
@@ -196,7 +192,6 @@
     [
       "workspace",
       showSidebar ? "" : "sidebar-hidden",
-      ownTools ? "has-tools" : "",
       drawer ? "drawer-open" : "",
     ]
       .filter(Boolean)

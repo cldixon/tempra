@@ -9,16 +9,8 @@ export function useUnread() {
   const loaded = useLoad(
     () => "inbox-count",
     () => api<{ unread: number }>("/api/v1/inbox/count"),
+    [INBOX_EVENT, "focus"],
   );
-  $effect(() => {
-    const reload = () => loaded.reload();
-    window.addEventListener(INBOX_EVENT, reload);
-    window.addEventListener("focus", reload);
-    return () => {
-      window.removeEventListener(INBOX_EVENT, reload);
-      window.removeEventListener("focus", reload);
-    };
-  });
   return {
     get current(): number {
       return loaded.data?.unread ?? 0;

@@ -2,6 +2,7 @@ import { isLive, LIVE_MS, type LiveWrite, loadTitles } from "./activity";
 import { isAgentChange } from "./changes";
 import type { FeedEvent } from "./live";
 import { useLoad } from "./load.svelte.ts";
+import { useNow } from "./ui.svelte.ts";
 import type { Urls } from "./urls";
 
 /** One load of a library's titles, shared by home and Activity. */
@@ -13,27 +14,6 @@ export function useTitles(urls: () => Urls) {
 }
 
 /**
- * A clock whose tick follows `ms()`: quick while something reads as live, slow otherwise. The
- * interval is a $derived, so the timer is set again only when the interval itself changes, not
- * on every write that keeps it the same.
- */
-export function useClock(ms: () => number) {
-  let now = $state(Date.now());
-  const interval = $derived(ms());
-  $effect(() => {
-    const t = setInterval(() => {
-      now = Date.now();
-    }, interval);
-    return () => clearInterval(t);
-  });
-  return {
-    get current() {
-      return now;
-    },
-  };
-}
-
-/**
  * Agents' writes as they arrive on the feed (tempra-dev: app/live): the last one, read as
  * writing now (the Summary's live entry) for LIVE_MS, and each event's arrival by seq (Every
  * event's pulsing rows). `heard` takes a batch from useFeed, `reset` a rollback. The clock ticks
@@ -42,7 +22,7 @@ export function useClock(ms: () => number) {
 export function useLiveWrites() {
   let last = $state.raw<LiveWrite | null>(null);
   let seqs = $state.raw(new Map<number, number>());
-  const clock = useClock(() => (last || seqs.size > 0 ? 5000 : 30_000));
+  const clock = useNow(() => (last || seqs.size > 0 ? 5000 : 30_000));
   return {
     /** The clock relative times are read against. */
     get now() {

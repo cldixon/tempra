@@ -29,10 +29,7 @@
 
   // Names actors for comments: agents for their person, the signed-in person as "You".
   const me = useMe();
-  const actors = useActors(
-    () => props.urls,
-    () => me.current?.actor ?? null,
-  );
+  const actors = useActors(() => props.urls);
   const name = actors.view;
   const t = $derived(props.thread);
   const first = $derived(t.comments[0]);

@@ -77,10 +77,7 @@
   const sources = $derived(props.data.sources);
   const links = $derived(props.data.links);
   const me = useMe();
-  const actors = useActors(
-    () => props.urls,
-    () => me.current?.actor ?? null,
-  );
+  const actors = useActors(() => props.urls);
   const name = actors.view;
   const role = useRole(() => props.urls);
   const fm = $derived(c.frontmatter);

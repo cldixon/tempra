@@ -32,10 +32,7 @@
     now: number;
   } = $props();
 
-  const actors = useActors(
-    () => urls,
-    () => me || null,
-  );
+  const actors = useActors(() => urls);
   const role = useRole(() => urls);
   const rows = $derived(eventRows(requests, filter));
   // Who (Agents, People), the kind and the text filter what is loaded, not the whole ledger: say

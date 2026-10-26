@@ -35,3 +35,6 @@ export function libraryLabel(l: {
   const name = l.title || l.slug;
   return (l.role ?? "owner") === "owner" ? name : `${name} (@${l.owner})`;
 }
+
+/** Whether the person reaches a library as a member, not as its owner. */
+export const isShared = (l: { role?: Role | null }) => (l.role ?? "owner") !== "owner";

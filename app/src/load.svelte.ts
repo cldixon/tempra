@@ -19,10 +19,16 @@ export interface Load<T> {
  * page seen before draws at once from what it loaded last time and is checked again in the
  * background (unless a prefetch has just loaded it); the new answer reuses every unchanged part
  * of what is shown (`share`), so what is derived from it and the reader built on it survive. A
- * response that arrives after the page moved on is dropped. Call it while a component
+ * response that arrives after the page moved on is dropped; `reloadOn` names window events that
+ * make it ask again. Call it while a component
  * initialises; the data is kept raw (`$state.raw`), never proxied, so identities hold.
  */
-export function useLoad<T>(key: () => string, load: () => Promise<T>): Load<T> {
+export function useLoad<T>(
+  key: () => string,
+  load: () => Promise<T>,
+  /** Window events that make it load again in place (`INBOX_EVENT`, `LIBRARIES_EVENT`, "focus"). */
+  reloadOn: readonly string[] = [],
+): Load<T> {
   const initial = (k: string): Loaded<T> =>
     cache.has(k) ? { state: "ready", data: cache.get(k) as T } : { state: "loading" };
   const first = untrack(key);
@@ -73,6 +79,15 @@ export function useLoad<T>(key: () => string, load: () => Promise<T>): Load<T> {
       live = false;
     };
   });
+  if (reloadOn.length > 0) {
+    $effect(() => {
+      const again = () => tick++;
+      for (const e of reloadOn) window.addEventListener(e, again);
+      return () => {
+        for (const e of reloadOn) window.removeEventListener(e, again);
+      };
+    });
+  }
   const current = $derived(result.key === current_key ? result.value : initial(current_key));
   return {
     get current() {
@@ -106,9 +121,6 @@ export function useAction() {
     },
     get error() {
       return error;
-    },
-    set error(e: string | null) {
-      error = e;
     },
     setError(e: string | null) {
       error = e;

@@ -2975,8 +2975,7 @@ button.tree-name {
 
   .topbar-brand,
   .topbar-path,
-  .show-sidebar,
-  .has-tools .topbar-end .bell {
+  .show-sidebar {
     display: none;
   }
 

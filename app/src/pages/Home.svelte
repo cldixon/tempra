@@ -35,10 +35,7 @@
   useTitle(() => name);
   const me = useMe();
   const role = useRole(() => urls);
-  const actors = useActors(
-    () => urls,
-    () => me.current?.actor ?? null,
-  );
+  const actors = useActors(() => urls);
   const frame = useFrame();
   const now = useNow();
   const loaded = useLoad(

@@ -23,10 +23,7 @@
     onChange(who: Who, actor: string): void;
   } = $props();
 
-  const actors = useActors(
-    () => urls,
-    () => me || null,
-  );
+  const actors = useActors(() => urls);
   const value = $derived(actor ? `actor:${actor}` : who);
   const people = $derived(view === "events" ? actors.contributors : []);
 
