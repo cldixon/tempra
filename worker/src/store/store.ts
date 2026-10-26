@@ -27,10 +27,11 @@ import {
   renderDoc,
   serializeRecord,
   sourceCandidates,
+  unaliasSourceUrls,
 } from "../okf/concept";
 import { type LogRequest, renderIndex, renderLog } from "../okf/derived";
 import { checkedFences, diagramLint, type RenderFailure, unrenderedWarning } from "../okf/diagrams";
-import { unifiedDiff } from "../okf/diff";
+import { unifiedDiff, unifiedDiffExcept } from "../okf/diff";
 import { figureLint } from "../okf/figure-lint";
 import { type FigureFact, figureFacts } from "../okf/figures";
 import { sha256Hex } from "../okf/hash";
@@ -1745,7 +1746,11 @@ export class LibraryStore {
       // Compared with the server-owned fields as the writer sent them, so an edit of the rendered
       // document (which carries the old stamp) is not reported, nor are ignored fields twice.
       const asSent = renderConcept(
-        { ...built.record, generated: parsed.generated },
+        {
+          ...built.record,
+          fm: unaliasSourceUrls(built.record.fm, built.aliased),
+          generated: parsed.generated,
+        },
         { verified: parsed.verified ?? [] },
       );
       const tidy = (t: string) =>
@@ -1754,29 +1759,39 @@ export class LibraryStore {
           .replace(/\r\n?/g, "\n")
           .trimEnd();
       // Spacing only: blanks and the length of table rules, as in a table's padding.
-      const squash = (t: string) =>
-        tidy(t)
-          .split("\n")
-          .map((l) => l.replace(/\s+/g, "").replace(/-+/g, "-"))
-          .join("\n");
+      const squashLine = (l: string) => l.replace(/\s+/g, "").replace(/-+/g, "-");
+      const squash = (t: string) => tidy(t).split("\n").map(squashLine).join("\n");
+      // A hunk that only re-spaces lines (or adds and drops blank ones) is left out of the diff.
+      const spacingOnly = (removed: string[], added: string[]) => {
+        const lines = (ls: string[]) => ls.map(squashLine).filter((l) => l !== "");
+        return lines(removed).join("\n") === lines(added).join("\n");
+      };
       if (tidy(asSent) !== tidy(markdown)) {
-        if (squash(asSent) === squash(markdown)) {
+        // The diff shows what is stored, server-owned fields included (TEMPRA-45).
+        const { diff, ignored } =
+          squash(asSent) === squash(markdown)
+            ? { diff: "", ignored: 0 }
+            : unifiedDiffExcept(
+                `${tidy(markdown)}\n`,
+                `${tidy(renderConcept(built.record, { verified }))}\n`,
+                { from: "sent", to: "stored" },
+                spacingOnly,
+              );
+        if (diff) {
+          result.normalized = diff;
+          const spaced =
+            ignored === 0
+              ? ""
+              : ` ${ignored === 1 ? "One place" : `${ignored} places`} where only spacing changed (table padding, indentation) ${ignored === 1 ? "is" : "are"} left out of it.`;
+          notices.push({
+            code: "normalized",
+            message: `Stored in canonical form, which differs from what you sent (see the diff); \`edit\` against the stored text, as \`read\` shows it.${spaced}`,
+          });
+        } else {
           notices.push({
             code: "normalized",
             message:
               "Stored in canonical form; only spacing changed (table padding, indentation). `edit` against the stored text, as `read` shows it.",
-          });
-        } else {
-          // The diff shows what is stored, server-owned fields included (TEMPRA-45).
-          const stored = renderConcept(built.record, { verified });
-          result.normalized = unifiedDiff(`${tidy(markdown)}\n`, `${tidy(stored)}\n`, {
-            from: "sent",
-            to: "stored",
-          });
-          notices.push({
-            code: "normalized",
-            message:
-              "Stored in canonical form, which differs from what you sent (see the diff); `edit` against the stored text, as `read` shows it.",
           });
         }
       }

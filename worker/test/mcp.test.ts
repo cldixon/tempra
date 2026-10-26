@@ -133,6 +133,8 @@ describe("MCP server", () => {
       "the title is the caption",
       ":::figure",
       "`sources`",
+      "taken from elsewhere",
+      "carries its own `credit` and `licence`",
       "`images: true`",
       "`diagrams: true`",
       "`diagram_invalid`",
