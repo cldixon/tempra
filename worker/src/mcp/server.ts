@@ -116,7 +116,7 @@ How to work:
 3. Prefer \`edit\` for small changes, \`write\` for new concepts or rewrites, \`batch\` for related changes so they land as one request. Pass \`if_match\` (the hash from your last read); on a conflict, re-read and reapply. Bodies are stored in a canonical form (\`-\` bullets, \`*\` emphasis, padded tables): what you write reads back normalized, so \`edit\` the text as \`read\` shows it. To add a file (an image, a PDF): an image on the public web, \`attach\` with \`source_url\` (the server fetches it and records where from; still cite the original in \`sources\`, and never hotlink it); a file you made, with a shell, \`prepare_upload\` and run the curl line it returns; without one, \`attach\` small files (under about 200 KB) as base64 with their \`sha256\`.
 4. Put a one-line \`note\` on every write. Read the \`lint\` in every write result and fix what it reports; the result's notes say what else to know (ignored fields, the stored form, open comments). A concept with no frontmatter, invalid YAML or no \`type\` is refused. Figures come back as lint, never refused: \`image_no_alt\` (say what the image shows in its alt text), \`image_external\` (hotlinked; bring it in with \`attach\` and \`source_url\`, cite the original in \`sources\`), \`image_large\` (over 2 MB or 4000 px; attach a smaller one), \`image_not_image\` (\`![…](x)\` on a file that is not an image, video, audio or PDF). Keep concepts under 100 KB; split big ones into linked concepts.
 5. Never write index.md or log.md (the server synthesizes them). Never set \`generated\` (the server stamps it) or \`verified\` (not yours to claim). Set \`status\` and \`stale_after\` honestly. Timestamps are full ISO 8601 datetimes with an offset (\`stale_after: 2026-12-31T00:00:00Z\`); a plain date is flagged.
-6. Use \`work\` to find what needs doing: open comments, stale concepts, broken links, lint, and structure (a directory's index.md made poor by its concepts: missing, long or title-repeating descriptions, duplicate titles, concepts nothing links to, a directory with one concept, none, or too many); \`work\` with kind stale_soon lists what goes stale within 14 days. Only a new \`stale_after\` resets a concept's clock; other edits leave it stale.
+6. Use \`work\` to find what needs doing: open comments, stale concepts, broken links, lint, hotlinked images (kind \`external_image\`, one item per page: \`attach\` each with \`source_url\`, \`edit\` the image to the attached path, cite the original in \`sources\`), and structure (a directory's index.md made poor by its concepts: missing, long or title-repeating descriptions, duplicate titles, concepts nothing links to, a directory with one concept, none, or too many); \`work\` with kind stale_soon lists what goes stale within 14 days. Only a new \`stale_after\` resets a concept's clock; other edits leave it stale.
 7. Comments are how people ask you for changes. Before editing a concept, read its open threads with \`comments\`; make the change a comment asks for, then answer it with \`comment\` (reply, and resolve what you fixed). Ask with a reply when unsure; never resolve a thread you did not address. A concept with open threads cannot be deleted until they are resolved.`;
 
 const text = (t: string): CallToolResult => ({ content: [{ type: "text", text: t }] });
@@ -161,11 +161,12 @@ export function healthLines(h: LibraryHealth): string[] {
     ["stale_soon", "stale soon"],
     ["broken_link", "broken links"],
     ["lint", "lint"],
+    ["external_image", "hotlinked images"],
     ["structure", "structure"],
     ["comment", "open comments"],
   ];
   const counts = names
-    .filter(([k]) => h.counts[k] > 0)
+    .filter(([k]) => (h.counts[k] ?? 0) > 0)
     .map(([k, label]) => `${label} ${h.counts[k]}`)
     .join(" · ");
   const newest = h.unverified.newest
@@ -1537,10 +1538,18 @@ export function buildServer(ctx: McpContext): McpServer {
       "work",
       {
         title: "Maintenance queue",
-        description: `${BEYOND}what needs doing in this library: open comment threads (requests from people), stale concepts (past stale_after), broken links, lint, and structure (what makes a directory's index.md poor: descriptions missing, too long or repeating the title, duplicate titles, concepts nothing links to, directories with one concept, none or too many; reported on the concept or on the directory's index.md, and never fixed for you), ranked by how many concepts link in. Each item has a suggested action; fix it through the normal write tools, and answer comments with \`comment\`. \`kind: "stale_soon"\` looks ahead instead: concepts within 14 days of stale_after, to refresh before they go stale; only moving stale_after resets the clock.`,
+        description: `${BEYOND}what needs doing in this library: open comment threads (requests from people), stale concepts (past stale_after), broken links, lint, hotlinked images (\`external_image\`, one item per page: \`attach\` each with \`source_url\`, \`edit\` the image to the attached path, cite the original in \`sources\`), and structure (what makes a directory's index.md poor: descriptions missing, too long or repeating the title, duplicate titles, concepts nothing links to, directories with one concept, none or too many; reported on the concept or on the directory's index.md, and never fixed for you), ranked by how many concepts link in. Each item has a suggested action; fix it through the normal write tools, and answer comments with \`comment\`. \`kind: "stale_soon"\` looks ahead instead: concepts within 14 days of stale_after, to refresh before they go stale; only moving stale_after resets the clock.`,
         inputSchema: {
           kind: z
-            .enum(["comment", "stale", "stale_soon", "broken_link", "lint", "structure"])
+            .enum([
+              "comment",
+              "stale",
+              "stale_soon",
+              "broken_link",
+              "lint",
+              "external_image",
+              "structure",
+            ])
             .optional(),
           limit: z.number().int().optional(),
           ...libArg,

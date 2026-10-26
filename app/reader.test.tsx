@@ -360,7 +360,7 @@ describe("figures (tempra-dev: app/reader, Figures)", () => {
     const captions = figures.map((f) => f.querySelector("figcaption")?.textContent);
     expect(captions).toEqual([
       "Figure 1. The tower at dusk",
-      "Figure 2. Only alt",
+      "Figure 2. Only altFrom e.com",
       "Figure 3.",
       "Figure 4. A write goes through the ledger",
       "Figure 5. In a list",
@@ -492,6 +492,65 @@ describe("figures (tempra-dev: app/reader, Figures)", () => {
         const b = text.blocks.find((x) => x.from === at);
         expect(readText(tb)).toBe(text.text.slice(b?.from, b?.to));
       }
+      await act(async () => root.unmount());
+    });
+  });
+
+  test("an external image names its site under the caption, outside the text", () => {
+    const md = [
+      "![Only alt](https://www.e.com/photo.jpg)",
+      "![Ours](assets/ours.png)",
+      'Text with ![a badge](//badges.io/b.svg "Build") and ![mine](assets/m.png).',
+      ':::figure\n![One](https://a.org/1.png "First")\n![Two](https://b.org/2.png "Second")\n:::',
+    ].join("\n\n");
+    const { p, root } = draw(stored(md), { href: hrefs, path: "c.md" });
+    expect(p.figures.map((f) => (f.kind === "image" ? f.host : null))).toEqual([
+      "e.com",
+      null,
+      "a.org",
+      "b.org",
+    ]);
+    const captions = [...root.querySelectorAll("figcaption")].map((c) => c.textContent);
+    expect(captions).toEqual([
+      "Figure 1. Only altFrom e.com",
+      "Figure 2. Ours",
+      "Figures 3 and 4.From a.org, b.org",
+    ]);
+    const source = root.querySelector("figcaption .figure-source") as Element;
+    expect(source.closest("[data-skip]")).not.toBeNull();
+    expect(source.querySelector("a")).toBeNull();
+    expect(p.text.text).not.toContain("e.com");
+    // Inline: a tooltip only, no line.
+    expect(root.querySelector('img[alt="a badge"]')?.getAttribute("title")).toBe(
+      "Build (from badges.io)",
+    );
+    expect(root.querySelector('img[alt="mine"]')?.hasAttribute("title")).toBe(false);
+  });
+
+  test("an external image that fails says it is external, and from where", async () => {
+    await live(async (window) => {
+      const md = "![A chart](https://charts.example.com/c.png)\n\nSee ![dot](https://x.io/d.png).";
+      const p = prepare(stored(md), { href: hrefs, path: "c.md" });
+      const { host, root } = await mount(
+        window,
+        <Body prepared={p} diff={null} hideFirst={false} />,
+      );
+      for (const alt of ["A chart", "dot"]) {
+        const img = host.querySelector(`img[alt="${alt}"]`) as HTMLImageElement;
+        await act(async () => {
+          img.dispatchEvent(new window.Event("error") as unknown as Event);
+        });
+      }
+      const box = host.querySelector(".figure-broken") as HTMLElement;
+      expect(box.textContent).toContain("This image can't be shown");
+      expect(box.textContent).toContain("An external image from charts.example.com");
+      expect(box.getAttribute("aria-label")).toBe(
+        "This external image from charts.example.com can't be shown: A chart",
+      );
+      const inline = host.querySelector(".image-broken") as HTMLElement;
+      expect(inline.getAttribute("title")).toBe("This external image from x.io can't be shown");
+      const para = host.querySelector("figure p[data-text]") as unknown as Element;
+      expect(readText(para)).toBe(ATOM);
       await act(async () => root.unmount());
     });
   });
@@ -655,7 +714,7 @@ describe("figure markup (TEMPRA-161)", () => {
       "Figure 3. The whole frame",
       "Figure 4. A labelled one",
       "Figures 5 and 6. The top bar before and after[src]",
-      "Figures 7–10. Four",
+      "Figures 7–10. FourFrom e.com",
       "Figure 11. Broken markup",
       "Figure 12. Listed",
       "Figure 13. Plain",

@@ -47,6 +47,7 @@ describe("summary and health without the whole ledger (TEMPRA-86)", () => {
             lint: work.counts.lint ?? 0,
             structure: work.counts.structure ?? 0,
             comment: work.counts.comment ?? 0,
+            external_image: work.counts.external_image ?? 0,
           },
         });
       }

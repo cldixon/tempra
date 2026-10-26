@@ -405,6 +405,12 @@
   font-weight: var(--tempra-weight-medium);
 }
 
+/* An external image's site, a quiet line under the caption (TEMPRA-163). */
+.prose .figure-source {
+  display: block;
+  color: var(--tempra-color-muted);
+}
+
 /*
  * Figure markup (TEMPRA-161; tempra-dev: app/media, Figure markup). Width: `--figure-width`, set on
  * the figure through the CSSOM, caps its images (max-width only, so an image is never drawn wider

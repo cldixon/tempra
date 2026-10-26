@@ -247,7 +247,15 @@ describe("the health summary (TEMPRA-66)", () => {
     expect(res.health).toEqual({
       at: "2026-10-01T00:00:00Z",
       seq: 2,
-      counts: { stale: 0, stale_soon: 0, broken_link: 1, lint: 1, structure: 1, comment: 0 },
+      counts: {
+        stale: 0,
+        stale_soon: 0,
+        broken_link: 1,
+        lint: 1,
+        structure: 1,
+        comment: 0,
+        external_image: 0,
+      },
       unverified: {
         total: 2,
         newest: [

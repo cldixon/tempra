@@ -1826,6 +1826,44 @@ async function browserRenders(
       for (const [path] of [["gate-markup.md"], ...images]) await agentDeletes(path);
     });
 
+    // External images (TEMPRA-163; tempra-dev: app/media): a hotlinked figure names its site under
+    // the caption, and its broken box says it is external. The gate has no internet, so the image
+    // is on a host that never resolves (`.invalid`), which is the broken state; `work` lists the
+    // page as one external_image item for an agent to bring the image home.
+    await step("external images: the site under the caption, the broken box, work", async () => {
+      const ext = "https://images.gate.invalid/chart.png";
+      const put = await fetch(`${libApi}/files/gate-external.md`, {
+        method: "PUT",
+        headers: { ...bearer, "Content-Type": "text/markdown", "X-Note": "gate: a hotlink" },
+        body: [
+          "---\ntype: Note\ntitle: Gate external image\ndescription: A hotlinked figure.\n---",
+          `![A chart from elsewhere](${ext} "A remote chart")\n`,
+        ].join("\n"),
+      });
+      if (!put.ok) throw new Error(`write: ${put.status} ${await put.text()}`);
+      const lint = ((await put.json()) as { lint?: { code: string }[] }).lint ?? [];
+      if (!lint.some((l) => l.code === "image_external")) throw new Error("no image_external lint");
+      await page.goto(`${lib}/gate-external.md`);
+      const fig = page.locator(".body figure.figure");
+      const source = fig.locator("figcaption .figure-source");
+      await source.waitFor({ timeout: 15_000 });
+      const from = (await source.innerText()).trim();
+      if (from !== "From images.gate.invalid") throw new Error(`the source line: ${from}`);
+      const broken = fig.locator(".figure-broken");
+      await broken.waitFor({ timeout: 15_000 });
+      const said = await broken.innerText();
+      if (!said.includes("An external image from images.gate.invalid")) {
+        throw new Error(`the broken box: ${said}`);
+      }
+      if (shots) await page.screenshot({ path: `${shots}/figure-external.png` });
+      const work = (await (
+        await fetch(`${libApi}/work?kind=external_image`, { headers: bearer })
+      ).json()) as { items: { path: string; detail: string }[] };
+      const item = work.items.find((i) => i.path === "gate-external.md");
+      if (!item?.detail.includes(ext)) throw new Error("work does not list the hotlinked image");
+      await agentDeletes("gate-external.md");
+    });
+
     // Reader images (TEMPRA-162; tempra-dev: app/media, How people see): every image from the
     // image route by hash, its box reserved from the stored size, so nothing moves as images
     // load; a phone gets a scaled copy (cf dev's Images stand-in scales locally), far smaller

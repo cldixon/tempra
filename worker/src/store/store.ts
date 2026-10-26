@@ -697,6 +697,7 @@ export class LibraryStore {
     this.addFtsRows();
     this.addBlobDimensions();
     this.sql.script(DIAGRAM_RENDERS);
+    this.addExternalImageFlags();
   }
 
   /**
@@ -2594,19 +2595,24 @@ export class LibraryStore {
     if (others.length === before.length && lint.length === 0) return [];
     const all = [...others, ...lint];
     this.sql.run("UPDATE concepts SET lint = ? WHERE concept_id = ?", JSON.stringify(all), id);
-    const flagged = all.filter((l) => l.code !== "broken_link");
-    if (flagged.length > 0) {
-      this.sql.run(
-        `INSERT INTO flags (concept_id, kind, since_seq, detail) VALUES (?, 'lint', ?, ?)
-         ON CONFLICT(concept_id, kind) DO UPDATE SET detail = excluded.detail`,
-        id,
-        this.headSeq(),
-        JSON.stringify(flagged),
-      );
-    } else {
-      this.sql.run("DELETE FROM flags WHERE concept_id = ? AND kind = 'lint'", id);
-    }
+    this.setLintFlag(id, all, this.headSeq());
     return lint;
+  }
+
+  /**
+   * Libraries linted before TEMPRA-163 hold `image_external` in their lint flags: moved once into
+   * `external_image` flags, so the same image is never listed under both kinds.
+   */
+  private addExternalImageFlags() {
+    if (this.sql.all("SELECT 1 FROM meta WHERE key = 'external_image_flags'").length > 0) return;
+    this.sql.transaction(() => {
+      for (const f of this.sql.all<{ concept_id: string; since_seq: number; detail: string }>(
+        "SELECT concept_id, since_seq, detail FROM flags WHERE kind = 'lint' AND detail LIKE '%image_external%'",
+      )) {
+        this.setLintFlag(f.concept_id, JSON.parse(f.detail) as LintWarning[], f.since_seq);
+      }
+      this.sql.run("INSERT INTO meta (key, value) VALUES ('external_image_flags', '1')");
+    });
   }
 
   /** The target-dependent figure lint of a concept version, as of the snapshot. */
@@ -2772,19 +2778,31 @@ export class LibraryStore {
     });
   }
 
-  /** The `lint` work flag from a concept's stored lint (broken links have their own flag). */
+  /**
+   * A concept's lint flags from its stored lint: hotlinked images (`image_external`) are their own
+   * kind of work, `external_image` (TEMPRA-163), so they are never listed twice; the rest is
+   * `lint`; broken links have their own flag (refreshBroken). A flag already set keeps its
+   * `since_seq`.
+   */
   private setLintFlag(id: string, lint: LintWarning[], seq: number) {
-    const nonLink = lint.filter((l) => l.code !== "broken_link");
-    if (nonLink.length > 0) {
-      this.sql.run(
-        `INSERT INTO flags (concept_id, kind, since_seq, detail) VALUES (?, 'lint', ?, ?)
-         ON CONFLICT(concept_id, kind) DO UPDATE SET detail = excluded.detail`,
-        id,
-        seq,
-        JSON.stringify(nonLink),
-      );
-    } else {
-      this.sql.run("DELETE FROM flags WHERE concept_id = ? AND kind = 'lint'", id);
+    const external = lint.filter((l) => l.code === "image_external");
+    const rest = lint.filter((l) => l.code !== "broken_link" && l.code !== "image_external");
+    for (const [kind, found] of [
+      ["lint", rest],
+      ["external_image", external],
+    ] as const) {
+      if (found.length > 0) {
+        this.sql.run(
+          `INSERT INTO flags (concept_id, kind, since_seq, detail) VALUES (?, ?, ?, ?)
+           ON CONFLICT(concept_id, kind) DO UPDATE SET detail = excluded.detail`,
+          id,
+          kind,
+          seq,
+          JSON.stringify(found),
+        );
+      } else {
+        this.sql.run("DELETE FROM flags WHERE concept_id = ? AND kind = ?", id, kind);
+      }
     }
   }
 
@@ -3855,6 +3873,14 @@ export class LibraryStore {
         detail = `links to missing ${targets.map((t) => `/${t}`).join(", ")}`;
         action =
           "Write the missing concept, point the link at an existing one, or remove the link.";
+      } else if (f.kind === "external_image") {
+        const urls = [
+          ...new Set((JSON.parse(f.detail) as LintWarning[]).map((l) => l.target ?? "")),
+        ].filter((u) => u !== "");
+        const n = urls.length;
+        detail = `${n} image${n === 1 ? "" : "s"} hotlinked from another site: ${urls.join(", ")}`;
+        action =
+          "Bring each into the library: `attach` it with `source_url` set to its URL (the server fetches it and records where from; put it beside this concept), `edit` the image to point at the attached path, and cite the original in `sources`.";
       } else if (f.kind === "lint") {
         detail = [
           ...this.freshLint(snap, e, JSON.parse(f.detail) as LintWarning[]),
@@ -4594,6 +4620,7 @@ export class LibraryStore {
         lint: n("lint"),
         structure: n("structure"),
         comment: n("comment"),
+        external_image: n("external_image"),
       },
       unverified: {
         total: this.sql.all<{ n: number }>(`SELECT COUNT(*) AS n ${UNVERIFIED}`)[0]?.n ?? 0,
@@ -5189,6 +5216,8 @@ export interface LibraryHealth {
     lint: number;
     structure: number;
     comment: number;
+    /** Pages with hotlinked images (TEMPRA-163); absent from summaries kept before it. */
+    external_image?: number;
   };
   /** Concepts whose latest change came after their latest verification (or that have none). */
   unverified: {
