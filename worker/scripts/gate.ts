@@ -891,7 +891,7 @@ async function browserRenders(
           el.scrollTop = 300;
         });
         const before = await main.evaluate((el) => el.scrollTop);
-        const title = await main.locator("h1").first().innerText();
+        const title = await main.locator("h1.doc-title").innerText();
         const link = sidebar.locator(`a[data-path="${other}"]`);
         await link.hover();
         await page.waitForTimeout(1500); // the hover's prefetch lands in the cache
@@ -899,10 +899,12 @@ async function browserRenders(
         await page.waitForURL(`${lib}/${enc(other)}`);
         // The URL changes before React draws the new page: wait for the page itself (on a
         // slow runner the old one can still be on screen, scrolled, when the URL has moved).
+        // By its title, not any h1: the old page's body can have h1 headings of its own, which
+        // satisfied the wait while the old page was still on screen.
         // (A locator, not waitForFunction: the app's CSP refuses string evaluation.)
         const exact = new RegExp(`^${literal(title)}$`);
         await main
-          .locator("h1", { hasNotText: exact })
+          .locator("h1.doc-title", { hasNotText: exact })
           .or(main.getByText("Loading…"))
           .first()
           .waitFor({ timeout: 5000 });
@@ -1493,9 +1495,29 @@ async function browserRenders(
     let tooltipShown = false;
     for (const concept of concepts) {
       await step(`reader on ${concept}`, async () => {
+        // The first page's data comes in the shell (TEMPRA-175): a full load of a concept draws
+        // its body without asking the API for the file, its context or the frame's first calls.
+        const asked: string[] = [];
+        const onRequest = (r: import("playwright-core").Request) => {
+          const u = new URL(r.url());
+          if (u.origin === base && u.pathname.startsWith("/api/")) asked.push(u.pathname);
+        };
+        page.on("request", onRequest);
         await page.goto(`${base}/${owner}/${slug}/${enc(concept)}`);
         const body = page.locator(".body .prose");
         await body.waitFor({ timeout: 15_000 });
+        page.off("request", onRequest);
+        const lib = `/api/v1/libraries/${owner}/${slug}`;
+        const booted = [
+          `${lib}/files/${enc(concept)}`,
+          `${lib}/sources/${enc(concept)}`,
+          `${lib}/outline`,
+          "/api/v1/inbox/count",
+        ];
+        const refetched = asked.filter((a) => booted.includes(a));
+        if (refetched.length > 0) {
+          throw new Error(`asked the API for what the shell carries: ${refetched.join(", ")}`);
+        }
         await sheetBar.getByRole("button", { name: "More", exact: true }).waitFor();
         await actionsFab().waitFor();
         // Read and comment only (TEMPRA-99): nothing in the page edits.

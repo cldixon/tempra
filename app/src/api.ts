@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { takeBoot } from "./boot";
 import { PageCache, share } from "./cache";
 
 /** An error answer from the API: `{ error, code }` with its HTTP status. */
@@ -36,6 +37,9 @@ export async function api<T>(url: string, init: RequestInit = {}): Promise<T> {
     headers.set("Content-Type", "application/json");
   }
   const read = (init.method ?? "GET") === "GET";
+  // The first page's answers came with the shell (TEMPRA-175): the first call to each is free.
+  const booted = read ? takeBoot(url) : null;
+  if (booted) return booted.data as T;
   let res: Response;
   for (let attempt = 0; ; attempt++) {
     const wait = holdUntil - Date.now();
