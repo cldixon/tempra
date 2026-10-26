@@ -36,15 +36,15 @@ const isConceptPath = (path: string) =>
 
 /**
  * The API calls the app makes first on a page, as it builds them: the frame's (who the person
- * is, their libraries, the bell), a library's (its agents, the seen cursor, the tree), and a
+ * is, their libraries, the bell's count), a library's (the tree, its agents), and a
  * file's page (app/src/concept/data.ts `loadFile` and the Comments panel's threads). Most
  * important first, since the size budget keeps what fits in order.
  */
 export function bootUrls(page: BootPage): string[] {
-  const frame = ["/api/v1/me", "/api/v1/libraries", "/api/v1/inbox/count", "/api/v1/inbox?limit=5"];
+  const frame = ["/api/v1/me", "/api/v1/libraries", "/api/v1/inbox/count"];
   if (page.kind === "account") return frame;
   const lib = `/api/v1/libraries/${encodeURIComponent(page.owner)}/${encodeURIComponent(page.slug)}`;
-  const library = [`${lib}/outline`, `${lib}/agents`, `${lib}/seen`];
+  const library = [`${lib}/outline`, `${lib}/agents`];
   if (page.kind === "library") return [...frame, ...library];
   const p = enc(page.path);
   const at = page.at === undefined ? "" : `?at=${page.at}`;

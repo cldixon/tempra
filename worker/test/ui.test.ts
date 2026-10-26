@@ -361,7 +361,6 @@ describe("the first page's data in the shell (TEMPRA-175)", () => {
       "/api/v1/me",
       "/api/v1/libraries",
       "/api/v1/inbox/count",
-      "/api/v1/inbox?limit=5",
     ]) {
       expect(Object.keys(boot)).toContain(url);
     }
@@ -378,7 +377,7 @@ describe("the first page's data in the shell (TEMPRA-175)", () => {
     expect(Object.keys(pinned)).not.toContain(`${LIB_API}/files/notes/a.md`);
     const account = bootOf((await page(s, "/agents")).html);
     expect(Object.keys(account).sort()).toEqual(
-      ["/api/v1/inbox/count", "/api/v1/inbox?limit=5", "/api/v1/libraries", "/api/v1/me"].sort(),
+      ["/api/v1/inbox/count", "/api/v1/libraries", "/api/v1/me"].sort(),
     );
   });
 
