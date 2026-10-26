@@ -1040,25 +1040,6 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     return c.body(null, 204);
   });
 
-  /** Tells a member the owner changed their access (TEMPRA-72); never fails the change. */
-  const accessChanged = async (c: C, user: string, excerpt: string) => {
-    const ref = c.var.token.library;
-    await c.var.deps.notifications
-      ?.add([
-        {
-          user,
-          library: ref.id,
-          kind: "access",
-          place: `${ref.owner}/${ref.slug}`,
-          actor: c.var.token.actor,
-          by_user: c.var.token.created_by ?? null,
-          excerpt,
-          mail: true,
-        },
-      ])
-      .catch((e) => console.error(JSON.stringify({ notify_failed: "access", error: String(e) })));
-  };
-
   /** A member by handle, for changing their role or removing them. */
   const memberNamed = async (c: C) => {
     const accounts = c.var.deps.accounts;
@@ -1092,11 +1073,6 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
       role,
       c.var.token.created_by ?? null,
     );
-    await accessChanged(
-      c,
-      person.id,
-      role === "write" ? "Now read and write" : "Now read and comment",
-    );
     return c.json({ handle: person.handle, role });
   });
 
@@ -1107,7 +1083,6 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     const leaving = person.id === c.var.token.created_by;
     if (!leaving) requireOwner(c.var.token.role, "remove members");
     await c.var.deps.accounts.unshare(c.var.token.library.id, person.id);
-    if (!leaving) await accessChanged(c, person.id, "Removed from the library");
     return c.body(null, 204);
   });
 

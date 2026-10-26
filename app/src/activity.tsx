@@ -568,18 +568,12 @@ function TouchedList({ touched, urls }: { touched: Touched[]; urls: Urls }) {
 
 /**
  * One Activity entry: who (avatar, name, whom an agent acts for), what they did, the note, the
- * concepts touched, and when; what is new since the person looked is marked by `NewDivider`.
+ * concepts touched, and when.
  */
-export function EntryRow(props: {
-  entry: Entry;
-  urls: Urls;
-  actor: ActorView;
-  now: number;
-  isNew: boolean;
-}) {
-  const { entry: e, urls, actor, now, isNew } = props;
+export function EntryRow(props: { entry: Entry; urls: Urls; actor: ActorView; now: number }) {
+  const { entry: e, urls, actor, now } = props;
   return (
-    <article className={isNew ? "entry new" : "entry"}>
+    <article className="entry">
       <Avatar name={actor.mark} agent={actor.agent} />
       <div className="entry-body">
         <p className="entry-line">
@@ -596,26 +590,8 @@ export function EntryRow(props: {
         <time dateTime={e.ts} title={localTime(e.ts)}>
           {entryTime(e.ts, now)}
         </time>
-        {/* Seen, it is marked once for the eye: the divider below the new entries. */}
-        {isNew && <span className="visually-hidden">New since you looked</span>}
       </span>
     </article>
-  );
-}
-
-/**
- * Where the new entries end (A-6, TEMPRA-121): one rule under the entries after the person's
- * seen cursor, "New since you looked" above it; nothing on a first look, when all is new.
- */
-export function NewDivider() {
-  // Each new entry says so to a screen reader; the divider is for the eye.
-  return (
-    <p className="entry-divider" aria-hidden="true">
-      <span>
-        <span className="change-dot" />
-        New since you looked
-      </span>
-    </p>
   );
 }
 

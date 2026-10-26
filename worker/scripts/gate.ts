@@ -567,7 +567,7 @@ function greyPng(width: number, height: number, shade: number): Uint8Array {
 
 /**
  * The app in a real browser, signed in as the seeded user (layout take 4, TEMPRA-113 to 118):
- * the library's home (no sections, no housekeeping, For you here), the workspace (the bar's
+ * the library's home (no sections, no housekeeping, nothing counted for the person), the workspace (the bar's
  * mark, library, switcher, search and page path, the tree, the foot's Activity and Settings, the
  * quick switcher, the hidden sidebar; at phone width the bar's mark and library, the drawer with
  * the bar's parts at its head, the tree, Activity, Settings and the Inbox, the home stacked, a
@@ -579,8 +579,8 @@ function greyPng(width: number, height: number, shade: number): Uint8Array {
  * (Mark as checked, the Checked line, review mode), comments in the panel, a concept on a
  * phone (its top bar with Copy page under ⋯,
  * On this page, every panel as a bottom sheet), the Markdown view,
- * figures in the full-screen view, the Inbox (a reply waiting, a page to check, the bell, Done,
- * filtered to the library from the home's For you here and from Needs you's old URL), and
+ * figures in the full-screen view, the Inbox (a reply waiting, reached by the bell, filtered to
+ * the library and from Needs you's old URL; nothing for a checked page an agent edited), and
  * Activity with its two views (Summary and
  * Every event), all drawn from the API; links move within the app without reloading the page, and
  * nothing is refused by the CSP or throws. GATE_SCREENSHOTS=<dir> saves screenshots of them.
@@ -918,13 +918,6 @@ async function browserRenders(
       },
     );
     await step("workspace: the tree follows an agent's write and move, live", async () => {
-      // The person has seen everything so far: no solid dot until an agent writes.
-      const libPath = `/api/v1/libraries/${owner}/${slug}`;
-      const { seq: head } = (await (await apiAs(devCookie, `${libPath}/summary`)).json()) as {
-        seq: number;
-      };
-      const seen = await apiAs(devCookie, `${libPath}/seen`, "PUT", { seq: head });
-      if (!seen.ok) throw new Error(`PUT …/seen: ${seen.status}`);
       await page.reload();
       await sidebar.locator(".tree a").first().waitFor({ timeout: 15_000 });
       const put = await fetch(`${libApi}/files/gate-live.md`, {
@@ -935,23 +928,10 @@ async function browserRenders(
       if (!put.ok) throw new Error(`write: ${put.status}`);
       const row = sidebar.locator('a[data-path="gate-live.md"]');
       await row.waitFor({ timeout: 5000 });
-      // The change dot (take 4, TEMPRA-129): pulsing while the agent writes, named for its
-      // person, not by the raw actor (TEMPRA-77): "… for @dev is editing this now".
-      await sidebar
-        .locator(".tree-row", { has: page.locator(`a[data-path="gate-live.md"]`) })
-        .locator('.tree-mark[title*=" for @"][title$="is editing this now"] .change-dot.live')
-        .waitFor({ timeout: 5000 });
-      // After it (a fresh look, the write no longer live): solid, changed since the person
-      // looked; take 3's grey is gone.
-      await page.reload();
-      await sidebar
-        .locator(".tree-row", { has: page.locator(`a[data-path="gate-live.md"]`) })
-        .locator('.tree-mark[title="Changed since you last looked"] .change-dot:not(.live)')
-        .waitFor({ timeout: 15_000 });
-      if ((await sidebar.locator(".change-dot.cool, .change-dot.warm").count()) > 0) {
-        throw new Error("the tree still draws take 3's warm or grey dot");
+      // The tree does not mark change (TEMPRA-173): no dot, live or since the person looked.
+      if ((await sidebar.locator(".change-dot").count()) > 0) {
+        throw new Error("the tree marks change");
       }
-      if (shots) await page.screenshot({ path: `${shots}/tree-dot.png` });
       const target = folder ? `${folder}/gate-live.md` : "moved/gate-live.md";
       const moved = await fetch(`${libApi}/files/gate-live.md/move`, {
         method: "POST",
@@ -984,16 +964,9 @@ async function browserRenders(
       await dialog.waitFor({ state: "hidden", timeout: 5000 });
       await agentDeletes(target);
     });
-    // TEMPRA-121: what changed since the person last looked, on the home's one line and in
-    // Recently changed; Activity marks only what is new, under one divider, and moves the cursor:
-    // back on the home (no reload) the line, the section's dot and the tree's dot are gone.
-    await step("home: since you last looked, Recently changed, and a second look", async () => {
-      const libPath = `/api/v1/libraries/${owner}/${slug}`;
-      const { seq: head } = (await (await apiAs(devCookie, `${libPath}/summary`)).json()) as {
-        seq: number;
-      };
-      const put = await apiAs(devCookie, `${libPath}/seen`, "PUT", { seq: head });
-      if (!put.ok) throw new Error(`PUT …/seen: ${put.status}`);
+    // What an agent wrote shows in Recently changed and in Activity; nothing counts it for the
+    // person (TEMPRA-173): no "since you last looked" line, no tree dot, no Activity divider.
+    await step("home: Recently changed, and nothing counted since the last look", async () => {
       const path = folder ? `${folder}/gate-since.md` : "gate-since.md";
       const wrote = await fetch(`${libApi}/files/${enc(path)}`, {
         method: "PUT",
@@ -1001,13 +974,8 @@ async function browserRenders(
         body: "---\ntype: Note\ntitle: Gate since\ndescription: Written after the last look.\n---\nNew.\n",
       });
       if (!wrote.ok) throw new Error(`write: ${wrote.status}`);
-      // A fresh load: the write is past the cursor, and no longer arriving live.
       await page.goto(`${lib}/`);
       await home();
-      const since = main.locator(".home-since");
-      await since
-        .filter({ hasText: /^Since earlier today: .+ changed 1 page · See Activity$/ })
-        .waitFor({ timeout: 15_000 });
       const recent = main.getByRole("region", { name: "Recently changed" });
       await recent
         .locator(".home-recent-row")
@@ -1016,43 +984,29 @@ async function browserRenders(
         .waitFor({ timeout: 10_000 });
       const meta = await recent.locator(".home-recent-meta").first().innerText();
       if (!/ · just now$/.test(meta)) throw new Error(`Recently changed says "${meta}"`);
-      // The tree's solid dot: on the file, or rolled up on a closed folder that holds it.
-      const treeDot = sidebar.locator('nav[aria-label="Files"] .change-dot');
-      await treeDot.first().waitFor({ timeout: 5000 });
-      if (shots) await page.screenshot({ path: `${shots}/home-since.png` });
+      if ((await main.getByText(/^Since /).count()) > 0) throw new Error("the home counts change");
+      if ((await main.getByRole("region", { name: "For you here" }).count()) > 0) {
+        throw new Error("the home still has For you here");
+      }
+      if ((await sidebar.locator(".change-dot").count()) > 0)
+        throw new Error("the tree marks change");
+      if (shots) await page.screenshot({ path: `${shots}/home-recent.png` });
       await markStay();
       await sidebar
         .getByRole("navigation", { name: "Library" })
         .getByRole("link", { name: /^Activity/ })
         .click();
       await page.waitForURL(`${lib}/-/activity`);
-      // One divider under the new entry (older entries follow it); no dot on every row.
-      const divider = main.locator(".entry-divider");
-      await divider.waitFor({ timeout: 15_000 });
-      if ((await divider.count()) !== 1) throw new Error(`${await divider.count()} dividers`);
+      await main.locator(".activity-day .entry").first().waitFor({ timeout: 15_000 });
       const above = await main.locator(".activity-day .entry").first().innerText();
       if (!above.includes("Gate since")) throw new Error(`the newest entry reads "${above}"`);
-      if ((await main.locator(".activity-day .entry-side .change-dot").count()) > 0) {
-        throw new Error("Activity still draws a dot on each new entry");
+      if ((await main.getByText("New since you looked").count()) > 0) {
+        throw new Error("Activity still marks what is new since the last look");
       }
-      if (shots) await page.screenshot({ path: `${shots}/activity-new.png` });
-      // The cursor moves (the server has it) ...
-      const deadline = Date.now() + 10_000;
-      for (;;) {
-        const { seq } = (await (await apiAs(devCookie, `${libPath}/seen`)).json()) as {
-          seq: number | null;
-        };
-        if (seq !== null && seq > head) break;
-        if (Date.now() > deadline) throw new Error(`the cursor stayed at ${seq}`);
-        await page.waitForTimeout(200);
-      }
-      // ... and the home, a second look in the same page load, has nothing new to say.
       // Home is the library's name in the bar (TEMPRA-145).
       await sheetBar.locator(".topbar-brand a.brand-name").click();
       await page.waitForURL(`${lib}/`);
       await home();
-      await since.waitFor({ state: "detached", timeout: 10_000 });
-      await treeDot.first().waitFor({ state: "detached", timeout: 10_000 });
       if (!(await stayed())) throw new Error("moving between home and Activity reloaded the page");
       await agentDeletes(path);
     });
@@ -1241,12 +1195,12 @@ async function browserRenders(
       await page.getByText("Saved.").waitFor({ timeout: 15_000 });
       await page.goto(`${lib}/`);
       await home();
-      // The bell: the inbox's latest few, and the way to the inbox.
-      await page.getByRole("button", { name: /^Inbox/ }).click();
-      const bell = page.locator(".menu-list.bell-pop");
-      await bell.getByRole("link", { name: "Open inbox", exact: true }).waitFor({ timeout: 5000 });
-      await page.keyboard.press("Escape");
-      await bell.waitFor({ state: "detached", timeout: 5000 });
+      // The bell: a link to the Inbox, no popover (TEMPRA-173).
+      const bellHref = await page
+        .locator("header.ws-topbar")
+        .getByRole("link", { name: /^Inbox/ })
+        .getAttribute("href");
+      if (bellHref !== "/inbox") throw new Error(`the bell links to ${bellHref}`);
       // The theme: applied at once, kept on the account across a reload, back to the system's.
       const account = page.locator(".menu-list.account");
       await page.getByRole("button", { name: "Account menu" }).click();
@@ -1284,7 +1238,7 @@ async function browserRenders(
             throw new Error("the phone's top bar has a search button");
           }
           for (const control of [
-            topbar.getByRole("button", { name: /^Inbox/ }),
+            topbar.getByRole("link", { name: /^Inbox/ }),
             topbar.getByRole("button", { name: "Account menu" }),
           ]) {
             if (!(await control.isVisible()))
@@ -1938,14 +1892,10 @@ async function browserRenders(
         await properties().waitFor({ state: "detached", timeout: 5000 });
       },
     );
-    // The Inbox's verify items (TEMPRA-116): the person verified the concept and an agent edited
-    // it since, so it waits in their Inbox and on the bell; Review opens review mode, Dismiss
-    // moves it to Done.
-    await step("Inbox: a page the person verified, edited by an agent, to verify", async () => {
+    // An agent edited a page the person checked: the page says so ("changed since"), and
+    // nothing reaches their Inbox (TEMPRA-173).
+    await step("Inbox: an edit to a page the person checked tells them nothing", async () => {
       const reviewHref = `/${owner}/${slug}/${enc(concept)}?review=1`;
-      const row = page
-        .locator("main.ws-main li.inbox-row")
-        .filter({ has: page.locator(`a[href="${reviewHref}"]`) });
       await page.goto(`${base}/inbox`);
       await page
         .locator("main.ws-main")
@@ -1961,59 +1911,11 @@ async function browserRenders(
       if ((await accountBrand.getByRole("button", { name: "Switch library" }).count()) > 0) {
         throw new Error("an account page's bar has a library switcher");
       }
-      await row.waitFor({ timeout: 10_000 });
-      await row.getByText("To check").waitFor({ timeout: 5000 });
-      await row.getByText(/^1 edit by .+ since you checked$/).waitFor({ timeout: 5000 });
-      // The bell lists it; Mark all read clears the badge.
-      const bellButton = page.getByRole("button", { name: /^Inbox, \d+ unread$/ });
-      await bellButton.waitFor({ timeout: 10_000 });
-      await bellButton.click();
-      const bell = page.locator(".menu-list.bell-pop");
-      await bell.locator(`a.bell-item[href="${reviewHref}"]`).waitFor({ timeout: 5000 });
-      // In the Inbox row's words (F-14): the page, then the detail line.
-      await bell
-        .getByText(/^1 edit by .+ since you checked$/)
-        .first()
-        .waitFor({ timeout: 5000 });
-      if (shots) await page.screenshot({ path: `${shots}/bell.png` });
-      await bell.getByRole("button", { name: "Mark all read" }).click();
-      await page.getByRole("button", { name: "Inbox", exact: true }).waitFor({ timeout: 10_000 });
-      if ((await page.locator(".bell .badge").count()) > 0) throw new Error("the badge stayed");
-      await page.keyboard.press("Escape");
-      await bell.waitFor({ state: "detached", timeout: 5000 });
-      // Review opens the page in review mode.
-      await row.getByRole("link", { name: "Review", exact: true }).click();
-      await page.waitForURL(`${url}?review=1`);
-      await page.getByRole("region", { name: "Review" }).waitFor({ timeout: 15_000 });
-      // The home's For you here draws the same open items (TEMPRA-130, H-5).
-      const card = main.locator(`a.home-card[href="${reviewHref}"]`);
-      await page.goto(`${lib}/`);
-      await home();
-      await card.waitFor({ timeout: 15_000 });
-      // Dismiss marks it done: gone from Open, listed under Done.
-      await page.goto(`${base}/inbox`);
-      await row.waitFor({ timeout: 15_000 });
-      await row.getByRole("button", { name: "Dismiss", exact: true }).click();
-      await row.waitFor({ state: "detached", timeout: 10_000 });
-      // Done in the Inbox, gone from the home.
-      await page.goto(`${lib}/`);
-      await home();
-      await card.waitFor({ state: "detached", timeout: 15_000 });
-      await page.goto(`${base}/inbox`);
-      await main
-        .getByRole("heading", { level: 1, name: "Inbox", exact: true })
-        .waitFor({ timeout: 15_000 });
-      await page
-        .locator("main.ws-main .inbox-filters")
-        .getByRole("button", { name: "Done", exact: true })
-        .click();
-      await page.waitForURL(`${base}/inbox?done=1`);
-      // Newest first: the one just dismissed (an earlier one, closed by verifying, is below).
-      await row
-        .first()
-        .getByText(/^1 edit by .+ since you checked$/)
-        .waitFor({ timeout: 10_000 });
-      if (shots) await page.screenshot({ path: `${shots}/inbox-done.png` });
+      if ((await main.locator(`li.inbox-row a[href="${reviewHref}"]`).count()) > 0) {
+        throw new Error("the Inbox lists a page to check");
+      }
+      if ((await main.getByText("To check").count()) > 0)
+        throw new Error("the Inbox says To check");
       // Checking from review mode's bar, with a note, clears "changed since" (TEMPRA-122).
       await page.goto(`${url}?review=1`);
       const bar = page.getByRole("region", { name: "Review" });
@@ -2334,7 +2236,7 @@ async function browserRenders(
         // their inbox, its count shows on the open page's bell (take 4) without a reload, and
         // the batched mail lands in the dev outbox.
         await sheetBar
-          .getByRole("button", { name: /^Inbox, \d+ unread$/ })
+          .getByRole("link", { name: /^Inbox, \d+ unread$/ })
           .waitFor({ timeout: 10_000 });
         const inbox = (await (await apiAs(devCookie, "/api/v1/inbox")).json()) as {
           items: { id: string; kind: string; excerpt: string; href: string }[];
@@ -2383,11 +2285,10 @@ async function browserRenders(
         }
       },
     );
-    // The Inbox (take 4, TEMPRA-116) and the home's For you here (TEMPRA-117): an agent's reply
-    // on a thread the person opened waits on them on the home, as a card from GET …/needs, and
-    // in the Inbox, filtered to the library from the home's "All n in Inbox" and from Needs
+    // The Inbox (TEMPRA-116, TEMPRA-173): an agent's reply on a thread the person opened waits
+    // in the Inbox, reached by the bell, filtered to the library by its select and from Needs
     // you's old URL.
-    await step("Inbox: an agent's reply waits on the home and in the Inbox", async () => {
+    await step("Inbox: an agent's reply waits in the Inbox", async () => {
       const target = concepts.find((c) => c !== concept) ?? concept;
       const posted = await apiAs(devCookie, `/api/v1/libraries/${owner}/${slug}/comments`, "POST", {
         path: target,
@@ -2407,27 +2308,23 @@ async function browserRenders(
       const row = main
         .locator("li.inbox-row")
         .filter({ hasText: "Gate: yes, it is still current." });
-      // The home's For you here: the reply as a card, and "All n in Inbox" to the Inbox
-      // filtered to this library.
+      // The bell, from the library's home, opens the Inbox; the select filters it to this library.
       await page.goto(`${lib}/`);
       await home();
       await markStay();
-      const forYou = main.getByRole("region", { name: "For you here" });
-      await forYou
-        .locator("a.home-card")
-        .filter({ hasText: "Gate: yes, it is still current." })
-        .waitFor({ timeout: 15_000 });
-      if (shots) await page.screenshot({ path: `${shots}/home-for-you.png` });
-      const all = forYou.getByRole("link", { name: /^All \d+ in Inbox$/ });
-      const allHref = await all.getAttribute("href");
-      if (allHref !== `/inbox?library=${owner}/${slug}`) throw new Error(`All n: ${allHref}`);
-      await all.click();
-      await page.waitForURL(filtered);
+      await page
+        .locator("header.ws-topbar")
+        .getByRole("link", { name: /^Inbox/ })
+        .click();
+      await page.waitForURL(`${base}/inbox`);
       await inboxHeading.waitFor({ timeout: 15_000 });
       await row.waitFor({ timeout: 10_000 });
       await row.getByText("replied to your thread").waitFor({ timeout: 5000 });
       // One library filter (TEMPRA-130, A-12): the select, set to this library.
       const filter = main.getByRole("combobox", { name: "Library" });
+      await filter.selectOption(`${owner}/${slug}`);
+      await page.waitForURL(filtered);
+      await row.waitFor({ timeout: 10_000 });
       if ((await filter.inputValue({ timeout: 5000 })) !== `${owner}/${slug}`) {
         throw new Error(`the library filter: ${await filter.inputValue()}`);
       }
@@ -2509,7 +2406,7 @@ async function browserRenders(
           }
           const moreButton = sheetBar.getByRole("button", { name: "More", exact: true });
           if (!(await moreButton.isVisible())) throw new Error("no ⋯ in the phone's top bar");
-          if (!(await sheetBar.getByRole("button", { name: /^Inbox/ }).isVisible())) {
+          if (!(await sheetBar.getByRole("link", { name: /^Inbox/ }).isVisible())) {
             throw new Error("no bell in the concept's phone bar");
           }
           for (const gone of [
