@@ -7,12 +7,15 @@
 
   /**
    * Source: "From example.com, fetched 2 hours ago" linking the URL (and where it was redirected
-   * to), or "Uploaded by Claude Code for @dev" for bytes an agent sent; then the page that cites
-   * it, when one does.
+   * to), or "Uploaded by Claude Code for @dev" for bytes an agent sent, with ", file supplied by
+   * @ann" when a person sent them from the agent's upload link (TEMPRA-196); then the page that
+   * cites it, when one does.
    */
   let props: {
     urls: Urls;
     source: AttachSource | null | undefined;
+    /** Who sent the bytes from an upload link, by handle. */
+    suppliedBy?: string | null | undefined;
     /** The version on screen, for who uploaded it. */
     version: Version | null;
     uses: readonly Use[] | null;
@@ -32,7 +35,7 @@
 {#if props.source}<div
     >From <a {...outbound(props.source.url)}>{hostOf(props.source.url)}</a
     >{#if props.source.fetched_at}, fetched <Moment ts={props.source.fetched_at} />{/if}</div
-  >{:else if props.version}<div>Uploaded by <AgentName who={props.name(props.version.actor, props.version.by)} /></div
+  >{:else if props.version}<div>Uploaded by <AgentName who={props.name(props.version.actor, props.version.by)} />{#if props.suppliedBy}{`, file supplied by @${props.suppliedBy}`}{/if}</div
   >{:else}<div class="muted">…</div>{/if}{#if redirected}<div class="muted"
     >Redirected to <a {...outbound(redirected)}>{hostOf(redirected)}</a></div
   >{/if}{#if cited}<div class="muted"

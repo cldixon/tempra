@@ -4,9 +4,10 @@ import { type Urls, urlsFor } from "./urls";
 
 /**
  * What a library's pages load first, by page (tempra-dev: app/workspace): the file's page, the
- * home and Activity register how, under the key their `useLoad` keeps it by. The tree and the
- * switcher prefetch a file's page on hover and selection (`prefetchFile`); a navigation waits a
- * moment for the next page's load before it replaces the one on screen (`hold.ts`, TEMPRA-194).
+ * home and Activity register how, under the key their `useLoad` keeps it by. A link pointed at
+ * loads its page ahead (`links.ts`, TEMPRA-193), the switcher its selected file (`prefetchFile`);
+ * a navigation waits a moment for the next page's load before it replaces the one on screen
+ * (`hold.ts`, TEMPRA-194).
  * A registry, so those parts do not import the pages.
  */
 export interface PageLoad {

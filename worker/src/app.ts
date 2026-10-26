@@ -35,6 +35,7 @@ import { type Mailer, registerSignInRoutes } from "./signin";
 import { OkfError } from "./store/errors";
 import {
   type AttachFacts,
+  type BlobRef,
   type ConceptContent,
   checkFacts,
   type RequestContext,
@@ -484,6 +485,8 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
         description: description ?? null,
         credit: v.credit ?? null,
         licence: v.licence ?? null,
+        // Who sent the bytes from the upload link, for the agent's write (TEMPRA-196).
+        supplied_by: v.supplied_by ?? null,
       });
     }
     if (view.kind === "attachment") {
@@ -1152,24 +1155,16 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   // ------------------------------------------------------------------ signed uploads
 
   /**
-   * An upload URL's PUT (TEMPRA-158): the signature is the credential, as for downloads. The
-   * bytes are checked against what was declared, the caller's access checked again, the link
-   * spent, the bytes stored (putBlob) and the `attach` applied as the caller that asked, with its
-   * note; the answer is the write result. A blob-first link (REST, no path) stores the bytes and
-   * answers with their hash, for `X-Blob` or a batch's attach.
+   * An upload URL's PUT (TEMPRA-158): the signature is the credential, as for downloads. Never a
+   * cookie: a person's upload page posts to its own URL (TEMPRA-196). See receiveUpload.
    */
   app.put("/ul/:lib/:token", async (c) => {
     const d = deps(c.env);
     const doId = c.req.param("lib");
     const raw = c.req.param("token");
     const lib = await d.libraryByDoId(doId);
-    if (!lib) {
-      throw new OkfError(403, "bad_upload", "This upload link is invalid or has expired.");
-    }
-    const grant = (await lib.openUpload(raw)) as unknown as UploadGrant;
-    if (grant.k !== "upload" || grant.token?.library?.do_id !== doId) {
-      throw new OkfError(403, "bad_upload", "This upload link is invalid or has expired.");
-    }
+    if (!lib) throw badUpload();
+    const grant = await openUploadGrant(lib, raw, doId);
     const length = Number(c.req.header("Content-Length") ?? Number.NaN);
     if (length > WORKER_ATTACHMENT_CAP) {
       throw new OkfError(
@@ -1180,29 +1175,13 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     }
     checkMedia(grant.media, c.req.header("Content-Type"));
     const bytes = await readCapped(c.req.raw.body);
-    checkBytes(bytes, { size: grant.size, sha256: grant.sha256 });
-    const token = await uploaderNow(d, grant.token);
-    await admit(d, tokenAdmission(token), true, !token.id.startsWith("session:"));
-    const media = grant.media ?? mediaFor(grant.path ?? "", c.req.header("Content-Type"));
-    // Checked (a broken image is `bad_image`, its type and size from its bytes) and stored
-    // before the link is spent, so refused bytes leave it good for a retry; stored bytes nothing
-    // references are harmless (content-addressed, swept after 31 days).
-    const blob = await putBlob(d.blobs, bytes, media, grant.path ?? undefined);
-    await lib.openUpload(raw, { claim: true });
-    if (grant.path === null) return c.json(blob, 201);
-    const res = await notifying(d, token, d.library(token), afterResponse(c)).apply(
-      { actor: grant.actor, request_id: crypto.randomUUID(), note: grant.note, by: grant.by },
-      [
-        {
-          op: "attach",
-          path: grant.path,
-          blob,
-          if_match: grant.if_match,
-          ...checkFacts(grant),
-        },
-      ],
-    );
-    return writeResponse(c, res);
+    const done = await receiveUpload(d, lib, raw, grant, {
+      bytes,
+      type: c.req.header("Content-Type"),
+      waitUntil: afterResponse(c),
+    });
+    if ("blob" in done) return c.json(done.blob, 201);
+    return writeResponse(c, done.res);
   });
 
   // ------------------------------------------------------------------ libraries and tokens
@@ -1540,7 +1519,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   registerSignInRoutes(app, deps);
   registerWaitlistRoutes(app, deps);
   registerAppRoutes(app, deps);
-  registerUiRoutes(app, deps);
+  registerUiRoutes(app, deps, { open: openUploadGrant, receive: receiveUpload });
 
   return app;
 }
@@ -1638,10 +1617,75 @@ async function exportTar(
   });
 }
 
+const badUpload = () =>
+  new OkfError(403, "bad_upload", "This upload link is invalid or has expired.");
+
+/** An upload link's token, checked against the library it names; not spent. */
+export async function openUploadGrant(
+  lib: LibraryClient,
+  raw: string,
+  doId: string,
+): Promise<UploadGrant> {
+  const grant = (await lib.openUpload(raw)) as unknown as UploadGrant;
+  if (grant.k !== "upload" || grant.token?.library?.do_id !== doId) throw badUpload();
+  return grant;
+}
+
+/** An upload link's bytes as they arrived, and from whom when a person sent them. */
+export interface UploadArrival {
+  bytes: Uint8Array;
+  /** The type the request says, checked against the declared one by the caller. */
+  type: string | undefined;
+  /** The handle of the signed-in person who sent them from the upload page (TEMPRA-196). */
+  supplied_by?: string;
+  waitUntil?: (p: Promise<unknown>) => void;
+}
+
+/**
+ * An upload link's bytes, from curl's PUT or a person's upload page (TEMPRA-158, TEMPRA-196):
+ * checked against what was declared, the caller's access checked again, the link spent, the
+ * bytes stored (putBlob) and the `attach` applied as the caller that asked, with its note. A
+ * blob-first link (REST, no path) stores the bytes and answers with their hash, for `X-Blob` or a
+ * batch's attach.
+ */
+export async function receiveUpload(
+  d: Deps,
+  lib: LibraryClient,
+  raw: string,
+  grant: UploadGrant,
+  arrival: UploadArrival,
+): Promise<{ blob: BlobRef } | { res: WriteResult }> {
+  const { bytes, type } = arrival;
+  checkBytes(bytes, { size: grant.size, sha256: grant.sha256 });
+  const token = await uploaderNow(d, grant.token);
+  await admit(d, tokenAdmission(token), true, !token.id.startsWith("session:"));
+  const media = grant.media ?? mediaFor(grant.path ?? "", type);
+  // Checked (a broken image is `bad_image`, its type and size from its bytes) and stored
+  // before the link is spent, so refused bytes leave it good for a retry; stored bytes nothing
+  // references are harmless (content-addressed, swept after 31 days).
+  const blob = await putBlob(d.blobs, bytes, media, grant.path ?? undefined);
+  await lib.openUpload(raw, { claim: true });
+  if (grant.path === null) return { blob };
+  const res = await notifying(d, token, d.library(token), arrival.waitUntil).apply(
+    { actor: grant.actor, request_id: crypto.randomUUID(), note: grant.note, by: grant.by },
+    [
+      {
+        op: "attach",
+        path: grant.path,
+        blob,
+        if_match: grant.if_match,
+        ...checkFacts(grant),
+        ...(arrival.supplied_by ? { supplied_by: arrival.supplied_by } : {}),
+      },
+    ],
+  );
+  return { res };
+}
+
 /**
  * The caller behind an upload link, checked again when its bytes arrive: the person it acts for
- * must still have the account and write access to the library (15 minutes is long enough for a
- * role to change).
+ * must still have the account and write access to the library (an hour is long enough for a role
+ * to change).
  */
 async function uploaderNow(d: Deps, t: TokenInfo): Promise<TokenInfo> {
   const ref = await d.accounts.libraryByDoId(t.library.do_id);

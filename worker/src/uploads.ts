@@ -10,8 +10,11 @@ import { sha256Hex } from "./okf/hash";
 import { OkfError } from "./store/errors";
 import type { RequestContext } from "./store/store";
 
-/** How long an upload URL stays good. */
-export const UPLOAD_TTL_SECONDS = 15 * 60;
+/**
+ * How long an upload URL and its page stay good: long enough for a person to switch from a chat
+ * to their files and back (TEMPRA-196).
+ */
+export const UPLOAD_TTL_SECONDS = 60 * 60;
 
 /**
  * The most MCP `attach` takes as `content_base64`, decoded (TEMPRA-156, tempra-dev app/media,
@@ -149,20 +152,30 @@ export async function readCapped(
   return out;
 }
 
-/** The URL to PUT a file to, and a curl line that does it. */
+/**
+ * The URL to PUT a file to, a curl line that does it, and for a file at a path, the page a
+ * signed-in person opens to send it from their browser instead (TEMPRA-196); one token for all.
+ */
 export async function prepareUpload(
   lib: LibraryClient,
   origin: string,
   grant: Omit<UploadGrant, "k">,
-): Promise<{ url: string; method: "PUT"; expires: string; curl: string }> {
+): Promise<{ url: string; method: "PUT"; expires: string; curl: string; upload_page?: string }> {
   const token = await lib.signUpload({ k: "upload", ...grant }, UPLOAD_TTL_SECONDS);
-  const url = `${origin}/ul/${encodeURIComponent(grant.token.library.do_id)}/${token}`;
+  const { do_id, owner, slug } = grant.token.library;
+  const url = `${origin}/ul/${encodeURIComponent(do_id)}/${token}`;
   const file = grant.path?.split("/").pop() || "<file>";
   return {
     url,
     method: "PUT",
     expires: new Date(Date.now() + UPLOAD_TTL_SECONDS * 1000).toISOString(),
     curl: `curl -sS -T ${shellQuote(file)} '${url}'`,
+    // Grants from before A1 carry no owner handle, so no page address.
+    ...(grant.path && owner
+      ? {
+          upload_page: `${origin}/${encodeURIComponent(owner)}/${encodeURIComponent(slug)}/-/upload/${token}`,
+        }
+      : {}),
   };
 }
 

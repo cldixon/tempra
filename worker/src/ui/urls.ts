@@ -22,6 +22,10 @@ export class Urls {
     if (dir === "") return `${this.base}${this.q()}`;
     return `${this.own(dir) ?? `${this.base}-/tree/${enc(dir)}`}/${this.q()}`;
   }
+  /** A file's page in the app. */
+  file(path: string) {
+    return `${this.own(path) ?? `${this.base}-/files/${enc(path)}`}${this.q()}`;
+  }
   raw(path: string) {
     return `${this.base}-/raw/${enc(path)}${this.q()}`;
   }

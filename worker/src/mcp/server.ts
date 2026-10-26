@@ -118,7 +118,7 @@ export const INSTRUCTIONS = `This server holds OKF (Open Knowledge Format) libra
 How to work:
 1. Call \`start\` first. It opens your library, or lists the libraries you can reach when there are several; then pass \`library\` (owner/slug) on every call. When the person asks for a new library, \`create_library\` makes one they own and opens it (only on a connection they allowed to). Then \`browse\` a directory before reading, follow links, and \`read\` what you need. Check frontmatter (type, status, trust tier, stale) before relying on a body.
 2. Write conformant concepts: a non-empty \`type\` naming what kind of thing it is (Metric, Protocol, Decision; never a generic word like concept, page or note, and reuse the types \`start\` lists), a \`title\` and one-line \`description\`, absolute links like [x](/dir/x.md), footnotes [^id] keyed to \`sources[].id\` (an entry is \`id\`, \`title\` and \`resource\`: a URL or a path in this library), one idea per concept.
-3. Figures, where one helps: a screenshot of what the page describes, a chart of data it discusses; for an architecture or a flow, a Mermaid diagram in a \`mermaid\` fence (text, diffable, drawn by the app; preview a non-trivial one with \`render\`). Put a file beside the concept that uses it, named for what it shows (\`dir/x.md\` uses \`dir/x-architecture.png\`): a web image by \`attach\` with \`source_url\` (never hotlink); a file you made by \`prepare_upload\` and its curl line when you have a shell, else \`attach\` base64 with \`sha256\`, small files only. Write \`![what it shows](/dir/x-architecture.png "Caption")\` (alt says what it shows, the title is the caption), in a \`:::figure\` block for size, placement or a group (\`write\` says how), and cite a work taken from elsewhere (a web image) in \`sources\`; a file the person gave you or you made carries its own \`credit\` and \`licence\` instead, with no \`sources\` entry. Before changing a figure or answering a comment on one, \`read\` with \`images: true\` (\`diagrams: true\` for diagrams).
+3. Figures, where one helps: a screenshot of what the page describes, a chart of data it discusses; for an architecture or a flow, a Mermaid diagram in a \`mermaid\` fence (text, diffable, drawn by the app; preview a non-trivial one with \`render\`). Put a file beside the concept that uses it, named for what it shows (\`dir/x.md\` uses \`dir/x-architecture.png\`): a web image by \`attach\` with \`source_url\` (never hotlink); a file you made or the person gave you by \`prepare_upload\`: run its curl line when your shell reaches this server, else give the person its upload link to choose the file in their browser; \`attach\` base64 with \`sha256\` for small files only. Write \`![what it shows](/dir/x-architecture.png "Caption")\` (alt says what it shows, the title is the caption), in a \`:::figure\` block for size, placement or a group (\`write\` says how), and cite a work taken from elsewhere (a web image) in \`sources\`; a file the person gave you or you made carries its own \`credit\` and \`licence\` instead, with no \`sources\` entry. Before changing a figure or answering a comment on one, \`read\` with \`images: true\` (\`diagrams: true\` for diagrams).
 4. Prefer \`edit\` for small changes, \`write\` for new concepts or rewrites, \`batch\` for related changes so they land as one request. Pass \`if_match\` (the hash from your last read); on a conflict, re-read and reapply. Bodies are stored in a canonical form (\`-\` bullets, \`*\` emphasis, padded tables): what you write reads back normalized, so \`edit\` the text as \`read\` shows it.
 5. Put a one-line \`note\` on every write. Read the \`lint\` in every write result and fix what it reports (figure and diagram lint too: \`image_*\`, \`figure_invalid\`, \`diagram_invalid\`, \`diagram_unrendered\` mean fix the image or the fence); the result's notes say what else to know (ignored fields, the stored form, open comments). A concept with no frontmatter, invalid YAML or no \`type\` is refused. Keep concepts under 100 KB; split big ones into linked concepts.
 6. Never write index.md or log.md (the server synthesizes them). Never set \`generated\` (the server stamps it) or \`verified\` (not yours to claim). Set \`status\` and \`stale_after\` honestly. Timestamps are full ISO 8601 datetimes with an offset (\`stale_after: 2026-12-31T00:00:00Z\`); a plain date is flagged.
@@ -852,6 +852,9 @@ export function buildServer(ctx: McpContext): McpServer {
               ...(view.description ? [`description: ${view.description}`] : []),
               ...(view.credit ? [`credit: ${view.credit}`] : []),
               ...(view.licence ? [`licence: ${view.licence}`] : []),
+              ...(view.supplied_by
+                ? [`supplied by: @${view.supplied_by}, from the upload link`]
+                : []),
               `versions: ${versions}`,
               `download (15 minutes): ${url}`,
             ].join("\n"),
@@ -1174,9 +1177,9 @@ export function buildServer(ctx: McpContext): McpServer {
   server.registerTool(
     "prepare_upload",
     {
-      title: "Upload a file from your shell",
+      title: "Upload a file",
       description:
-        "The way to add a file you made (a screenshot, a chart, a PDF; up to 10 MB) when you can run a shell; put it beside the concept that uses it, named for what it shows (`dir/x-architecture.png`). Returns a URL, good for one PUT within 15 minutes, and a ready `curl -T <file> '<url>'` line. Run it; the server stores the bytes and attaches them at `path` as you, with your `note`, and curl prints the write result as JSON (path, hash, seq, lint). Pass `sha256` (`sha256sum file`) or `size` so damaged bytes are refused. The URL needs no token, so keep it to yourself. It only works where your shell can reach this server; from a sandbox that cannot, use `attach` with base64 for a small file (or `source_url` for an image on the web).",
+        "The way to add a file up to 10 MB that is not on the web: one you made (a screenshot, a chart, a PDF), or one the person has, such as a photo they attached in the chat. Put it beside the concept that uses it, named for what it shows (`dir/x-architecture.png`). Returns a URL good for one PUT within an hour, a ready `curl -T <file> '<url>'` line, and an upload link for the person. With a shell that reaches this server, run the curl line: the server stores the bytes and attaches them at `path` as you, with your `note`, and curl prints the write result as JSON (path, hash, seq, lint). From a sandbox that cannot reach this server (curl fails to connect, or a proxy refuses it), or for a file the person has (you cannot pass on a chat's attachment), give the person the upload link instead: signed in, they choose the file in their browser, and it is attached as your write with your note, description, credit and licence, recorded as supplied by them. Then `read` the path to see when it has arrived. Pass `sha256` (`sha256sum file`) or `size` only when you have the exact file, so damaged bytes are refused. The URL needs no token, so keep it to yourself; the link needs the person signed in with write access.",
       inputSchema: {
         path: z
           .string()
@@ -1249,6 +1252,13 @@ export function buildServer(ctx: McpContext): McpServer {
             up.curl,
             "",
             "curl prints the write result as JSON; read its lint. An error comes back as JSON with a code (checksum_mismatch, media_mismatch, upload_used); prepare again and resend.",
+            ...(up.upload_page
+              ? [
+                  "",
+                  "If your shell cannot reach this server, or the file is the person's (one they attached in the chat), give them this link to upload it from their browser, signed in; the same link, so it works once, until the same time:",
+                  up.upload_page,
+                ]
+              : []),
           ].join("\n"),
         );
       },

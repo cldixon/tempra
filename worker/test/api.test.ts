@@ -408,7 +408,7 @@ describe("upload URLs (TEMPRA-158)", () => {
     expect((await put(s, `/ul/lib-1/${dl}`, PNG)).status).toBe(403);
     const ul = p.body.url.split("/").pop();
     expect((await s.anon.request(`/dl/lib-1/${ul}`)).status).toBe(403);
-    setSystemTime(new Date(Date.now() + 16 * 60_000));
+    setSystemTime(new Date(Date.now() + 61 * 60_000));
     try {
       const late = await put(s, p.body.url, PNG);
       expect(late.status).toBe(403);
