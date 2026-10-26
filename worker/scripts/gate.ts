@@ -1494,9 +1494,29 @@ async function browserRenders(
     let tooltipShown = false;
     for (const concept of concepts) {
       await step(`reader on ${concept}`, async () => {
+        // The first page's data comes in the shell (TEMPRA-175): a full load of a concept draws
+        // its body without asking the API for the file, its context or the frame's first calls.
+        const asked: string[] = [];
+        const onRequest = (r: import("playwright-core").Request) => {
+          const u = new URL(r.url());
+          if (u.origin === base && u.pathname.startsWith("/api/")) asked.push(u.pathname);
+        };
+        page.on("request", onRequest);
         await page.goto(`${base}/${owner}/${slug}/${enc(concept)}`);
         const body = page.locator(".body .prose");
         await body.waitFor({ timeout: 15_000 });
+        page.off("request", onRequest);
+        const lib = `/api/v1/libraries/${owner}/${slug}`;
+        const booted = [
+          `${lib}/files/${enc(concept)}`,
+          `${lib}/sources/${enc(concept)}`,
+          `${lib}/outline`,
+          "/api/v1/inbox/count",
+        ];
+        const refetched = asked.filter((a) => booted.includes(a));
+        if (refetched.length > 0) {
+          throw new Error(`asked the API for what the shell carries: ${refetched.join(", ")}`);
+        }
         await sheetBar.getByRole("button", { name: "More", exact: true }).waitFor();
         await actionsFab().waitFor();
         // Read and comment only (TEMPRA-99): nothing in the page edits.

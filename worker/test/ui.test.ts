@@ -76,9 +76,10 @@ describe("the app's pages (TEMPRA-9)", () => {
       expect(csp).toContain("connect-src 'self'");
       expect(r.headers.get("Cache-Control")).toBe("no-store");
     }
-    // No inline scripts or styles.
+    // No inline scripts or styles: the one script element without `src` is the boot data, a
+    // JSON block that is never run (TEMPRA-175).
     const one = await page(s, "/");
-    expect(one.html).not.toMatch(/<script(?![^>]*\bsrc=)/);
+    expect(one.html).not.toMatch(/<script(?![^>]*\b(src=|type="application\/json"))/);
     expect(one.html).not.toMatch(/<style|\sstyle=/);
   });
 
@@ -329,6 +330,63 @@ describe("history, ledger and revert (Phase 3, slice 2)", () => {
       actor: "human:owner",
       note: "back to first",
     });
+  });
+});
+
+describe("the first page's data in the shell (TEMPRA-175)", () => {
+  /** The boot data a shell carries, by URL key. */
+  const bootOf = (html: string): Record<string, unknown> => {
+    const m = /<script type="application\/json" id="tempra-boot">(.*?)<\/script>/s.exec(html);
+    return m ? (JSON.parse(m[1] as string) as Record<string, unknown>) : {};
+  };
+  const LIB_API = "/api/v1/libraries/owner/demo";
+
+  test("a concept's page carries what its first paint asks for, as the API answers it", async () => {
+    const s = setup();
+    await put(s, "notes/a.md", "---\ntype: Note\ntitle: A\n---\nA, with </script> in it.\n");
+    const r = await page(s, `${LIB}/notes/a.md`);
+    expect(r.status).toBe(200);
+    // Nothing in the data can end the block: `<` is escaped.
+    expect(r.html.split("</script>").length).toBe(3);
+    const boot = bootOf(r.html);
+    for (const url of [
+      `${LIB_API}/files/notes/a.md`,
+      `${LIB_API}/stats`,
+      `${LIB_API}/sources/notes/a.md`,
+      `${LIB_API}/links/notes/a.md`,
+      `${LIB_API}/history/notes/a.md`,
+      `${LIB_API}/comments?limit=200&path=notes%2Fa.md&status=all`,
+      `${LIB_API}/outline`,
+      `${LIB_API}/agents`,
+      "/api/v1/me",
+      "/api/v1/libraries",
+      "/api/v1/inbox/count",
+      "/api/v1/inbox?limit=5",
+    ]) {
+      expect(Object.keys(boot)).toContain(url);
+    }
+    // Exactly what the app's own call returns.
+    expect(boot[`${LIB_API}/files/notes/a.md`]).toEqual(await get(s, "/files/notes/a.md"));
+    expect(boot["/api/v1/me"]).toMatchObject({ handle: "owner" });
+  });
+
+  test("a version's page asks for that version; an account page only for the frame", async () => {
+    const s = setup();
+    await put(s, "notes/a.md", "---\ntype: Note\n---\nOne.\n");
+    const pinned = bootOf((await page(s, `${LIB}/notes/a.md?at=1`)).html);
+    expect(Object.keys(pinned)).toContain(`${LIB_API}/files/notes/a.md?at=1`);
+    expect(Object.keys(pinned)).not.toContain(`${LIB_API}/files/notes/a.md`);
+    const account = bootOf((await page(s, "/agents")).html);
+    expect(Object.keys(account).sort()).toEqual(
+      ["/api/v1/inbox/count", "/api/v1/inbox?limit=5", "/api/v1/libraries", "/api/v1/me"].sort(),
+    );
+  });
+
+  test("a call that fails is left out, for the app to make and see fail as it always would", async () => {
+    const s = setup();
+    const boot = bootOf((await page(s, `${LIB}/notes/missing.md`)).html);
+    expect(Object.keys(boot)).not.toContain(`${LIB_API}/files/notes/missing.md`);
+    expect(Object.keys(boot)).toContain(`${LIB_API}/outline`);
   });
 });
 

@@ -1,5 +1,6 @@
 import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
+import { readBoot } from "./boot";
 import { Account, Agents, Invitations, Notifications, Welcome } from "./pages/Account";
 import { Activity } from "./pages/Activity";
 import { File } from "./pages/File";
@@ -188,6 +189,9 @@ function App() {
 }
 
 interceptLinks();
+// The first page's API answers, carried in the shell (TEMPRA-175), before anything asks for them.
+readBoot();
+
 createRoot(document.getElementById("root") as HTMLElement).render(
   <StrictMode>
     <App />
