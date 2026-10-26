@@ -1,7 +1,7 @@
 <script lang="ts">
   /** A PDF's card: its name, type and size, Open and Download. Also the full-screen view's. */
   import Icon from "../Icon.svelte";
-  import { formatSize } from "../ui";
+  import { formatSize } from "../ui.ts";
   import { baseName } from "../urls";
   import BrokenImage from "./BrokenImage.svelte";
   import type { ImageFigure } from "./prepare";

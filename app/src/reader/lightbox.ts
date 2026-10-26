@@ -2,7 +2,7 @@
  * What the full-screen view of a concept's figures (Lightbox.svelte) is given and says beyond
  * the figure: the page's title, an image's facts, its file page and download.
  */
-import { formatSize, relativeTime } from "../ui";
+import { formatSize, relativeTime } from "../ui.ts";
 import { baseName } from "../urls";
 import type { ImageFigure } from "./prepare";
 

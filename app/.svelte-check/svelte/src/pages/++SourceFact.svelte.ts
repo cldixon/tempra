@@ -28,6 +28,8 @@ import { hostOf, type Name, type Use, type Version } from "./attachment";
    * it, when one does.
    */
   let props:/*Ωignore_startΩ*/$$ComponentProps/*Ωignore_endΩ*/ = $props();
+  // A link to the web, its attributes in the order the page has always drawn them.
+  const outbound = (href: string) => ({ href, rel: "noopener noreferrer", target: "_blank" });
   const cited = $derived((props.uses ?? []).find((u) => u.cites !== null));
   const redirected = $derived(
     props.source?.final_url && props.source.final_url !== props.source.url ? props.source.final_url : null,
@@ -35,7 +37,7 @@ import { hostOf, type Name, type Use, type Version } from "./attachment";
 ;
 async () => {
 
-if(props.source){ { svelteHTML.createElement("div", { });  { svelteHTML.createElement("a", {     "href":props.source.url,"rel":`noopener noreferrer`,"target":`_blank`,});hostOf(props.source.url); }if(props.source.fetched_at){   { const $$_tnemoM1C = __sveltets_2_ensureComponent(Moment); new $$_tnemoM1C({ target: __sveltets_2_any(), props: {  "ts":props.source.fetched_at,}});}} }} else if (props.version){ { svelteHTML.createElement("div", {});   { const $$_emaNtnegA1C = __sveltets_2_ensureComponent(AgentName); new $$_emaNtnegA1C({ target: __sveltets_2_any(), props: {  "who":props.name(props.version.actor, props.version.by),}});} }}else{ { svelteHTML.createElement("div", { "class":`muted`,});  }}if(redirected){ { svelteHTML.createElement("div", {  "class":`muted`,});   { svelteHTML.createElement("a", {     "href":redirected,"rel":`noopener noreferrer`,"target":`_blank`,});hostOf(redirected); } }}if(cited){ { svelteHTML.createElement("div", {  "class":`muted`,});   { svelteHTML.createElement("a", { "href":props.urls.file(cited.path),});props.titles.get(cited.path) ?? baseName(cited.path); }  cited.cites;  }}
+if(props.source){ { svelteHTML.createElement("div", { });  { svelteHTML.createElement("a", {...outbound(props.source.url),});hostOf(props.source.url); }if(props.source.fetched_at){   { const $$_tnemoM1C = __sveltets_2_ensureComponent(Moment); new $$_tnemoM1C({ target: __sveltets_2_any(), props: {  "ts":props.source.fetched_at,}});}} }} else if (props.version){ { svelteHTML.createElement("div", {});   { const $$_emaNtnegA1C = __sveltets_2_ensureComponent(AgentName); new $$_emaNtnegA1C({ target: __sveltets_2_any(), props: {  "who":props.name(props.version.actor, props.version.by),}});} }}else{ { svelteHTML.createElement("div", { "class":`muted`,});  }}if(redirected){ { svelteHTML.createElement("div", {  "class":`muted`,});   { svelteHTML.createElement("a", {...outbound(redirected),});hostOf(redirected); } }}if(cited){ { svelteHTML.createElement("div", {  "class":`muted`,});   { svelteHTML.createElement("a", { "href":props.urls.file(cited.path),});props.titles.get(cited.path) ?? baseName(cited.path); }  cited.cites;  }}
 };
 return { props: {} as any as $$ComponentProps, exports: {}, bindings: __sveltets_$$bindings(''), slots: {}, events: {} }}
 const SourceFact__SvelteComponent_ = __sveltets_2_fn_component($$render());

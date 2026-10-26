@@ -27,7 +27,7 @@
     hoveredOf,
     rectNear,
   } from "./reader/reading";
-  import { commentKey } from "./ui";
+  import { commentKey } from "./ui.ts";
 
   let {
     prepared,

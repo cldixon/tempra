@@ -23,5 +23,4 @@
   });
 </script>
 
-{#if props.path && frame.slots.path}<Portal target={frame.slots.path}>{@render props.path()}</Portal>{/if}
-{#if props.actions && frame.slots.tools}<Portal target={frame.slots.tools}>{@render props.actions()}</Portal>{/if}
+{#if props.path && frame.slots.path}<Portal target={frame.slots.path}>{@render props.path()}</Portal>{/if}{#if props.actions && frame.slots.tools}<Portal target={frame.slots.tools}>{@render props.actions()}</Portal>{/if}

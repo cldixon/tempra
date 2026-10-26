@@ -124,8 +124,8 @@
     onclick={() => setOpen(!open)}
   >
     {@render props.label()}
-  </button>
-  {#if open}
+  </button
+  >{#if open}
     <!-- A choice (a link or a button in the list) closes the menu. -->
     <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div

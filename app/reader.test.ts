@@ -298,9 +298,11 @@ describe("what the reader draws", () => {
     const { html, root } = draw(
       stored('Hi <img src=x onerror="alert(1)"> there\n\n<div>\nblock\n</div>'),
     );
+    // The DOM's serialization escapes `<`, `>` and `&` in text (React's markup also escaped `"`).
     expect(html).toContain(
-      '<code class="raw" data-atom="">&lt;img src=x onerror=&quot;alert(1)&quot;&gt;</code>',
+      '<code class="raw" data-atom="">&lt;img src=x onerror="alert(1)"&gt;</code>',
     );
+    expect(root.querySelector("code.raw")?.textContent).toBe('<img src=x onerror="alert(1)">');
     expect(root.querySelector("img")).toBeNull();
     expect(root.querySelector("pre.raw code")?.textContent).toBe("<div>\nblock\n</div>");
   });
@@ -423,7 +425,9 @@ describe("figures (tempra-dev: app/reader, Figures)", () => {
     const { p, root } = draw(stored(FIGURES), { href: hrefs, path: "c.md" });
     const t = p.text.text;
     const caption = root.querySelector("figcaption") as Element;
-    const inCaption = caption.lastChild as Node;
+    // Its last text (Svelte's comment anchors are not text).
+    const inCaption = [...caption.childNodes].filter((n) => n.nodeType === 3 && n.textContent).at(-1) as Node;
+    expect(inCaption.textContent).toBe(" The tower at dusk");
     // A point in the caption snaps to the text after it (a start) or the figure's atom (an end).
     const before = t.indexOf("Before the figures.");
     const atom = t.indexOf(ATOM, before);
@@ -732,8 +736,17 @@ describe("figure markup (TEMPRA-161)", () => {
       "figure figure-wide",
       "figure",
     ]);
-    // No style attribute anywhere: the width goes through the CSSOM.
-    expect(root.querySelector("[style]")).toBeNull();
+    // No style attribute in the markup: the width goes through the CSSOM, so the only styles are
+    // the sized figures' `--figure-width`, set once they are drawn.
+    const styled = [...root.querySelectorAll("[style]")] as HTMLElement[];
+    expect(styled.map((el) => el.className)).toEqual(
+      figures.map((f) => f.className).filter((c) => c.includes("figure-sized")),
+    );
+    for (const el of styled) {
+      expect(Array.from({ length: el.style.length }, (_, i) => el.style.item(i))).toEqual([
+        "--figure-width",
+      ]);
+    }
     // A group: one textblock, its images one atom each, in cells with their labels.
     const group = figures[4] as Element;
     const row = group.querySelector(":scope > p.figure-row[data-text]") as Element;

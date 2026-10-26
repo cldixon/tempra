@@ -19,6 +19,8 @@
     titles: ReadonlyMap<string, string>;
     name: Name;
   } = $props();
+  // A link to the web, its attributes in the order the page has always drawn them.
+  const outbound = (href: string) => ({ href, rel: "noopener noreferrer", target: "_blank" });
   const cited = $derived((props.uses ?? []).find((u) => u.cites !== null));
   const redirected = $derived(
     props.source?.final_url && props.source.final_url !== props.source.url ? props.source.final_url : null,
@@ -26,11 +28,11 @@
 </script>
 
 {#if props.source}<div
-    >From <a href={props.source.url} rel="noopener noreferrer" target="_blank">{hostOf(props.source.url)}</a
+    >From <a {...outbound(props.source.url)}>{hostOf(props.source.url)}</a
     >{#if props.source.fetched_at}, fetched <Moment ts={props.source.fetched_at} />{/if}</div
   >{:else if props.version}<div>Uploaded by <AgentName who={props.name(props.version.actor, props.version.by)} /></div
   >{:else}<div class="muted">…</div>{/if}{#if redirected}<div class="muted"
-    >Redirected to <a href={redirected} rel="noopener noreferrer" target="_blank">{hostOf(redirected)}</a></div
+    >Redirected to <a {...outbound(redirected)}>{hostOf(redirected)}</a></div
   >{/if}{#if cited}<div class="muted"
     >Cited in <a href={props.urls.file(cited.path)}>{props.titles.get(cited.path) ?? baseName(cited.path)}</a> as “{cited.cites}”</div
   >{/if}
