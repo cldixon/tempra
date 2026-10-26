@@ -22,7 +22,7 @@ export interface Option {
   href: string;
 }
 
-export const MAX = 12;
+const MAX = 12;
 
 /**
  * A library's options for what was typed (`needle`, lower case): recent files first, then titles

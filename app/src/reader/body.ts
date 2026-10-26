@@ -70,14 +70,14 @@ export type Inline =
   | { k: "raw"; text: string };
 
 /** A table cell. */
-export interface Cell {
+interface Cell {
   offset: number | undefined;
   align: string | undefined;
   text: Inline[];
 }
 
 /** A paragraph of a `:::figure`: its images' textblock. */
-export interface FigureRow {
+interface FigureRow {
   key: string;
   id: string | undefined;
   offset: number | undefined;

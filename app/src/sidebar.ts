@@ -8,7 +8,7 @@
  */
 
 import type { AccountPage, Place } from "./frame";
-import type { ReachableLibrary } from "./role";
+import { isShared, type ReachableLibrary } from "./role";
 import type { Urls } from "./urls";
 
 /**
@@ -40,7 +40,27 @@ export const ACCOUNT_SETTINGS: readonly [AccountPage, string, string][] = [
 /** The person's libraries by kind: their own, then those shared with them. */
 export function byKind(list: ReachableLibrary[]) {
   return {
-    yours: list.filter((l) => (l.role ?? "owner") === "owner"),
-    shared: list.filter((l) => (l.role ?? "owner") !== "owner"),
+    yours: list.filter((l) => !isShared(l)),
+    shared: list.filter(isShared),
   };
+}
+
+const hiddenKey = (urls: Urls) => `tempra:sidebar:${urls.owner}/${urls.slug}`;
+
+/** Whether the person hid the sidebar in this library (a reading mode, remembered per library). */
+export function loadHidden(urls: Urls): boolean {
+  try {
+    return localStorage.getItem(hiddenKey(urls)) === "hidden";
+  } catch {
+    return false;
+  }
+}
+
+export function saveHidden(urls: Urls, hidden: boolean) {
+  try {
+    if (hidden) localStorage.setItem(hiddenKey(urls), "hidden");
+    else localStorage.removeItem(hiddenKey(urls));
+  } catch {
+    // Storage off: the sidebar shows again next time.
+  }
 }

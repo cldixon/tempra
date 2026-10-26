@@ -2,10 +2,9 @@
   import type { AccountPage } from "./frame";
   import { useUnread } from "./inbox.svelte.ts";
   import NavRow from "./NavRow.svelte";
-  import { libraryLabel, type ReachableLibrary } from "./role";
+  import { isShared, libraryLabel, type ReachableLibrary } from "./role";
   import { useLibraries } from "./role.svelte.ts";
   import { byKind } from "./sidebar";
-  import UnreadCount from "./UnreadCount.svelte";
   import { Urls } from "./urls";
 
   /** The account's sidebar: Libraries, the Inbox, then the person's libraries by kind. */
@@ -15,11 +14,10 @@
   const kinds = $derived(byKind(libs.data?.libraries ?? []));
 </script>
 
-{#snippet unreadEnd()}<UnreadCount unread={unread.current} />{/snippet}
 {#snippet row(l: ReachableLibrary)}
   <NavRow
     href={new Urls(l.owner, l.slug).tree("")}
-    tile={{ name: l.title || l.slug, shared: (l.role ?? "owner") !== "owner" }}
+    tile={{ name: l.title || l.slug, shared: isShared(l) }}
     label={libraryLabel(l)}
   />
 {/snippet}
@@ -30,7 +28,7 @@
     current={page === "inbox" || page === "invitations"}
     icon="inbox"
     label="Inbox"
-    end={unreadEnd}
+    unread={unread.current}
   />
 </nav>
 <div class="sidebar-scroll">

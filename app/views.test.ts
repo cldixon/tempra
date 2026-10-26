@@ -60,7 +60,6 @@ describe("the library's home (take 4)", () => {
       access: "owner",
       latest: null,
       who: null,
-      now: Date.now(),
     });
     expect(waiting).toContain("Nothing here yet");
     expect(waiting).toContain("/mcp</code>");
@@ -79,7 +78,6 @@ describe("the library's home (take 4)", () => {
         events: [],
       },
       who: view("claude-code/dev"),
-      now: Date.now(),
     });
     expect(written).toContain("Last write by Claude Code, <time");
     expect(written).toContain(">just now</time>: mcp smoke cleanup");
@@ -92,7 +90,6 @@ describe("the library's home (take 4)", () => {
       access: "write",
       latest: null,
       who: null,
-      now: Date.now(),
     });
     expect(writer).toContain("/mcp</code>");
     expect(writer).not.toContain(urls.transfer());
@@ -102,7 +99,6 @@ describe("the library's home (take 4)", () => {
       access: "read",
       latest: null,
       who: null,
-      now: Date.now(),
     });
     expect(reader).toContain("Nothing here yet");
     expect(reader).not.toContain("/mcp</code>");

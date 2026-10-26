@@ -4,7 +4,7 @@ import { enc, type Urls } from "../urls";
 /*
  * A concept's tools in the top bar (take 4, TEMPRA-114; tempra-dev: app/reader, Layout): ⋯, with
  * Copy page at its head (TEMPRA-145; on a phone since TEMPRA-118), then History, Properties, View
- * Markdown, Copy link and Download .md. Comments n is the page's own (it carries the open count).
+ * Markdown, Copy link and Download .md. Comment is in the page's actions (PageActions.svelte).
  */
 
 /** The file as stored, frontmatter and body: what an agent reads (`GET …/files/{path}`). */

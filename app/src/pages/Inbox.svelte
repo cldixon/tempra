@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api } from "../api";
+  import { api, post } from "../api";
   import {
     INBOX_EVENT,
     type InboxItem,
@@ -11,21 +11,21 @@
   } from "../inbox";
   import { useAgentLabels, usePageTitles } from "../inbox.svelte.ts";
   import { useAction, useLoad } from "../load.svelte.ts";
+  import { useOlder } from "../paging.svelte.ts";
   import { librariesChanged, libraryLabel } from "../role";
   import { useLibraries } from "../role.svelte.ts";
   import { navigate } from "../router";
   import Status from "../Status.svelte";
-  import { useMe, useNow, useTitle } from "../ui.svelte.ts";
-  import { inboxUrl, Urls } from "../urls";
+  import { useMe, useTitle } from "../ui.svelte.ts";
+  import { inboxUrl, urlsOf } from "../urls";
   import InboxRow from "./InboxRow.svelte";
 
   /**
    * The Inbox (take 4, boards 02, 13; TEMPRA-116; tempra-dev: v2/notifications): the one place for
    * what the person should do or answer across their libraries, newest first, kept until done:
    * invitations, mentions and replies on their threads, and nothing else (TEMPRA-173). Open and
-   * Done tabs, one
-   * library or all; read and done are kept on the server, so they follow the person. "Older" pages
-   * back past the first hundred.
+   * Done tabs, one library or all; read and done are kept on the server, so they follow the
+   * person. "Older" pages back past the first hundred.
    */
   let { done, library }: { done: boolean; library: string | null } = $props();
 
@@ -42,43 +42,24 @@
   const loaded = useLoad(
     () => `inbox ${q}`,
     () => api<InboxPage>(`/api/v1/inbox?${q}`),
+    [INBOX_EVENT],
   );
-  $effect(() => {
-    const reload = () => loaded.reload();
-    window.addEventListener(INBOX_EVENT, reload);
-    return () => window.removeEventListener(INBOX_EVENT, reload);
-  });
   const first = $derived(loaded.data ?? null);
-  // Older pages, after the first ("Older", as Activity has); kept for the first page they follow,
-  // so a new first page (a change) starts again from the top.
-  let older = $state.raw<{ after: InboxPage; items: InboxItem[]; next: string | null } | null>(
-    null,
+  // Older pages, after the first ("Older", as Activity has), kept as the first page reloads.
+  const older = useOlder(
+    () => first,
+    (i) => i.id,
+    (before: string) => {
+      const page = new URLSearchParams(q);
+      page.set("before", before);
+      return api<InboxPage>(`/api/v1/inbox?${page}`);
+    },
   );
-  const more = $derived(older !== null && older.after === first ? older : null);
-  let paging = $state(false);
-  const raw = $derived(first ? [...first.items, ...(more?.items ?? [])] : null);
+  const raw = $derived(first ? older.items : null);
   const labels = useAgentLabels(() => raw);
   const items = $derived(raw && withNames(raw, labels.current));
-  const next = $derived(more ? more.next : (first?.next ?? null));
-  function loadOlder() {
-    const after = first;
-    if (next === null || after === null) return;
-    paging = true;
-    const page = new URLSearchParams(q);
-    page.set("before", next);
-    api<InboxPage>(`/api/v1/inbox?${page}`)
-      .then((p) => {
-        const kept = older?.after === after ? older.items : [];
-        older = { after, items: [...kept, ...p.items], next: p.next };
-      })
-      .catch(() => {})
-      .finally(() => {
-        paging = false;
-      });
-  }
   const titles = usePageTitles(() => items);
   const action = useAction();
-  const now = useNow(60_000);
   const me = useMe();
   const libs = useLibraries();
   const reachable = $derived(libs.data?.libraries ?? []);
@@ -89,16 +70,13 @@
       await fn();
       inboxChanged();
     });
-  const post = (path: string, body: unknown = {}) =>
-    api(path, { method: "POST", body: JSON.stringify(body) });
   const accept = (i: InboxItem) =>
     void run(async () => {
-      await post(`/api/v1/invitations/${encodeURIComponent(i.invitation ?? "")}/accept`);
+      await post(`/api/v1/invitations/${encodeURIComponent(i.invitation ?? "")}/accept`, {});
       librariesChanged();
-      const [owner = "", slug = ""] = i.library.split("/");
       joined = {
         name: itemLibrary(i, me.current?.handle ?? null),
-        href: new Urls(owner, slug).tree(""),
+        href: urlsOf(i.library).tree(""),
       };
     });
   const open = $derived(first?.open ?? null);
@@ -172,19 +150,17 @@
           <InboxRow
             item={i}
             titles={titles.current}
-            now={now.current}
             me={me.current?.handle ?? null}
             reachable={reachable.some((l) => `${l.owner}/${l.slug}` === i.library)}
             busy={action.busy}
             {run}
-            {post}
             onAccept={accept}
           />
         {/each}
       </ul>
-      {#if next !== null}
+      {#if older.next !== null}
         <p class="view-more">
-          <button type="button" onclick={loadOlder} disabled={paging}>{paging ? "Loading…" : "Older"}</button>
+          <button type="button" onclick={older.loadOlder} disabled={older.paging}>{older.paging ? "Loading…" : "Older"}</button>
         </p>
       {/if}
     {/if}

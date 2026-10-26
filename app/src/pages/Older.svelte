@@ -2,11 +2,13 @@
   import type { Snippet } from "svelte";
   import { type LedgerRequest, REQUESTS_PAGE, type RequestPage } from "../activity";
   import { api } from "../api";
+  import { useOlder } from "../paging.svelte.ts";
   import type { Urls } from "../urls";
 
   /**
    * The first page and the older ones "Older" pages back to, as one list of requests (both views
-   * draw from it). Keyed by the server's filters (`{#key}` in Activity), so changing them starts
+   * draw from it). The first page reloads as agents write; the older pages are kept across that
+   * (`useOlder`). Keyed by the server's filters (`{#key}` in Activity), so changing them starts
    * afresh.
    */
   let {
@@ -24,35 +26,25 @@
     children: Snippet<[LedgerRequest[], boolean]>;
   } = $props();
 
-  let older = $state.raw<RequestPage>({ requests: [], next: null });
-  let paging = $state(false);
-  const next = $derived(older.requests.length > 0 ? older.next : first.next);
-  const requests = $derived([...first.requests, ...older.requests]);
-
-  function loadOlder() {
-    if (next === null) return;
-    paging = true;
-    api<RequestPage>(
-      urls.api("requests", {
-        prefix: prefix || undefined,
-        actor: actor || undefined,
-        before: next,
-        limit: REQUESTS_PAGE,
-      }),
-    )
-      .then((p) => {
-        older = { requests: [...older.requests, ...p.requests], next: p.next };
-      })
-      .catch(() => {})
-      .finally(() => {
-        paging = false;
-      });
-  }
+  const page = $derived({ items: first.requests, next: first.next });
+  const older = useOlder(
+    () => page,
+    (r) => r.request_id,
+    (before: number) =>
+      api<RequestPage>(
+        urls.api("requests", {
+          prefix: prefix || undefined,
+          actor: actor || undefined,
+          before,
+          limit: REQUESTS_PAGE,
+        }),
+      ).then((p) => ({ items: p.requests, next: p.next })),
+  );
 </script>
 
-{@render children(requests, next !== null)}
-{#if next !== null}
+{@render children(older.items, older.next !== null)}
+{#if older.next !== null}
   <p class="view-more">
-    <button type="button" onclick={loadOlder} disabled={paging}>{paging ? "Loading…" : "Older"}</button>
+    <button type="button" onclick={older.loadOlder} disabled={older.paging}>{older.paging ? "Loading…" : "Older"}</button>
   </p>
 {/if}

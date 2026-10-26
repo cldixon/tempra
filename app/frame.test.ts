@@ -74,7 +74,14 @@ describe("the tree's rules (Tree.svelte, tree.ts)", () => {
 
   test("every folder starts open; a closed one rolls up its marks and is remembered", async () => {
     const urls = new Urls("dev", "dev");
-    const t = draw(Tree, { urls, file: "b/a.md", dir: null });
+    const t = draw(Tree, {
+      urls,
+      file: "b/a.md",
+      dir: null,
+      files: OUTLINE,
+      failed: false,
+      onRetry: () => {},
+    });
     await settle(10);
     const rows = [...t.host.querySelectorAll(".tree-row")].map((r) => r.textContent);
     expect(rows).toEqual([
@@ -105,7 +112,7 @@ describe("the tree's rules (Tree.svelte, tree.ts)", () => {
 });
 
 describe("the account's frame (AccountFrame.svelte)", () => {
-  test("the bar, the sidebar and the page, as React drew them", async () => {
+  test("the bar, the sidebar and the page", async () => {
     const children = createRawSnippet(() => ({ render: () => "<p>Page</p>" }));
     const f = draw(AccountFrame, { page: "libraries", me: null, children });
     await settle(10);

@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api } from "../api";
+  import { post } from "../api";
   import { useAction } from "../load.svelte.ts";
   import MentionArea from "../MentionArea.svelte";
   import { useMentionable } from "../mentions.svelte.ts";
@@ -27,10 +27,10 @@
     if (kind === "reply" && !body) return;
     void action.run(async () => {
       const suffix = kind === "reply" ? "" : `/${kind}`;
-      await api(props.urls.api(`comments/${encodeURIComponent(t.id)}${suffix}`), {
-        method: "POST",
-        body: JSON.stringify(body ? { body } : {}),
-      });
+      await post(
+        props.urls.api(`comments/${encodeURIComponent(t.id)}${suffix}`),
+        body ? { body } : {},
+      );
       reply = "";
       // A resolved thread is no longer highlighted: nothing stays active.
       if (kind === "resolve") props.onActive(null);

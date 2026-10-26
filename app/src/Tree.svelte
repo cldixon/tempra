@@ -1,8 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { api } from "./api";
   import Icon from "./Icon.svelte";
-  import { useFeed } from "./live.svelte.ts";
   import { prefetchFile } from "./prefetch";
   import {
     ancestors,
@@ -13,7 +11,6 @@
     insideDirs,
     loadClosed,
     type OutlineFile,
-    REFRESH_MS,
     rollUp,
     saveClosed,
   } from "./tree";
@@ -22,57 +19,30 @@
 
   /**
    * The library's file tree (tempra-dev: app/workspace). The whole index (paths, titles,
-   * sequences; no bodies) arrives in one small request when the workspace opens, so opening a
-   * folder never waits. A folder (named for people, with its count of concepts) is a group, not a
-   * page: its row opens and closes it (TEMPRA-138), and a folder's address reveals it here. Every
-   * folder starts open; the ones the person closed are remembered on this browser, the open file
-   * is revealed and marked, and the change feed refreshes the index once per burst of writes. A
-   * closed folder rolls up the marks of what is inside it. Change is not marked here
-   * (TEMPRA-173): Activity is where a person looks for it.
+   * sequences; no bodies; Workspace loads it in one small request and keeps it following the
+   * feed) is here at once, so opening a folder never waits. A folder (named for people, with its
+   * count of concepts) is a group, not a page: its row opens and closes it (TEMPRA-138), and a
+   * folder's address reveals it here. Every folder starts open; the ones the person closed are
+   * remembered on this browser, and the open file is revealed and marked. A closed folder rolls
+   * up the marks of what is inside it. Change is not marked here (TEMPRA-173): Activity is where
+   * a person looks for it.
    */
   let props: {
     urls: Urls;
     file: string | null;
     dir: string | null;
-    /** The index and its sequence, for the quick switcher and the feed's start. */
-    onIndex?(files: OutlineFile[], seq: number): void;
+    /** The library's index; null until it arrives. */
+    files: OutlineFile[] | null;
+    /** Loading the index failed (and there is none to show): Retry asks again. */
+    failed: boolean;
+    onRetry(): void;
   } = $props();
 
-  let files = $state.raw<OutlineFile[] | null>(null);
   let closed = $state.raw(loadClosed(untrack(() => props.urls)));
   const isOpen = (dir: string) => !closed.has(dir);
-  let seq = $state<number | null>(null);
-  const dirs = $derived(files ? buildDirs(files) : null);
-  const counts = $derived(files ? countConcepts(files) : new Map<string, number>());
-  const inside = $derived(files ? insideDirs(files) : new Map<string, OutlineFile[]>());
-
-  // Only the latest request's answer is kept (two loads may cross).
-  let asked = 0;
-  let loadedAt = 0;
-  let failed = $state(false);
-  async function load() {
-    const mine = ++asked;
-    loadedAt = Date.now();
-    try {
-      const r = await api<{ seq: number; files: OutlineFile[] }>(props.urls.api("outline"));
-      if (mine !== asked) return;
-      files = r.files;
-      failed = false;
-      // The feed is synced once, from the first index; it stays live after that.
-      seq = seq ?? r.seq;
-    } catch {
-      if (mine === asked) failed = true;
-    }
-  }
-  $effect(() => {
-    void props.urls;
-    untrack(() => void load());
-  });
-  $effect(() => {
-    const f = files;
-    const s = seq;
-    if (f && s !== null) untrack(() => props.onIndex?.(f, s));
-  });
+  const dirs = $derived(props.files ? buildDirs(props.files) : null);
+  const counts = $derived(props.files ? countConcepts(props.files) : new Map<string, number>());
+  const inside = $derived(props.files ? insideDirs(props.files) : new Map<string, OutlineFile[]>());
 
   // The open file's folders are revealed when it opens (and may be collapsed after); so is a
   // folder whose address was opened (`dir`, on its way to the home).
@@ -96,28 +66,6 @@
     });
   });
 
-  // Live: the index is refreshed shortly after a write, and at most every few seconds while
-  // agents keep writing (each refresh reads the whole index).
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  $effect(() => () => clearTimeout(timer));
-  useFeed(
-    () => props.urls,
-    () => seq,
-    () => {
-      if (timer === undefined) {
-        const wait = Math.max(300, loadedAt + REFRESH_MS - Date.now());
-        timer = setTimeout(() => {
-          timer = undefined;
-          void load();
-        }, wait);
-      }
-    },
-    () => {
-      // The ledger went back (a restore): start again from the new index.
-      seq = null;
-      void load();
-    },
-  );
   function toggle(dir: string) {
     const next = new Set(closed);
     if (next.has(dir)) next.delete(dir);
@@ -185,8 +133,8 @@
   )}{/snippet}
 
 {#snippet rows(dir: string)}
-  {#if dirs === null && failed}
-    <li class="tree-note">Could not load the files.{" "}<button type="button" onclick={() => void load()}>Retry</button></li>
+  {#if dirs === null && props.failed}
+    <li class="tree-note">Could not load the files.{" "}<button type="button" onclick={props.onRetry}>Retry</button></li>
   {:else if dirs === null}
     <li class="tree-note">Loading…</li>
   {:else if (dirs[dir] ?? []).length === 0 && dir === ""}

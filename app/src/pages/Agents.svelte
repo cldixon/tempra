@@ -1,15 +1,16 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { api, field } from "../api";
+  import { api, field, post } from "../api";
   import ComposeDialog from "../ComposeDialog.svelte";
   import ConfirmDialog from "../ConfirmDialog.svelte";
   import CopyField from "../CopyField.svelte";
   import { useConfirm } from "../confirm.svelte.ts";
   import Dialog from "../Dialog.svelte";
   import { useAction, useLoad } from "../load.svelte.ts";
+  import { isShared, type ReachableLibrary } from "../role";
   import Status from "../Status.svelte";
   import { day, type Me } from "../ui";
-  import { useTitle } from "../ui.svelte.ts";
+  import { useNow, useTitle } from "../ui.svelte.ts";
   import { type AppGrant, chosenLibrary, liveToken, type Minted, type TokenRow } from "./account";
   import ConnectSteps from "./ConnectSteps.svelte";
 
@@ -27,13 +28,11 @@
       const [a, t, l] = await Promise.all([
         api<{ apps: AppGrant[] }>("/api/v1/apps"),
         api<{ tokens: TokenRow[] }>("/api/v1/tokens"),
-        api<{ libraries: { owner: string; slug: string; role?: string }[] }>("/api/v1/libraries"),
+        api<{ libraries: ReachableLibrary[] }>("/api/v1/libraries"),
       ]);
       // An own library by its slug; one shared with the person as owner/slug, the name the
       // server mints on (a member's token is held to their role there).
-      const names = l.libraries.map((x) =>
-        (x.role ?? "owner") === "owner" ? x.slug : `${x.owner}/${x.slug}`,
-      );
+      const names = l.libraries.map((x) => (isShared(x) ? `${x.owner}/${x.slug}` : x.slug));
       return { apps: a.apps, tokens: t.tokens, libraries: names };
     },
   );
@@ -42,6 +41,8 @@
   const action = useAction();
   let notice = $state<string | null>(null);
   const c = useConfirm();
+  /** The clock tokens are checked against, so one turns "expired" while the page is open. */
+  const now = useNow();
   /** The token a confirmation is about, for its body. */
   let revoking = $state.raw<TokenRow | null>(null);
 
@@ -82,16 +83,13 @@
     const form = e.currentTarget;
     const f = (k: string) => field(form, k);
     void tokenAction.run(async () => {
-      const res = await api<Minted>("/api/v1/tokens", {
-        method: "POST",
-        body: JSON.stringify({
-          library: f("library"),
-          actor: f("actor"),
-          scope: f("scope") === "read" ? "read" : "write",
-          prefix: f("prefix") || null,
-          expires: f("expires") || null,
-          mcp_tiers: f("tiers") === "files" ? "files" : "all",
-        }),
+      const res = await post<Minted>("/api/v1/tokens", {
+        library: f("library"),
+        actor: f("actor"),
+        scope: f("scope") === "read" ? "read" : "write",
+        prefix: f("prefix") || null,
+        expires: f("expires") || null,
+        mcp_tiers: f("tiers") === "files" ? "files" : "all",
       });
       creating = false;
       minted = res;
@@ -121,8 +119,7 @@
 {#if action.error}<div class="notice">{action.error}</div>{/if}
 <Status loaded={loaded.current}>
   {#snippet children({ apps, tokens, libraries })}
-    {@const now = Date.now()}
-    {@const live = (t: TokenRow) => liveToken(t, now)}
+    {@const live = (t: TokenRow) => liveToken(t, now.current)}
     <!-- What can act now first (apps, then tokens), then the tokens that no longer can. -->
     {@const ordered = [...tokens.filter(live), ...tokens.filter((t) => !live(t))]}
     {#if apps.length === 0 && tokens.length === 0}

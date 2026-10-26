@@ -12,14 +12,21 @@
   import Caption from "./Caption.svelte";
   import CodeBlock from "./CodeBlock.svelte";
   import FigureBox from "./FigureBox.svelte";
-  import FigureOf from "./FigureOf.svelte";
+  import FigureImage from "./FigureImage.svelte";
   import FromHosts from "./FromHosts.svelte";
   import { figureNumber } from "./figure";
   import InlineImage from "./InlineImage.svelte";
-  import { code, node as nodeBlocks } from "./registry";
+  import type { ImageFigure } from "./prepare";
+  import { code, media, node as nodeBlocks } from "./registry";
 
   let { blocks: list }: { blocks: Block[] } = $props();
 </script>
+
+<!-- A figure's image, or its video, audio or PDF through the registry (TEMPRA-164). -->
+{#snippet figureOf(figure: ImageFigure)}
+  {@const Media = figure.source?.kind ? media[figure.source.kind] : undefined}
+  {#if Media}<Media {figure} />{:else}<FigureImage {figure} />{/if}
+{/snippet}
 
 {#snippet inline(nodes: Inline[])}
   {#each nodes as x}
@@ -49,10 +56,10 @@
         >{@render inline(x.kids)}</a
       >
     {:else if x.k === "figure"}
-      <FigureOf figure={x.figure} />
+      {@render figureOf(x.figure)}
     {:else if x.k === "cell"}
       <span class="figure-cell"
-        ><FigureOf figure={x.figure} />{#if x.label}<span class="figure-label" data-skip=""
+        >{@render figureOf(x.figure)}{#if x.label}<span class="figure-label" data-skip=""
             >{x.label}</span
           >{/if}</span
       >

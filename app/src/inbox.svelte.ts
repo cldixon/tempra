@@ -2,7 +2,7 @@ import { agentLabel, type Contributor } from "./agents";
 import { api } from "./api";
 import { type AgentLabels, INBOX_EVENT, type InboxItem, type PageTitles } from "./inbox";
 import { useLoad } from "./load.svelte.ts";
-import { Urls } from "./urls";
+import { urlsOf } from "./urls";
 
 /** The unread count, for the bell and the sidebar's Inbox row: reloads when told it changed. */
 export function useUnread() {
@@ -34,11 +34,8 @@ export function useAgentLabels(items: () => InboxItem[] | null) {
       const shared = new Set<string>();
       await Promise.all(
         want.map(async (library) => {
-          const [owner = "", slug = ""] = library.split("/");
           try {
-            const r = await api<{ contributors: Contributor[] }>(
-              new Urls(owner, slug).api("agents"),
-            );
+            const r = await api<{ contributors: Contributor[] }>(urlsOf(library).api("agents"));
             for (const c of r.contributors) {
               if (!c.agent) continue;
               const key = `${library} ${c.actor}`;
@@ -77,10 +74,9 @@ export function usePageTitles(items: () => InboxItem[] | null) {
       const out: PageTitles = {};
       await Promise.all(
         want.map(async (library) => {
-          const [owner = "", slug = ""] = library.split("/");
           try {
             const r = await api<{ files: { path: string; title?: string | null }[] }>(
-              new Urls(owner, slug).api("outline"),
+              urlsOf(library).api("outline"),
             );
             for (const f of r.files) if (f.title) out[`${library} ${f.path}`] = f.title;
           } catch {

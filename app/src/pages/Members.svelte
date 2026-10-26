@@ -1,16 +1,15 @@
 <script lang="ts">
   import { agentLabel, type Contributor } from "../agents";
-  import { api, field } from "../api";
+  import { api, field, post } from "../api";
   import ConfirmDialog from "../ConfirmDialog.svelte";
   import { useConfirm } from "../confirm.svelte.ts";
   import { useAction, useLoad } from "../load.svelte.ts";
   import Moment from "../Moment.svelte";
-  import { useLibraryLabel } from "../role.svelte.ts";
+  import { useLibraryTitle } from "../role.svelte.ts";
   import Status from "../Status.svelte";
   import { day, plural } from "../ui";
-  import { useTitle } from "../ui.svelte.ts";
   import type { Urls } from "../urls";
-  import { json, type MembersData, ROLE_WORDS } from "./manage";
+  import { type MembersData, ROLE_WORDS } from "./manage";
 
   /**
    * Who is in the library (tempra-dev: v2/sharing): the owner, members with their access, and the
@@ -18,8 +17,10 @@
    * removes; a member may leave. Each of those asks first (S-4).
    */
   let { urls, me }: { urls: Urls; me: string | null } = $props();
-  const label = useLibraryLabel(() => urls);
-  useTitle(() => `Members · ${label.current}`);
+  useLibraryTitle(
+    () => urls,
+    () => "Members",
+  );
   const loaded = useLoad(
     () => `members ${urls.base}`,
     async () => {
@@ -49,10 +50,10 @@
     const to = field(form, "to");
     const role = field(form, "role");
     void action.run(async () => {
-      const r = await api<{ sent: string; handle?: string }>(
-        urls.api("invitations"),
-        json({ to, role }),
-      );
+      const r = await post<{ sent: string; handle?: string }>(urls.api("invitations"), {
+        to,
+        role,
+      });
       form.reset();
       done(
         r.sent === "invited"
@@ -70,7 +71,7 @@
       action: "Change access",
       run: () =>
         action.run(async () => {
-          await api(member(handle), { method: "PUT", body: JSON.stringify({ role }) });
+          await post(member(handle), { role }, "PUT");
           done(`@${handle} now has ${role} access.`);
         }),
     });

@@ -8,7 +8,7 @@ export interface Frame {
   readonly sidebar: boolean;
   /** The phone layout: a top bar, the sidebar as a drawer. */
   readonly narrow: boolean;
-  /** The library's index (`GET …/outline`, as the tree loaded it); null until it arrives. */
+  /** The library's index (`GET …/outline`, as the workspace loaded it); null until it arrives. */
   readonly index: OutlineFile[] | null;
   /** The top bar's slots a page fills through PageBar: its path, its tools. */
   readonly slots: { tools: HTMLElement | null; path: HTMLElement | null };

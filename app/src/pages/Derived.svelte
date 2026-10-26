@@ -3,8 +3,7 @@
   import { bodyHref, type FileJson } from "../concept/data";
   import Reader from "../Reader.svelte";
   import { prepare } from "../reader/prepare";
-  import { useLibraryLabel } from "../role.svelte.ts";
-  import { useTitle } from "../ui.svelte.ts";
+  import { useLibraryTitle } from "../role.svelte.ts";
   import type { Urls } from "../urls";
 
   /** A synthesized file (index.md, log.md) in the reader: the file as an agent reads it. */
@@ -13,8 +12,10 @@
     head,
     file,
   }: { urls: Urls; head: number; file: Extract<FileJson, { kind: "derived" }> } = $props();
-  const label = useLibraryLabel(() => urls);
-  useTitle(() => `${file.path} · ${label.current}`);
+  useLibraryTitle(
+    () => urls,
+    () => file.path,
+  );
   const prepared = $derived(
     prepare(file.doc, { path: file.path, href: bodyHref(urls), footnote: () => null }),
   );

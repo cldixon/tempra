@@ -1,6 +1,6 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { api, field } from "../api";
+  import { api, field, post } from "../api";
   import ConfirmDialog from "../ConfirmDialog.svelte";
   import { useConfirm } from "../confirm.svelte.ts";
   import { useAction, useLoad } from "../load.svelte.ts";
@@ -10,7 +10,7 @@
   import { useTheme } from "../theme.svelte.ts";
   import { localTime } from "../ui";
   import { useTitle } from "../ui.svelte.ts";
-  import { type AccountData, DONE, LEGAL, post } from "./account";
+  import { type AccountData, DONE, LEGAL } from "./account";
 
   /** The account: email, handle, limits, sessions, deleting it (v2 spec: Accounts). */
   let { done }: { done: string | null } = $props();
@@ -20,7 +20,8 @@
     () => api<AccountData>("/api/v1/account"),
   );
   const action = useAction();
-  // The page opened from a link that says what was done (`?done=`): said once, as React's initial state was.
+  // The page opened from a link that says what was done (`?done=`): said once, from the first
+  // value of the prop, and then replaced by what the page does next.
   let notice = $state<string | null>(untrack(() => (done ? (DONE[done] ?? null) : null)));
   let devLink = $state<string | null>(null);
   let deleted = $state(false);
@@ -34,9 +35,8 @@
     e.preventDefault();
     const email = field(e.currentTarget, "email");
     void action.run(async () => {
-      const res = await api<{ sent_to: string; dev_link?: string }>("/api/v1/account/email", {
-        method: "POST",
-        body: JSON.stringify({ email }),
+      const res = await post<{ sent_to: string; dev_link?: string }>("/api/v1/account/email", {
+        email,
       });
       notice = `Check ${res.sent_to} for a link, and open it while signed in as you are now.`;
       devLink = res.dev_link ?? null;

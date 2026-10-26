@@ -1,6 +1,7 @@
 import { actorAgentName, readableName } from "./agents";
 import { api } from "./api";
 import { libraryLabel } from "./role";
+import { urlsOf } from "./urls";
 
 /*
  * The Inbox's items and count (TEMPRA-72; take 4, TEMPRA-116), shared by the bell and the Inbox
@@ -8,7 +9,7 @@ import { libraryLabel } from "./role";
  */
 
 /** What a person is told of (TEMPRA-173): an invitation, a mention and a reply, nothing else. */
-export type InboxKind = "reply" | "mention" | "invitation";
+type InboxKind = "reply" | "mention" | "invitation";
 
 /** One item, as `GET /api/v1/inbox` describes it. */
 export interface InboxItem {
@@ -83,7 +84,7 @@ export function itemLibrary(
   i: Pick<InboxItem, "library" | "library_title">,
   me: string | null,
 ): string {
-  const [owner = "", slug = i.library] = i.library.split("/");
+  const { owner, slug } = urlsOf(i.library);
   return libraryLabel({
     owner,
     slug,
@@ -95,7 +96,7 @@ export function itemLibrary(
 /** What the item is about: the page, or the library for an invitation or an access change. */
 export function itemTitle(i: InboxItem, titles: PageTitles = {}): string {
   if (i.path) return i.title || titles[`${i.library} ${i.path}`] || pageName(i.path);
-  return i.library_title || (i.library.split("/").pop() ?? i.library);
+  return i.library_title || urlsOf(i.library).slug;
 }
 
 /** Agents' names by "owner/slug actor", for items whose actor is an agent (useAgentLabels). */

@@ -1,9 +1,9 @@
 /**
  * Text offsets in the drawn body (tempra-dev: app/reader): DOM points to offsets in the document's
- * text and back, counted by the renderer's rules (Body.tsx). Inside an element marked `data-text`
- * (a textblock, at that offset), a text node counts its characters, an element marked `data-atom`
- * counts one whatever it holds, and one marked `data-skip` counts nothing. These are `docText`'s
- * rules, so a selection maps to the same (block, offset) an anchor stores.
+ * text and back, counted by the reader's rules (body.ts, Blocks.svelte). Inside an element marked
+ * `data-text` (a textblock, at that offset), a text node counts its characters, an element marked
+ * `data-atom` counts one whatever it holds, and one marked `data-skip` counts nothing. These are
+ * `docText`'s rules, so a selection maps to the same (block, offset) an anchor stores.
  */
 
 const TEXT = 3;

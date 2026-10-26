@@ -1,9 +1,9 @@
 <script lang="ts">
-  import { api } from "../api";
+  import { api, post } from "../api";
   import { useAction, useLoad } from "../load.svelte.ts";
   import Status from "../Status.svelte";
   import { useScrollToHash, useTitle } from "../ui.svelte.ts";
-  import { choice, fromChoice, type MailPrefs, post } from "./account";
+  import { choice, fromChoice, type MailPrefs } from "./account";
 
   /**
    * The Notifications page (take 4, board 04's sidebar): what the person is mailed.

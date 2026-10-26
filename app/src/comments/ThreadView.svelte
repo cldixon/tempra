@@ -7,7 +7,6 @@
   import Moment from "../Moment.svelte";
   import { revealOffset } from "../reader/reading";
   import { clip } from "../ui";
-  import { useMe } from "../ui.svelte.ts";
   import type { Urls } from "../urls";
   import type { CommentT, Placed } from "./data";
   import ThreadActions from "./ThreadActions.svelte";
@@ -28,7 +27,6 @@
   } = $props();
 
   // Names actors for comments: agents for their person, the signed-in person as "You".
-  const me = useMe();
   const actors = useActors(() => props.urls);
   const name = actors.view;
   const t = $derived(props.thread);

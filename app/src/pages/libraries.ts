@@ -1,14 +1,8 @@
+import { isShared, type ReachableLibrary } from "../role";
 import { plural } from "../ui";
 
-/** A library as the list shows it (`GET /api/v1/libraries`). */
-export interface Library {
-  id: string;
-  owner: string;
-  slug: string;
-  /** Shared libraries carry the person's role there (tempra-dev: v2/sharing). */
-  role?: "owner" | "write" | "read";
-  title?: string;
-  description?: string;
+/** A library as the list shows it (`GET /api/v1/libraries`), with its summary. */
+export interface Library extends ReachableLibrary {
   seq?: number;
   concepts?: number;
   attachments?: number;
@@ -29,9 +23,8 @@ export function slugFrom(name: string): string {
 
 /** A card's line of facts: the person's access when shared, its page count, a failed summary. */
 export function cardFacts(l: Library): string[] {
-  const shared = (l.role ?? "owner") !== "owner";
   const facts: string[] = [];
-  if (shared) facts.push(l.role === "write" ? "Write" : "Read");
+  if (isShared(l)) facts.push(l.role === "write" ? "Write" : "Read");
   if (typeof l.concepts === "number") facts.push(plural(l.concepts, "page"));
   if (l.unavailable) facts.push("couldn't load just now");
   return facts;

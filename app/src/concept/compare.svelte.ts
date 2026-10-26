@@ -31,7 +31,7 @@ export function useCompare(
       return f.doc;
     },
   );
-  const doc = $derived(old.state === "ready" ? (old.data ?? null) : null);
+  const doc = $derived(old.data ?? null);
   const diff = $derived(doc ? wordDiff(docText(doc), prepared().text) : null);
   return {
     get diff() {

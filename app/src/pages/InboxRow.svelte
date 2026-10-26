@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { post } from "../api";
   import {
     type InboxItem,
     itemDetail,
@@ -12,29 +13,25 @@
   } from "../inbox";
   import LibraryTile from "../LibraryTile.svelte";
   import Moment from "../Moment.svelte";
-  import { Urls } from "../urls";
+  import { urlsOf } from "../urls";
 
   /** One item: its library, kind and time; the title; the detail line, a quote; its actions. */
   let {
     item: i,
     titles,
-    now,
     me,
     reachable,
     busy,
     run,
-    post,
     onAccept,
   }: {
     item: InboxItem;
     titles: PageTitles;
-    now: number;
     me: string | null;
     /** Whether the person reaches the item's library (an accepted invitation opens it). */
     reachable: boolean;
     busy: boolean;
     run: (fn: () => Promise<unknown>) => Promise<void>;
-    post: (path: string, body?: unknown) => Promise<unknown>;
     onAccept(i: InboxItem): void;
   } = $props();
 
@@ -44,18 +41,16 @@
     | { label: string; primary: boolean; onclick: () => void };
 
   const unread = $derived(i.read_at === null && i.done_at === null);
-  const owner = $derived(i.library.split("/")[0] ?? "");
-  const slug = $derived(i.library.split("/")[1] ?? "");
-  const urls = $derived(new Urls(owner, slug));
+  const urls = $derived(urlsOf(i.library));
   const href = $derived(itemHref(i));
   const quote = $derived(itemQuote(i));
   // Following an item, or acting on it, reads it.
   const read = () => {
     if (i.read_at === null) void markRead([i.id]);
   };
-  const ownLibrary = $derived(me !== null && owner === me);
+  const ownLibrary = $derived(me !== null && urls.owner === me);
   const name = $derived(itemLibrary(i, me));
-  const done = (path: string) => () => void run(() => post(path));
+  const done = (path: string) => () => void run(() => post(path, {}));
   const actions = $derived.by(() => {
     const out: Action[] = [];
     const link = (label: string, to: string, primary = false) =>
@@ -81,7 +76,7 @@
   <span class="inbox-dot" aria-hidden="true"></span>
   {#if unread}<span class="visually-hidden">{"Unread: "}</span>{/if}
   <div class="inbox-main">
-    <p class="inbox-meta"><LibraryTile name={i.library_title || slug} shared={!ownLibrary} /><span>{name}</span><span aria-hidden="true">·</span><span>{kindLabel(i)}</span><span aria-hidden="true">·</span><Moment ts={i.created} {now} /></p>
+    <p class="inbox-meta"><LibraryTile name={i.library_title || urls.slug} shared={!ownLibrary} /><span>{name}</span><span aria-hidden="true">·</span><span>{kindLabel(i)}</span><span aria-hidden="true">·</span><Moment ts={i.created} /></p>
     <p class="inbox-title"><a {href} onclick={read}>{itemTitle(i, titles)}</a></p>
     <p class="inbox-detail">{itemDetail(i)}</p>
     {#if quote}
@@ -89,8 +84,9 @@
     {/if}
   </div>
   {#if actions.length > 0}
-    <!-- A click bubbling up from an action reads the item; the actions take the keys. -->
+    <!-- A click bubbling up from an action (a link or a button) reads the item, once; the actions
+      take the keys. -->
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-    <div class="inbox-actions" onclick={read}>{#each actions as a}{#if "href" in a}<a class={a.primary ? "button primary" : "button"} href={a.href} onclick={read}>{a.label}</a>{:else}<button type="button" class={a.primary ? "primary" : undefined} disabled={busy} onclick={a.onclick}>{a.label}</button>{/if}{/each}</div>
+    <div class="inbox-actions" onclick={read}>{#each actions as a}{#if "href" in a}<a class={a.primary ? "button primary" : "button"} href={a.href}>{a.label}</a>{:else}<button type="button" class={a.primary ? "primary" : undefined} disabled={busy} onclick={a.onclick}>{a.label}</button>{/if}{/each}</div>
   {/if}
 </li>

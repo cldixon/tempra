@@ -1,4 +1,5 @@
 import type { Touched } from "../activity";
+import { ApiError } from "../api";
 import type { Role } from "../role";
 import { day, localTime } from "../ui";
 import { dirOf, folderName } from "../urls";
@@ -10,7 +11,12 @@ import { dirOf, folderName } from "../urls";
  * pages by title, local times, no sequence numbers or storage words. The pure parts they share.
  */
 
-export const json = (body: unknown) => ({ method: "POST", body: JSON.stringify(body) });
+/**
+ * An owner-only page's load (OwnerOnly): made once the role is known to be owner, so nobody else
+ * asks the server for what it would refuse. Key the load by the role, so it runs again then.
+ */
+export const forOwner = <T>(role: Role | null, load: () => Promise<T>): Promise<T> =>
+  role === "owner" ? load() : Promise.reject(new ApiError(403, "owner_only", "Owner only."));
 
 // ---------------------------------------------------------------- import and export
 

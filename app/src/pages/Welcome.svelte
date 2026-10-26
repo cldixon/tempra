@@ -1,10 +1,9 @@
 <script lang="ts">
-  import { api, field } from "../api";
+  import { field, post } from "../api";
   import { useAction } from "../load.svelte.ts";
   import type { Me } from "../ui";
   import { useTitle } from "../ui.svelte.ts";
   import { Urls } from "../urls";
-  import { post } from "./account";
 
   /**
    * First run (v2 spec: Onboarding): pick a handle and name the first library, both parts of the
@@ -22,13 +21,13 @@
     const form = e.currentTarget;
     const handle = field(form, "handle");
     const slug = field(form, "library");
-    const starter = new FormData(form).get("starter") === "1";
+    const starter = field(form, "starter") === "1";
     void action.run(async () => {
       if (handle.toLowerCase() !== m.handle)
         await post("/api/v1/account/handle", { handle }, "PUT");
-      const lib = await api<{ owner: string; slug: string }>("/api/v1/libraries", {
-        method: "POST",
-        body: JSON.stringify({ slug, starter }),
+      const lib = await post<{ owner: string; slug: string }>("/api/v1/libraries", {
+        slug,
+        starter,
       });
       // A full load: the header and links follow the new handle.
       location.assign(new Urls(lib.owner, lib.slug).tree(""));

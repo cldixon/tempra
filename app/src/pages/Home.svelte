@@ -5,12 +5,13 @@
   import { useFrame } from "../frame.svelte.ts";
   import { useFeed, useTrailing } from "../live.svelte.ts";
   import { useLoad } from "../load.svelte.ts";
+  import { useMentionable } from "../mentions.svelte.ts";
   import PageColumn from "../PageColumn.svelte";
   import { libraryLabel } from "../role";
-  import { useLibraries, useRole } from "../role.svelte.ts";
+  import { useLibrary, useRole } from "../role.svelte.ts";
   import Status from "../Status.svelte";
   import { plural } from "../ui";
-  import { useMe, useNow, useTitle } from "../ui.svelte.ts";
+  import { useMe, useTitle } from "../ui.svelte.ts";
   import type { Urls } from "../urls";
   import EmptyLibrary from "./EmptyLibrary.svelte";
   import { READ, recentlyChanged } from "./home";
@@ -27,17 +28,14 @@
    */
   let { urls }: { urls: Urls } = $props();
 
-  const libs = useLibraries();
-  const lib = $derived(
-    libs.data?.libraries.find((l) => l.owner === urls.owner && l.slug === urls.slug),
-  );
+  const library = useLibrary(() => urls);
+  const lib = $derived(library.current);
   const name = $derived(libraryLabel(lib ?? urls));
   useTitle(() => name);
   const me = useMe();
   const role = useRole(() => urls);
   const actors = useActors(() => urls);
   const frame = useFrame();
-  const now = useNow();
   const loaded = useLoad(
     () => `home ${urls.base}`,
     async () => {
@@ -55,15 +53,9 @@
       };
     },
   );
-  // Who works here: only the header's quiet line needs it, so a failure drops only that line.
-  const members = useLoad(
-    () => `home people ${urls.base}`,
-    () =>
-      api<{ owner: string; members: { handle: string }[] }>(urls.api("members")).then((m) => [
-        m.owner,
-        ...m.members.map((x) => x.handle),
-      ]),
-  );
+  // Who works here (the owner and members; none until they load, as the owner is always one):
+  // only the header's quiet line needs it, so a failure drops only that line.
+  const members = useMentionable(() => urls);
   const reload = useTrailing(() => loaded.reload(), 1500);
   useFeed(
     () => urls,
@@ -72,10 +64,10 @@
     reload,
   );
 
-  // The tree's outline when it has arrived (it follows the feed), else the summary (`empty`).
+  // The frame's index when it has arrived (it follows the feed), else the summary (`empty`).
   const files = $derived(frame.index);
   const handle = $derived(me.current?.handle ?? null);
-  const people = $derived(members.data ?? null);
+  const people = $derived(members.current.length > 0 ? members.current : null);
   const you = $derived(handle !== null && (people?.includes(handle) ?? false));
   const agents = $derived(actors.contributors.filter((c) => c.agent).length);
   const guide = $derived(files?.some((f) => f.path === "guide.md" && f.kind === "concept"));
@@ -107,7 +99,6 @@
           access={role.current}
           latest={home.latest}
           who={home.latest ? actors.view(home.latest.actor, home.latest.by) : null}
-          now={now.current}
         />
       {:else}
         <!-- A first library with only its start-here note: how to connect an agent. -->
@@ -117,7 +108,6 @@
             access={role.current}
             latest={null}
             who={null}
-            now={now.current}
             heading="Connect an agent"
           />
         {/if}

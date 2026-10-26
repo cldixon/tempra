@@ -71,7 +71,7 @@ export function useLiveFile(
  * writing a comment (a draft, a comment or a reply with text): the moment a new version may
  * replace what they are reading without pulling it from under them.
  */
-export function useIdle(ms: number) {
+function useIdle(ms: number) {
   let idle = $state(false);
   $effect(() => {
     let last = Date.now();

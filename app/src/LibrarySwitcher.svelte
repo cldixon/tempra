@@ -2,7 +2,7 @@
   import Icon from "./Icon.svelte";
   import LibraryTile from "./LibraryTile.svelte";
   import Menu from "./Menu.svelte";
-  import { libraryLabel, type ReachableLibrary } from "./role";
+  import { isShared, libraryLabel, type ReachableLibrary } from "./role";
   import { useLibraries } from "./role.svelte.ts";
   import { byKind } from "./sidebar";
   import { Urls } from "./urls";
@@ -23,9 +23,9 @@
     class="menu-lib"
     href={new Urls(l.owner, l.slug).tree("")}
     aria-current={here(l) ? "page" : undefined}
-    ><LibraryTile name={l.title || l.slug} shared={(l.role ?? "owner") !== "owner"} /><span
+    ><LibraryTile name={l.title || l.slug} shared={isShared(l)} /><span
       >{libraryLabel(l)}</span
-    >{#if (l.role ?? "owner") !== "owner"}<span class="menu-lib-role"
+    >{#if isShared(l)}<span class="menu-lib-role"
         >{l.role === "write" ? "Write" : "Read"}</span
       >{/if}{#if here(l)}<span class="menu-lib-check"><Icon name="check" size={14} /></span>{/if}</a
   >{/snippet}

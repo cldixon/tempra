@@ -2,7 +2,7 @@
   import { useThreads } from "../comments/data.svelte.ts";
   import ConceptPage from "../concept/ConceptPage.svelte";
   import { type FileData, fileKey, isConceptPath, loadFile } from "../concept/data";
-  import LiveNotice from "../concept/LiveNotice.svelte";
+  import LiveChange from "../concept/LiveChange.svelte";
   import { useLiveFile } from "../concept/live.svelte.ts";
   import { useLoad } from "../load.svelte.ts";
   import PageColumn from "../PageColumn.svelte";
@@ -74,9 +74,10 @@
   <NotFound urls={props.urls} path={props.path} />
 {:else}
   <PageColumn wide={attachment !== null}
-    >{#if notice}<div class="notice">{notice}</div>{/if}{#if live.current}<LiveNotice
+    >{#if notice}<div class="notice">{notice}</div>{/if}{#if live.current}<LiveChange
         urls={props.urls}
         live={live.current}
+        notice
       />{/if}<Status loaded={loaded.current}
       >{#snippet children(d: FileData)}{#if d.file.kind === "attachment"}<Attachment
             urls={props.urls}

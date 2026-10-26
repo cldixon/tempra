@@ -150,7 +150,7 @@
         <Redirect to={urls.pinned(undefined).tree("")} />
       {/if}
     {:else if route.page === "activity"}
-      <Activity {urls} {actor} filters={route.filters} done={route.done} />
+      <Activity {urls} filters={route.filters} done={route.done} />
     {:else if route.page === "file"}
       <File {urls} path={route.path} done={url.searchParams.get("done")} {actor} compare={route.compare ?? null} />
     {:else if route.page === "diff"}
@@ -170,9 +170,9 @@
     {:else if route.page === "members"}
       {#await settings() then S}<S.Members {urls} me={me.current?.handle ?? null} />{/await}
     {:else if route.page === "revert"}
-      {#await settings() then S}<S.Revert {urls} request={route.request} {actor} />{/await}
+      {#await settings() then S}<S.Revert {urls} request={route.request} />{/await}
     {:else if route.page === "restore"}
-      {#await settings() then S}<S.Restore {urls} path={route.path} to={route.to} {actor} />{/await}
+      {#await settings() then S}<S.Restore {urls} path={route.path} to={route.to} />{/await}
     {/if}
   {/if}
 {/snippet}

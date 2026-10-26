@@ -5,8 +5,9 @@
 
   /**
    * The owner's recovery tools (Import, Recovery, Revert, Restore; tempra-dev:
-   * decisions/read-and-comment-only, its one exception): nothing until the role is known, and a
-   * plain line for anyone else.
+   * decisions/read-and-comment-only, its one exception) and Delete: nothing until the role is
+   * known, and a plain line for anyone else. A page's own loads wait for the role too (forOwner,
+   * manage.ts).
    */
   let { urls, children }: { urls: Urls; children: Snippet } = $props();
   const role = useRole(() => urls);

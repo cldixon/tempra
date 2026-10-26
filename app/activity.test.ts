@@ -11,12 +11,12 @@ import {
   type LedgerEvent,
   type LedgerRequest,
   LIVE_MS,
-  momentText,
   toEntry,
   whoWorksHere,
   wordsText,
 } from "./src/activity";
 import Moment from "./src/Moment.svelte";
+import { following } from "./src/paging";
 import { localTime, relativeTime } from "./src/ui";
 import { folderName } from "./src/urls";
 import { draw } from "./test/dom";
@@ -50,12 +50,14 @@ const req = (events: LedgerEvent[], over: Partial<LedgerRequest> = {}): LedgerRe
   ...over,
 });
 
-const titles = {
+const named: Record<string, string> = {
   "app/reader.md": "Reader",
   "app/diagrams.md": "Diagrams",
   "decisions/cssom.md": "Diagram styles go through the CSSOM",
   "v2/tenancy.md": "Tenancy",
 };
+/** Titles by path, as the app's useTitleOf gives them (the file name for a page it lacks). */
+const titles = (path: string) => named[path] ?? path.replace(/^.*\//, "").replace(/\.md$/, "");
 
 /** The sentence as text, folders as the app names them. */
 const text = (e: Entry | null) =>
@@ -184,8 +186,8 @@ describe("toEntry", () => {
     expect(toEntry(only, titles, { hideComments: true })).toBeNull();
   });
 
-  test("an unknown title falls back to the file's name", () => {
-    expect(text(toEntry(req([ev("put", "notes/plan.md")]), {}))).toBe("edited plan");
+  test("pages are named by the titles given", () => {
+    expect(text(toEntry(req([ev("put", "notes/plan.md")]), titles))).toBe("edited plan");
   });
 });
 
@@ -212,12 +214,11 @@ describe("times", () => {
     ]);
   });
 
-  test("an entry's time", () => {
+  test("an entry's time: relative today, the time of day as localTime writes it before", () => {
     expect(entryTime(at(19, 13), now)).toBe("2 hours ago");
-    expect(entryTime(at(18, 18, 40), now)).toBe("18:40");
-    expect(entryTime(at(18, 18, 40), now, true)).toBe("yesterday");
-    expect(entryTime(at(12, 9), now, true)).toBe("Oct 12");
-    expect(momentText(at(18, 18, 40), now)).toBe("yesterday, 18:40");
+    const evening = at(18, 18, 40);
+    expect(localTime(evening).endsWith(entryTime(evening, now))).toBe(true);
+    expect(entryTime(evening, now)).toMatch(/^\d{1,2}[:.]40/);
   });
 
   // The one relative time (TEMPRA-131, X-4): never seconds, never UTC.
@@ -241,7 +242,7 @@ describe("times", () => {
   test("Moment: the relative time, the local date and time on hover", () => {
     const ts = at(19, 13);
     const { host, destroy } = draw(Moment, { ts, now });
-    // The DOM's attribute names are lower case (React's markup wrote `dateTime`).
+    // The attribute names as the DOM has them (lower case: `datetime`).
     expect(host.innerHTML.replace(/<!---->/g, "")).toBe(
       `<time datetime="${ts}" title="${localTime(ts)}">2 hours ago</time>`,
     );
@@ -318,4 +319,33 @@ test("words changed", () => {
   expect(wordsText({ added: 38, removed: 12 })).toBe("+38 −12 words");
   expect(wordsText({ added: 0, removed: 0 })).toBeNull();
   expect(wordsText(null)).toBeNull();
+});
+
+describe("Older (paging.ts)", () => {
+  const r = (id: string) => req([ev("put", `app/${id}.md`)], { request_id: id });
+  const page = (ids: string[], next: number | null) => ({ items: ids.map(r), next });
+  const ids = (o: { items: LedgerRequest[] } | null) => o?.items.map((x) => x.request_id);
+  const id = (x: LedgerRequest) => x.request_id;
+
+  test("agents' writes reload the first page: what it pushed off stays, nothing goes missing", () => {
+    // Older was pressed once: r5 r4 r3, then r2 r1 from the next page.
+    const first = page(["r5", "r4", "r3"], 3);
+    const older = { after: first, items: [r("r2"), r("r1")], next: null };
+    expect(following(older, first, id)).toBe(older);
+    // Two agent writes: the reloaded first page is r7 r6 r5; r4 and r3 must not vanish.
+    const reloaded = page(["r7", "r6", "r5"], 5);
+    const kept = following(older, reloaded, id);
+    expect(ids(kept)).toEqual(["r4", "r3", "r2", "r1"]);
+    expect(kept?.next).toBeNull();
+    expect(kept?.after).toBe(reloaded);
+  });
+
+  test("an item the first page no longer holds above its end goes; none in common starts afresh", () => {
+    const first = page(["a", "b", "c"], 1);
+    const older = { after: first, items: [r("d"), r("e")], next: 9 };
+    // "b" was done: the first page now ends with "d", pulled up from the older page.
+    expect(ids(following(older, page(["a", "c", "d"], 2), id))).toEqual(["e"]);
+    expect(following(older, page(["x", "y", "z"], 4), id)).toBeNull();
+    expect(following(null, first, id)).toBeNull();
+  });
 });

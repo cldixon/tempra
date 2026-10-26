@@ -1,11 +1,10 @@
 <script lang="ts">
   import type { LedgerRequest } from "../activity";
   import { type ActorView, actorAgentName, actorText } from "../agents";
-  import Icon from "../Icon.svelte";
+  import CopyField from "../CopyField.svelte";
   import Moment from "../Moment.svelte";
   import type { Role } from "../role";
   import { clip } from "../ui";
-  import { useCopy } from "../ui.svelte.ts";
   import type { Urls } from "../urls";
 
   /**
@@ -20,19 +19,16 @@
     access: role,
     latest,
     who,
-    now,
     heading,
   }: {
     urls: Urls;
     access: Role | null;
     latest: LedgerRequest | null;
     who: ActorView | null;
-    now: number;
     heading?: string;
   } = $props();
 
   const mcp = `${typeof location === "undefined" ? "" : location.origin}/mcp`;
-  const copied = useCopy();
   const canWrite = $derived(role === "owner" || role === "write");
 </script>
 
@@ -44,15 +40,7 @@
   {#if canWrite}
     <ol class="empty-steps">
       <li>
-        <span>Add Tempra to your agent:</span><span class="copy-field"><code>{mcp}</code><button
-            type="button"
-            class="icon-button"
-            aria-label="Copy the MCP URL"
-            title={copied.state === "copied" ? "Copied" : "Copy"}
-            onclick={() => void copied.copy(mcp)}
-          ><Icon name={copied.state === "copied" ? "check" : "copy"} /></button
-          ></span
-        >
+        <span>Add Tempra to your agent:</span><CopyField value={mcp} label="the MCP URL" />
       </li>
       <li>
         <span>Ask it to start, for example: “In my {urls.slug} library, keep a page for each book I mention.”</span>
@@ -62,7 +50,7 @@
   {#if canWrite || !heading}
     <p class="empty-wait" aria-live="polite">
       {#if latest}
-        <span class="change-dot" aria-hidden="true"></span><span>Last write by {who ? actorText(who) : actorAgentName(latest.actor)}, <Moment ts={latest.ts} {now} />{latest.note ? `: ${clip(latest.note, 80)}` : ""}</span>
+        <span class="change-dot" aria-hidden="true"></span><span>Last write by {who ? actorText(who) : actorAgentName(latest.actor)}, <Moment ts={latest.ts} />{latest.note ? `: ${clip(latest.note, 80)}` : ""}</span>
       {:else}
         <span class="change-dot live" aria-hidden="true"></span><span>Waiting for the first write…</span>
       {/if}
