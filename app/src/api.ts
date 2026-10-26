@@ -1,5 +1,5 @@
 import { takeBoot } from "./boot";
-import { PageCache, share } from "./cache";
+import { PageCache } from "./cache";
 
 /** An error answer from the API: `{ error, code }` with its HTTP status. */
 export class ApiError extends Error {

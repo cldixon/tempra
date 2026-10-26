@@ -11,8 +11,8 @@
  */
 import { mkdirSync, readFileSync, rmSync, watch as watchFiles, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { css as designCss, fonts as designFonts, href as designHref } from "@tempra/design";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
+import { css as designCss, fonts as designFonts, href as designHref } from "@tempra/design";
 import { build, type Rollup } from "vite";
 
 const ROOT = import.meta.dir;

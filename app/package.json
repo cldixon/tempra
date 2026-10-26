@@ -8,8 +8,8 @@
   "scripts": {
     "build": "bun build.ts",
     "dev": "bun build.ts --watch",
-    "test": "bun test",
-    "typecheck": "tsc --noEmit"
+    "test": "bun test --conditions browser",
+    "typecheck": "svelte-check --tsgo --tsconfig ./tsconfig.json --threshold error"
   },
   "dependencies": {
     "@lucide/svelte": "^1.61.0",
