@@ -6,5 +6,6 @@
     "../src/**/*.ts",
     "../scripts/**/*.ts",
     "./**/*.ts"
-  ]
+  ],
+  "exclude": ["../scripts/panel-host.ts"]
 }
