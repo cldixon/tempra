@@ -2,8 +2,11 @@
  * The full-screen view of a concept's figures (tempra-dev: app/reader, Figures): over the app on
  * the ground colour, the image (or the diagram, drawn again at the view's size) as large as fits,
  * previous and next through the concept's figures ("fig. n of m"), Escape to close. For an image,
- * Download and Open file (its attachment page; "Open original" for an external image) as pills, and beneath the caption a quiet line: its path, size and who added it,
- * asked of the page when the view opens (`FigureView.describe`); an external image shows its URL.
+ * Download and Open file (its attachment page; "Open original" for an external image) as pills,
+ * and beneath the caption a quiet line: its path, size, the host it was fetched from, who added
+ * it and what it shows (TEMPRA-170), asked of the page when the view opens
+ * (`FigureView.describe`); an external image shows its URL. A video plays here and audio too; a
+ * PDF is its card, Open going to its page (TEMPRA-164).
  *
  * A modal <dialog> (showModal: the top layer, focus kept inside, Escape), its look in reader.css.
  */
@@ -14,6 +17,7 @@ import { formatSize, relativeTime } from "../ui";
 import { baseName } from "../urls";
 import { useDiagram } from "./Diagram";
 import { BrokenImage, Img } from "./Figure";
+import { PdfCard, Player } from "./Media";
 import type { DiagramFigure, Figure, ImageFigure } from "./prepare";
 
 /** What the page knows about an image in the library, for the line under it. All optional. */
@@ -26,6 +30,10 @@ export interface ImageFacts {
   by?: string | null;
   /** When, as an ISO 8601 datetime. */
   at?: string | null;
+  /** The host it was fetched from, when an agent attached it from a URL (TEMPRA-170). */
+  host?: string | null;
+  /** What it shows, in its writer's words. */
+  description?: string | null;
 }
 
 /** What the reader's page gives the full-screen view. Without it the view still works. */
@@ -40,11 +48,16 @@ export interface FigureView {
   downloadHref?(path: string): string;
 }
 
-/** An image figure's quiet line: its file name (or URL), size, who added it and when. */
+/**
+ * An image figure's quiet line: its file name (or URL), size, the host it came from, who added it
+ * and when, and what it shows.
+ */
 export function factsLine(f: ImageFigure, facts: ImageFacts | null): string {
   const parts = [f.path ? baseName(f.path) : f.url];
   if (facts?.size != null) parts.push(formatSize(facts.size));
+  if (facts?.host) parts.push(`from ${facts.host}`);
   if (facts?.by) parts.push(`added by ${facts.by}${facts.at ? `, ${relativeTime(facts.at)}` : ""}`);
+  if (facts?.description) parts.push(facts.description);
   return parts.join(" · ");
 }
 
@@ -52,6 +65,18 @@ function ImageStage({ figure }: { figure: ImageFigure }) {
   const [failed, setFailed] = useState<string | null>(null);
   const { source } = figure;
   if (source === null || failed === source.src) return <BrokenImage figure={figure} />;
+  // A video plays here, audio too; a PDF is its card, Open going to its page (TEMPRA-164).
+  if (source.kind === "pdf") return <PdfCard figure={figure} />;
+  if (source.kind === "video" || source.kind === "audio") {
+    return (
+      <Player
+        kind={source.kind}
+        source={source}
+        name={figure.alt || figure.caption || figure.url}
+        onError={() => setFailed(source.src)}
+      />
+    );
+  }
   return (
     <Img
       source={source}

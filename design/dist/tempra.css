@@ -997,6 +997,80 @@ details > summary {
   border-radius: var(--tempra-radius-box);
 }
 
+/*
+ * Video, audio and PDF figures (TEMPRA-164; tempra-dev: app/media, How people see). A video
+ * spans the column (its controls need the room), its stored width and height giving its shape,
+ * with Enlarge in its corner;
+ * audio is its controls across the text's column; a PDF is a card: a hairline box with its icon,
+ * name, type and size, Open and Download as pills.
+ */
+.prose .figure-video {
+  position: relative;
+}
+
+.prose .figure-media video {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: var(--tempra-radius-box);
+  background: var(--tempra-color-ground);
+}
+
+.prose .figure-media audio {
+  display: block;
+  width: 100%;
+}
+
+.figure-pdf {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+  padding: 16px 18px;
+  border: 1px solid var(--tempra-color-border);
+  border-radius: var(--tempra-radius-box);
+  background: var(--tempra-color-bg);
+  color: var(--tempra-color-text);
+  font-family: var(--tempra-font-text);
+  font-size: var(--tempra-text-ui);
+  line-height: var(--tempra-line-height);
+}
+
+.figure-pdf > svg {
+  flex: none;
+  color: var(--tempra-color-faint);
+}
+
+.figure-pdf-about {
+  display: flex;
+  flex: 1 1 12rem;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.figure-pdf-name {
+  font-weight: var(--tempra-weight-medium);
+  overflow-wrap: anywhere;
+}
+
+.figure-pdf-meta {
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+}
+
+.figure-pdf-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.figure-pdf-actions a.button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+}
+
 /* The image is the button that enlarges it: no button look, a focus ring when reached by keys. */
 .prose .figure-open {
   display: block;
@@ -1030,6 +1104,12 @@ details > summary {
 .prose .figure-number {
   color: var(--tempra-color-text);
   font-weight: var(--tempra-weight-medium);
+}
+
+/* An external image's site, a quiet line under the caption (TEMPRA-163). */
+.prose .figure-source {
+  display: block;
+  color: var(--tempra-color-muted);
 }
 
 /*
@@ -1542,6 +1622,23 @@ details > summary {
   max-height: 100%;
   object-fit: contain;
   border-radius: var(--tempra-radius-card);
+  box-shadow: var(--tempra-shadow);
+}
+
+/* A video plays as large as fits; audio and a PDF's card sit in the middle (TEMPRA-164). */
+.lightbox-figure > video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.lightbox-figure > audio {
+  width: min(100%, 32rem);
+}
+
+.lightbox-figure > .figure-pdf {
+  width: min(100%, 32rem);
   box-shadow: var(--tempra-shadow);
 }
 
@@ -4907,6 +5004,21 @@ a.activity-download {
   object-fit: contain;
 }
 
+/* A video plays in place, as large as the image would be; audio is its controls across the frame
+   (TEMPRA-164). */
+.attachment-frame video {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-height: 70vh;
+  object-fit: contain;
+}
+
+.attachment-frame audio {
+  display: block;
+  width: min(100%, 32rem);
+}
+
 .attachment-icon {
   display: grid;
   place-items: center;
@@ -4971,6 +5083,70 @@ a.activity-download {
   list-style: none;
 }
 
+.attachment-used > li + li {
+  margin-top: var(--tempra-space-1);
+}
+
+/* The name and, under it, what the file shows (TEMPRA-170). */
+.attachment-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--tempra-space-1);
+}
+
+.attachment-description {
+  margin: 0;
+  text-wrap: pretty;
+  overflow-wrap: anywhere;
+}
+
+/* Under a page in Used in: the figure it appears as, and its caption. */
+.attachment-figure {
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+}
+
+/* File history: every version as a row between hairlines, under the image and the facts. */
+.attachment-history {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+
+.attachment-history ol {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--tempra-color-border);
+}
+
+.attachment-history li {
+  display: grid;
+  grid-template-columns: 10rem minmax(0, 1fr) 10rem auto;
+  gap: var(--tempra-space-1) var(--tempra-space-3);
+  align-items: baseline;
+  padding: var(--tempra-space-2) 0;
+  border-bottom: 1px solid var(--tempra-color-border);
+}
+
+.attachment-version-when {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--tempra-space-1) var(--tempra-space-2);
+}
+
+.attachment-version-who {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.attachment-version-download {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--tempra-space-1);
+  white-space: nowrap;
+}
+
 @media (max-width: 1100px) {
   .attachment {
     grid-template-columns: minmax(0, 1fr);
@@ -4979,6 +5155,21 @@ a.activity-download {
   .attachment-frame {
     min-height: 14rem;
     padding: var(--tempra-space-3);
+  }
+}
+
+/* A phone: each version stacks, when and who above its size and Download. */
+@media (max-width: 900px) {
+  .attachment-history li {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .attachment-version-who {
+    grid-column: 1 / -1;
+  }
+
+  .attachment-version-download {
+    min-height: 44px;
   }
 }
 

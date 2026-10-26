@@ -15,6 +15,7 @@ import {
   walk as walkDoc,
 } from "@tempra/editor/doc";
 import { stringify as yamlStringify } from "yaml";
+import { PELE_VERSION } from "../../render/src/version";
 import {
   buildRecord,
   deserializeRecord,
@@ -27,7 +28,7 @@ import {
   sourceCandidates,
 } from "../okf/concept";
 import { type LogRequest, renderIndex, renderLog } from "../okf/derived";
-import { diagramLint } from "../okf/diagrams";
+import { checkedFences, diagramLint, type RenderFailure, unrenderedWarning } from "../okf/diagrams";
 import { unifiedDiff } from "../okf/diff";
 import { figureLint } from "../okf/figure-lint";
 import { type FigureFact, figureFacts } from "../okf/figures";
@@ -91,7 +92,7 @@ import {
   type ThreadView,
 } from "./comments";
 import { notFound, OkfError } from "./errors";
-import { LEDGER_COUNTS, migrate } from "./schema";
+import { DIAGRAM_RENDERS, LEDGER_COUNTS, migrate } from "./schema";
 import type { SqlHandle, SqlValue } from "./sql";
 
 /** Concepts over this many bytes of rendered markdown are refused (spec: OKF conformance). */
@@ -122,22 +123,55 @@ export interface AttachSource {
 
 /** An attachment's description is short: a line or two for its page (TEMPRA-170). */
 export const DESCRIPTION_MAX = 500;
+/** Credit and licence are a line each, free text (TEMPRA-170; no licence picker). */
+export const CREDIT_MAX = 200;
 
-/** A description as given: trimmed, at most DESCRIPTION_MAX characters; empty is none. */
-export function checkDescription(d: unknown): string | undefined {
+/** What a writer may say about an attachment version, kept in its attach op's ledger meta. */
+export interface AttachFacts {
+  /** What the file shows. */
+  description?: string;
+  /** Who made it, as it should be credited. */
+  credit?: string;
+  /** Its licence, as free text ("CC BY-SA 4.0"). */
+  licence?: string;
+}
+
+/** A short text as given: trimmed, at most `max` characters; empty is none. */
+function checkText(name: string, d: unknown, max: number): string | undefined {
   if (d === undefined || d === null) return undefined;
   if (typeof d !== "string") {
-    throw new OkfError(400, "bad_description", "`description` is a short text.");
+    throw new OkfError(400, `bad_${name}`, `\`${name}\` is a short text.`);
   }
   const t = d.trim();
-  if (t.length > DESCRIPTION_MAX) {
+  if (t.length > max) {
     throw new OkfError(
       400,
-      "bad_description",
-      `\`description\` is at most ${DESCRIPTION_MAX} characters; this one is ${t.length}.`,
+      `bad_${name}`,
+      `\`${name}\` is at most ${max} characters; this one is ${t.length}.`,
     );
   }
   return t === "" ? undefined : t;
+}
+
+/** A description as given: trimmed, at most DESCRIPTION_MAX characters; empty is none. */
+export function checkDescription(d: unknown): string | undefined {
+  return checkText("description", d, DESCRIPTION_MAX);
+}
+
+/** An attachment's description, credit and licence as given, checked; only those set. */
+export function checkFacts(input: {
+  description?: unknown;
+  credit?: unknown;
+  licence?: unknown;
+}): AttachFacts {
+  const out: AttachFacts = {};
+  const description = checkDescription(input.description);
+  const credit = checkText("credit", input.credit, CREDIT_MAX);
+  const licence = checkText("licence", input.licence, CREDIT_MAX);
+  if (description !== undefined) out.description = description;
+  if (credit !== undefined) out.credit = credit;
+  if (licence !== undefined) out.licence = licence;
+  return out;
 }
 
 function checkSource(s: AttachSource): void {
@@ -187,6 +221,9 @@ export type WriteOp =
       source?: AttachSource;
       /** What the file shows, in the writer's words (at most DESCRIPTION_MAX characters). */
       description?: string;
+      /** Who made it and its licence, free text (at most CREDIT_MAX characters each). */
+      credit?: string;
+      licence?: string;
     }
   | { op: "edit"; path: string; edits: { old: string; new: string }[]; if_match?: string | null }
   | { op: "move"; path: string; to: string }
@@ -215,7 +252,29 @@ export interface WriteResult {
   results: OpResult[];
   /** For the Worker's after-commit step (notify.ts), which strips it before answering. */
   notify?: WriteNotice;
+  /** Diagrams for the render service to try after the commit (render-lint.ts), also stripped. */
+  render?: RenderJob[];
 }
+
+/**
+ * The diagrams of one written concept version that the fast check passed and whose verdict from
+ * Pele the library does not know yet (TEMPRA-167), keyed by Pele's version and their source's SHA-256.
+ */
+export interface RenderJob {
+  concept_id: string;
+  path: string;
+  hash: string;
+  diagrams: { key: string; source: string }[];
+}
+
+/** Pele's verdict on a diagram's source: null when it draws, else where and why it failed. */
+export interface RenderVerdict {
+  key: string;
+  error: RenderFailure | null;
+}
+
+/** At most this many diagrams of a request go to the render service; the rest wait for a write. */
+export const RENDERS_PER_WRITE = 10;
 
 /**
  * What a committed write means for the people of the library (TEMPRA-116; tempra-dev:
@@ -244,6 +303,7 @@ export interface ImportResult {
   skipped: string[];
   warnings: { path: string; lint: LintWarning[] }[];
   notify?: WriteNotice;
+  render?: RenderJob[];
 }
 
 export interface EventRow {
@@ -388,9 +448,25 @@ export interface ConceptRow {
 export interface ImageRef {
   hash: string;
   media: string | null;
+  /** Its size in bytes (a PDF's card says it, TEMPRA-164). */
+  size?: number;
   width?: number | null;
   height?: number | null;
+  /** For a video, the image attached beside it as its poster (`demo.poster.png`, TEMPRA-164). */
+  poster?: ImageRef;
 }
+
+/** A blob the reader's image or media route serves (TEMPRA-162, TEMPRA-164). */
+export interface ServedBlob {
+  hash: string;
+  size: number;
+  media: string;
+  width: number | null;
+  height: number | null;
+}
+
+/** The image types a video's poster may be, by the extension after `<name>.poster.`. */
+const POSTER_EXTENSIONS = ["png", "jpg", "jpeg", "webp", "avif"];
 
 export type FileView =
   | {
@@ -436,6 +512,9 @@ export type FileView =
       source: AttachSource | null;
       /** What the file shows, in its writer's words (TEMPRA-170). */
       description: string | null;
+      /** Who made it and under what licence, when its writer said (TEMPRA-170). */
+      credit: string | null;
+      licence: string | null;
     }
   | { kind: "derived"; path: string; seq: number; markdown: string };
 
@@ -451,6 +530,8 @@ export interface StoreOptions {
   now?: () => Date;
   /** Bytes of storage the library uses; the Durable Object passes its SQLite size. */
   size?: () => number;
+  /** The render service's Pele version (render/src/version.ts); verdicts are kept per version. */
+  peleVersion?: string;
 }
 
 /** Reads are counted over this window for internal sources' usage (spec: What the service derives). */
@@ -601,6 +682,8 @@ export class LibraryStore {
   private readonly cap: number;
   private readonly clock: () => Date;
   private readonly size: (() => number) | null;
+  /** The Pele whose verdicts the library keeps (TEMPRA-167): another version asks again. */
+  private readonly peleVersion: string;
   private readonly records = new Map<string, ConceptRecord>();
   private readonly snapshots = new Map<number, Snapshot>();
   /** Missing-heading lint at head, by concept, for the seq it was worked out at (TEMPRA-86). */
@@ -621,6 +704,7 @@ export class LibraryStore {
     this.cap = opts.conceptCap ?? DEFAULT_CONCEPT_CAP;
     this.clock = opts.now ?? (() => new Date());
     this.size = opts.size ?? null;
+    this.peleVersion = opts.peleVersion ?? PELE_VERSION;
     migrate(sql);
     this.reindexSearch();
     this.addStaleTimes();
@@ -628,6 +712,8 @@ export class LibraryStore {
     this.addLedgerCounts();
     this.addFtsRows();
     this.addBlobDimensions();
+    this.sql.script(DIAGRAM_RENDERS);
+    this.addExternalImageFlags();
   }
 
   /**
@@ -681,13 +767,19 @@ export class LibraryStore {
    * in this library makes), for the reader's image route (TEMPRA-162): a hash alone grants
    * nothing, so one this library never stored is null, as is a file that is not an image.
    */
-  imageBlob(hash: string): {
-    hash: string;
-    size: number;
-    media: string;
-    width: number | null;
-    height: number | null;
-  } | null {
+  imageBlob(hash: string): ServedBlob | null {
+    return this.servedBlob(hash, (m) => m.startsWith("image/"));
+  }
+
+  /**
+   * A video or audio file this library holds, current or past, for the reader's media route
+   * (TEMPRA-164), by the same rule as `imageBlob`: a hash grants nothing.
+   */
+  mediaBlob(hash: string): ServedBlob | null {
+    return this.servedBlob(hash, (m) => m.startsWith("video/") || m.startsWith("audio/"));
+  }
+
+  private servedBlob(hash: string, kind: (media: string) => boolean): ServedBlob | null {
     if (!/^[0-9a-f]{64}$/.test(hash)) return null;
     const row = this.sql.all<{
       size: number;
@@ -695,7 +787,7 @@ export class LibraryStore {
       width: number | null;
       height: number | null;
     }>("SELECT size, media, width, height FROM blobs WHERE hash = ? AND location = 'r2'", hash)[0];
-    if (!row?.media?.startsWith("image/")) return null;
+    if (!row?.media || !kind(row.media)) return null;
     const sized = (row.width ?? 0) > 0 && (row.height ?? 0) > 0;
     return {
       hash,
@@ -1020,6 +1112,7 @@ export class LibraryStore {
             request_id: ctx.request_id,
             seq: this.headSeq(),
             results: this.finish(w, results),
+            ...rendersOf(w),
           };
         }),
       );
@@ -1090,6 +1183,7 @@ export class LibraryStore {
           warnings: results
             .filter((r) => r.lint.length > 0)
             .map((r) => ({ path: r.path, lint: r.lint })),
+          ...rendersOf(w),
         };
       }),
     );
@@ -1120,6 +1214,7 @@ export class LibraryStore {
           request_id: ctx.request_id,
           seq: this.headSeq(),
           results: this.finish(w, results),
+          ...rendersOf(w),
         };
       }),
     );
@@ -1317,6 +1412,7 @@ export class LibraryStore {
       pending: new Map(),
       written: new Map(),
       affected: new Set(),
+      renders: [],
     };
   }
 
@@ -1603,6 +1699,7 @@ export class LibraryStore {
     }
     const hash = this.putRecord(built.record);
     const conceptId = cur?.concept_id ?? w.pending.get(path) ?? crypto.randomUUID();
+    built.lint.push(...this.renderLint(w, conceptId, path, hash, built.record.doc));
     let seq = cur?.seq ?? 0;
     if (!cur || cur.hash !== hash) {
       const meta: JsonObject = w.source ? { source: w.source } : {};
@@ -1785,7 +1882,12 @@ export class LibraryStore {
     conceptId: string,
     hash: string,
     seq: number,
-  ): { source: AttachSource | null; description: string | null } {
+  ): {
+    source: AttachSource | null;
+    description: string | null;
+    credit: string | null;
+    licence: string | null;
+  } {
     const rows = this.sql.all<{ meta: string | null }>(
       `SELECT meta FROM events WHERE concept_id = ? AND hash = ? AND seq <= ?
          AND op IN ('put', 'import') AND meta IS NOT NULL ORDER BY seq DESC LIMIT 50`,
@@ -1794,7 +1896,11 @@ export class LibraryStore {
       seq,
     );
     let source: AttachSource | null = null;
-    let description: string | null = null;
+    const text: Record<"description" | "credit" | "licence", string | null> = {
+      description: null,
+      credit: null,
+      licence: null,
+    };
     for (const r of rows) {
       const m = JSON.parse(r.meta as string) as JsonObject;
       const s = m.source as Partial<AttachSource> | string | undefined;
@@ -1806,15 +1912,20 @@ export class LibraryStore {
           fetched_at: String(s.fetched_at ?? ""),
         };
       }
-      if (description === null && typeof m.description === "string") description = m.description;
-      if (source && description !== null) break;
+      for (const k of ["description", "credit", "licence"] as const) {
+        const v = m[k];
+        if (text[k] === null && typeof v === "string") text[k] = v;
+      }
+      if (source && text.description !== null && text.credit !== null && text.licence !== null) {
+        break;
+      }
     }
-    return { source, description };
+    return { source, ...text };
   }
 
   private writeAttachment(w: WriteState, op: Extract<WriteOp, { op: "attach" }>): OpResult {
     const { path: input, blob, if_match: ifMatch, if_none_match: ifNoneMatch } = op;
-    const description = checkDescription(op.description);
+    const facts = checkFacts(op);
     if (op.source !== undefined) checkSource(op.source);
     const path = normalizePath(input);
     if (!path) throw new OkfError(400, "bad_path", `Invalid path ${JSON.stringify(input)}.`);
@@ -1865,18 +1976,21 @@ export class LibraryStore {
     const conceptId = cur?.concept_id ?? w.pending.get(path) ?? crypto.randomUUID();
     let seq = cur?.seq ?? 0;
     const sameBytes = cur?.hash === blob.hash;
-    // A new source or description for the same bytes is a write of its own, as a new type is.
+    // A new source, description, credit or licence for the same bytes is a write of its own, as
+    // a new type is.
     const had = cur && sameBytes ? this.provenance(cur.concept_id, cur.hash, cur.seq) : null;
     const described =
       !!had &&
       ((op.source !== undefined &&
         (had.source?.url !== op.source.url || had.source?.final_url !== op.source.final_url)) ||
-        (description !== undefined && had.description !== description));
+        (["description", "credit", "licence"] as const).some(
+          (k) => facts[k] !== undefined && had[k] !== facts[k],
+        ));
     if (!cur || !sameBytes || retyped || described) {
       const meta: JsonObject = {};
       if (w.source) meta.source = w.source;
       else if (op.source) meta.source = { ...op.source } as unknown as JsonObject;
-      if (description !== undefined) meta.description = description;
+      for (const [k, v] of Object.entries(facts)) meta[k] = v;
       if (retyped) meta.media = { from: before?.media ?? null, to: blob.media };
       seq = this.appendEvent(w.ctx, w.now, {
         op: w.mode === "import" ? "import" : "put",
@@ -2212,6 +2326,7 @@ export class LibraryStore {
     if (kind === "concept") {
       const r = this.record(hash);
       lint = this.fieldLint(r, path, this.verifiedAt(conceptId, seq), true);
+      lint.push(...this.renderLint(w, conceptId, path, hash, r.doc));
       this.indexConcept(conceptId, path, r, lint, seq);
       w.written.set(path, conceptId);
     }
@@ -2383,18 +2498,7 @@ export class LibraryStore {
       id,
     );
 
-    const nonLink = lint.filter((l) => l.code !== "broken_link");
-    if (nonLink.length > 0) {
-      this.sql.run(
-        `INSERT INTO flags (concept_id, kind, since_seq, detail) VALUES (?, 'lint', ?, ?)
-         ON CONFLICT(concept_id, kind) DO UPDATE SET detail = excluded.detail`,
-        id,
-        seq,
-        JSON.stringify(nonLink),
-      );
-    } else {
-      this.sql.run("DELETE FROM flags WHERE concept_id = ? AND kind = 'lint'", id);
-    }
+    this.setLintFlag(id, lint, seq);
 
     // Only a new stale_after moves the clock (TEMPRA-63): any other write leaves the flags as
     // the staleness process last set them.
@@ -2513,19 +2617,24 @@ export class LibraryStore {
     if (others.length === before.length && lint.length === 0) return [];
     const all = [...others, ...lint];
     this.sql.run("UPDATE concepts SET lint = ? WHERE concept_id = ?", JSON.stringify(all), id);
-    const flagged = all.filter((l) => l.code !== "broken_link");
-    if (flagged.length > 0) {
-      this.sql.run(
-        `INSERT INTO flags (concept_id, kind, since_seq, detail) VALUES (?, 'lint', ?, ?)
-         ON CONFLICT(concept_id, kind) DO UPDATE SET detail = excluded.detail`,
-        id,
-        this.headSeq(),
-        JSON.stringify(flagged),
-      );
-    } else {
-      this.sql.run("DELETE FROM flags WHERE concept_id = ? AND kind = 'lint'", id);
-    }
+    this.setLintFlag(id, all, this.headSeq());
     return lint;
+  }
+
+  /**
+   * Libraries linted before TEMPRA-163 hold `image_external` in their lint flags: moved once into
+   * `external_image` flags, so the same image is never listed under both kinds.
+   */
+  private addExternalImageFlags() {
+    if (this.sql.all("SELECT 1 FROM meta WHERE key = 'external_image_flags'").length > 0) return;
+    this.sql.transaction(() => {
+      for (const f of this.sql.all<{ concept_id: string; since_seq: number; detail: string }>(
+        "SELECT concept_id, since_seq, detail FROM flags WHERE kind = 'lint' AND detail LIKE '%image_external%'",
+      )) {
+        this.setLintFlag(f.concept_id, JSON.parse(f.detail) as LintWarning[], f.since_seq);
+      }
+      this.sql.run("INSERT INTO meta (key, value) VALUES ('external_image_flags', '1')");
+    });
   }
 
   /** The target-dependent figure lint of a concept version, as of the snapshot. */
@@ -2596,6 +2705,127 @@ export class LibraryStore {
       });
     }
     return out;
+  }
+
+  /**
+   * `diagram_unrendered` lint for a concept version's diagrams from Pele's known verdicts
+   * (TEMPRA-167), and, inside a write, a render job for those the fast check passed whose verdict
+   * is not known yet (up to RENDERS_PER_WRITE in the request). Synchronous: the render itself is
+   * the Worker's, after the commit.
+   */
+  private renderLint(
+    w: WriteState | null,
+    conceptId: string,
+    path: string,
+    hash: string,
+    doc: Doc,
+  ): LintWarning[] {
+    const fences = checkedFences(doc);
+    if (fences.length === 0) return [];
+    const out: LintWarning[] = [];
+    const unknown: { key: string; source: string }[] = [];
+    for (const f of fences) {
+      const key = `${this.peleVersion}:${sha256Hex(f.source)}`;
+      const row = this.sql.all<{ error: string | null }>(
+        "SELECT error FROM diagram_renders WHERE key = ?",
+        key,
+      )[0];
+      if (!row) {
+        if (!unknown.some((u) => u.key === key)) unknown.push({ key, source: f.source });
+      } else if (row.error) {
+        out.push(unrenderedWarning(f, JSON.parse(row.error) as RenderFailure));
+      }
+    }
+    if (w && unknown.length > 0) {
+      const room = RENDERS_PER_WRITE - w.renders.reduce((n, j) => n + j.diagrams.length, 0);
+      const diagrams = unknown.slice(0, Math.max(0, room));
+      if (diagrams.length > 0) w.renders.push({ concept_id: conceptId, path, hash, diagrams });
+    }
+    return out;
+  }
+
+  /**
+   * Keeps Pele's verdicts from the render service and, for each concept still at the version
+   * they were asked for, replaces its `diagram_unrendered` lint (TEMPRA-167); a concept that has
+   * moved on keeps its lint, as its newer write asked for its own. Not a write: no ledger event,
+   * no new version. Returns each updated concept's `diagram_unrendered` lint by path.
+   */
+  setDiagramRenders(
+    jobs: { concept_id: string; hash: string; verdicts: RenderVerdict[] }[],
+  ): { path: string; hash: string; lint: LintWarning[] }[] {
+    return this.sql.transaction(() => {
+      for (const j of jobs) {
+        for (const v of j.verdicts) {
+          this.sql.run(
+            "INSERT OR REPLACE INTO diagram_renders (key, error) VALUES (?, ?)",
+            v.key,
+            v.error ? JSON.stringify(v.error) : null,
+          );
+        }
+      }
+      const out: { path: string; hash: string; lint: LintWarning[] }[] = [];
+      for (const j of jobs) {
+        const row = this.sql.all<{ path: string; hash: string; kind: string; last_seq: number }>(
+          "SELECT path, hash, kind, last_seq FROM paths WHERE concept_id = ?",
+          j.concept_id,
+        )[0];
+        if (row?.kind !== "concept" || row.hash !== j.hash) continue;
+        const stored = this.sql.all<{ lint: string | null }>(
+          "SELECT lint FROM concepts WHERE concept_id = ?",
+          j.concept_id,
+        )[0];
+        if (!stored) continue;
+        const unrendered = this.renderLint(
+          null,
+          j.concept_id,
+          row.path,
+          row.hash,
+          this.record(row.hash).doc,
+        );
+        const lint = [
+          ...(JSON.parse(stored.lint ?? "[]") as LintWarning[]).filter(
+            (l) => l.code !== "diagram_unrendered",
+          ),
+          ...unrendered,
+        ];
+        this.sql.run(
+          "UPDATE concepts SET lint = ? WHERE concept_id = ?",
+          JSON.stringify(lint),
+          j.concept_id,
+        );
+        this.setLintFlag(j.concept_id, lint, row.last_seq);
+        out.push({ path: row.path, hash: row.hash, lint: unrendered });
+      }
+      return out;
+    });
+  }
+
+  /**
+   * A concept's lint flags from its stored lint: hotlinked images (`image_external`) are their own
+   * kind of work, `external_image` (TEMPRA-163), so they are never listed twice; the rest is
+   * `lint`; broken links have their own flag (refreshBroken). A flag already set keeps its
+   * `since_seq`.
+   */
+  private setLintFlag(id: string, lint: LintWarning[], seq: number) {
+    const external = lint.filter((l) => l.code === "image_external");
+    const rest = lint.filter((l) => l.code !== "broken_link" && l.code !== "image_external");
+    for (const [kind, found] of [
+      ["lint", rest],
+      ["external_image", external],
+    ] as const) {
+      if (found.length > 0) {
+        this.sql.run(
+          `INSERT INTO flags (concept_id, kind, since_seq, detail) VALUES (?, ?, ?, ?)
+           ON CONFLICT(concept_id, kind) DO UPDATE SET detail = excluded.detail`,
+          id,
+          kind,
+          seq,
+          JSON.stringify(found),
+        );
+      } else {
+        this.sql.run("DELETE FROM flags WHERE concept_id = ? AND kind = ?", id, kind);
+      }
+    }
   }
 
   /** Field lint of a content version, as a write of it would report (spec: OKF conformance). */
@@ -2818,15 +3048,33 @@ export class LibraryStore {
       if (t?.kind !== "internal" || t.dir || t.path === "" || t.path in out) return undefined;
       const a = snap.lookup(t.path);
       if (a?.kind !== "attachment") return undefined;
-      const info = this.blobInfo(a.hash);
-      out[t.path] = {
-        hash: a.hash,
-        media: info.media,
-        ...(info.dims ? { width: info.dims.width, height: info.dims.height } : {}),
-      };
+      const ref = this.imageRef(a.hash);
+      if (ref.media?.startsWith("video/")) {
+        // A poster beside it: `demo.mp4` -> `demo.poster.png` (or .jpg, .webp, ...).
+        const stem = t.path.replace(/\.[^./]+$/, "");
+        for (const ext of POSTER_EXTENSIONS) {
+          const p = snap.lookup(`${stem}.poster.${ext}`);
+          if (p?.kind !== "attachment") continue;
+          const poster = this.imageRef(p.hash);
+          if (!poster.media?.startsWith("image/")) continue;
+          ref.poster = poster;
+          break;
+        }
+      }
+      out[t.path] = ref;
       return undefined;
     });
     return out;
+  }
+
+  private imageRef(hash: string): ImageRef {
+    const info = this.blobInfo(hash);
+    return {
+      hash,
+      media: info.media,
+      size: info.size,
+      ...(info.dims ? { width: info.dims.width, height: info.dims.height } : {}),
+    };
   }
 
   /** A concept's figures, each attachment from its blob row (no bytes; TEMPRA-154). */
@@ -3411,9 +3659,46 @@ export class LibraryStore {
       "SELECT * FROM events WHERE concept_id = ? ORDER BY seq",
       id,
     );
+    // An attachment's versions carry their bytes' size, type and dimensions, for its page's
+    // File history (TEMPRA-170).
+    const files = new Map<string, JsonObject | null>();
+    const fileOf = (hash: string | null): JsonObject | null => {
+      if (hash === null) return null;
+      if (!files.has(hash)) {
+        const row = this.sql.all<{
+          size: number;
+          media: string | null;
+          width: number | null;
+          height: number | null;
+        }>(
+          "SELECT size, media, width, height FROM blobs WHERE hash = ? AND location = 'r2'",
+          hash,
+        )[0];
+        files.set(
+          hash,
+          row
+            ? {
+                size: row.size,
+                media: row.media,
+                width: row.width && row.width > 0 ? row.width : null,
+                height: row.height && row.height > 0 ? row.height : null,
+              }
+            : null,
+        );
+      }
+      return files.get(hash) ?? null;
+    };
     return {
       path: this.pathOf(id) ?? p,
-      events: rows.map((e) => ({ ...e, meta: e.meta ? (JSON.parse(e.meta) as JsonObject) : null })),
+      events: rows.map((e) => {
+        const file =
+          e.op === "put" || e.op === "import" || e.op === "revert" ? fileOf(e.hash) : null;
+        return {
+          ...e,
+          meta: e.meta ? (JSON.parse(e.meta) as JsonObject) : null,
+          ...(file ? { file } : {}),
+        };
+      }),
     };
   }
 
@@ -3628,6 +3913,14 @@ export class LibraryStore {
         detail = `links to missing ${targets.map((t) => `/${t}`).join(", ")}`;
         action =
           "Write the missing concept, point the link at an existing one, or remove the link.";
+      } else if (f.kind === "external_image") {
+        const urls = [
+          ...new Set((JSON.parse(f.detail) as LintWarning[]).map((l) => l.target ?? "")),
+        ].filter((u) => u !== "");
+        const n = urls.length;
+        detail = `${n} image${n === 1 ? "" : "s"} hotlinked from another site: ${urls.join(", ")}`;
+        action =
+          "Bring each into the library: `attach` it with `source_url` set to its URL (the server fetches it and records where from; put it beside this concept), `edit` the image to point at the attached path, and cite the original in `sources`.";
       } else if (f.kind === "lint") {
         detail = [
           ...this.freshLint(snap, e, JSON.parse(f.detail) as LintWarning[]),
@@ -4367,6 +4660,7 @@ export class LibraryStore {
         lint: n("lint"),
         structure: n("structure"),
         comment: n("comment"),
+        external_image: n("external_image"),
       },
       unverified: {
         total: this.sql.all<{ n: number }>(`SELECT COUNT(*) AS n ${UNVERIFIED}`)[0]?.n ?? 0,
@@ -4962,6 +5256,8 @@ export interface LibraryHealth {
     lint: number;
     structure: number;
     comment: number;
+    /** Pages with hotlinked images (TEMPRA-163); absent from summaries kept before it. */
+    external_image?: number;
   };
   /** Concepts whose latest change came after their latest verification (or that have none). */
   unverified: {
@@ -5087,6 +5383,10 @@ interface ThreadRow extends Entry {
   replies: number;
 }
 
+/** A request's render jobs for its result, when it has any. */
+const rendersOf = (w: WriteState): { render?: RenderJob[] } =>
+  w.renders.length > 0 ? { render: w.renders } : {};
+
 interface WriteState {
   ctx: RequestContext;
   now: string;
@@ -5098,4 +5398,6 @@ interface WriteState {
   written: Map<string, string>;
   /** Concepts whose outbound links changed state, for flag refresh. */
   affected: Set<string>;
+  /** Diagrams for the render service after the commit, at most RENDERS_PER_WRITE in all. */
+  renders: RenderJob[];
 }

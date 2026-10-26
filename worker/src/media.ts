@@ -128,6 +128,13 @@ export function checkAttachment(
   declared: string | null,
   path?: string,
 ): AttachmentInfo {
+  // Bytes that are a video, audio or a PDF are that, whatever was declared (TEMPRA-164); but
+  // HEIC, a cut AVIF and other ISO-BMFF images share MP4's `ftyp`, so one declared as an image
+  // is checked as that.
+  const sniffed = sniffImage(bytes) ? null : sniffMedia(bytes);
+  if (sniffed && !(sniffed === "video/mp4" && declared?.toLowerCase().startsWith("image/"))) {
+    return mediaAttachment(bytes, declared);
+  }
   const info = imageInfo(bytes, formatOf(declared));
   if (!info) return { media: declared };
   const what = path ? `${path} is not a valid ${FORMAT_NAME[info.format]}` : "Not a valid image";
@@ -147,6 +154,147 @@ export function checkAttachment(
     out.note = `The bytes are a ${FORMAT_NAME[info.format]} image, so it is stored as ${media}; the declared ${declared} was ignored.`;
   }
   return out;
+}
+
+const MEDIA_NAME: Record<string, string> = {
+  "application/pdf": "PDF",
+  "audio/ogg": "Ogg",
+  "audio/wav": "WAV",
+  "audio/mpeg": "MP3",
+  "video/webm": "WebM",
+  "video/mp4": "MP4",
+};
+
+/**
+ * Bytes that are not an image (TEMPRA-164): a video, audio or PDF is stored with the type its
+ * signature names (`sniffMedia`), the declared one ignored with a note when it disagrees; one
+ * declared as audio in the same container keeps it (an `.m4a` is `ftyp`, a WebM may be sound
+ * alone). Anything else keeps the declared type.
+ */
+function mediaAttachment(bytes: Uint8Array, declared: string | null): AttachmentInfo {
+  const sniffed = sniffMedia(bytes);
+  if (!sniffed) return { media: declared };
+  const out = typed(sniffed, declared);
+  if (out.media?.startsWith("video/")) {
+    const size = videoSize(bytes, out.media);
+    if (size) {
+      out.width = size.width;
+      out.height = size.height;
+    }
+  }
+  return out;
+}
+
+function typed(sniffed: string, declared: string | null): AttachmentInfo {
+  const said = declared?.split(";")[0]?.trim().toLowerCase() ?? null;
+  if (said === sniffed) return { media: sniffed };
+  const sub = (m: string) => m.split("/")[1];
+  if (said?.startsWith("audio/") && sniffed.startsWith("video/") && sub(said) === sub(sniffed)) {
+    return { media: said };
+  }
+  if (said === "audio/x-m4a" && sniffed === "video/mp4") return { media: "audio/mp4" };
+  if (said === "audio/wave" || said === "audio/x-wav" || said === "audio/vnd.wave") {
+    if (sniffed === "audio/wav") return { media: sniffed };
+  }
+  if (!said || said === "application/octet-stream") return { media: sniffed };
+  return {
+    media: sniffed,
+    note: `The bytes are a ${MEDIA_NAME[sniffed] ?? sniffed} file, so it is stored as ${sniffed}; the declared ${declared} was ignored.`,
+  };
+}
+
+/**
+ * A video's frame size from its header, when cheap to find (TEMPRA-164): an MP4's track header
+ * (`moov > trak > tkhd`, the largest track) or a WebM's `Tracks > TrackEntry > Video` pixel size.
+ * Null when it does not say or does not parse; the browser finds it once the video loads.
+ */
+export function videoSize(b: Uint8Array, media: string): { width: number; height: number } | null {
+  try {
+    const size = media === "video/webm" ? webmSize(b) : media === "video/mp4" ? mp4Size(b) : null;
+    return size && size.width > 0 && size.height > 0 ? size : null;
+  } catch (e) {
+    if (e instanceof Broken || e instanceof RangeError) return null;
+    throw e;
+  }
+}
+
+function mp4Size(b: Uint8Array): { width: number; height: number } | null {
+  const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const moov = boxes(b, 0, b.length).find((x) => x[0] === "moov");
+  if (!moov) return null;
+  let best: { width: number; height: number } | null = null;
+  for (const [t, s, e] of boxes(b, moov[1], moov[2])) {
+    if (t !== "trak") continue;
+    const tkhd = boxes(b, s, e).find((x) => x[0] === "tkhd");
+    if (!tkhd || tkhd[2] - tkhd[1] < 84) continue;
+    // The payload ends with width and height, 16.16 fixed point.
+    const width = Math.round(v.getUint32(tkhd[2] - 8) / 65536);
+    const height = Math.round(v.getUint32(tkhd[2] - 4) / 65536);
+    if (width * height > (best ? best.width * best.height : 0)) best = { width, height };
+  }
+  return best;
+}
+
+/** An EBML variable-length integer at `at`: its value (marker kept for IDs) and length. */
+function vint(b: Uint8Array, at: number, keepMarker: boolean): { value: number; len: number } {
+  const first = b[at];
+  if (first === undefined || first === 0) broken("an EBML number runs past the end");
+  let len = 1;
+  while (len <= 8 && !((first as number) & (0x80 >> (len - 1)))) len++;
+  if (at + len > b.length) broken("an EBML number runs past the end");
+  let value = keepMarker ? (first as number) : (first as number) & (0xff >> len);
+  let ones = value === 0xff >> len;
+  for (let i = 1; i < len; i++) {
+    const x = b[at + i] as number;
+    if (x !== 0xff) ones = false;
+    value = value * 256 + x;
+  }
+  // All ones is an unknown size: it runs to the end of its parent.
+  return { value: !keepMarker && ones ? -1 : value, len };
+}
+
+function webmSize(b: Uint8Array): { width: number; height: number } | null {
+  const SEGMENT = 0x18538067;
+  const TRACKS = 0x1654ae6b;
+  const CLUSTER = 0x1f43b675;
+  const elements = function* (from: number, to: number) {
+    let at = from;
+    while (at < to) {
+      const id = vint(b, at, true);
+      const size = vint(b, at + id.len, false);
+      const data = at + id.len + size.len;
+      const end = size.value < 0 ? to : Math.min(to, data + size.value);
+      yield { id: id.value, data, end };
+      at = end;
+    }
+  };
+  const uint = (s: number, e: number) => {
+    let n = 0;
+    for (let i = s; i < e; i++) n = n * 256 + (b[i] as number);
+    return n;
+  };
+  for (const top of elements(0, b.length)) {
+    if (top.id !== SEGMENT) continue;
+    for (const el of elements(top.data, top.end)) {
+      if (el.id === CLUSTER) return null;
+      if (el.id !== TRACKS) continue;
+      for (const entry of elements(el.data, el.end)) {
+        if (entry.id !== 0xae) continue;
+        for (const video of elements(entry.data, entry.end)) {
+          if (video.id !== 0xe0) continue;
+          let width = 0;
+          let height = 0;
+          for (const f of elements(video.data, video.end)) {
+            if (f.id === 0xb0) width = uint(f.data, f.end);
+            if (f.id === 0xba) height = uint(f.data, f.end);
+          }
+          if (width > 0 && height > 0) return { width, height };
+        }
+      }
+      return null;
+    }
+  }
+  return null;
 }
 
 // ---------------------------------------------------------------------------------------- PNG

@@ -12,7 +12,9 @@
  */
 import type { Code, RootContent } from "mdast";
 import type { ReactNode } from "react";
+import type { MediaKind } from "../images";
 import { Diagram } from "./Diagram";
+import { AudioFigure, type MediaProps, PdfFigure, VideoFigure } from "./Media";
 import type { Figure } from "./prepare";
 
 export interface BlockProps<N> {
@@ -34,6 +36,17 @@ export const code: Record<string, BlockComponent<Code>> = { mermaid: Diagram };
 
 /** Blocks by node type, ahead of the default rendering (e.g. `html` for raw HTML blocks). */
 export const node: Record<string, BlockComponent<RootContent>> = {};
+
+/**
+ * An image node's figure by what its attachment is (TEMPRA-164; Media.tsx): video, audio and PDF
+ * in place of the image, each still the paragraph's one atom. An image, or a file the library
+ * does not know the type of, is drawn as an image (Figure.tsx).
+ */
+export const media: Partial<Record<MediaKind, (props: MediaProps) => ReactNode>> = {
+  video: VideoFigure,
+  audio: AudioFigure,
+  pdf: PdfFigure,
+};
 
 /** The default code block: the text, with the fence's language as a quiet label (CSS only). */
 export function CodeBlock({ node, id, offset, text }: BlockProps<Code>) {

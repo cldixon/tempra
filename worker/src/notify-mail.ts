@@ -182,6 +182,7 @@ const HEALTH_WORDS: Record<string, [string, string]> = {
   stale_soon: ["stale soon", "stale soon"],
   broken_link: ["broken link", "broken links"],
   lint: ["lint", "lint"],
+  external_image: ["page with hotlinked images", "pages with hotlinked images"],
   structure: ["structure finding", "structure findings"],
   comment: ["open comment", "open comments"],
   unverified: ["unverified", "unverified"],

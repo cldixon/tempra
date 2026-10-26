@@ -49,6 +49,8 @@ export const LIBRARY_METHODS = [
   "digest",
   "setDimensions",
   "imageBlob",
+  "mediaBlob",
+  "setDiagramRenders",
 ] as const;
 
 export type LibraryMethod = (typeof LIBRARY_METHODS)[number];
@@ -85,8 +87,21 @@ export function makeClient(call: CallFn): LibraryClient {
 /** Content-addressed attachment bytes, `blobs/<sha256>` in R2 (spec: Backend architecture). */
 export interface BlobStore {
   put(hash: string, bytes: Uint8Array, media: string | null): Promise<void>;
-  get(hash: string): Promise<{ body: ReadableStream | Uint8Array; size: number } | null>;
+  /**
+   * The blob's bytes; with `range`, only `length` bytes from `offset` (a video's seeking,
+   * TEMPRA-164), `size` still the whole blob's.
+   */
+  get(
+    hash: string,
+    range?: BlobRange,
+  ): Promise<{ body: ReadableStream | Uint8Array; size: number } | null>;
   head(hash: string): Promise<{ size: number } | null>;
+}
+
+/** Part of a blob: `length` bytes from `offset`. */
+export interface BlobRange {
+  offset: number;
+  length: number;
 }
 
 export const blobKey = (hash: string) => `blobs/${hash}`;
@@ -99,8 +114,8 @@ export function r2BlobStore(bucket: R2Bucket): BlobStore {
         httpMetadata: media ? { contentType: media } : undefined,
       });
     },
-    async get(hash) {
-      const obj = await bucket.get(blobKey(hash));
+    async get(hash, range) {
+      const obj = await bucket.get(blobKey(hash), range ? { range } : undefined);
       return obj ? { body: obj.body, size: obj.size } : null;
     },
     async head(hash) {

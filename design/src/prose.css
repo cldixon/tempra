@@ -370,6 +370,80 @@
   border-radius: var(--tempra-radius-box);
 }
 
+/*
+ * Video, audio and PDF figures (TEMPRA-164; tempra-dev: app/media, How people see). A video
+ * spans the column (its controls need the room), its stored width and height giving its shape,
+ * with Enlarge in its corner;
+ * audio is its controls across the text's column; a PDF is a card: a hairline box with its icon,
+ * name, type and size, Open and Download as pills.
+ */
+.prose .figure-video {
+  position: relative;
+}
+
+.prose .figure-media video {
+  display: block;
+  width: 100%;
+  height: auto;
+  border-radius: var(--tempra-radius-box);
+  background: var(--tempra-color-ground);
+}
+
+.prose .figure-media audio {
+  display: block;
+  width: 100%;
+}
+
+.figure-pdf {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px 16px;
+  padding: 16px 18px;
+  border: 1px solid var(--tempra-color-border);
+  border-radius: var(--tempra-radius-box);
+  background: var(--tempra-color-bg);
+  color: var(--tempra-color-text);
+  font-family: var(--tempra-font-text);
+  font-size: var(--tempra-text-ui);
+  line-height: var(--tempra-line-height);
+}
+
+.figure-pdf > svg {
+  flex: none;
+  color: var(--tempra-color-faint);
+}
+
+.figure-pdf-about {
+  display: flex;
+  flex: 1 1 12rem;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.figure-pdf-name {
+  font-weight: var(--tempra-weight-medium);
+  overflow-wrap: anywhere;
+}
+
+.figure-pdf-meta {
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+}
+
+.figure-pdf-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.figure-pdf-actions a.button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+}
+
 /* The image is the button that enlarges it: no button look, a focus ring when reached by keys. */
 .prose .figure-open {
   display: block;
@@ -403,6 +477,12 @@
 .prose .figure-number {
   color: var(--tempra-color-text);
   font-weight: var(--tempra-weight-medium);
+}
+
+/* An external image's site, a quiet line under the caption (TEMPRA-163). */
+.prose .figure-source {
+  display: block;
+  color: var(--tempra-color-muted);
 }
 
 /*

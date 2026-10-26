@@ -13,6 +13,13 @@ import type { RequestContext } from "./store/store";
 /** How long an upload URL stays good. */
 export const UPLOAD_TTL_SECONDS = 15 * 60;
 
+/**
+ * The most MCP `attach` takes as `content_base64`, decoded (TEMPRA-156, tempra-dev app/media,
+ * Limits): the model types every byte, so anything bigger goes by `source_url` or
+ * `prepare_upload`. REST, uploads, fetches and import keep WORKER_ATTACHMENT_CAP.
+ */
+export const BASE64_MAX_BYTES = 256 * 1024;
+
 /** What an upload URL's token carries: the write to apply when the bytes arrive, and as whom. */
 export interface UploadGrant {
   k: "upload";
@@ -24,6 +31,9 @@ export interface UploadGrant {
   if_match?: string;
   /** What the file shows, kept with the attach op (TEMPRA-157, for the file's page). */
   description?: string;
+  /** Who made it and its licence (TEMPRA-170). */
+  credit?: string;
+  licence?: string;
   note: string | null;
   actor: string;
   by: RequestContext["by"];
@@ -83,15 +93,26 @@ const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
 /**
  * Strict base64 (TEMPRA-156): whitespace is dropped, then the length must be a multiple of 4
  * and every character in the standard alphabet, padding only at the end. `atob` alone accepts
- * unpadded and some sloppy input, which hides a truncated send.
+ * unpadded and some sloppy input, which hides a truncated send. Refused past `max` decoded bytes
+ * (`base64_too_large`), worked out from the text's length before anything is decoded.
  */
-export function decodeBase64(text: string): Uint8Array {
+export function decodeBase64(text: string, max = BASE64_MAX_BYTES): Uint8Array {
   const s = text.replace(/\s+/g, "");
   if (s.length % 4 !== 0 || !BASE64.test(s)) {
     throw new OkfError(
       400,
       "bad_base64",
       `content_base64 is not valid base64 (${s.length} characters after whitespace; a whole base64 string is a multiple of 4, from A-Z a-z 0-9 + / with = padding only at the end). It may have been cut short.`,
+    );
+  }
+  // The decoded length from the text's, before decoding anything.
+  const size = (s.length / 4) * 3 - (s.endsWith("==") ? 2 : s.endsWith("=") ? 1 : 0);
+  if (size > max) {
+    throw new OkfError(
+      400,
+      "base64_too_large",
+      `content_base64 decodes to ${size} bytes, over the limit of ${max} bytes (${max / 1024} KB). Nothing was written. For an image on the web, use \`attach\` with \`source_url\`; for a file you made, with a shell, use \`prepare_upload\` and PUT the file (up to ${WORKER_ATTACHMENT_CAP / 1048576} MB).`,
+      { size, limit: max },
     );
   }
   const bin = atob(s);
