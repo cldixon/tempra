@@ -448,9 +448,25 @@ export interface ConceptRow {
 export interface ImageRef {
   hash: string;
   media: string | null;
+  /** Its size in bytes (a PDF's card says it, TEMPRA-164). */
+  size?: number;
   width?: number | null;
   height?: number | null;
+  /** For a video, the image attached beside it as its poster (`demo.poster.png`, TEMPRA-164). */
+  poster?: ImageRef;
 }
+
+/** A blob the reader's image or media route serves (TEMPRA-162, TEMPRA-164). */
+export interface ServedBlob {
+  hash: string;
+  size: number;
+  media: string;
+  width: number | null;
+  height: number | null;
+}
+
+/** The image types a video's poster may be, by the extension after `<name>.poster.`. */
+const POSTER_EXTENSIONS = ["png", "jpg", "jpeg", "webp", "avif"];
 
 export type FileView =
   | {
@@ -751,13 +767,19 @@ export class LibraryStore {
    * in this library makes), for the reader's image route (TEMPRA-162): a hash alone grants
    * nothing, so one this library never stored is null, as is a file that is not an image.
    */
-  imageBlob(hash: string): {
-    hash: string;
-    size: number;
-    media: string;
-    width: number | null;
-    height: number | null;
-  } | null {
+  imageBlob(hash: string): ServedBlob | null {
+    return this.servedBlob(hash, (m) => m.startsWith("image/"));
+  }
+
+  /**
+   * A video or audio file this library holds, current or past, for the reader's media route
+   * (TEMPRA-164), by the same rule as `imageBlob`: a hash grants nothing.
+   */
+  mediaBlob(hash: string): ServedBlob | null {
+    return this.servedBlob(hash, (m) => m.startsWith("video/") || m.startsWith("audio/"));
+  }
+
+  private servedBlob(hash: string, kind: (media: string) => boolean): ServedBlob | null {
     if (!/^[0-9a-f]{64}$/.test(hash)) return null;
     const row = this.sql.all<{
       size: number;
@@ -765,7 +787,7 @@ export class LibraryStore {
       width: number | null;
       height: number | null;
     }>("SELECT size, media, width, height FROM blobs WHERE hash = ? AND location = 'r2'", hash)[0];
-    if (!row?.media?.startsWith("image/")) return null;
+    if (!row?.media || !kind(row.media)) return null;
     const sized = (row.width ?? 0) > 0 && (row.height ?? 0) > 0;
     return {
       hash,
@@ -3026,15 +3048,33 @@ export class LibraryStore {
       if (t?.kind !== "internal" || t.dir || t.path === "" || t.path in out) return undefined;
       const a = snap.lookup(t.path);
       if (a?.kind !== "attachment") return undefined;
-      const info = this.blobInfo(a.hash);
-      out[t.path] = {
-        hash: a.hash,
-        media: info.media,
-        ...(info.dims ? { width: info.dims.width, height: info.dims.height } : {}),
-      };
+      const ref = this.imageRef(a.hash);
+      if (ref.media?.startsWith("video/")) {
+        // A poster beside it: `demo.mp4` -> `demo.poster.png` (or .jpg, .webp, ...).
+        const stem = t.path.replace(/\.[^./]+$/, "");
+        for (const ext of POSTER_EXTENSIONS) {
+          const p = snap.lookup(`${stem}.poster.${ext}`);
+          if (p?.kind !== "attachment") continue;
+          const poster = this.imageRef(p.hash);
+          if (!poster.media?.startsWith("image/")) continue;
+          ref.poster = poster;
+          break;
+        }
+      }
+      out[t.path] = ref;
       return undefined;
     });
     return out;
+  }
+
+  private imageRef(hash: string): ImageRef {
+    const info = this.blobInfo(hash);
+    return {
+      hash,
+      media: info.media,
+      size: info.size,
+      ...(info.dims ? { width: info.dims.width, height: info.dims.height } : {}),
+    };
   }
 
   /** A concept's figures, each attachment from its blob row (no bytes; TEMPRA-154). */

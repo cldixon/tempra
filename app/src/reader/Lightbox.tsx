@@ -5,7 +5,8 @@
  * Download and Open file (its attachment page; "Open original" for an external image) as pills,
  * and beneath the caption a quiet line: its path, size, the host it was fetched from, who added
  * it and what it shows (TEMPRA-170), asked of the page when the view opens
- * (`FigureView.describe`); an external image shows its URL.
+ * (`FigureView.describe`); an external image shows its URL. A video plays here and audio too; a
+ * PDF is its card, Open going to its page (TEMPRA-164).
  *
  * A modal <dialog> (showModal: the top layer, focus kept inside, Escape), its look in reader.css.
  */
@@ -16,6 +17,7 @@ import { formatSize, relativeTime } from "../ui";
 import { baseName } from "../urls";
 import { useDiagram } from "./Diagram";
 import { BrokenImage, Img } from "./Figure";
+import { PdfCard, Player } from "./Media";
 import type { DiagramFigure, Figure, ImageFigure } from "./prepare";
 
 /** What the page knows about an image in the library, for the line under it. All optional. */
@@ -63,6 +65,18 @@ function ImageStage({ figure }: { figure: ImageFigure }) {
   const [failed, setFailed] = useState<string | null>(null);
   const { source } = figure;
   if (source === null || failed === source.src) return <BrokenImage figure={figure} />;
+  // A video plays here, audio too; a PDF is its card, Open going to its page (TEMPRA-164).
+  if (source.kind === "pdf") return <PdfCard figure={figure} />;
+  if (source.kind === "video" || source.kind === "audio") {
+    return (
+      <Player
+        kind={source.kind}
+        source={source}
+        name={figure.alt || figure.caption || figure.url}
+        onError={() => setFailed(source.src)}
+      />
+    );
+  }
   return (
     <Img
       source={source}

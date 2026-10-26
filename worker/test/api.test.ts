@@ -6,7 +6,7 @@ import { readTar, writeTar } from "../src/util/tar";
 import { compareBundle } from "./compare";
 import { BUNDLES, loadBundle } from "./fixtures";
 import { API, setup, UI } from "./harness";
-import { makePng, SVG } from "./images";
+import { makePng, SVG, sample } from "./images";
 
 const doc = (body: string, extra = "") => `---\ntype: Note\n${extra}---\n${body}`;
 
@@ -641,11 +641,158 @@ describe("the reader's image route (TEMPRA-162)", () => {
       })
     ).json()) as { images: Record<string, unknown> };
     expect(view.images).toEqual({
-      "img/wide.png": { hash: HASH, media: "image/png", width: 1600, height: 800 },
-      "img/old.png": { hash: hex(old), media: "image/png", width: 30, height: 20 },
+      "img/wide.png": {
+        hash: HASH,
+        media: "image/png",
+        size: PNG.length,
+        width: 1600,
+        height: 800,
+      },
+      "img/old.png": {
+        hash: hex(old),
+        media: "image/png",
+        size: old.length,
+        width: 30,
+        height: 20,
+      },
     });
     // Kept: the next read has the size without the bytes.
     expect(s.store().read("img/old.png")).toMatchObject({ width: 30, height: 20 });
+  });
+});
+
+describe("the reader's media route (TEMPRA-164)", () => {
+  type S = ReturnType<typeof setup>;
+  const WEBM = sample("clip.webm");
+  const hex = (b: Uint8Array) => new Bun.CryptoHasher("sha256").update(b).digest("hex");
+  const HASH = hex(WEBM);
+  const attach = (s: S, path: string, bytes: Uint8Array, type: string, token?: string) =>
+    s.req(`/files/${path}`, {
+      method: "PUT",
+      token,
+      headers: { "Content-Type": type },
+      body: bytes as unknown as BodyInit,
+    });
+  const media = (s: S, headers: Record<string, string> = {}, hash = HASH) =>
+    s.app.request(`${UI}/-/media/${hash}`, { headers });
+
+  test("the whole file, inline and cached for good, saying it takes ranges", async () => {
+    const s = setup();
+    await attach(s, "clips/demo.webm", WEBM, "video/webm");
+    const r = await media(s);
+    expect(r.status).toBe(200);
+    expect(r.headers.get("Content-Type")).toBe("video/webm");
+    expect(r.headers.get("Accept-Ranges")).toBe("bytes");
+    expect(r.headers.get("Cache-Control")).toBe("private, max-age=31536000, immutable");
+    expect(r.headers.get("Content-Disposition")).toBe("inline");
+    expect(r.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(r.headers.get("Content-Length")).toBe(String(WEBM.length));
+    expect(new Uint8Array(await r.arrayBuffer())).toEqual(WEBM);
+  });
+
+  test("ranges: 206 with Content-Range, open-ended and suffix ranges, 416 past the end", async () => {
+    const s = setup();
+    await attach(s, "clips/demo.webm", WEBM, "video/webm");
+    const size = WEBM.length;
+    const first = await media(s, { Range: "bytes=0-99" });
+    expect(first.status).toBe(206);
+    expect(first.headers.get("Content-Range")).toBe(`bytes 0-99/${size}`);
+    expect(first.headers.get("Content-Length")).toBe("100");
+    expect(new Uint8Array(await first.arrayBuffer())).toEqual(WEBM.subarray(0, 100));
+    const rest = await media(s, { Range: "bytes=1000-" });
+    expect(rest.status).toBe(206);
+    expect(rest.headers.get("Content-Range")).toBe(`bytes 1000-${size - 1}/${size}`);
+    expect(new Uint8Array(await rest.arrayBuffer())).toEqual(WEBM.subarray(1000));
+    const tail = await media(s, { Range: "bytes=-10" });
+    expect(tail.headers.get("Content-Range")).toBe(`bytes ${size - 10}-${size - 1}/${size}`);
+    expect(new Uint8Array(await tail.arrayBuffer())).toEqual(WEBM.subarray(size - 10));
+    // An end past the file is clamped to it.
+    const over = await media(s, { Range: `bytes=${size - 5}-${size + 100}` });
+    expect(over.headers.get("Content-Range")).toBe(`bytes ${size - 5}-${size - 1}/${size}`);
+    expect((await over.arrayBuffer()).byteLength).toBe(5);
+    const past = await media(s, { Range: `bytes=${size}-` });
+    expect(past.status).toBe(416);
+    expect(past.headers.get("Content-Range")).toBe(`bytes */${size}`);
+    // Several ranges, or one that does not parse: the whole file.
+    expect((await media(s, { Range: "bytes=0-1,5-6" })).status).toBe(200);
+    expect((await media(s, { Range: "bytes=9-3" })).status).toBe(200);
+    expect((await media(s, { Range: "lines=1-2" })).status).toBe(200);
+  });
+
+  test("a hash grants nothing: a stranger, another library's, an image, a PDF", async () => {
+    const s = setup();
+    const other = await s.stranger();
+    await attach(s, "clips/demo.webm", WEBM, "video/webm", other.writer);
+    expect((await media(s)).status).toBe(404);
+    await attach(s, "clips/demo.webm", WEBM, "video/webm");
+    expect((await media(s)).status).toBe(200);
+    const theirs = await other.app.request(`${UI}/-/media/${HASH}`, {
+      headers: { Range: "bytes=0-9" },
+    });
+    expect(theirs.status).toBe(404);
+    expect(theirs.headers.get("Content-Type")).not.toBe("video/webm");
+    const anon = await s.anon.request(`${UI}/-/media/${HASH}`);
+    expect(anon.headers.get("Content-Type")).not.toBe("video/webm");
+    const png = makePng(4, 4);
+    await attach(s, "img/p.png", png, "image/png");
+    expect((await media(s, {}, hex(png))).status).toBe(404);
+    const pdf = new TextEncoder().encode("%PDF-1.4\n%%EOF\n");
+    await attach(s, "docs/p.pdf", pdf, "application/pdf");
+    expect((await media(s, {}, hex(pdf))).status).toBe(404);
+    expect((await media(s, {}, "not-a-hash")).status).toBe(404);
+  });
+
+  test("a concept's JSON lists video, audio and PDFs with their size, and a video's poster", async () => {
+    const s = setup();
+    await attach(s, "clips/demo.webm", WEBM, "video/webm");
+    const poster = makePng(64, 36);
+    await attach(s, "clips/demo.poster.png", poster, "image/png");
+    const ogg = sample("tone.ogg");
+    await attach(s, "clips/tone.ogg", ogg, "audio/ogg");
+    const pdf = new TextEncoder().encode("%PDF-1.4\n%%EOF\n");
+    await attach(s, "docs/paper.pdf", pdf, "application/octet-stream");
+    await s.req("/files/notes/media.md", {
+      method: "PUT",
+      headers: { "Content-Type": "text/markdown" },
+      body: [
+        "---",
+        "type: Note",
+        "title: Media",
+        "description: Media figures.",
+        "---",
+        '![A walkthrough](/clips/demo.webm "Demo")',
+        "",
+        "![A tone](/clips/tone.ogg)",
+        "",
+        "![The paper](/docs/paper.pdf)",
+        "",
+      ].join("\n"),
+    });
+    const view = (await (
+      await s.app.request(`${API}/files/notes/media.md`, {
+        headers: { Accept: "application/json" },
+      })
+    ).json()) as { images: Record<string, unknown> };
+    expect(view.images).toEqual({
+      "clips/demo.webm": {
+        hash: HASH,
+        media: "video/webm",
+        size: WEBM.length,
+        width: 64,
+        height: 36,
+        poster: {
+          hash: hex(poster),
+          media: "image/png",
+          size: poster.length,
+          width: 64,
+          height: 36,
+        },
+      },
+      "clips/tone.ogg": { hash: hex(ogg), media: "audio/ogg", size: ogg.length },
+      "docs/paper.pdf": { hash: hex(pdf), media: "application/pdf", size: pdf.length },
+    });
+    // The poster is an image of the library, served by the image route.
+    expect((await s.app.request(`${UI}/-/image/${hex(poster)}`)).status).toBe(200);
   });
 });
 

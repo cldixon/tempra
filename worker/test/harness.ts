@@ -41,9 +41,11 @@ export function memoryBlobs(): BlobStore & { map: Map<string, Uint8Array> } {
     async put(hash, bytes) {
       map.set(hash, bytes);
     },
-    async get(hash) {
+    async get(hash, range) {
       const b = map.get(hash);
-      return b ? { body: b, size: b.length } : null;
+      if (!b) return null;
+      const body = range ? b.subarray(range.offset, range.offset + range.length) : b;
+      return { body, size: b.length };
     },
     async head(hash) {
       const b = map.get(hash);

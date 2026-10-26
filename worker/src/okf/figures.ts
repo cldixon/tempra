@@ -106,6 +106,8 @@ export function figureLine(f: FigureFact): string {
   parts.push(`alt ${JSON.stringify(f.alt)}`);
   if (f.title) parts.push(`caption ${JSON.stringify(f.title)}`);
   if (f.blob?.width && f.blob.height) parts.push(`${f.blob.width}×${f.blob.height}`);
+  // Video, audio and PDFs are figures too (TEMPRA-164): their type says which.
+  if (f.blob?.media && !f.blob.media.startsWith("image/")) parts.push(f.blob.media);
   if (f.blob) parts.push(sizeText(f.blob.size));
   parts.push(f.status);
   return parts.join(" · ");

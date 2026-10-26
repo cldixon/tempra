@@ -21,6 +21,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readFileSync,
   renameSync,
   rmSync,
   symlinkSync,
@@ -1862,6 +1863,123 @@ async function browserRenders(
       const item = work.items.find((i) => i.path === "gate-external.md");
       if (!item?.detail.includes(ext)) throw new Error("work does not list the hotlinked image");
       await agentDeletes("gate-external.md");
+    });
+
+    // Other media (TEMPRA-164; tempra-dev: app/media, How people see): a short WebM plays in the
+    // reader (the shell's media-src, the media route's ranges) and in the full-screen view; a PDF
+    // is a card whose Open goes to its page; the video's own page plays it in place.
+    await step("media: a WebM plays, a PDF's card opens its page", async () => {
+      const files = [
+        ["gate-clip.webm", "video/webm", readFileSync(join(WORKER_DIR, "test/media/clip.webm"))],
+        [
+          "gate-paper.pdf",
+          "application/pdf",
+          new TextEncoder().encode("%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\n%%EOF\n"),
+        ],
+      ] as const;
+      for (const [path, type, body] of files) {
+        const put = await fetch(`${libApi}/files/${path}`, {
+          method: "PUT",
+          headers: { ...bearer, "Content-Type": type, "X-Note": "gate: media" },
+          body: new Uint8Array(body),
+        });
+        if (!put.ok) throw new Error(`upload ${path}: ${put.status} ${await put.text()}`);
+      }
+      const put = await fetch(`${libApi}/files/gate-media.md`, {
+        method: "PUT",
+        headers: { ...bearer, "Content-Type": "text/markdown", "X-Note": "gate: media" },
+        body: [
+          "---\ntype: Note\ntitle: Gate media\ndescription: A video and a PDF.\n---",
+          '![A short test pattern](/gate-clip.webm "A test clip")\n',
+          '![A one-page paper](/gate-paper.pdf "The paper")\n',
+        ].join("\n"),
+      });
+      if (!put.ok) throw new Error(`write: ${put.status} ${await put.text()}`);
+      await page.goto(`${lib}/gate-media.md`);
+      const video = page.locator(".body video");
+      await video.waitFor({ timeout: 15_000 });
+      /** The part of an HTMLVideoElement the gate plays (no DOM types in the Worker's scripts). */
+      type Video = {
+        muted: boolean;
+        play(): Promise<void>;
+        pause(): void;
+        currentTime: number;
+        videoWidth: number;
+        error: { code: number } | null;
+      };
+      const plays = (el: unknown) =>
+        new Promise<{ t: number; w: number; error: number | null }>((done) => {
+          const v = el as Video;
+          v.muted = true;
+          const after = () => {
+            v.pause();
+            done({ t: v.currentTime, w: v.videoWidth, error: v.error?.code ?? null });
+          };
+          v.play().then(
+            () => setTimeout(after, 500),
+            () => done({ t: 0, w: v.videoWidth, error: v.error?.code ?? -1 }),
+          );
+        });
+      const played = await video.evaluate(plays);
+      if (!(played.t > 0) || played.w !== 64) {
+        throw new Error(`the video did not play: ${JSON.stringify(played)}`);
+      }
+      // Seeking asks for ranges, which the media route answers.
+      const src = (await video.getAttribute("src")) ?? "";
+      const ranged = await page.evaluate(async (u) => {
+        const r = await fetch(u, { headers: { Range: "bytes=0-9" } });
+        return { status: r.status, range: r.headers.get("Content-Range") };
+      }, src);
+      if (ranged.status !== 206 || !ranged.range?.startsWith("bytes 0-9/")) {
+        throw new Error(`a range of the video: ${JSON.stringify(ranged)}`);
+      }
+      const captions = await page.locator(".body figcaption").allInnerTexts();
+      if (
+        captions.map((c) => c.trim()).join(" | ") !== "Figure 1. A test clip | Figure 2. The paper"
+      ) {
+        throw new Error(`captions: ${captions.join(" | ")}`);
+      }
+      const card = page.locator(".body .figure-pdf");
+      const about = (await card.innerText()).replace(/\s+/g, " ");
+      if (!about.includes("gate-paper.pdf") || !about.includes("PDF document")) {
+        throw new Error(`the PDF's card: ${about}`);
+      }
+      if ((await page.locator(".body iframe, .body embed, .body object").count()) > 0) {
+        throw new Error("a PDF is embedded");
+      }
+      if (shots) await page.screenshot({ path: `${shots}/media.png`, fullPage: true });
+      // The full-screen view plays it.
+      await page.getByRole("button", { name: "Enlarge video: A short test pattern" }).click();
+      const view = page.locator("dialog.lightbox");
+      await view.getByText("fig. 1 of 2", { exact: true }).waitFor({ timeout: 5000 });
+      const big = await view.locator("video").evaluate(plays);
+      if (!(big.t > 0))
+        throw new Error(`the full-screen view did not play: ${JSON.stringify(big)}`);
+      await page.keyboard.press("Escape");
+      await view.waitFor({ state: "hidden", timeout: 5000 });
+      // A phone: the video and the card fit the screen.
+      await page.setViewportSize({ width: 390, height: 844 });
+      await page.waitForTimeout(200);
+      const sideways = await page.locator("html").evaluate((el) => el.scrollWidth > el.clientWidth);
+      if (sideways) throw new Error("the media page scrolls sideways on a phone");
+      if (shots) await page.screenshot({ path: `${shots}/media-phone.png`, fullPage: true });
+      await usual();
+      // Open on the card: the PDF's page.
+      await card.getByRole("link", { name: "Open", exact: true }).click();
+      await page
+        .getByRole("heading", { level: 1, name: "gate-paper.pdf", exact: true })
+        .waitFor({ timeout: 15_000 });
+      // The video's page plays it in place.
+      await page.goto(`${lib}/gate-clip.webm`);
+      const inPlace = page.locator(".attachment-frame video");
+      await inPlace.waitFor({ timeout: 15_000 });
+      const there = await inPlace.evaluate(plays);
+      if (!(there.t > 0))
+        throw new Error(`the video's page did not play: ${JSON.stringify(there)}`);
+      if (shots) await page.screenshot({ path: `${shots}/media-attachment.png` });
+      for (const path of ["gate-media.md", "gate-clip.webm", "gate-paper.pdf"]) {
+        await agentDeletes(path);
+      }
     });
 
     // Reader images (TEMPRA-162; tempra-dev: app/media, How people see): every image from the
