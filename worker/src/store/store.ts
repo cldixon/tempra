@@ -3523,6 +3523,25 @@ export class LibraryStore {
    * GET /links: outbound links with current targets, inbound links, and broken ones. With `at`,
    * outbound and broken are as of that sequence; inbound links are only known at head.
    */
+  /**
+   * Everything a file's page shows, in one call, so it is read at one sequence number
+   * (TEMPRA-191): the file as the app draws it (with its images), the head, and for a concept its
+   * sources, links and versions, found by the concept's own path however it was asked for. The
+   * app made five requests for these; the separate routes stay for agents and the API.
+   */
+  page(input: string, opts: { at?: number } = {}) {
+    const file = this.read(input, { at: opts.at, images: true });
+    const head = this.headSeq();
+    if (file.kind !== "concept") return { file, head };
+    return {
+      file,
+      head,
+      sources: this.sources(file.path, { at: opts.at }),
+      links: this.links(file.path, { at: opts.at }),
+      history: this.history(file.path),
+    };
+  }
+
   links(input: string, opts: { at?: number } = {}) {
     const snap = this.snapshot(opts.at);
     const e = snap.lookup(normalizePath(input) ?? "");

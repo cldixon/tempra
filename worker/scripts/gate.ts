@@ -961,7 +961,7 @@ async function browserRenders(
           await held;
           await route.continue().catch(() => {});
         };
-        const fileApi = `**/api/v1/libraries/${owner}/${slug}/files/${enc(next)}*`;
+        const fileApi = `**/api/v1/libraries/${owner}/${slug}/page/${enc(next)}*`;
         await page.route(fileApi, hold);
         try {
           const clicked = Date.now();
@@ -1161,10 +1161,16 @@ async function browserRenders(
         .getByRole("region", { name: "Recently changed" })
         .getByRole("link", { name: "Gate ahead", exact: true });
       await row.waitFor({ timeout: 10_000 });
-      const fileApi = `/api/v1/libraries/${owner}/${slug}/files/${enc(path)}`;
+      // A file's page is one request (TEMPRA-191): `page/{path}`, never the five it replaced.
+      const fileApi = `/api/v1/libraries/${owner}/${slug}/page/${enc(path)}`;
       const asked: string[] = [];
+      const split: string[] = [];
       const onRequest = (r: { url(): string }) => {
-        if (new URL(r.url()).pathname === fileApi) asked.push(r.url());
+        const p = new URL(r.url()).pathname;
+        if (p === fileApi) asked.push(r.url());
+        for (const old of ["files", "sources", "links", "history"]) {
+          if (p === `/api/v1/libraries/${owner}/${slug}/${old}/${enc(path)}`) split.push(p);
+        }
       };
       page.on("request", onRequest);
       try {
@@ -1183,6 +1189,7 @@ async function browserRenders(
         }
         if (asked.length !== before) throw new Error("the page asked for its file again");
         if (before !== 1) throw new Error(`the hover asked for the file ${before} times`);
+        if (split.length > 0) throw new Error(`the page asked ${split.join(", ")}`);
       } finally {
         page.off("request", onRequest);
       }
@@ -1647,16 +1654,20 @@ async function browserRenders(
         await body.waitFor({ timeout: 15_000 });
         page.off("request", onRequest);
         const lib = `/api/v1/libraries/${owner}/${slug}`;
-        const booted = [
-          `${lib}/files/${enc(concept)}`,
-          `${lib}/sources/${enc(concept)}`,
-          `${lib}/outline`,
-          "/api/v1/inbox/count",
-        ];
+        const booted = [`${lib}/page/${enc(concept)}`, `${lib}/outline`, "/api/v1/inbox/count"];
         const refetched = asked.filter((a) => booted.includes(a));
         if (refetched.length > 0) {
           throw new Error(`asked the API for what the shell carries: ${refetched.join(", ")}`);
         }
+        // The page is one call (TEMPRA-191): none of the five it replaced.
+        const split = asked.filter(
+          (a) =>
+            a === `${lib}/stats` ||
+            ["files", "sources", "links", "history"].some(
+              (r) => a === `${lib}/${r}/${enc(concept)}`,
+            ),
+        );
+        if (split.length > 0) throw new Error(`a concept's page asked ${split.join(", ")}`);
         await sheetBar.getByRole("button", { name: "More", exact: true }).waitFor();
         await actionsFab().waitFor();
         // Read and comment only (TEMPRA-99): nothing in the page edits.
