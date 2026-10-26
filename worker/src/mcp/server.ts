@@ -44,7 +44,13 @@ import {
   type WriteResult,
 } from "../store/store";
 import { requireOwner } from "../tenancy";
-import { checkBytes, checkDeclared, decodeBase64, prepareUpload } from "../uploads";
+import {
+  BASE64_MAX_BYTES,
+  checkBytes,
+  checkDeclared,
+  decodeBase64,
+  prepareUpload,
+} from "../uploads";
 
 export interface McpContext {
   /** The ledger actor, access and tool tier: the same in every library the caller reaches. */
@@ -1046,8 +1052,7 @@ export function buildServer(ctx: McpContext): McpServer {
     "attach",
     {
       title: "Add an attachment",
-      description:
-        "Store a non-markdown file (an image, a script, a PDF) at a path, from exactly one of `source_url` or `content_base64`. Put a figure beside the concept that uses it, named for what it shows (`dir/x.md` uses `dir/x-architecture.png`), and link it by absolute path. An image on the public web goes in with `source_url`: the server fetches it (https only, no credentials in the URL, at most 3 redirects, 10 s, up to 10 MB; images, video, audio and PDF only, judged by the bytes), so nothing passes through you, and records the URL and fetch time as the file's source; a refused fetch is `fetch_refused` naming the rule. That source is not a citation: cite the original in the concept's `sources` too. Never hotlink a web image in a concept; bring it in this way. A file you made goes in with `prepare_upload` when you can run a shell (the real file, up to 10 MB); `content_base64` is the last resort, for small files only (under about 50 KB): every character is typed out, and a long run gets cut short or garbled. Pass `sha256` (hex; `sha256sum file`, or `hashlib.sha256(data).hexdigest()`) or at least `size` in bytes, so bytes that arrive damaged are refused (`checksum_mismatch`, with what arrived) instead of stored. Images (PNG, JPEG, GIF, WebP, AVIF, SVG) are checked on write: a broken or truncated one is refused with `bad_image`, and an image's type is taken from its bytes, not from `media` or the extension. `description` says in a line what the file shows (up to 500 characters); `credit` (who made it) and `licence` (free text) a line each, up to 200 characters, for an image you did not make. They show on the file's page. Replacing needs `if_match`; the same bytes with a new description, credit or licence is a write too. Reading it back with `read` returns its facts (source, description, credit, licence and how many versions), a short-lived download URL and, for an image, the image.",
+      description: `Store a non-markdown file (an image, a script, a PDF) at a path, from exactly one of \`source_url\` or \`content_base64\`. Put a figure beside the concept that uses it, named for what it shows (\`dir/x.md\` uses \`dir/x-architecture.png\`), and link it by absolute path. An image on the public web goes in with \`source_url\`: the server fetches it (https only, no credentials in the URL, at most 3 redirects, 10 s, up to 10 MB; images, video, audio and PDF only, judged by the bytes), so nothing passes through you, and records the URL and fetch time as the file's source; a refused fetch is \`fetch_refused\` naming the rule. That source is not a citation: cite the original in the concept's \`sources\` too. Never hotlink a web image in a concept; bring it in this way. A file you made goes in with \`prepare_upload\` when you can run a shell (the real file, up to 10 MB); \`content_base64\` is the last resort, for small files only (advised under about 50 KB; at most ${BASE64_MAX_BYTES / 1024} KB decoded, refused above that as \`base64_too_large\`): every character is typed out, and a long run gets cut short or garbled. Pass \`sha256\` (hex; \`sha256sum file\`, or \`hashlib.sha256(data).hexdigest()\`) or at least \`size\` in bytes, so bytes that arrive damaged are refused (\`checksum_mismatch\`, with what arrived) instead of stored. Images (PNG, JPEG, GIF, WebP, AVIF, SVG) are checked on write: a broken or truncated one is refused with \`bad_image\`, and an image's type is taken from its bytes, not from \`media\` or the extension. \`description\` says in a line what the file shows (up to 500 characters); \`credit\` (who made it) and \`licence\` (free text) a line each, up to 200 characters, for an image you did not make. They show on the file's page. Replacing needs \`if_match\`; the same bytes with a new description, credit or licence is a write too. Reading it back with \`read\` returns its facts (source, description, credit, licence and how many versions), a short-lived download URL and, for an image, the image.`,
       inputSchema: {
         path: z.string(),
         source_url: z
@@ -1059,7 +1064,9 @@ export function buildServer(ctx: McpContext): McpServer {
         content_base64: z
           .string()
           .optional()
-          .describe("The file's bytes as base64, for small files; instead of source_url."),
+          .describe(
+            `The file's bytes as base64, for small files (at most ${BASE64_MAX_BYTES / 1024} KB decoded); instead of source_url.`,
+          ),
         description: z
           .string()
           .optional()
