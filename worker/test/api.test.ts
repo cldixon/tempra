@@ -41,6 +41,67 @@ describe("auth", () => {
   });
 });
 
+describe("a file's page in one request (TEMPRA-191)", () => {
+  const json = { headers: { Accept: "application/json" } };
+  const write = (req: ReturnType<typeof setup>["req"], path: string, body: string) =>
+    req(`/files/${path}`, { method: "PUT", body, headers: { "Content-Type": "text/markdown" } });
+
+  test("a concept: what the five routes say, read together", async () => {
+    const { req } = setup();
+    expect((await write(req, "notes/b.md", doc("B.\n", "title: B\n"))).status).toBe(200);
+    const body = doc(
+      "See [b](/notes/b.md).[^s]\n\n[^s]: A source.\n",
+      "title: A\nsources:\n  - id: s\n    title: A source\n",
+    );
+    expect((await write(req, "notes/a.md", body)).status).toBe(200);
+    const r = await req("/page/notes/a.md");
+    expect(r.status).toBe(200);
+    const page = (await r.json()) as Record<string, unknown>;
+    const each = async (path: string, init?: RequestInit) => (await req(path, init)).json();
+    expect(page.file).toEqual(await each("/files/notes/a.md", json));
+    expect(page.sources).toEqual(await each("/sources/notes/a.md"));
+    expect(page.links).toEqual(await each("/links/notes/a.md"));
+    expect(page.history).toEqual(await each("/history/notes/a.md"));
+    expect(page.head).toBe(((await each("/stats")) as { seq: number }).seq);
+    // Another spelling of the path: the context is the concept's own.
+    const bare = (await (await req("/page/notes/a")).json()) as typeof page;
+    expect((bare.file as { path: string }).path).toBe("notes/a.md");
+    expect(bare.history).toEqual(page.history);
+  });
+
+  test("a version, a synthesized file, and nothing there", async () => {
+    const { req } = setup();
+    await write(req, "notes/a.md", doc("One.\n"));
+    await req("/files/notes/a.md", {
+      method: "PATCH",
+      body: JSON.stringify({ edits: [{ old: "One.", new: "Two." }] }),
+    });
+    const v1 = (await (await req("/page/notes/a.md?at=1")).json()) as {
+      file: { seq: number; doc: Doc };
+      head: number;
+    };
+    expect(toMarkdown(v1.file.doc)).toBe("One.\n");
+    expect(v1.head).toBe(2);
+    const log = (await (await req("/page/log.md")).json()) as Record<string, unknown>;
+    expect((log.file as { kind: string }).kind).toBe("derived");
+    expect(Object.keys(log).sort()).toEqual(["file", "head"]);
+    expect((await req("/page/notes/none.md")).status).toBe(404);
+  });
+
+  test("a stranger is told nothing; a read member gets the page", async () => {
+    const s = setup();
+    await write(s.req, "notes/a.md", doc("A.\n"));
+    const url = "/api/v1/libraries/owner/demo/page/notes/a.md";
+    const stranger = await s.stranger("stranger@example.com");
+    expect((await stranger.app.request(url)).status).toBe(404);
+    const friend = await s.stranger("friend@example.com");
+    await s.accounts.share("lib-1", friend.user.id, "read", "user_1");
+    const r = await friend.app.request(url);
+    expect(r.status).toBe(200);
+    expect(((await r.json()) as { file: { path: string } }).file.path).toBe("notes/a.md");
+  });
+});
+
 describe("files", () => {
   test("PUT, GET with ETag, conditional replace, PATCH, move, DELETE", async () => {
     const { req } = setup();

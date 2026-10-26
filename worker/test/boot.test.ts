@@ -8,17 +8,26 @@ describe("the shell's boot data (TEMPRA-175)", () => {
     expect(bootKey("http://localhost/api/v1/x?path=a%2Fb.md")).toBe("/api/v1/x?path=a%2Fb.md");
   });
 
-  test("a file's page asks for the file first, a concept's context, then the frame", () => {
+  test("a file's page asks for its page first (one call, TEMPRA-191), a concept's threads, then the frame", () => {
     const urls = bootUrls({ kind: "file", owner: "ann", slug: "notes", path: "a b/c.md" });
-    expect(urls[0]).toBe("/api/v1/libraries/ann/notes/files/a%20b/c.md");
-    expect(urls).toContain("/api/v1/libraries/ann/notes/history/a%20b/c.md");
+    expect(urls[0]).toBe("/api/v1/libraries/ann/notes/page/a%20b/c.md");
+    expect(urls[1]).toStartWith("/api/v1/libraries/ann/notes/comments?");
     expect(urls).toContain("/api/v1/me");
-    // Not a concept: no sources, links, history or comments.
-    const png = bootUrls({ kind: "file", owner: "ann", slug: "notes", path: "img/x.png" });
-    expect(png.some((u) => u.includes("/sources/") || u.includes("/comments"))).toBe(false);
-    expect(bootUrls({ kind: "file", owner: "a", slug: "b", path: "d/index.md" })).not.toContain(
-      "/api/v1/libraries/a/b/history/d/index.md",
+    for (const old of ["/files/", "/stats", "/sources/", "/links/", "/history/"]) {
+      expect(urls.some((u) => u.includes(old))).toBe(false);
+    }
+    expect(bootUrls({ kind: "file", owner: "a", slug: "b", path: "c.md", at: 3 })[0]).toBe(
+      "/api/v1/libraries/a/b/page/c.md?at=3",
     );
+    // Not a concept: no comments.
+    const png = bootUrls({ kind: "file", owner: "ann", slug: "notes", path: "img/x.png" });
+    expect(png[0]).toBe("/api/v1/libraries/ann/notes/page/img/x.png");
+    expect(png.some((u) => u.includes("/comments"))).toBe(false);
+    expect(
+      bootUrls({ kind: "file", owner: "a", slug: "b", path: "d/index.md" }).some((u) =>
+        u.includes("/comments"),
+      ),
+    ).toBe(false);
   });
 
   test("keeps 200 JSON answers in order within the budget, drops failures and late ones", async () => {

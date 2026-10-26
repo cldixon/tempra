@@ -41,7 +41,7 @@ afterEach(() => {
 });
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const files = () => asked.filter((p) => p.includes("/files/"));
+const pages = () => asked.filter((p) => p.includes("/page/"));
 
 describe("linkLoad", () => {
   test("a page of the library that registered a load", () => {
@@ -72,13 +72,13 @@ describe("usePrefetchLinks", () => {
     const links = [link(urls.file(a)), link(urls.file(b)), link(urls.file(c))];
     for (const l of links) l.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
     await sleep(LINK_REST_MS + 40);
-    expect(files()).toEqual([`/api/v1/libraries/ann/notes/files/${c}`]);
+    expect(pages()).toEqual([`/api/v1/libraries/ann/notes/page/${c}`]);
     // Left before the rest is up: nothing.
     const d = link(urls.file(freshPath()));
     d.dispatchEvent(new PointerEvent("pointerover", { bubbles: true }));
     d.dispatchEvent(new PointerEvent("pointerout", { bubbles: true }));
     await sleep(LINK_REST_MS + 40);
-    expect(files()).toHaveLength(1);
+    expect(pages()).toHaveLength(1);
     stop();
   });
 
@@ -87,7 +87,7 @@ describe("usePrefetchLinks", () => {
     flushSync();
     const path = freshPath();
     link(urls.file(path)).dispatchEvent(new Event("touchstart", { bubbles: true }));
-    expect(files()).toEqual([`/api/v1/libraries/ann/notes/files/${path}`]);
+    expect(pages()).toEqual([`/api/v1/libraries/ann/notes/page/${path}`]);
     stop();
   });
 
@@ -96,6 +96,6 @@ describe("usePrefetchLinks", () => {
     flushSync();
     stop();
     link(urls.file(freshPath())).dispatchEvent(new Event("touchstart", { bubbles: true }));
-    expect(files()).toHaveLength(0);
+    expect(pages()).toHaveLength(0);
   });
 });

@@ -38,6 +38,7 @@ import {
   type BlobRef,
   type ConceptContent,
   checkFacts,
+  type FileView,
   type RequestContext,
   type WriteOp,
   type WriteResult,
@@ -467,27 +468,8 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     });
     c.header("X-Seq", String(view.seq));
     if (view.kind === "attachment" && wantsJson) {
-      // A description, not the bytes: what the app shows on an attachment's page.
-      const v = await withDimensions(c.var.lib, c.var.deps.blobs, view);
-      const { kind, path, seq, hash, size, media, width, height, source, description } = v;
-      c.header("ETag", `"${hash}"`);
-      return c.json({
-        kind,
-        path,
-        seq,
-        hash,
-        size,
-        media: media ?? null,
-        width: width ?? null,
-        height: height ?? null,
-        // Where the bytes were fetched from, and what the file shows (TEMPRA-157, TEMPRA-170).
-        source: source ?? null,
-        description: description ?? null,
-        credit: v.credit ?? null,
-        licence: v.licence ?? null,
-        // Who sent the bytes from the upload link, for the agent's write (TEMPRA-196).
-        supplied_by: v.supplied_by ?? null,
-      });
+      c.header("ETag", `"${view.hash}"`);
+      return c.json(await fileJson(c.var.lib, c.var.deps.blobs, view));
     }
     if (view.kind === "attachment") {
       c.header("ETag", `"${view.hash}"`);
@@ -501,23 +483,18 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
       if (!obj) throw new OkfError(500, "blob_missing", `Bytes for ${view.path} are missing.`);
       return c.body(obj.body as ReadableStream);
     }
-    if (view.kind === "derived") {
-      if (wantsJson) {
-        // The app draws it like a concept body: as a tree.
-        const doc = parseMarkdown(splitFrontmatter(view.markdown).body);
-        return c.json({ kind: view.kind, path: view.path, seq: view.seq, doc });
-      }
-      return c.body(view.markdown, 200, { "Content-Type": "text/markdown; charset=utf-8" });
-    }
-    c.header("ETag", `"${view.hash}"`);
-    if (wantsJson) {
-      const { markdown: _, ...rest } = view;
-      if (rest.images) {
-        rest.images = await imagesWithDimensions(c.var.lib, c.var.deps.blobs, rest.images);
-      }
-      return c.json(rest);
-    }
+    if (view.kind === "concept") c.header("ETag", `"${view.hash}"`);
+    if (wantsJson) return c.json(await fileJson(c.var.lib, c.var.deps.blobs, view));
     return c.body(view.markdown, 200, { "Content-Type": "text/markdown; charset=utf-8" });
+  });
+
+  // A file's page in one request (TEMPRA-191): the file as `files/{path}` describes it in JSON,
+  // the head, and for a concept its sources, links and versions, read together at one seq. The
+  // app asked for these five separately; the separate routes stay for agents and the API.
+  app.get(`${BASE}/page/*`, async (c) => {
+    const { file, ...rest } = await c.var.lib.page(tail(c, "/page/"), { at: num(c, "at") });
+    c.header("X-Seq", String(file.seq));
+    return c.json({ file: await fileJson(c.var.lib, c.var.deps.blobs, file), ...rest });
   });
 
   app.put(`${BASE}/files/*`, async (c) => {
@@ -1522,6 +1499,43 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   registerUiRoutes(app, deps, { open: openUploadGrant, receive: receiveUpload });
 
   return app;
+}
+
+/**
+ * A file described in JSON, as the app draws it: a concept with its tree and its images' sizes, a
+ * synthesized file as a tree, an attachment's facts (never its bytes).
+ */
+async function fileJson(lib: LibraryClient, blobs: BlobStore, view: FileView) {
+  if (view.kind === "attachment") {
+    // A description, not the bytes: what the app shows on an attachment's page.
+    const v = await withDimensions(lib, blobs, view);
+    const { kind, path, seq, hash, size, media, width, height, source, description } = v;
+    return {
+      kind,
+      path,
+      seq,
+      hash,
+      size,
+      media: media ?? null,
+      width: width ?? null,
+      height: height ?? null,
+      // Where the bytes were fetched from, and what the file shows (TEMPRA-157, TEMPRA-170).
+      source: source ?? null,
+      description: description ?? null,
+      credit: v.credit ?? null,
+      licence: v.licence ?? null,
+      // Who sent the bytes from the upload link, for the agent's write (TEMPRA-196).
+      supplied_by: v.supplied_by ?? null,
+    };
+  }
+  if (view.kind === "derived") {
+    // The app draws it like a concept body: as a tree.
+    const doc = parseMarkdown(splitFrontmatter(view.markdown).body);
+    return { kind: view.kind, path: view.path, seq: view.seq, doc };
+  }
+  const { markdown: _, ...rest } = view;
+  if (rest.images) rest.images = await imagesWithDimensions(lib, blobs, rest.images);
+  return rest;
 }
 
 /**

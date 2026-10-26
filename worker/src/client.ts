@@ -13,6 +13,7 @@ export const LIBRARY_METHODS = [
   "import",
   "revert",
   "read",
+  "page",
   "tree",
   "outline",
   "concepts",

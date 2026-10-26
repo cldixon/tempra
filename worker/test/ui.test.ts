@@ -376,11 +376,8 @@ describe("the first page's data in the shell (TEMPRA-175)", () => {
     expect(r.html.split("</script>").length).toBe(3);
     const boot = bootOf(r.html);
     for (const url of [
-      `${LIB_API}/files/notes/a.md`,
-      `${LIB_API}/stats`,
-      `${LIB_API}/sources/notes/a.md`,
-      `${LIB_API}/links/notes/a.md`,
-      `${LIB_API}/history/notes/a.md`,
+      // The file's page in one call (TEMPRA-191), then its threads.
+      `${LIB_API}/page/notes/a.md`,
       `${LIB_API}/comments?limit=200&path=notes%2Fa.md&status=all`,
       `${LIB_API}/outline`,
       `${LIB_API}/agents`,
@@ -391,7 +388,10 @@ describe("the first page's data in the shell (TEMPRA-175)", () => {
       expect(Object.keys(boot)).toContain(url);
     }
     // Exactly what the app's own call returns.
-    expect(boot[`${LIB_API}/files/notes/a.md`]).toEqual(await get(s, "/files/notes/a.md"));
+    expect(boot[`${LIB_API}/page/notes/a.md`]).toEqual(await get(s, "/page/notes/a.md"));
+    for (const old of ["files", "sources", "links", "history"]) {
+      expect(Object.keys(boot)).not.toContain(`${LIB_API}/${old}/notes/a.md`);
+    }
     expect(boot["/api/v1/me"]).toMatchObject({ handle: "owner" });
   });
 
@@ -399,8 +399,8 @@ describe("the first page's data in the shell (TEMPRA-175)", () => {
     const s = setup();
     await put(s, "notes/a.md", "---\ntype: Note\n---\nOne.\n");
     const pinned = bootOf((await page(s, `${LIB}/notes/a.md?at=1`)).html);
-    expect(Object.keys(pinned)).toContain(`${LIB_API}/files/notes/a.md?at=1`);
-    expect(Object.keys(pinned)).not.toContain(`${LIB_API}/files/notes/a.md`);
+    expect(Object.keys(pinned)).toContain(`${LIB_API}/page/notes/a.md?at=1`);
+    expect(Object.keys(pinned)).not.toContain(`${LIB_API}/page/notes/a.md`);
     const account = bootOf((await page(s, "/agents")).html);
     expect(Object.keys(account).sort()).toEqual(
       ["/api/v1/inbox/count", "/api/v1/libraries", "/api/v1/me"].sort(),
@@ -410,7 +410,7 @@ describe("the first page's data in the shell (TEMPRA-175)", () => {
   test("a call that fails is left out, for the app to make and see fail as it always would", async () => {
     const s = setup();
     const boot = bootOf((await page(s, `${LIB}/notes/missing.md`)).html);
-    expect(Object.keys(boot)).not.toContain(`${LIB_API}/files/notes/missing.md`);
+    expect(Object.keys(boot)).not.toContain(`${LIB_API}/page/notes/missing.md`);
     expect(Object.keys(boot)).toContain(`${LIB_API}/outline`);
   });
 });
