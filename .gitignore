@@ -43,3 +43,4 @@ bun-debug.log*
 
 # Astro (site/): generated types
 .astro/
+.svelte-check/

@@ -44,6 +44,22 @@
       }
     },
     {
+      "includes": ["**/*.svelte"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noUnusedVariables": "off",
+            "noUnusedImports": "off",
+            "useHookAtTopLevel": "off"
+          },
+          "style": {
+            "useConst": "off",
+            "useImportType": "off"
+          }
+        }
+      }
+    },
+    {
       "includes": ["design/src/**/*.css"],
       "linter": {
         "rules": {
@@ -53,5 +69,10 @@
         }
       }
     }
-  ]
+  ],
+  "html": {
+    "formatter": {
+      "indentScriptAndStyle": true
+    }
+  }
 }

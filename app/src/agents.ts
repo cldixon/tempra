@@ -1,7 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
-import { api, useLoad } from "./api";
 import { who } from "./ui";
-import type { Urls } from "./urls";
 
 /**
  * Agents named for whom they act (tempra-dev: decisions/agents-act-for-a-person, TEMPRA-77):
@@ -101,7 +98,7 @@ export interface ActorView {
 }
 
 /** Each agent's contributor entry by its id. */
-function agentsById(contributors: Contributor[]): Record<string, Contributor> {
+export function agentsById(contributors: Contributor[]): Record<string, Contributor> {
   const out: Record<string, Contributor> = {};
   for (const c of contributors) if (c.agent) out[c.agent.id] = c;
   return out;
@@ -125,68 +122,4 @@ export function actorView(
   const person = c?.person ?? null;
   const name = c?.agent?.name ? readableName(c.agent.name) : actorAgentName(actor);
   return { name, for: person ? `@${person}` : null, agent: true, you: false, mark: name };
-}
-
-/**
- * The library's contributors (`GET …/agents`), loaded once per library and shared by every page
- * that names people and agents. An agent seen on screen that the list does not know yet (its
- * first write, arriving live) loads it again, once per agent.
- */
-function useContributors(urls: Urls) {
-  const loaded = useLoad(`contributors ${urls.base}`, () =>
-    api<{ contributors: Contributor[] }>(urls.api("agents")).then((r) => r.contributors),
-  );
-  const list = loaded.state === "ready" ? loaded.data : null;
-  const byId = useMemo(() => agentsById(list ?? []), [list]);
-  // Ids met while drawing that the list lacks; asked for after the render, each once.
-  const missing = useRef(new Set<string>());
-  const asked = useRef(new Set<string>());
-  const note = useCallback(
-    (id: string | undefined) => {
-      if (id && list && !(id in byId) && !asked.current.has(id)) missing.current.add(id);
-    },
-    [list, byId],
-  );
-  useEffect(() => {
-    if (missing.current.size === 0) return;
-    for (const id of missing.current) asked.current.add(id);
-    missing.current.clear();
-    loaded.reload();
-  });
-  return { list, byId, note };
-}
-
-/**
- * Who acted, as an ActorView, for pages that draw people and agents apart (the byline, home,
- * Activity, the Inbox). `me` is the signed-in person's actor (`human:handle`).
- */
-export function useActors(urls: Urls, me: string | null) {
-  const { list, byId, note } = useContributors(urls);
-  return useMemo(
-    () => ({
-      view: (actor: string, by?: ActedBy | null) => {
-        note(by?.agent);
-        return actorView(actor, by, byId, me);
-      },
-      /** Everyone who has worked here: people and agents. */
-      contributors: list ?? [],
-    }),
-    [list, byId, note, me],
-  );
-}
-
-/**
- * The library's agent names as one string each ("Claude for @ann"), for the tree's marks, the
- * new-version notice and the ledger.
- */
-export function useAgentNames(urls: Urls, seen: readonly (string | undefined)[] = []) {
-  const { list, note } = useContributors(urls);
-  for (const id of seen) note(id);
-  return useMemo(() => {
-    const known = agentNames(list ?? []);
-    return (actor: string, by?: ActedBy | null) => {
-      note(by?.agent);
-      return actorLabel(actor, by, known);
-    };
-  }, [list, note]);
 }

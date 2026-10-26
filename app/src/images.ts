@@ -29,7 +29,7 @@ export interface ImageRef {
 /**
  * What a figure is drawn as, by its media type (TEMPRA-164; tempra-dev: app/media, Kinds): an
  * image, a video or audio player, or a PDF's card. The reader's registry maps the others to their
- * components (reader/registry.tsx, `media`).
+ * components (reader/registry.ts, `media`).
  */
 export type MediaKind = "image" | "video" | "audio" | "pdf";
 
@@ -60,12 +60,12 @@ export interface ImageSource {
 }
 
 /** The image route for a hash, scaled to a long edge when `edge` is given. */
-export function imageUrl(urls: Urls, hash: string, edge?: number): string {
+function imageUrl(urls: Urls, hash: string, edge?: number): string {
   return `${urls.base}-/image/${hash}${edge === undefined ? "" : `?w=${edge}`}`;
 }
 
 /** The media route for a video or audio file's hash, which serves ranges (TEMPRA-164). */
-export function mediaUrl(urls: Urls, hash: string): string {
+function mediaUrl(urls: Urls, hash: string): string {
   return `${urls.base}-/media/${hash}`;
 }
 
@@ -112,7 +112,7 @@ export function imageSource(urls: Urls, ref: ImageRef): ImageSource {
   return out;
 }
 
-/** The phone's breakpoint (tokens.css, `NARROW` in Workspace.tsx): images span the screen. */
+/** The phone's breakpoint (tokens.css, `NARROW` in frame.ts): images span the screen. */
 const PHONE = "(max-width: 900px) 100vw";
 /** The text's column (`--tempra-column-text`) and a wide figure's (`--tempra-figure-wide`). */
 const COLUMN = 620;

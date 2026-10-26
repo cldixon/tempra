@@ -1,8 +1,7 @@
-import { useEffect } from "react";
-import { actorAgentName, agentLabel, type Contributor, readableName } from "./agents";
-import { api, useLoad } from "./api";
+import { actorAgentName, readableName } from "./agents";
+import { api } from "./api";
 import { libraryLabel } from "./role";
-import { Urls } from "./urls";
+import { urlsOf } from "./urls";
 
 /*
  * The Inbox's items and count (TEMPRA-72; take 4, TEMPRA-116), shared by the bell and the Inbox
@@ -10,7 +9,7 @@ import { Urls } from "./urls";
  */
 
 /** What a person is told of (TEMPRA-173): an invitation, a mention and a reply, nothing else. */
-export type InboxKind = "reply" | "mention" | "invitation";
+type InboxKind = "reply" | "mention" | "invitation";
 
 /** One item, as `GET /api/v1/inbox` describes it. */
 export interface InboxItem {
@@ -74,21 +73,6 @@ export function markReadBody(
   return library ? { library } : {};
 }
 
-/** The unread count, for the bell and the sidebar's Inbox row: reloads when told it changed. */
-export function useUnread(): number {
-  const loaded = useLoad("inbox-count", () => api<{ unread: number }>("/api/v1/inbox/count"));
-  const { reload } = loaded;
-  useEffect(() => {
-    window.addEventListener(INBOX_EVENT, reload);
-    window.addEventListener("focus", reload);
-    return () => {
-      window.removeEventListener(INBOX_EVENT, reload);
-      window.removeEventListener("focus", reload);
-    };
-  }, [reload]);
-  return loaded.state === "ready" ? loaded.data.unread : 0;
-}
-
 /** A path's last part without .md: what names a page that has no title. */
 const pageName = (path: string) => path.replace(/\.md$/, "").split("/").pop() ?? path;
 
@@ -100,7 +84,7 @@ export function itemLibrary(
   i: Pick<InboxItem, "library" | "library_title">,
   me: string | null,
 ): string {
-  const [owner = "", slug = i.library] = i.library.split("/");
+  const { owner, slug } = urlsOf(i.library);
   return libraryLabel({
     owner,
     slug,
@@ -112,7 +96,7 @@ export function itemLibrary(
 /** What the item is about: the page, or the library for an invitation or an access change. */
 export function itemTitle(i: InboxItem, titles: PageTitles = {}): string {
   if (i.path) return i.title || titles[`${i.library} ${i.path}`] || pageName(i.path);
-  return i.library_title || (i.library.split("/").pop() ?? i.library);
+  return i.library_title || urlsOf(i.library).slug;
 }
 
 /** Agents' names by "owner/slug actor", for items whose actor is an agent (useAgentLabels). */
@@ -137,70 +121,8 @@ export function itemWho(
 export const withNames = (items: InboxItem[], labels: AgentLabels): InboxItem[] =>
   items.map((i) => ({ ...i, who: itemWho(i, labels) }));
 
-/**
- * The agents of the libraries agents' items are in (`GET …/agents`), as labels by actor. An
- * actor two people's agents share ("claude-ai/connector") cannot tell them apart, so it keeps
- * the agent's plain name.
- */
-export function useAgentLabels(items: InboxItem[] | null): AgentLabels {
-  const want = [...new Set((items ?? []).filter((i) => i.agent).map((i) => i.library))].sort();
-  const loaded = useLoad(`inbox agents ${want.join(" ")}`, async () => {
-    const out: AgentLabels = {};
-    const shared = new Set<string>();
-    await Promise.all(
-      want.map(async (library) => {
-        const [owner = "", slug = ""] = library.split("/");
-        try {
-          const r = await api<{ contributors: Contributor[] }>(new Urls(owner, slug).api("agents"));
-          for (const c of r.contributors) {
-            if (!c.agent) continue;
-            const key = `${library} ${c.actor}`;
-            const label = agentLabel(c);
-            if (key in out && out[key] !== label) shared.add(key);
-            out[key] = label;
-          }
-        } catch {
-          // A library out of reach names its agents by their plain names.
-        }
-      }),
-    );
-    for (const key of shared) delete out[key];
-    return out;
-  });
-  return loaded.state === "ready" ? loaded.data : {};
-}
-
 /** Pages' titles by "owner/slug path", for items the server names by path only (replies). */
 export type PageTitles = Record<string, string>;
-
-/**
- * The titles of the pages items are on, where an item has none of its own (a reply or a
- * mention carries only the path): read from each such library's outline, the index the tree
- * loads (`GET …/outline`), so a row always names a page by its title.
- */
-export function usePageTitles(items: InboxItem[] | null): PageTitles {
-  const want = [
-    ...new Set((items ?? []).filter((i) => i.path && !i.title).map((i) => i.library)),
-  ].sort();
-  const loaded = useLoad(`inbox titles ${want.join(" ")}`, async () => {
-    const out: PageTitles = {};
-    await Promise.all(
-      want.map(async (library) => {
-        const [owner = "", slug = ""] = library.split("/");
-        try {
-          const r = await api<{ files: { path: string; title?: string | null }[] }>(
-            new Urls(owner, slug).api("outline"),
-          );
-          for (const f of r.files) if (f.title) out[`${library} ${f.path}`] = f.title;
-        } catch {
-          // A library out of reach names its pages by path, as before.
-        }
-      }),
-    );
-    return out;
-  });
-  return loaded.state === "ready" ? loaded.data : {};
-}
 
 /** The kind, as the row's meta line says it. */
 export function kindLabel(i: InboxItem): string {

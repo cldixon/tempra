@@ -1,0 +1,43 @@
+<script lang="ts">
+  import type { Place } from "./frame";
+  import { useUnread } from "./inbox.svelte.ts";
+  import NavRow from "./NavRow.svelte";
+  import Tree from "./Tree.svelte";
+  import type { OutlineFile } from "./tree";
+  import type { Urls } from "./urls";
+
+  /**
+   * The library's sidebar (TEMPRA-145): the files, then a fixed foot of the library's tools,
+   * Activity and Settings (and on a phone the Inbox). Home is the library's name in the bar.
+   */
+  let props: {
+    urls: Urls;
+    place: Place;
+    /** The library's index (Workspace loads it), null until it arrives; whether loading failed. */
+    files: OutlineFile[] | null;
+    failed: boolean;
+    onRetry(): void;
+  } = $props();
+  const unread = useUnread();
+</script>
+
+<div class="sidebar-scroll">
+  <Tree
+    urls={props.urls}
+    file={props.place.file}
+    dir={props.place.dir}
+    files={props.files}
+    failed={props.failed}
+    onRetry={props.onRetry}
+  />
+</div>
+<nav class="sidebar-foot" aria-label="Library">
+  <NavRow
+    href={props.urls.activity()}
+    current={props.place.view === "activity"}
+    icon="activity"
+    label="Activity"
+  />
+  <NavRow href={props.urls.settings()} icon="settings" label="Settings" />
+  <NavRow href="/inbox" icon="inbox" label="Inbox" className="phone-only" unread={unread.current} />
+</nav>

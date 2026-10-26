@@ -2,7 +2,7 @@
  * A stored body made ready to draw (tempra-dev: app/reader): where each textblock starts in the
  * document's text ({@link docText}, which comment anchors count in), each heading's anchor, each
  * footnote reference's marker, and the footnote definitions kept beside the body. Pure and
- * DOM-free: the renderer (Body.tsx) only reads it.
+ * DOM-free: the reader's components (Body.svelte, Blocks.svelte) only read it.
  */
 import {
   type ContainerDirective,
@@ -279,7 +279,7 @@ export function prepare(tree: Doc, options: BodyOptions = {}): Prepared {
 }
 
 /** Where a link written in the body points, as the reader draws it. */
-export interface LinkInfo {
+interface LinkInfo {
   /** Null for a target a browser must not follow (`javascript:`, `data:`), or one dropped. */
   href: string | null;
   /** The library path it resolves to, if it is internal. */
@@ -318,7 +318,7 @@ export function externalHost(url: string): string | null {
 }
 
 /** Where an image written in the body loads from, or null to show its alt text instead. */
-export function imageSrc(options: BodyOptions, url: string): string | null {
+function imageSrc(options: BodyOptions, url: string): string | null {
   const target = linkTarget(options.path ?? "", url);
   if (options.href) return options.href(target, url, "image");
   return target && target.kind !== "internal" ? target.href : null;

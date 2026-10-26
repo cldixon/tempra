@@ -908,7 +908,7 @@ async function browserRenders(
         await page.waitForTimeout(1500); // the hover's prefetch lands in the cache
         await link.click();
         await page.waitForURL(`${lib}/${enc(other)}`);
-        // The URL changes before React draws the new page: wait for the page itself (on a
+        // The URL changes before the app draws the new page: wait for the page itself (on a
         // slow runner the old one can still be on screen, scrolled, when the URL has moved).
         // By its title, not any h1: the old page's body can have h1 headings of its own, which
         // satisfied the wait while the old page was still on screen.
@@ -3097,7 +3097,9 @@ async function browserRenders(
       await card.waitFor({ state: "detached", timeout: 5000 });
       // Selected text, then Ctrl+Alt+M: the draft's box takes the focus; Tab to Comment, Enter.
       await page.evaluate(`(() => {
-        const text = document.querySelector(".body .prose p").firstChild;
+        // The paragraph's first text with words in it (Svelte keeps empty text anchors).
+        const p = document.querySelector(".body .prose p");
+        const text = [...p.childNodes].find((n) => n.nodeType === 3 && n.textContent.length >= 18);
         const range = document.createRange();
         range.setStart(text, 0);
         range.setEnd(text, 18);

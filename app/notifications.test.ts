@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mentionAt, offered } from "./src/Mentions";
+import { mentionAt, offered } from "./src/mentions";
 
 describe("mentions in the comment box (TEMPRA-73)", () => {
   test("finds the @word being typed before the caret", () => {

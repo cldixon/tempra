@@ -1,4 +1,3 @@
-import { useCallback, useEffect, useRef, useState } from "react";
 import type { ActedBy } from "./agents";
 import { api } from "./api";
 import type { Urls } from "./urls";
@@ -361,7 +360,7 @@ async function readEvents(urls: Urls, since: number): Promise<FeedEvent[]> {
 const feeds = new Map<string, LibraryFeed>();
 
 /** The library's one feed, made on first use; a tab shown again wakes every feed's retries. */
-function feedOf(urls: Urls): LibraryFeed {
+export function feedOf(urls: Urls): LibraryFeed {
   const key = `${urls.owner}/${urls.slug}`;
   let feed = feeds.get(key);
   if (!feed) {
@@ -374,80 +373,4 @@ function feedOf(urls: Urls): LibraryFeed {
     feeds.set(key, feed);
   }
   return feed;
-}
-
-/**
- * Whether the library's feed is live or reconnecting, said only once it has been reconnecting
- * for a few seconds (a socket the server asks to reopen, or a blip, says nothing).
- */
-export function useFeedStatus(urls: Urls, quietMs = 4000): FeedStatus {
-  const key = `${urls.owner}/${urls.slug}`;
-  const [shown, setShown] = useState<FeedStatus>("live");
-  // biome-ignore lint/correctness/useExhaustiveDependencies: one feed per library, keyed by it.
-  useEffect(() => {
-    const feed = feedOf(urls);
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const on = (s: FeedStatus) => {
-      clearTimeout(timer);
-      if (s === "live") setShown("live");
-      else timer = setTimeout(() => setShown(feed.status), quietMs);
-    };
-    on(feed.status);
-    const stop = feed.watch(on);
-    return () => {
-      stop();
-      clearTimeout(timer);
-    };
-  }, [key, quietMs]);
-  return shown;
-}
-
-/**
- * Calls `onEvents` with each batch of new events in the library, for as long as the component
- * is mounted, and `onReset` when the ledger is rolled back. `from` is the sequence the page's
- * data reflects (null while loading): the page then also hears the events that arrived, or
- * committed, while it loaded. The callbacks may change between renders; the latest are used.
- */
-export function useFeed(
-  urls: Urls,
-  from: number | null,
-  onEvents: (events: FeedEvent[]) => void,
-  onReset: () => void,
-) {
-  const callbacks = useRef({ onEvents, onReset });
-  callbacks.current = { onEvents, onReset };
-  const key = `${urls.owner}/${urls.slug}`;
-  const sub = useRef<ReturnType<LibraryFeed["subscribe"]> | null>(null);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: one feed per library, keyed by it.
-  useEffect(() => {
-    const feed = feedOf(urls);
-    const s = feed.subscribe({
-      events: (events) => callbacks.current.onEvents(events),
-      reset: () => callbacks.current.onReset(),
-    });
-    sub.current = s;
-    return () => {
-      s.close();
-      sub.current = null;
-    };
-  }, [key]);
-  useEffect(() => {
-    const s = sub.current;
-    if (from !== null && s) feeds.get(key)?.sync(s, from);
-  }, [from, key]);
-}
-
-/**
- * A function that runs `fn` once, `ms` after the last of a burst of calls: a page reloading on
- * feed events reloads once per burst of agents' writes, not once per write.
- */
-export function useTrailing(fn: () => void, ms = 400): () => void {
-  const latest = useRef(fn);
-  latest.current = fn;
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  useEffect(() => () => clearTimeout(timer.current), []);
-  return useCallback(() => {
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => latest.current(), ms);
-  }, [ms]);
 }

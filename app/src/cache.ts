@@ -1,7 +1,7 @@
 /**
- * What each page loaded last (see useLoad in api.ts), so a page seen before draws at once. Kept
- * apart from React so its rules can be tested: newer answers win, and only a prefetch spares
- * the page from asking again.
+ * What each page loaded last (see useLoad in load.svelte.ts), so a page seen before draws at
+ * once. Kept apart from the runes so its rules can be tested: newer answers win, and only a
+ * prefetch spares the page from asking again.
  */
 interface Entry {
   data: unknown;
@@ -64,9 +64,9 @@ export class PageCache {
 }
 
 /**
- * `next`, reusing every part of `prev` with the same content (React Query's replaceEqualDeep):
+ * `next`, reusing every part of `prev` with the same content (structural sharing, as TanStack Query's replaceEqualDeep does):
  * an unchanged answer comes back as `prev` itself, and a changed one keeps the identity of its
- * unchanged parts, so a page's memos and the reader built on them survive a refresh.
+ * unchanged parts, so what a page derives from it, and the reader built on it, survive a refresh.
  */
 export function share<T>(prev: unknown, next: T): T {
   if (Object.is(prev, next)) return prev as T;

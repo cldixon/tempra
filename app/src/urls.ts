@@ -190,3 +190,9 @@ export function inboxUrl(opts: { done?: boolean; library?: string | null } = {})
   const s = q.toString().replace(/%2F/g, "/");
   return s ? `/inbox?${s}` : "/inbox";
 }
+
+/** A library's Urls from its "owner/slug" (as the Inbox's items and the API name it). */
+export function urlsOf(library: string): Urls {
+  const [owner = "", slug = ""] = library.split("/");
+  return new Urls(owner, slug);
+}

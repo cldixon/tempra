@@ -1,0 +1,87 @@
+<script lang="ts">
+  import { field, post } from "../api";
+  import { useAction } from "../load.svelte.ts";
+  import type { Me } from "../ui";
+  import { useTitle } from "../ui.svelte.ts";
+  import { Urls } from "../urls";
+
+  /**
+   * First run (v2 spec: Onboarding): pick a handle and name the first library, both parts of the
+   * library's address (H-12), then land on the new library's home, which shows how to connect an
+   * agent and waits for its first write.
+   */
+  let { me }: { me: Me | null } = $props();
+  useTitle(() => "Welcome");
+  const action = useAction();
+
+  function submit(e: SubmitEvent & { currentTarget: HTMLFormElement }) {
+    e.preventDefault();
+    const m = me;
+    if (!m) return;
+    const form = e.currentTarget;
+    const handle = field(form, "handle");
+    const slug = field(form, "library");
+    const starter = field(form, "starter") === "1";
+    void action.run(async () => {
+      if (handle.toLowerCase() !== m.handle)
+        await post("/api/v1/account/handle", { handle }, "PUT");
+      const lib = await post<{ owner: string; slug: string }>("/api/v1/libraries", {
+        slug,
+        starter,
+      });
+      // A full load: the header and links follow the new handle.
+      location.assign(new Urls(lib.owner, lib.slug).tree(""));
+    });
+  }
+</script>
+
+{#if !me}
+  <p class="muted">Loading…</p>
+{:else}
+  <h1>Welcome</h1>
+  {#if action.error}<div class="notice">{action.error}</div>{/if}
+  <form onsubmit={submit}>
+    <p>
+      <label>
+        Handle
+        <input
+          type="text"
+          name="handle"
+          defaultValue={me.handle}
+          required
+          autocapitalize="off"
+          spellcheck="false"
+          aria-describedby="welcome-handle-hint"
+        />
+      </label><span id="welcome-handle-hint" class="field-hint">
+        Part of every library's address: {location.host}/handle/library. 2 to 39 lowercase
+        letters, digits, - or _.
+      </span>
+    </p>
+    <p>
+      <label>
+        First library
+        <input
+          type="text"
+          name="library"
+          defaultValue="notes"
+          required
+          pattern={"[a-z0-9][a-z0-9\\-]{0,62}"}
+          autocapitalize="off"
+          spellcheck="false"
+          aria-describedby="welcome-library-hint"
+        />
+      </label><span id="welcome-library-hint" class="field-hint">
+        The last part of its address. Lowercase letters, digits and -.
+      </span>
+    </p>
+    <p>
+      <label>
+        <input type="checkbox" name="starter" value="1" defaultChecked /> Add a start-here note
+      </label>
+    </p>
+    <p>
+      <button class="primary" type="submit" disabled={action.busy}>Create</button>
+    </p>
+  </form>
+{/if}
