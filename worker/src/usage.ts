@@ -14,10 +14,10 @@ export const RETRY_AFTER_S = 60;
 export interface UsageEvent {
   /**
    * A request, a write, a sign-in email, a change-feed connection opened, an image handed to a
-   * model over MCP (TEMPRA-153; bytes: what was sent), or a diagram drawn by the render Worker
-   * (TEMPRA-165).
+   * model over MCP (TEMPRA-153; bytes: what was sent), a diagram drawn by the render Worker
+   * (TEMPRA-165), or a file fetched from a URL an agent named (TEMPRA-157; bytes: what was read).
    */
-  kind: "request" | "write" | "email" | "feed" | "read_image" | "render";
+  kind: "request" | "write" | "email" | "feed" | "read_image" | "render" | "fetch";
   /** The account: a library owner's handle, or an email for sign-in mail. */
   account: string;
   library?: string;
@@ -26,7 +26,11 @@ export interface UsageEvent {
 
 export interface UsageDeps {
   /** True when the call may go ahead; absent means no limits (tests, local dev). */
-  rateLimit?: (kind: "write" | "request" | "session", key: string) => Promise<boolean>;
+  /**
+   * One against a limiter; `render` is the MCP render cap per account (TEMPRA-166), keyed
+   * `render:<account>` on WRITE_LIMITER, whose limit (60 a minute) is the render limit too.
+   */
+  rateLimit?: (kind: "write" | "request" | "session" | "render", key: string) => Promise<boolean>;
   /** Records a data point; never throws, never blocks. */
   meter?: (e: UsageEvent) => void;
 }

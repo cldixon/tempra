@@ -1,11 +1,9 @@
-import { type AgentChange, isLive } from "./changes";
 import { Icon, Menu } from "./chrome";
 import { useUnread } from "./inbox";
 import { libraryLabel, type ReachableLibrary, useLibraries, useRole } from "./role";
 import { type OutlineFile, Tree } from "./Tree";
 import { Urls } from "./urls";
 import type { AccountPage, Place } from "./Workspace";
-import { useFrame } from "./Workspace";
 
 /*
  * The frame's sidebars (take 4, TEMPRA-113; tempra-dev: app/workspace): a library's (the tree,
@@ -73,25 +71,14 @@ function UnreadCount({ unread }: { unread: number }) {
 export function LibrarySidebar(props: {
   urls: Urls;
   place: Place;
-  changes: Map<string, AgentChange>;
-  now: number;
   onIndex(files: OutlineFile[], seq: number): void;
 }) {
   const { urls, place } = props;
-  const { latest, now } = useFrame();
-  const writing = isLive(latest, now);
   const unread = useUnread();
   return (
     <>
       <div className="sidebar-scroll">
-        <Tree
-          urls={urls}
-          file={place.file}
-          dir={place.dir}
-          changes={props.changes}
-          now={props.now}
-          onIndex={props.onIndex}
-        />
+        <Tree urls={urls} file={place.file} dir={place.dir} onIndex={props.onIndex} />
       </div>
       <nav className="sidebar-foot" aria-label="Library">
         <Row
@@ -99,14 +86,6 @@ export function LibrarySidebar(props: {
           current={place.view === "activity"}
           icon="activity"
           label="Activity"
-          end={
-            writing ? (
-              <span className="nav-count" title="An agent is writing now">
-                <span className="change-dot live" aria-hidden="true" />
-                <span className="visually-hidden">An agent is writing now</span>
-              </span>
-            ) : undefined
-          }
         />
         <Row href={urls.settings()} icon="settings" label="Settings" />
         <Row

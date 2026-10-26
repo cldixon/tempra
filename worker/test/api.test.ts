@@ -1,11 +1,12 @@
 import { describe, expect, setSystemTime, test } from "bun:test";
 import { type Doc, parseMarkdown, toMarkdown } from "@tempra/editor/doc";
+import { imagesService, VARIANT_EDGES } from "../src/images";
 import { parseConcept } from "../src/okf/concept";
 import { readTar, writeTar } from "../src/util/tar";
 import { compareBundle } from "./compare";
 import { BUNDLES, loadBundle } from "./fixtures";
-import { setup } from "./harness";
-import { makePng } from "./images";
+import { API, setup, UI } from "./harness";
+import { makePng, SVG } from "./images";
 
 const doc = (body: string, extra = "") => `---\ntype: Note\n${extra}---\n${body}`;
 
@@ -467,4 +468,189 @@ describe("upload URLs (TEMPRA-158)", () => {
     expect(w.status).toBe(200);
     expect(new Uint8Array(await (await s.req("/files/x/pic.png")).arrayBuffer())).toEqual(PNG);
   });
+});
+
+describe("the reader's image route (TEMPRA-162)", () => {
+  type S = ReturnType<typeof setup>;
+  const PNG = makePng(1600, 800);
+  const hex = (b: Uint8Array) => new Bun.CryptoHasher("sha256").update(b).digest("hex");
+  const HASH = hex(PNG);
+  const WEBP = new Uint8Array([0x52, 0x49, 0x46, 0x46, 4, 0, 0, 0, 0x57, 0x45, 0x42, 0x50]);
+  const attach = (s: S, path: string, bytes: Uint8Array, type: string, token?: string) =>
+    s.req(`/files/${path}`, {
+      method: "PUT",
+      token,
+      headers: { "Content-Type": type },
+      body: bytes as unknown as BodyInit,
+    });
+  const image = (s: S, query = "", headers: Record<string, string> = {}) =>
+    s.app.request(`${UI}/-/image/${HASH}${query}`, { headers });
+  /** A stand-in for the IMAGES binding that records each transform, or fails every one. */
+  const fakeImages = (s: S, opts: { fail?: boolean } = {}) => {
+    const calls: { width: number; format: string }[] = [];
+    s.deps.images = imagesService({
+      blobs: s.blobs,
+      transformer: {
+        input: (stream) => ({
+          transform: (t) => ({
+            output: async (o) => {
+              await new Response(stream).arrayBuffer();
+              calls.push({ width: t.width, format: o.format });
+              if (opts.fail) throw new Error("ERROR 9422: not enabled");
+              return {
+                image: () => new Response(WEBP).body as ReadableStream<Uint8Array>,
+                contentType: () => o.format,
+              };
+            },
+          }),
+        }),
+      },
+    });
+    return calls;
+  };
+
+  test("the original, inline and cached for good, with no redirect", async () => {
+    const s = setup();
+    await attach(s, "img/wide.png", PNG, "image/png");
+    const r = await image(s);
+    expect(r.status).toBe(200);
+    expect(r.headers.get("Content-Type")).toBe("image/png");
+    expect(r.headers.get("Cache-Control")).toBe("private, max-age=31536000, immutable");
+    expect(r.headers.get("Content-Disposition")).toBe("inline");
+    expect(r.headers.get("X-Content-Type-Options")).toBe("nosniff");
+    expect(r.headers.get("Content-Length")).toBe(String(PNG.length));
+    expect(r.headers.get("Vary")).toBeNull();
+    expect(new Uint8Array(await r.arrayBuffer())).toEqual(PNG);
+    // Signed in only: no session is the sign-in page, never the bytes.
+    const anon = await s.anon.request(`${UI}/-/image/${HASH}`);
+    expect(anon.headers.get("Content-Type")).not.toBe("image/png");
+  });
+
+  test("a hash grants nothing: another library's, a stranger's, unknown or not an image", async () => {
+    const s = setup();
+    const other = await s.stranger();
+    // The stranger's image is theirs alone, though the bytes are one blob.
+    await attach(s, "img/wide.png", PNG, "image/png", other.writer);
+    expect((await image(s)).status).toBe(404);
+    await attach(s, "img/wide.png", PNG, "image/png");
+    expect((await image(s)).status).toBe(200);
+    // And the owner's library is not the stranger's to open.
+    const theirs = await other.app.request(`${UI}/-/image/${HASH}`);
+    expect(theirs.status).toBe(404);
+    expect(theirs.headers.get("Content-Type")).not.toBe("image/png");
+    expect((await s.app.request(`${UI}/-/image/${"0".repeat(64)}`)).status).toBe(404);
+    expect((await s.app.request(`${UI}/-/image/not-a-hash`)).status).toBe(404);
+    // A concept's bytes and a file that is not an image are not images.
+    const w = (await (
+      await s.req("/files/notes/a.md", {
+        method: "PUT",
+        headers: { "Content-Type": "text/markdown" },
+        body: "---\ntype: Note\ntitle: A\ndescription: A note.\n---\nHello.\n",
+      })
+    ).json()) as { hash: string };
+    expect((await s.app.request(`${UI}/-/image/${w.hash}`)).status).toBe(404);
+    const csv = new TextEncoder().encode("a,b\n1,2\n");
+    await attach(s, "data/t.csv", csv, "text/csv");
+    expect((await s.app.request(`${UI}/-/image/${hex(csv)}`)).status).toBe(404);
+  });
+
+  test("a past attachment still answers: the hash names bytes the library held", async () => {
+    const s = setup();
+    await attach(s, "img/wide.png", PNG, "image/png");
+    await s.req("/files/img/wide.png", { method: "DELETE" });
+    expect((await image(s)).status).toBe(200);
+  });
+
+  test("w: a variant as WebP, AVIF when accepted, never enlarged; only known edges", async () => {
+    const s = setup();
+    await attach(s, "img/wide.png", PNG, "image/png");
+    const calls = fakeImages(s);
+    const webp = await image(s, "?w=640", { Accept: "image/webp,*/*" });
+    expect(webp.status).toBe(200);
+    expect(webp.headers.get("Content-Type")).toBe("image/webp");
+    expect(webp.headers.get("Vary")).toBe("Accept");
+    expect(webp.headers.get("Cache-Control")).toBe("private, max-age=31536000, immutable");
+    expect(webp.headers.get("Content-Disposition")).toBe("inline");
+    expect(new Uint8Array(await webp.arrayBuffer())).toEqual(WEBP);
+    const avif = await image(s, "?w=640", { Accept: "image/avif,image/webp,*/*" });
+    expect(avif.headers.get("Content-Type")).toBe("image/avif");
+    expect(calls).toEqual([
+      { width: 640, format: "image/webp" },
+      { width: 640, format: "image/avif" },
+    ]);
+    // At or past the image's own long edge (1600): the original, with no transform.
+    const big = await image(s, "?w=1920");
+    expect(big.headers.get("Content-Type")).toBe("image/png");
+    expect(big.headers.get("Vary")).toBe("Accept");
+    expect(calls).toHaveLength(2);
+    expect((await image(s, "?w=500")).status).toBe(400);
+    expect((await image(s, "?w=abc")).status).toBe(400);
+  });
+
+  test("w falls back to the original: no binding, a failed transform, an SVG", async () => {
+    const s = setup();
+    await attach(s, "img/wide.png", PNG, "image/png");
+    const none = await image(s, "?w=640");
+    expect(none.headers.get("Content-Type")).toBe("image/png");
+    expect(new Uint8Array(await none.arrayBuffer())).toEqual(PNG);
+    const calls = fakeImages(s, { fail: true });
+    const failed = await image(s, "?w=640", { Accept: "image/avif,*/*" });
+    expect(failed.status).toBe(200);
+    expect(failed.headers.get("Content-Type")).toBe("image/png");
+    // AVIF tried, then WebP, then the original.
+    expect(calls.map((c) => c.format)).toEqual(["image/avif", "image/webp"]);
+    await attach(s, "img/mark.svg", SVG, "image/svg+xml");
+    const r = await s.app.request(`${UI}/-/image/${hex(SVG)}?w=320`);
+    expect(r.headers.get("Content-Type")).toBe("image/svg+xml");
+    expect(r.headers.get("Content-Security-Policy")).toContain("sandbox");
+    expect(new Uint8Array(await r.arrayBuffer())).toEqual(new Uint8Array(SVG));
+    expect(calls).toHaveLength(2);
+  });
+
+  test("a concept's JSON lists its images' hashes and sizes, backfilling ones from before", async () => {
+    const s = setup();
+    await attach(s, "img/wide.png", PNG, "image/png");
+    // An image from before TEMPRA-152: stored by the store alone, no size.
+    const old = makePng(30, 20);
+    s.blobs.map.set(hex(old), old);
+    s.store().apply({ actor: "test/old", request_id: "old" }, [
+      {
+        op: "attach",
+        path: "img/old.png",
+        blob: { hash: hex(old), size: old.length, media: "image/png" },
+      },
+    ]);
+    await s.req("/files/notes/figs.md", {
+      method: "PUT",
+      headers: { "Content-Type": "text/markdown" },
+      body: [
+        "---",
+        "type: Note",
+        "title: Figs",
+        "description: Figures.",
+        "---",
+        "![Wide](/img/wide.png)",
+        "",
+        "Inline ![old](../img/old.png), ![gone](/img/gone.png), ![ext](https://example.com/x.png).",
+        "",
+      ].join("\n"),
+    });
+    const view = (await (
+      await s.app.request(`${API}/files/notes/figs.md`, {
+        headers: { Accept: "application/json" },
+      })
+    ).json()) as { images: Record<string, unknown> };
+    expect(view.images).toEqual({
+      "img/wide.png": { hash: HASH, media: "image/png", width: 1600, height: 800 },
+      "img/old.png": { hash: hex(old), media: "image/png", width: 30, height: 20 },
+    });
+    // Kept: the next read has the size without the bytes.
+    expect(s.store().read("img/old.png")).toMatchObject({ width: 30, height: 20 });
+  });
+});
+
+test("the app offers the variant edges the server makes (TEMPRA-162)", async () => {
+  const src = await Bun.file(new URL("../../app/src/images.ts", import.meta.url)).text();
+  const m = src.match(/export const VARIANT_EDGES = \[([^\]]*)\]/);
+  expect(m?.[1]?.split(",").map((x) => Number(x.trim()))).toEqual([...VARIANT_EDGES]);
 });

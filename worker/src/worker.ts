@@ -5,6 +5,7 @@ import { imagesService } from "./images";
 import { handleMcp, type McpContext } from "./mcp/server";
 import { notifying, postComment } from "./notify";
 import { type GrantProps, SCOPES } from "./oauth/routes";
+import { RENDER_UNAVAILABLE } from "./render";
 import { OkfError } from "./store/errors";
 import { createLibraryForGrant, grantAgent, grantLibraries } from "./tenancy";
 import { type Admission, admit, mcpWrites, tokenAdmission } from "./usage";
@@ -145,6 +146,14 @@ export function createWorker(deps: (env: Cloudflare.Env) => Deps): {
             blobs: d.blobs,
             images: d.images ?? imagesService({ blobs: d.blobs }),
             meter: (e) => d.meter?.({ ...e, account: who.account }),
+            fetch: d.fetch,
+            // The render tool and read's diagrams (TEMPRA-166), counted per account.
+            render: (req, library) =>
+              d.renderDiagram
+                ? d.renderDiagram(req, { account: who.account, library })
+                : Promise.resolve({ error: { message: RENDER_UNAVAILABLE, line: 0, column: 0 } }),
+            allowRender: async () =>
+              (await d.rateLimit?.("render", `render:${who.account}`)) ?? true,
             origin,
           });
         },

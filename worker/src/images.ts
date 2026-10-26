@@ -1,4 +1,5 @@
 import type { BlobStore } from "./client";
+import { imageInfo } from "./media";
 
 /**
  * Attachment images scaled through Cloudflare Images (the `IMAGES` binding; TEMPRA-153, and the
@@ -9,16 +10,24 @@ import type { BlobStore } from "./client";
  */
 
 /** Formats a variant can take. */
-export type VariantFormat = "webp" | "jpeg" | "png";
+export type VariantFormat = "webp" | "avif" | "jpeg" | "png";
 
-const MEDIA: Record<VariantFormat, "image/webp" | "image/jpeg" | "image/png"> = {
+type VariantMedia = "image/webp" | "image/avif" | "image/jpeg" | "image/png";
+
+const MEDIA: Record<VariantFormat, VariantMedia> = {
   webp: "image/webp",
+  avif: "image/avif",
   jpeg: "image/jpeg",
   png: "image/png",
 };
 
 /** Output quality per format; part of what a cached variant is, so changing it needs new keys. */
-const QUALITY: Record<VariantFormat, number | undefined> = { webp: 80, jpeg: 80, png: undefined };
+const QUALITY: Record<VariantFormat, number | undefined> = {
+  webp: 80,
+  avif: 60,
+  jpeg: 80,
+  png: undefined,
+};
 
 /**
  * The long edges a variant may have. A fixed set keeps the cache bounded and lets the sweep
@@ -63,7 +72,7 @@ export interface ImageTransformerLike {
   input(stream: ReadableStream<Uint8Array>): {
     transform(t: { width: number; height: number; fit: "scale-down" }): {
       output(o: {
-        format: "image/webp" | "image/jpeg" | "image/png";
+        format: VariantMedia;
         quality?: number;
       }): Promise<{ image(): ReadableStream<Uint8Array>; contentType(): string }>;
     };
@@ -101,6 +110,13 @@ export interface Images {
    * binding, the original when it is within MODEL_BYTES, else `tooLarge`.
    */
   forModel(blob: { hash: string; size: number; media: string | null }): Promise<ModelImage>;
+  /**
+   * Bytes that are not a stored blob (a drawn diagram's PNG, TEMPRA-166) as a model should get
+   * them: as they are when the long edge is within MODEL_EDGE and the bytes within MODEL_BYTES,
+   * else scaled down the same ladder as `forModel` (not cached: the render Worker caches the
+   * PNG); without the binding, as they are when within MODEL_BYTES, else `tooLarge`.
+   */
+  fitForModel(bytes: Uint8Array, media: string): Promise<ModelImage>;
 }
 
 export function imagesService(d: {
@@ -133,8 +149,40 @@ export function imagesService(d: {
     }
   };
 
+  /** One scale of bytes held in memory; null when Images refuses or is not bound. */
+  const scaleBytes = async (bytes: Uint8Array, edge: number): Promise<ScaledImage | null> => {
+    if (!d.transformer) return null;
+    try {
+      const out = await d.transformer
+        .input(toStream(bytes))
+        .transform({ width: edge, height: edge, fit: "scale-down" })
+        .output({ format: MEDIA.webp, quality: QUALITY.webp });
+      return { bytes: await readBytes(out.image()), media: out.contentType() || MEDIA.webp };
+    } catch (e) {
+      console.error(JSON.stringify({ image_transform_failed: String(e), edge }));
+      return null;
+    }
+  };
+
   return {
     scaled,
+    async fitForModel(bytes, media) {
+      const info = imageInfo(bytes);
+      const edge = info?.ok ? Math.max(info.width, info.height) : Number.POSITIVE_INFINITY;
+      if (edge <= MODEL_EDGE && bytes.byteLength <= MODEL_BYTES) {
+        return { bytes, media, scaled: false };
+      }
+      let last: ScaledImage | null = null;
+      for (const e of MODEL_LADDER) {
+        const s = await scaleBytes(bytes, e);
+        if (!s) break;
+        last = s;
+        if (s.bytes.byteLength <= MODEL_BYTES) return { ...s, scaled: true };
+      }
+      if (last) return { ...last, scaled: true };
+      if (bytes.byteLength > MODEL_BYTES) return { tooLarge: true, size: bytes.byteLength };
+      return { bytes, media, scaled: false };
+    },
     async forModel(blob) {
       let last: ScaledImage | null = null;
       for (const edge of MODEL_LADDER) {

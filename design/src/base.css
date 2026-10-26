@@ -244,6 +244,11 @@ img {
   max-width: 100%;
 }
 
+/* An image whose size is known, until it loads: a quiet grey box at that size (TEMPRA-162). */
+img.image-loading {
+  background: var(--tempra-color-ground);
+}
+
 details > summary {
   cursor: pointer;
 }

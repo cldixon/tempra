@@ -2,7 +2,6 @@ import { useEffect } from "react";
 import { actorAgentName, agentLabel, type Contributor, readableName } from "./agents";
 import { api, useLoad } from "./api";
 import { libraryLabel } from "./role";
-import { clip } from "./ui";
 import { Urls } from "./urls";
 
 /*
@@ -10,7 +9,8 @@ import { Urls } from "./urls";
  * page. Kept apart from the page so the chrome can show it without importing pages.
  */
 
-export type InboxKind = "reply" | "mention" | "thread" | "invitation" | "access" | "verify";
+/** What a person is told of (TEMPRA-173): an invitation, a mention and a reply, nothing else. */
+export type InboxKind = "reply" | "mention" | "invitation";
 
 /** One item, as `GET /api/v1/inbox` describes it. */
 export interface InboxItem {
@@ -28,14 +28,12 @@ export interface InboxItem {
   who: string;
   agent: boolean;
   excerpt: string;
-  /** `verify`: edits since the person verified. */
-  count: number | null;
   /** `invitation`: the invitation to accept or decline, while it is open. */
   invitation: string | null;
   created: string;
   read_at: string | null;
   done_at: string | null;
-  /** What the row offers: reply, resolve, review, dismiss, open, accept, decline. */
+  /** What the row offers: reply, resolve, open, accept, decline. */
   actions: string[];
   href: string;
 }
@@ -204,56 +202,6 @@ export function usePageTitles(items: InboxItem[] | null): PageTitles {
   return loaded.state === "ready" ? loaded.data : {};
 }
 
-/** The library's open items (`GET /api/v1/inbox?library=`), for its home's For you here. */
-export function useLibraryInbox(library: string, limit = 20) {
-  const q = new URLSearchParams({ limit: String(limit), library });
-  const loaded = useLoad(`inbox ${q}`, () => api<InboxPage>(`/api/v1/inbox?${q}`));
-  const { reload } = loaded;
-  useEffect(() => {
-    window.addEventListener(INBOX_EVENT, reload);
-    window.addEventListener("focus", reload);
-    return () => {
-      window.removeEventListener(INBOX_EVENT, reload);
-      window.removeEventListener("focus", reload);
-    };
-  }, [reload]);
-  return loaded;
-}
-
-/** One thing for the person on a library's home, as a card: its kind, a title and a detail. */
-export interface Card {
-  key: string;
-  kind: string;
-  title: string;
-  detail: string | null;
-  href: string;
-}
-
-/**
- * The home's cards from the library's open Inbox items (the same items the Inbox lists, so
- * what is done there leaves the home too): one of each kind first (something said to the person,
- * a page to verify), then more in that order, up to `max`.
- */
-export function forYouCards(items: InboxItem[], titles: PageTitles = {}, max = 3): Card[] {
-  const card = (i: InboxItem): Card => {
-    const page = itemTitle(i, titles);
-    const said = i.kind === "reply" || i.kind === "mention" || i.kind === "thread";
-    return {
-      key: i.id,
-      kind: kindLabel(i),
-      title: said ? `${i.who} on ${page}` : page,
-      detail: said ? (i.excerpt ? clip(i.excerpt, 80) : null) : itemDetail(i),
-      href: itemHref(i),
-    };
-  };
-  const group = (i: InboxItem) => (i.kind === "verify" ? 1 : i.path ? 0 : 2);
-  const kinds: InboxItem[][] = [[], [], []];
-  for (const i of items) kinds[group(i)]?.push(i);
-  const firsts = kinds.flatMap((k) => k.slice(0, 1));
-  const rest = kinds.flatMap((k) => k.slice(1));
-  return [...firsts, ...rest].slice(0, max).map(card);
-}
-
 /** The kind, as the row's meta line says it. */
 export function kindLabel(i: InboxItem): string {
   switch (i.kind) {
@@ -261,14 +209,8 @@ export function kindLabel(i: InboxItem): string {
       return "Reply";
     case "mention":
       return "Mention";
-    case "thread":
-      return "New thread";
-    case "verify":
-      return "To check";
     case "invitation":
       return "Invitation";
-    case "access":
-      return "Access";
   }
 }
 
@@ -279,16 +221,8 @@ export function itemDetail(i: InboxItem): string {
       return `${i.who} replied to your thread`;
     case "mention":
       return `${i.who} mentioned you`;
-    case "thread":
-      return `${i.who} opened a thread`;
-    case "verify": {
-      const n = i.count ?? 1;
-      return `${n} ${n === 1 ? "edit" : "edits"} by ${i.who} since you checked`;
-    }
     case "invitation":
       return `${i.who} invited you to ${/write/i.test(i.excerpt) ? "write" : "read and comment"}`;
-    case "access":
-      return `${i.who} changed your access`;
     default:
       return i.excerpt;
   }
@@ -296,15 +230,12 @@ export function itemDetail(i: InboxItem): string {
 
 /** The quote a row shows under its detail line: what was said, when something was. */
 export function itemQuote(i: InboxItem): string | null {
-  if (i.kind === "reply" || i.kind === "mention" || i.kind === "thread" || i.kind === "access") {
-    return i.excerpt || null;
-  }
-  return null;
+  return i.kind === "invitation" ? null : i.excerpt || null;
 }
 
 /** Where following the item leads: a thread opens in the page's Comments panel. */
 export function itemHref(i: InboxItem): string {
-  if (i.thread && i.path && (i.kind === "reply" || i.kind === "mention" || i.kind === "thread")) {
+  if (i.thread && i.path && i.kind !== "invitation") {
     return i.href.replace(/#comments$/, `#thread-${encodeURIComponent(i.thread)}`);
   }
   return i.href;

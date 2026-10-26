@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { imagesService, MODEL_BYTES, MODEL_EDGE, variantKeysFor } from "../src/images";
+import { fakeRenderer } from "../src/render";
 import { readTar } from "../src/util/tar";
 import { setup } from "./harness";
 import { base64, makePng } from "./images";
@@ -56,6 +57,7 @@ describe("MCP server", () => {
       "links",
       "log",
       "query",
+      "render",
       "revert",
       "search",
       "sources",
@@ -71,6 +73,7 @@ describe("MCP server", () => {
       "path",
       "image",
       "images",
+      "diagrams",
       "figures",
       "library",
     ]);
@@ -607,7 +610,6 @@ describe("MCP server", () => {
             "Not shown:",
             "Figure 2: external images are not fetched (TEMPRA-163)",
             "Figure 3: missing: no attachment at /img/gone.png",
-            "Figure 4: diagram images arrive with the render tool (TEMPRA-166)",
           ].join("\n"),
         );
         expect(s.usage.filter((e) => e.kind === "read_image").map((e) => e.bytes)).toEqual([
@@ -625,7 +627,7 @@ describe("MCP server", () => {
         expect((other[1] as Text).text).toBe(
           [
             "Not shown:",
-            "Figure 4: diagram images arrive with the render tool (TEMPRA-166)",
+            "Figure 4: not drawn: the render service is unavailable",
             "Figure 9: no such figure (this page has 4)",
           ].join("\n"),
         );
@@ -666,6 +668,253 @@ describe("MCP server", () => {
         const seventh = await content(client, { path: "t/many.md", figures: [7] });
         expect(seventh.map((x) => x.type)).toEqual(["text", "text", "image"]);
         expect((seventh[1] as Text).text).toBe("Figure 7: Noise 7");
+      });
+
+      test("figure lines fill in the size of images stored before it was kept", async () => {
+        const s = setup();
+        const { call } = await page(s);
+        const forget = () =>
+          (s.store() as unknown as { sql: { run(q: string, ...a: unknown[]): void } }).sql.run(
+            "UPDATE blobs SET width = NULL, height = NULL",
+          );
+        forget();
+        const line1 = async () =>
+          (await call("read", { path: "t/figs.md" })).text
+            .split("\n")
+            .find((l) => l.startsWith("Figure 1 ·"));
+        expect(await line1()).toContain("· 1×1 ·");
+        // Worked out once and kept: the blob row has it now.
+        const rows = (
+          s.store() as unknown as { sql: { all(q: string): { width: number }[] } }
+        ).sql.all("SELECT width FROM blobs WHERE location = 'r2'");
+        expect(rows.map((r) => r.width)).toEqual([1]);
+        expect(await line1()).toContain("· 1×1 ·");
+      });
+
+      describe("diagrams (TEMPRA-166)", () => {
+        const FLOW = "flowchart LR\n  A --> B";
+        const drawnPng = makePng(1360, 400);
+        const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="680" height="200"></svg>';
+        const drawing = () => fakeRenderer(() => ({ svg, png: drawnPng }));
+        const ledger = (s: ReturnType<typeof setup>) =>
+          (s.store() as unknown as { sql: { all(q: string): { n: number }[] } }).sql.all(
+            "SELECT COUNT(*) AS n FROM events",
+          )[0]?.n;
+
+        const render = async (
+          client: Awaited<ReturnType<typeof connect>>["client"],
+          args: Record<string, unknown>,
+        ) => {
+          const r = await client.callTool({ name: "render", arguments: args });
+          return {
+            content: r.content as (Text | { type: "image"; data: string; mimeType: string })[],
+            isError: !!r.isError,
+          };
+        };
+
+        test("render draws a source as a PNG, writing nothing", async () => {
+          const s = setup();
+          const r = drawing();
+          s.deps.renderDiagram = r;
+          const { client } = await connect(s.app);
+          const before = ledger(s);
+          const out = await render(client, { source: FLOW });
+          expect(out.isError).toBe(false);
+          expect(out.content.map((c) => c.type)).toEqual(["text", "image"]);
+          expect((out.content[0] as Text).text).toBe(
+            "Diagram · mermaid, flowchart · light · 1360×400 px",
+          );
+          expect(out.content[1]).toEqual({
+            type: "image",
+            data: b64(drawnPng),
+            mimeType: "image/png",
+          });
+          expect(r.calls).toEqual([{ source: FLOW, theme: "light", width: 680, png: true }]);
+          expect(ledger(s)).toBe(before);
+          expect(s.usage.filter((e) => e.kind === "read_image").map((e) => e.bytes)).toEqual([
+            drawnPng.byteLength,
+          ]);
+          // A whole fence is drawn as its body; the dark theme is passed on.
+          await render(client, { source: `\`\`\`mermaid\n${FLOW}\n\`\`\``, theme: "dark" });
+          expect(r.calls[1]).toMatchObject({ source: FLOW, theme: "dark" });
+        });
+
+        test("a tall drawing is scaled for the model through Images", async () => {
+          const s = setup();
+          const { calls } = fakeImages(s);
+          s.deps.renderDiagram = fakeRenderer(() => ({ svg, png: makePng(1360, 4000) }));
+          const { client } = await connect(s.app);
+          const out = await render(client, { source: FLOW });
+          expect(out.content[1]).toEqual({
+            type: "image",
+            data: b64(SCALED),
+            mimeType: "image/webp",
+          });
+          expect(calls).toEqual([{ width: MODEL_EDGE, format: "image/webp" }]);
+        });
+
+        test("render returns Pele's error with its line and column", async () => {
+          const s = setup();
+          s.deps.renderDiagram = fakeRenderer(() => ({
+            error: { message: "Expected an arrow", line: 2, column: 5 },
+          }));
+          const { client } = await connect(s.app);
+          const out = await render(client, { source: "flowchart LR\n  A -> B" });
+          expect(out.isError).toBe(false);
+          expect(out.content.map((c) => c.type)).toEqual(["text"]);
+          expect((out.content[0] as Text).text).toContain(
+            "Pele could not draw it: Expected an arrow (line 2, column 5)\n  2 |   A -> B",
+          );
+        });
+
+        test("a :::figure group's images count one each before a diagram", async () => {
+          const s = setup();
+          const r = drawing();
+          s.deps.renderDiagram = r;
+          const { client, call } = await page(s);
+          const body = [
+            ":::figure[Two dots]",
+            '![A](/img/dot.png "One")',
+            '![B](/img/dot.png "Two")',
+            ":::",
+            "",
+            "```mermaid",
+            FLOW,
+            "```",
+            "",
+          ].join("\n");
+          const w = await call("write", { path: "t/group.md", content: doc("Group", body) });
+          expect(w.isError).toBe(false);
+          const out = await render(client, { path: "t/group.md", figure: 3 });
+          expect((out.content[0] as Text).text).toStartWith("Figure 3 of /t/group.md · mermaid");
+          const c = await content(client, { path: "t/group.md", figures: [3] });
+          expect((c[1] as Text).text).toBe("Figure 3: diagram (flowchart)");
+          const d = await content(client, { path: "t/group.md", diagrams: true });
+          expect(d.map((x) => x.type)).toEqual(["text", "text", "image"]);
+          expect((d[1] as Text).text).toBe("Figure 3: diagram (flowchart)");
+        });
+
+        test("render by path and figure number", async () => {
+          const s = setup();
+          const r = drawing();
+          s.deps.renderDiagram = r;
+          const { client } = await page(s);
+          const out = await render(client, { path: "t/figs.md", figure: 4 });
+          expect((out.content[0] as Text).text).toBe(
+            'Figure 4 of /t/figs.md ("Flow") · mermaid, flowchart · light · 1360×400 px',
+          );
+          expect(r.calls[0]?.source).toBe(FLOW);
+          const image = await render(client, { path: "t/figs.md", figure: 1 });
+          expect(image.isError).toBe(true);
+          expect((image.content[0] as Text).text).toContain("is an image, not a diagram");
+          const none = await render(client, { path: "t/figs.md", figure: 9 });
+          expect((none.content[0] as Text).text).toContain("has no figure 9 (it has 4)");
+          const both = await render(client, { source: FLOW, path: "t/figs.md", figure: 4 });
+          expect(both.isError).toBe(true);
+        });
+
+        test("without a PNG it returns the SVG as text; without the service, says so", async () => {
+          const s = setup();
+          s.deps.renderDiagram = fakeRenderer(() => ({
+            svg,
+            error: {
+              message: "PNG not drawn: Browser Rendering is not enabled",
+              line: 0,
+              column: 0,
+            },
+          }));
+          const { client } = await connect(s.app);
+          const out = await render(client, { source: FLOW });
+          expect(out.isError).toBe(false);
+          expect(out.content.map((c) => c.type)).toEqual(["text"]);
+          expect((out.content[0] as Text).text).toBe(
+            `Diagram · mermaid, flowchart · light\nDrawn, but the PNG could not be made (PNG not drawn: Browser Rendering is not enabled); the SVG follows as text (${svg.length} B).\n${svg}`,
+          );
+
+          s.deps.renderDiagram = undefined;
+          const off = await render(client, { source: FLOW });
+          expect(off.isError).toBe(true);
+          expect((off.content[0] as Text).text).toContain(
+            "Not drawn: the render service is unavailable.",
+          );
+        });
+
+        test("renders are capped per account", async () => {
+          const s = setup();
+          s.deps.renderDiagram = drawing();
+          const keys: string[] = [];
+          s.deps.rateLimit = async (kind, key) => {
+            if (kind === "render") keys.push(key);
+            return kind !== "render";
+          };
+          const { client } = await connect(s.app);
+          const out = await render(client, { source: FLOW });
+          expect(out.isError).toBe(true);
+          expect((out.content[0] as Text).text).toContain(
+            "over the limit of 60 renders a minute for this account",
+          );
+          expect(keys).toEqual(["render:owner"]);
+        });
+
+        test("read with diagrams: true draws them under their figure lines", async () => {
+          const s = setup();
+          s.deps.renderDiagram = drawing();
+          const { client } = await page(s);
+          const c = await content(client, { path: "t/figs.md", diagrams: true });
+          expect(c.map((x) => x.type)).toEqual(["text", "text", "image"]);
+          expect((c[1] as Text).text).toBe("Figure 4: Flow");
+          expect(c[2]).toEqual({ type: "image", data: b64(drawnPng), mimeType: "image/png" });
+          // With images too, both kinds in figure order.
+          const all = await content(client, { path: "t/figs.md", images: true, diagrams: true });
+          expect(all.map((x) => (x.type === "text" ? x.text.split("\n")[0] : x.type))).toEqual([
+            "path: t/figs.md",
+            "Figure 1: The dot",
+            "image",
+            "Figure 4: Flow",
+            "image",
+            "Not shown:",
+          ]);
+          // One that does not draw is listed with Pele's error.
+          s.deps.renderDiagram = fakeRenderer(() => ({
+            error: { message: "Expected an arrow", line: 2, column: 5 },
+          }));
+          const bad = await content(client, { path: "t/figs.md", figures: [4] });
+          expect((bad.at(-1) as Text).text).toBe(
+            "Not shown:\nFigure 4: Pele could not draw it: Expected an arrow (line 2, column 5)\n  2 |   A --> B",
+          );
+        });
+
+        test("diagrams share the per-call caps with images", async () => {
+          const s = setup();
+          // A drawing of about 380 KB: within a model image, past 2 MB after five images.
+          const big = makePng(360, 352, { noise: true });
+          s.deps.renderDiagram = fakeRenderer(() => ({ svg, png: big }));
+          const { client, call } = await connect(s.app);
+          const lines: string[] = [];
+          for (let i = 1; i <= 5; i++) {
+            const put = await s.req(`/files/img/n${i}.png`, {
+              method: "PUT",
+              headers: { "Content-Type": "image/png" },
+              body: makePng(360, 350 + i, { noise: true }),
+            });
+            expect(put.status).toBeLessThan(300);
+            lines.push(`![Noise ${i}](/img/n${i}.png)`, "");
+          }
+          lines.push("```mermaid", FLOW, "```", "", "![Dot](/img/n1.png)", "");
+          await call("write", { path: "t/mixed.md", content: doc("Mixed", lines.join("\n")) });
+          const c = await content(client, { path: "t/mixed.md", images: true, diagrams: true });
+          expect(c.filter((x) => x.type === "image").length).toBe(5);
+          expect((c.at(-1) as Text).text).toBe(
+            [
+              "Not shown:",
+              "Figure 6: over the cap of 2.0 MB of images a call; ask with figures: [6]",
+              "Figure 7: over the cap of 6 images a call; ask with figures: [7]",
+            ].join("\n"),
+          );
+          const sixth = await content(client, { path: "t/mixed.md", figures: [6] });
+          expect(sixth.map((x) => x.type)).toEqual(["text", "text", "image"]);
+          expect((sixth[1] as Text).text).toBe("Figure 6: diagram (flowchart)");
+        });
       });
     });
 

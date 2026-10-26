@@ -1,25 +1,8 @@
-import { useMemo } from "react";
-import {
-  byPerson,
-  dayLabel,
-  type LedgerEvent,
-  type LedgerRequest,
-  useNow,
-  whoWorksHere,
-} from "../activity";
+import { byPerson, type LedgerRequest, useNow, whoWorksHere } from "../activity";
 import { type ActedBy, type ActorView, actorAgentName, actorText, useActors } from "../agents";
 import { api, useLoad } from "../api";
 import { Icon } from "../chrome";
-import {
-  type Card,
-  forYouCards,
-  type InboxPage,
-  type PageTitles,
-  useAgentLabels,
-  useLibraryInbox,
-  withNames,
-} from "../inbox";
-import { useFeed, useSeenCursor, useTrailing } from "../live";
+import { useFeed, useTrailing } from "../live";
 import { Moment } from "../Moment";
 import { libraryLabel, type Role, useLibraries, useRole } from "../role";
 import { fileLabel, type OutlineFile } from "../Tree";
@@ -33,17 +16,14 @@ const READ = 20;
 /** How many pages Recently changed lists. */
 const RECENT = 5;
 
-/** The most events read for "Since you last looked" (one page of the ledger). */
-const SINCE_READ = 1000;
-
 /**
  * The library's home (take 4, TEMPRA-117, TEMPRA-121; tempra-dev: app/home): its title and
- * description, one quiet line (who works here, the page count, the guide), one line on what
- * changed since the person last looked, up to three of their open Inbox items here with the way
- * to the Inbox, and the pages changed most recently. No sections: the tree beside it lists the
- * folders (TEMPRA-138); no housekeeping, which is the agents' (TEMPRA-144). An empty library
- * shows how to connect an agent instead (to those who can). Each part loads on its own, so one that fails
- * leaves the rest (H-7). It does not move the seen cursor (Activity does).
+ * description, one quiet line (who works here, the page count, the guide), and the pages changed
+ * most recently. No sections: the tree beside it lists the folders (TEMPRA-138); no housekeeping,
+ * which is the agents' (TEMPRA-144); no notifications, which are the Inbox's, and no "since you
+ * last looked", which is Activity's to show when asked (TEMPRA-173). An empty library shows how to
+ * connect an agent instead (to those who can). Each part loads on its own, so one that fails
+ * leaves the rest (H-7).
  */
 export function Home({ urls }: { urls: Urls }) {
   const libs = useLibraries();
@@ -57,8 +37,6 @@ export function Home({ urls }: { urls: Urls }) {
   const role = useRole(urls);
   const actors = useActors(urls, me?.actor ?? null);
   const frame = useFrame();
-  const cursor = useSeenCursor(urls);
-  const seen = cursor.seen;
   const now = useNow();
   const loaded = useLoad(`home ${urls.base}`, async () => {
     const [summary, page] = await Promise.all([
@@ -81,29 +59,8 @@ export function Home({ urls }: { urls: Urls }) {
       ...m.members.map((x) => x.handle),
     ]),
   );
-  // What came in since the person last looked (the event at the cursor too, for its date).
-  const since = useLoad(`home since ${urls.base} ${seen}`, async () =>
-    seen === null
-      ? null
-      : api<{ events: LedgerEvent[]; next: number | null }>(
-          urls.api("events", { since: Math.max(0, seen - 1), limit: SINCE_READ }),
-        ),
-  );
-  const reloadAll = () => {
-    loaded.reload();
-    since.reload();
-  };
-  const reload = useTrailing(reloadAll, 1500);
+  const reload = useTrailing(loaded.reload, 1500);
   useFeed(urls, loaded.state === "ready" ? loaded.data.head : null, reload, reload);
-  const inbox = useLibraryInbox(`${urls.owner}/${urls.slug}`);
-  // A reply's item names its page by path; the tree's outline has its title.
-  const titles = useMemo(() => {
-    const out: PageTitles = {};
-    for (const f of frame.index ?? []) {
-      if (f.title) out[`${urls.owner}/${urls.slug} ${f.path}`] = f.title;
-    }
-    return out;
-  }, [frame.index, urls]);
   return (
     <PageColumn>
       <Status loaded={loaded}>
@@ -116,13 +73,9 @@ export function Home({ urls }: { urls: Urls }) {
           const you = handle !== null && (people?.includes(handle) ?? false);
           const agents = actors.contributors.filter((c) => c.agent).length;
           const guide = files?.some((f) => f.path === "guide.md" && f.kind === "concept");
-          // A first look: the page count goes on the line of what is here so far.
-          const firstLook = cursor.known && seen === null;
           const who =
             people === null ? null : whoWorksHere(you, people.length - (you ? 1 : 0), agents);
-          const meta = [who, firstLook ? null : plural(home.concepts, "page")].filter(
-            (p): p is string => p !== null,
-          );
+          const meta = [who, plural(home.concepts, "page")].filter((p): p is string => p !== null);
           const canWrite = role === "owner" || role === "write";
           return (
             <>
@@ -140,22 +93,6 @@ export function Home({ urls }: { urls: Urls }) {
                         </>
                       )}
                     </p>
-                  )}
-                  {!empty && firstLook && (
-                    <p className="view-meta home-since">
-                      {plural(home.concepts, "page")} so far ·{" "}
-                      <a href={urls.activity()}>See Activity</a>
-                    </p>
-                  )}
-                  {!empty && since.state === "ready" && since.data && seen !== null && (
-                    <SinceLine
-                      urls={urls}
-                      what={sinceYouLooked(since.data.events, seen, me?.actor ?? null, {
-                        more: since.data.next !== null,
-                      })}
-                      name={(a, by) => actors.view(a, by).name}
-                      now={now}
-                    />
                   )}
                 </div>
               </header>
@@ -180,17 +117,6 @@ export function Home({ urls }: { urls: Urls }) {
                       heading="Connect an agent"
                     />
                   )}
-                  {inbox.state === "ready" && (
-                    <ForYou urls={urls} inbox={inbox.data} titles={titles} />
-                  )}
-                  {inbox.state === "error" && (
-                    <p className="home-section view-meta home-failed">
-                      Couldn't load what's for you here.{" "}
-                      <button type="button" onClick={inbox.reload}>
-                        Retry
-                      </button>
-                    </p>
-                  )}
                   {files !== null && (
                     <RecentlyChanged
                       urls={urls}
@@ -205,104 +131,6 @@ export function Home({ urls }: { urls: Urls }) {
         }}
       </Status>
     </PageColumn>
-  );
-}
-
-// ---------------------------------------------------------------- since you last looked
-
-/** What came in since the person's seen cursor, as the home's one line tells it. */
-export interface SinceYouLooked {
-  /** When the person last looked (the event at their cursor), when the ledger has it. */
-  from: string | null;
-  /** Who changed things, in order of their first change: each actor once. */
-  who: { actor: string; by: ActedBy | null }[];
-  pages: number;
-  files: number;
-  comments: number;
-  /** More came in than was read: the counts are a floor. */
-  more: boolean;
-}
-
-const actedBy = (e: LedgerEvent): ActedBy | null => {
-  const by = e.meta?.by as ActedBy | undefined;
-  return typeof by?.person === "string" ? by : null;
-};
-
-/**
- * The events after `seen` (`GET …/events?since=seen-1`, so the one at the cursor dates the
- * line), by anyone but the person acting in the app themselves: the pages and files changed, the
- * comments, and who.
- */
-export function sinceYouLooked(
-  events: LedgerEvent[],
-  seen: number,
-  me: string | null,
-  opts: { more?: boolean } = {},
-): SinceYouLooked {
-  const at = events.find((e) => e.seq === seen);
-  const pages = new Set<string>();
-  const files = new Set<string>();
-  let comments = 0;
-  const who = new Map<string, { actor: string; by: ActedBy | null }>();
-  for (const e of events) {
-    if (e.seq <= seen) continue;
-    const by = actedBy(e);
-    if (me !== null && e.actor === me && !by?.agent) continue;
-    if (e.op === "verify") continue;
-    if (e.op === "comment") comments++;
-    else (e.path.endsWith(".md") ? pages : files).add(e.path);
-    const key = by?.agent ?? e.actor;
-    if (!who.has(key)) who.set(key, { actor: e.actor, by });
-  }
-  return {
-    from: at?.ts ?? null,
-    who: [...who.values()],
-    pages: pages.size,
-    files: files.size,
-    comments,
-    more: opts.more ?? false,
-  };
-}
-
-/** "Claude Code", "Claude Code and you", "Claude Code and 2 others". */
-const names = (list: string[]) =>
-  list.length <= 2 ? list.join(" and ") : `${list[0]} and ${list.length - 1} others`;
-
-/**
- * "Since yesterday: Claude Code changed 4 pages · See Activity"; nothing when nothing came in.
- * The when is the day the person last looked, in Activity's words.
- */
-export function SinceLine(props: {
-  urls: Urls;
-  what: SinceYouLooked;
-  name(actor: string, by: ActedBy | null): string;
-  now: number;
-}) {
-  const { what } = props;
-  const plus = what.more ? "+" : "";
-  const changed = [
-    what.pages > 0 && `${what.pages}${plus} ${what.pages === 1 && !plus ? "page" : "pages"}`,
-    what.files > 0 && plural(what.files, "file"),
-  ].filter(Boolean);
-  const clauses = [
-    changed.length > 0 && `changed ${changed.join(" and ")}`,
-    what.comments > 0 && `left ${plural(what.comments, "comment")}`,
-  ].filter(Boolean);
-  if (clauses.length === 0 || what.who.length === 0) return null;
-  const day = what.from === null ? null : dayLabel(what.from, props.now);
-  const when =
-    day === null
-      ? "Since you last looked"
-      : day === "Today"
-        ? "Since earlier today"
-        : day === "Yesterday"
-          ? "Since yesterday"
-          : `Since ${day}`;
-  const who = names(what.who.map((w) => props.name(w.actor, w.by)));
-  return (
-    <p className="view-meta home-since">
-      {when}: {who} {clauses.join(" and ")} · <a href={props.urls.activity()}>See Activity</a>
-    </p>
   );
 }
 
@@ -382,43 +210,6 @@ export function RecentlyChanged(props: {
 }
 
 // ---------------------------------------------------------------- for you, sections, foot
-
-/** The Inbox filtered to this library (TEMPRA-116 makes the filter work). */
-export const inboxHref = (urls: Urls) =>
-  `/inbox?library=${encodeURIComponent(urls.owner)}/${encodeURIComponent(urls.slug)}`;
-
-/**
- * For you here: up to three cards from the person's open Inbox items in this library, and "All n
- * in Inbox" (the same count the filtered Inbox shows); nothing when there is nothing.
- */
-export function ForYou(props: { urls: Urls; inbox: InboxPage; titles?: PageTitles }) {
-  const labels = useAgentLabels(props.inbox.items);
-  const cards: Card[] = forYouCards(withNames(props.inbox.items, labels), props.titles);
-  if (cards.length === 0) return null;
-  return (
-    <section className="home-section" aria-labelledby="home-for-you">
-      <div className="view-section-head">
-        <h2 id="home-for-you" className="view-section-title">
-          For you here
-        </h2>
-        <a className="view-aside" href={inboxHref(props.urls)}>
-          All {Math.max(props.inbox.open, cards.length)} in Inbox
-        </a>
-      </div>
-      <ul className="home-cards">
-        {cards.map((c) => (
-          <li key={c.key}>
-            <a className="home-card" href={c.href}>
-              <span className="home-card-kind">{c.kind}</span>
-              <span className="home-card-title">{c.title}</span>
-              {c.detail && <span className="home-card-detail">{c.detail}</span>}
-            </a>
-          </li>
-        ))}
-      </ul>
-    </section>
-  );
-}
 
 // ---------------------------------------------------------------- an empty library
 

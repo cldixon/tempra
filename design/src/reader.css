@@ -338,8 +338,12 @@
   grid-column: 3;
 }
 
+/* Its natural size within the stage (the width and height attributes only give its candidates'
+   proportions; nothing is beside it to move). */
 .lightbox-figure > img {
   display: block;
+  width: auto;
+  height: auto;
   max-width: 100%;
   max-height: 100%;
   object-fit: contain;

@@ -78,7 +78,7 @@ export function imageLint(doc: Doc): LintWarning[] {
     if (host) {
       out.push({
         code: "image_external",
-        message: `Image ${img.url} is hotlinked from ${host}; bring it into the library with \`attach\` and \`source_url\` (beside this concept), point the image at the attached path, and cite the original in \`sources\`.`,
+        message: `Image ${img.url} is hotlinked from ${host}; bring it into the library with \`attach\` and \`source_url: "${img.url}"\` (the server fetches it and records where from; put it beside this concept), point the image at the attached path, and cite the original in \`sources\`.`,
         target: img.url,
       });
     }
