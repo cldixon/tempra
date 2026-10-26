@@ -182,9 +182,8 @@ export function folderName(path: string) {
 }
 
 /** The account's Inbox: Open or Done, all libraries or one (`owner/slug`). */
-export function inboxUrl(opts: { done?: boolean; library?: string | null } = {}): string {
+export function inboxUrl(opts: { library?: string | null } = {}): string {
   const q = new URLSearchParams();
-  if (opts.done) q.set("done", "1");
   if (opts.library) q.set("library", opts.library);
   // The slash between owner and slug reads better left as it is.
   const s = q.toString().replace(/%2F/g, "/");

@@ -6,9 +6,8 @@ export type Route =
   | { page: "welcome" }
   | { page: "agents"; newToken: boolean; library: string | null }
   | { page: "account"; done: string | null }
-  | { page: "notifications" }
   | { page: "invitations" }
-  | { page: "inbox"; done: boolean; library: string | null }
+  | { page: "inbox"; library: string | null }
   /** A page that moved: the app replaces the URL with `to` (as the server answers with a 308). */
   | { page: "redirect"; to: string }
   | { page: "members"; owner: string; slug: string }
@@ -93,17 +92,12 @@ export function match(url: URL): Route | null {
     };
   }
   if (path === "/account") return { page: "account", done: q.get("done") };
-  if (path === "/notifications") return { page: "notifications" };
+  // Email settings are one switch on the Account page (TEMPRA-189).
+  if (path === "/notifications") return { page: "redirect", to: "/account#email" };
   if (path === "/invitations") return { page: "invitations" };
-  // The Inbox (take 4, TEMPRA-116): Open or Done (take 3's `?all=1` showed done ones too), all
-  // libraries or one.
-  if (path === "/inbox") {
-    return {
-      page: "inbox",
-      done: q.get("done") === "1" || q.get("all") === "1",
-      library: q.get("library")?.trim() || null,
-    };
-  }
+  // The Inbox (TEMPRA-116, TEMPRA-189): what waits, then Earlier; all libraries or one. Older
+  // links' `?done=1` and `?all=1` land on the same page.
+  if (path === "/inbox") return { page: "inbox", library: q.get("library")?.trim() || null };
   const m = /^\/([^/]+)\/([^/]+)\/(.*)$/.exec(path);
   if (!m) return null;
   const owner = decode(m[1] ?? "");

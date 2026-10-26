@@ -1,15 +1,10 @@
-/* ---------- The Inbox (take 4, boards 02 and 13; TEMPRA-116) ---------- */
+/* ---------- The Inbox (take 4, boards 02 and 13; TEMPRA-116; one state, TEMPRA-189) ---------- */
 
 /*
- * One list, newest first, between hairline rules: an unread dot in the gutter, the library, kind
- * and time on a quiet line, the title, the detail line and a quote, and the row's actions on the
- * right. Lines and greys only.
+ * What waits, newest first, between hairline rules: the library, kind and time on a quiet line,
+ * the title, the detail line and a quote, and the row's actions on the right. Then Earlier, the
+ * done items, their titles in the muted grey. Lines and greys only.
  */
-
-.inbox-filters .inbox-mark {
-  margin-left: auto;
-  color: var(--tempra-color-muted);
-}
 
 .inbox-list {
   margin: 0;
@@ -20,23 +15,11 @@
 
 .inbox-row {
   display: grid;
-  grid-template-columns: var(--tempra-space-4) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-items: start;
   gap: 0 var(--tempra-space-2);
   padding: var(--tempra-space-3) 0;
   border-bottom: 1px solid var(--tempra-color-border);
-}
-
-.inbox-dot {
-  justify-self: center;
-  width: var(--tempra-dot);
-  height: var(--tempra-dot);
-  margin-top: calc(var(--tempra-text-meta) * 0.6);
-  border-radius: 50%;
-}
-
-.inbox-row.unread .inbox-dot {
-  background: var(--tempra-color-text);
 }
 
 .inbox-main {
@@ -75,6 +58,19 @@
   text-decoration: underline;
 }
 
+.inbox-row.done .inbox-title a {
+  color: var(--tempra-color-muted);
+  font-weight: var(--tempra-weight-regular);
+}
+
+.inbox-earlier {
+  margin-top: var(--tempra-space-4);
+}
+
+.inbox-earlier .view-section-title {
+  margin-bottom: var(--tempra-space-2);
+}
+
 .inbox-detail {
   color: var(--tempra-color-muted);
 }
@@ -95,11 +91,10 @@
 
 @media (max-width: 900px) {
   .inbox-row {
-    grid-template-columns: var(--tempra-space-4) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .inbox-actions {
-    grid-column: 2;
     justify-content: flex-start;
     margin-top: var(--tempra-space-2);
   }

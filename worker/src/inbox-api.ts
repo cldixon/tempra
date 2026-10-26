@@ -61,8 +61,8 @@ export function registerInboxApi(
     return lib;
   };
 
-  // The Inbox (take 4, TEMPRA-116): open items, `?done=1` the Done tab, `?all=1` both;
-  // `?library=<owner>/<slug>` one library's. Each item says what the Inbox draws: its library's
+  // The Inbox (TEMPRA-116, TEMPRA-189): open items, `?done=1` done ones (its Earlier list),
+  // `?all=1` both; `?library=<owner>/<slug>` one library's. Each item says what the Inbox draws: its library's
   // name and title, the page's title, who did it (an agent by its name) and the actions it takes.
   app.get("/api/v1/inbox", async (c) => {
     const { d, n, user } = await person(c);
@@ -72,16 +72,13 @@ export function registerInboxApi(
       d.accounts.reachable(user.id),
       named ? reachableNamed(d, user, named) : Promise.resolve(null),
     ]);
-    const [page, unread] = await Promise.all([
-      n.inbox(user.id, {
-        all: c.req.query("all") === "1",
-        done: c.req.query("done") === "1",
-        library: filter?.id,
-        before: c.req.query("before") || undefined,
-        limit,
-      }),
-      n.unread(user.id),
-    ]);
+    const page = await n.inbox(user.id, {
+      all: c.req.query("all") === "1",
+      done: c.req.query("done") === "1",
+      library: filter?.id,
+      before: c.req.query("before") || undefined,
+      limit,
+    });
     const byId = new Map(libs.map((l) => [l.id, l]));
     const agentIds = [...new Set(page.items.flatMap((i) => (i.by_agent ? [i.by_agent] : [])))];
     const [agents, invitations] = await Promise.all([
@@ -109,31 +106,17 @@ export function registerInboxApi(
         };
       }),
       next: page.next,
-      unread: unread.total,
       open: page.open,
     });
   });
 
-  // The avatar's count; cheap enough to ask on every page.
+  // The bell's count: what waits (one state, TEMPRA-189); cheap enough to ask on every page.
   app.get("/api/v1/inbox/count", async (c) => {
     const { n, user } = await person(c);
-    return c.json({ unread: (await n.unread(user.id)).total });
+    return c.json({ open: await n.openCount(user.id) });
   });
 
-  app.post("/api/v1/inbox/read", async (c) => {
-    const { d, n, user } = await person(c);
-    const b = await body<{ ids: unknown; library: unknown }>(c);
-    let library: string | undefined;
-    if (typeof b.library === "string" && b.library) {
-      // By {owner}/{slug}, among the libraries the person reaches.
-      library = (await reachableNamed(d, user, b.library)).id;
-    }
-    const ids = Array.isArray(b.ids)
-      ? b.ids.filter((x): x is string => typeof x === "string")
-      : undefined;
-    return c.json({ read: await n.markRead(user.id, { ids, library }) });
-  });
-
+  // Done: the person opened the item (or, by hand, set it aside).
   app.post("/api/v1/inbox/:id/done", async (c) => {
     const { n, user } = await person(c);
     const b = await body<{ done: unknown }>(c);
@@ -144,40 +127,19 @@ export function registerInboxApi(
 
   // ------------------------------------------------------------------ mail settings
 
+  // One switch (TEMPRA-189): mentions and replies by email, or not. Invitations always mail.
   app.get("/api/v1/account/notifications", async (c) => {
-    const { d, n, user } = await person(c);
-    const [prefs, libs] = await Promise.all([n.prefs(user.id), d.accounts.reachable(user.id)]);
-    const own = new Map(prefs.libraries.map((l) => [l.library, l]));
-    return c.json({
-      immediate: prefs.immediate,
-      digest: prefs.digest,
-      libraries: libs.map((l) => ({
-        library: `${l.owner}/${l.slug}`,
-        immediate: own.get(l.id)?.immediate ?? null,
-        digest: own.get(l.id)?.digest ?? null,
-      })),
-    });
+    const { n, user } = await person(c);
+    return c.json(await n.prefs(user.id));
   });
 
   app.put("/api/v1/account/notifications", async (c) => {
-    const { d, n, user } = await person(c);
-    const b = await body<{ library: unknown; immediate: unknown; digest: unknown }>(c);
-    const setting = (v: unknown, k: string) => {
-      if (v === undefined || v === null || typeof v === "boolean") return v as boolean | null;
-      throw new OkfError(400, "bad_request", `\`${k}\` is true, false or null.`);
-    };
-    let library = "";
-    if (typeof b.library === "string" && b.library) {
-      const lib = (await d.accounts.reachable(user.id)).find(
-        (l) => `${l.owner}/${l.slug}` === b.library,
-      );
-      if (!lib) throw new OkfError(404, "no_library", `There is no library ${b.library}.`);
-      library = lib.id;
+    const { n, user } = await person(c);
+    const b = await body<{ email: unknown }>(c);
+    if (typeof b.email !== "boolean") {
+      throw new OkfError(400, "bad_request", "Send { email: true } or { email: false }.");
     }
-    await n.setPrefs(user.id, library, {
-      immediate: setting(b.immediate, "immediate"),
-      digest: setting(b.digest, "digest"),
-    });
+    await n.setPrefs(user.id, { email: b.email });
     return c.body(null, 204);
   });
 
@@ -185,7 +147,7 @@ export function registerInboxApi(
 
   const unsubscribed = () =>
     html(
-      "<h1>Unsubscribed</h1><p>You get no more notification mail from Tempra. Turn it back on from your Account page.</p>",
+      "<h1>Unsubscribed</h1><p>You get no more notification email from Tempra. Turn it back on in the Email section of your Account page.</p>",
       200,
       {},
       "Unsubscribed",

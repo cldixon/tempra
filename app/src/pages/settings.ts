@@ -10,7 +10,6 @@ export { default as DeleteLibrary } from "./DeleteLibrary.svelte";
 export { default as General } from "./General.svelte";
 export { default as Invitations } from "./Invitations.svelte";
 export { default as Members } from "./Members.svelte";
-export { default as Notifications } from "./Notifications.svelte";
 export { default as Recovery } from "./Recovery.svelte";
 export { default as Restore } from "./Restore.svelte";
 export { default as Revert } from "./Revert.svelte";

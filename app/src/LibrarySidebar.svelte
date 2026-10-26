@@ -1,6 +1,5 @@
 <script lang="ts">
   import type { Place } from "./frame";
-  import { useUnread } from "./inbox.svelte.ts";
   import NavRow from "./NavRow.svelte";
   import Tree from "./Tree.svelte";
   import type { OutlineFile } from "./tree";
@@ -8,7 +7,7 @@
 
   /**
    * The library's sidebar (TEMPRA-145): the files, then a fixed foot of the library's tools,
-   * Activity and Settings (and on a phone the Inbox). Home is the library's name in the bar.
+   * Activity and Settings. Home is the library's name in the bar; the Inbox is the bell's.
    */
   let props: {
     urls: Urls;
@@ -18,7 +17,6 @@
     failed: boolean;
     onRetry(): void;
   } = $props();
-  const unread = useUnread();
 </script>
 
 <div class="sidebar-scroll">
@@ -39,5 +37,4 @@
     label="Activity"
   />
   <NavRow href={props.urls.settings()} icon="settings" label="Settings" />
-  <NavRow href="/inbox" icon="inbox" label="Inbox" className="phone-only" unread={unread.current} />
 </nav>

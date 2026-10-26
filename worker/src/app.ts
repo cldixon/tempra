@@ -18,7 +18,7 @@ import {
 } from "./client";
 import { type FetchFn, fetchBlob } from "./fetch-source";
 import type { Images } from "./images";
-import { notificationsOf, registerInboxApi } from "./inbox-api";
+import { registerInboxApi } from "./inbox-api";
 import { registerLegalRoutes } from "./legal";
 import { deleteLibrary } from "./lifecycle";
 import { type Notifications, notifying, postComment } from "./notify";
@@ -199,14 +199,6 @@ async function within<T>(ms: number, run: () => Promise<T>): Promise<T> {
     if (timer !== undefined) clearTimeout(timer);
   }
 }
-
-/** A catch that logs and answers `fallback`, for a part a page can do without. */
-const logged =
-  <T>(what: string, fallback: T) =>
-  (e: unknown): T => {
-    console.error(what, e);
-    return fallback;
-  };
 
 function etag(header: string | undefined): string | null {
   if (!header) return null;
@@ -1130,46 +1122,6 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     return c.body(null, 204);
   });
 
-  // ------------------------------------------------------------------ read state and tally
-
-  // "Seen up to seq N" (TEMPRA-72): the person's cursor in this library, on the server so it
-  // follows them across devices. It only moves forward.
-  app.get(`${BASE}/seen`, async (c) => {
-    sessionOnly(c, "Read state is kept");
-    const n = notificationsOf(c.var.deps);
-    const seen = await n.seen(c.var.token.created_by ?? "");
-    return c.json({ seq: seen[c.var.token.library.id] ?? null });
-  });
-
-  app.put(`${BASE}/seen`, async (c) => {
-    sessionOnly(c, "Read state is kept");
-    const seq = (await json<{ seq?: unknown }>(c)).seq;
-    if (typeof seq !== "number" || !Number.isInteger(seq) || seq < 0) {
-      throw new OkfError(400, "bad_request", "Send { seq: <ledger sequence> }.");
-    }
-    const n = notificationsOf(c.var.deps);
-    return c.json({
-      seq: await n.setSeen(c.var.token.created_by ?? "", c.var.token.library.id, seq),
-    });
-  });
-
-  // The library's tally for the person (TEMPRA-72): changes by others since they last looked,
-  // and unread items for them here. One call to the library and one to D1.
-  app.get(`${BASE}/tally`, async (c) => {
-    sessionOnly(c, "The tally is read");
-    const n = notificationsOf(c.var.deps);
-    const user = c.var.token.created_by ?? "";
-    const [seen, unread] = await Promise.all([n.seen(user), n.unread(user)]);
-    const since = seen[c.var.token.library.id] ?? null;
-    const activity = await c.var.lib.activity({ since: since ?? 0, person: user });
-    return c.json({
-      seen: since,
-      head: activity.head,
-      changes: since === null ? 0 : activity.changes,
-      for_you: unread.libraries[c.var.token.library.id] ?? 0,
-    });
-  });
-
   // ------------------------------------------------------------------ signed downloads
 
   /** Short-lived download URLs for exports and attachments; the signature is the credential. */
@@ -1293,16 +1245,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   app.get("/api/v1/libraries", async (c) => {
     const { d, user } = await human(c);
     const refs = await d.accounts.reachable(user.id);
-    // The tally (TEMPRA-72): unread items and cursors from D1 in one go; changes since the
-    // cursor ride on the summary call each library already gets. Each part fails on its own
-    // (TEMPRA-23): without them the list still names every library.
-    const n = d.notifications;
-    const [seen, unread] = await Promise.all([
-      n
-        ? n.seen(user.id).catch(logged("seen", {} as Record<string, number>))
-        : ({} as Record<string, number>),
-      n ? n.unread(user.id).catch(logged("unread", null)) : null,
-    ]);
+    // Each library's summary fails on its own (TEMPRA-23): without it the list still names it.
     const libraries = await Promise.all(
       refs.map(async ({ id, slug, owner, do_id, role, title, description }) => {
         const row = {
@@ -1313,13 +1256,12 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
           ...(title ? { title } : {}),
           ...(description ? { description } : {}),
         };
-        const since = seen[id];
         let s: Awaited<ReturnType<LibraryClient["summary"]>>;
         try {
           s = await within(SUMMARY_MS, async () => {
             const lib = await d.libraryByDoId(do_id);
             if (!lib) throw new Error("no library object");
-            return lib.summary(since === undefined ? undefined : { since, person: user.id });
+            return lib.summary();
           });
         } catch (e) {
           // One library that fails (an error, a restart, too slow) is listed as unavailable,
@@ -1327,17 +1269,12 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
           console.error("library summary", `${owner}/${slug}`, e);
           return { ...row, unavailable: true };
         }
-        const forYou = unread ? (unread.libraries[id] ?? 0) : undefined;
         return {
           ...row,
           seq: s.seq,
           concepts: s.concepts,
           attachments: s.attachments,
           open_work: s.open_work,
-          tally: {
-            changes: s.activity?.changes ?? 0,
-            ...(forYou === undefined ? {} : { for_you: forYou }),
-          },
           health: s.health,
         };
       }),

@@ -342,16 +342,11 @@ export function registerUiRoutes<E extends AppEnv>(
     }
     return shell(p);
   });
-  for (const path of [
-    "/welcome",
-    "/agents",
-    "/account",
-    "/notifications",
-    "/invitations",
-    "/inbox",
-  ]) {
+  for (const path of ["/welcome", "/agents", "/account", "/invitations", "/inbox"]) {
     get(path, shell);
   }
+  // Email settings are one switch on the Account page (TEMPRA-189).
+  app.get("/notifications", (c) => c.redirect("/account#email", 301));
   // Agents (2026-10-23) took the place of Connect an agent, Tokens and Connected apps; a link to
   // a library's tokens opens New token for it.
   for (const path of ["/connect", "/tokens", "/apps"]) {

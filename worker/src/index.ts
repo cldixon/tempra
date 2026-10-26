@@ -10,7 +10,7 @@ import { type Library, refuseFeed } from "./library";
 import { DEFAULT_STORAGE_MB } from "./limits";
 import { exportsPrefix, listExports } from "./maintain";
 import { d1Notifications } from "./notify";
-import { devMailer, flushMail, sendDigests } from "./notify-mail";
+import { devMailer, flushMail } from "./notify-mail";
 import { listRestores, RESTORE_ID, restoresPrefix } from "./recovery";
 import { type RenderService, serviceRenderer } from "./render";
 import { d1Sessions } from "./session";
@@ -245,7 +245,8 @@ export default {
 
   /**
    * The crons in cloudflare.config.ts: every 5 minutes the batched notification mail (TEMPRA-74);
-   * daily the blob sweep, the operator digest and people's digests (v2 spec: A3).
+   * daily the blob sweep and the operator digest (v2 spec: A3). People's digests went with
+   * TEMPRA-189.
    */
   async scheduled(controller, env) {
     // Local dev (DEV_SIGNIN=1) keeps notification mail in the dev outbox (/_dev/mail).
@@ -261,16 +262,6 @@ export default {
       if (sent.mails || sent.skipped) console.log(JSON.stringify({ notify_mail: sent }));
       return;
     }
-    const digests = await sendDigests({
-      ...mail,
-      digest: (doId, since) => {
-        const stub = libraryStub(env, doId);
-        return makeClient((method, args) => stub.call(method, args)).digest({ since });
-      },
-    }).catch((e) => {
-      console.error(JSON.stringify({ digests_failed: String(e) }));
-      return null;
-    });
     const result = await sweep({
       refs: d1BlobRefs(env.DB),
       queue: sweepQueue(env),
@@ -300,7 +291,7 @@ export default {
     const failed = await mail.notifications.failures(yesterday);
     if (failed)
       result.attention.push(`${failed} notification mails failed to send on ${yesterday}`);
-    console.log(JSON.stringify({ sweep: result, digests }));
+    console.log(JSON.stringify({ sweep: result }));
     const mailer = mailerFor(env);
     if (result.attention.length && env.OPERATOR_EMAIL && mailer) {
       await mailer.send({

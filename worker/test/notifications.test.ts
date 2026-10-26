@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { resolveMentions } from "../src/notify";
-import { composeBatch, flushMail, MAX_WAIT_MS, QUIET_MS, sendDigests } from "../src/notify-mail";
+import { composeBatch, flushMail, MAX_WAIT_MS, QUIET_MS } from "../src/notify-mail";
 import { API, LIB, ORIGIN, OWNER, setup } from "./harness";
 
 type S = ReturnType<typeof setup>;
@@ -36,7 +36,7 @@ interface InboxItem {
 async function inbox(app: App, all = false) {
   const r = await call(app, `/api/v1/inbox${all ? "?all=1" : ""}`);
   expect(r.status).toBe(200);
-  return (await r.json()) as { items: InboxItem[]; unread: number };
+  return (await r.json()) as { items: InboxItem[]; open: number };
 }
 
 /** The owner's library, shared with a friend at `role`; plus an agent token of the owner's. */
@@ -107,8 +107,8 @@ describe("mentions (TEMPRA-73)", () => {
       thread: { id: string; comments: { mentions?: string[] }[] };
     };
     expect(thread.comments[0]?.mentions).toEqual(["@owner"]);
-    const { items, unread } = await inbox(s.app);
-    expect(unread).toBe(1);
+    const { items, open } = await inbox(s.app);
+    expect(open).toBe(1);
     expect(items[0]).toMatchObject({
       kind: "mention",
       place: "owner/demo",
@@ -226,7 +226,7 @@ describe("the inbox (TEMPRA-72)", () => {
     expect((await inbox(friend.app)).items).toHaveLength(1);
   });
 
-  test("read, done, the count, and read state that sticks", async () => {
+  test("one state: an item is done once opened; the count is what waits (TEMPRA-189)", async () => {
     const { s, friend } = await shared();
     await write(s.app, "a.md");
     const id = await open(s.app, "a.md", "One");
@@ -234,28 +234,26 @@ describe("the inbox (TEMPRA-72)", () => {
     await call(friend.app, `${API}/comments/${id}`, "POST", { body: "reply 2" });
     const { items } = await inbox(s.app);
     expect(items.map((i) => i.excerpt)).toEqual(["reply 2", "reply 1"]);
-    expect((await (await call(s.app, "/api/v1/inbox/count")).json()) as unknown).toEqual({
-      unread: 2,
-    });
+    const count = async () => (await (await call(s.app, "/api/v1/inbox/count")).json()) as unknown;
+    expect(await count()).toEqual({ open: 2 });
 
+    // Opening one marks it done: it leaves what waits and joins Earlier (`?done=1`).
     const [newest, oldest] = items;
-    let r = await call(s.app, "/api/v1/inbox/read", "POST", { ids: [newest?.id] });
-    expect((await r.json()) as unknown).toEqual({ read: 1 });
-    expect((await (await call(s.app, "/api/v1/inbox/count")).json()) as unknown).toEqual({
-      unread: 1,
-    });
-    r = await call(s.app, `/api/v1/inbox/${oldest?.id}/done`, "POST");
-    expect(r.status).toBe(200);
-    // Done leaves the inbox; read stays, marked read.
+    expect((await call(s.app, `/api/v1/inbox/${oldest?.id}/done`, "POST")).status).toBe(200);
+    expect(await count()).toEqual({ open: 1 });
     const after = await inbox(s.app);
     expect(after.items.map((i) => i.excerpt)).toEqual(["reply 2"]);
-    expect(after.items[0]?.read_at).not.toBeNull();
-    expect(after.unread).toBe(0);
+    expect(after.open).toBe(1);
+    const earlier = (await (await call(s.app, "/api/v1/inbox?done=1")).json()) as {
+      items: InboxItem[];
+    };
+    expect(earlier.items.map((i) => i.id)).toEqual([String(oldest?.id)]);
+    expect(earlier.items[0]?.done_at).not.toBeNull();
     expect((await inbox(s.app, true)).items).toHaveLength(2);
-    // Another person's item is theirs alone.
+    void newest;
+    // Another person's item is theirs alone; there is no read state to mark any more.
     expect((await call(friend.app, `/api/v1/inbox/${oldest?.id}/done`, "POST")).status).toBe(404);
-    r = await call(s.app, "/api/v1/inbox/read", "POST", { library: "owner/demo" });
-    expect(r.status).toBe(200);
+    expect((await call(s.app, "/api/v1/inbox/read", "POST", {})).status).toBe(404);
     // Tokens never read the inbox.
     expect(
       (await s.anon.request("/api/v1/inbox", { headers: { Authorization: "Bearer human" } }))
@@ -285,9 +283,8 @@ describe("the inbox (TEMPRA-72)", () => {
     expect((await inbox(friend.app)).items).toEqual([]);
   });
 
-  // The Inbox page's calls (TEMPRA-130): Mark all read on a filtered list, Accept from a row,
-  // and the library's open items, which its home's For you here draws.
-  test("Mark all read on one library's items leaves another library's unread", async () => {
+  // The Inbox page's calls (TEMPRA-130): the library filter, Accept from a row.
+  test("the library filter lists one library's items", async () => {
     const { s, friend } = await shared();
     // The friend's thread on the owner's library, answered by the owner: a reply in owner/demo.
     await write(s.app, "a.md");
@@ -306,16 +303,13 @@ describe("the inbox (TEMPRA-72)", () => {
       (await call(s.app, `${theirs}/comments`, "POST", { path: "b.md", body: "@friend Hello" }))
         .status,
     ).toBe(201);
-    const before = (await inbox(friend.app)).items;
-    expect(before.map((i) => i.kind).sort()).toEqual(["mention", "reply"]);
-
-    const r = await call(friend.app, "/api/v1/inbox/read", "POST", { library: "owner/demo" });
-    expect((await r.json()) as unknown).toEqual({ read: 1 });
-    const after = await inbox(friend.app);
-    const byKind = Object.fromEntries(after.items.map((i) => [i.kind, i.read_at]));
-    expect(byKind.reply).not.toBeNull();
-    expect(byKind.mention).toBeNull();
-    expect(after.unread).toBe(1);
+    expect((await inbox(friend.app)).items.map((i) => i.kind).sort()).toEqual(["mention", "reply"]);
+    const one = (await (await call(friend.app, "/api/v1/inbox?library=owner/demo")).json()) as {
+      items: InboxItem[];
+      open: number;
+    };
+    expect(one.items.map((i) => i.kind)).toEqual(["reply"]);
+    expect(one.open).toBe(1);
   });
 
   test("accepting from the Inbox row adds the library; a dismissed item leaves the library's list", async () => {
@@ -355,47 +349,15 @@ describe("the inbox (TEMPRA-72)", () => {
     expect(left.open).toBe(listed.open - 1);
   });
 
-  test("the tally: changes by others since the cursor, and items for you", async () => {
-    const { s, friend, agent } = await shared();
-    await write(s.app, "a.md");
-    // Never looked: no cursor, so nothing counts as new yet.
-    let t = await (await call(s.app, `${API}/tally`)).json();
-    expect(t).toMatchObject({ seen: null, changes: 0, for_you: 0 });
-    const head = (t as { head: number }).head;
-    expect(
-      (await (await call(s.app, `${API}/seen`, "PUT", { seq: head })).json()) as unknown,
-    ).toEqual({
-      seq: head,
-    });
-    // The owner's own writes in the app are not news; their agent's and the friend's are.
-    await write(s.app, "b.md");
-    await write(friend.app, "c.md");
-    await s.req("/files/d.md", {
-      method: "PUT",
-      token: agent,
-      headers: { "Content-Type": "text/markdown" },
-      body: doc("d"),
-    });
-    const id = await open(friend.app, "a.md", "@owner look");
-    t = await (await call(s.app, `${API}/tally`)).json();
-    expect(t).toMatchObject({ seen: head, changes: 2, for_you: 1 });
-    void id;
-    // The cursor never goes back, and the same numbers ride on the library list.
-    expect((await (await call(s.app, `${API}/seen`, "PUT", { seq: 1 })).json()) as unknown).toEqual(
-      {
-        seq: head,
-      },
-    );
+  test("no read cursor or tally any more (TEMPRA-189)", async () => {
+    const { s } = await shared();
+    for (const path of ["seen", "tally"]) {
+      expect((await call(s.app, `${API}/${path}`)).status).toBe(404);
+    }
     const list = (await (await call(s.app, "/api/v1/libraries")).json()) as {
-      libraries: { slug: string; owner: string; tally: { changes: number; for_you: number } }[];
+      libraries: Record<string, unknown>[];
     };
-    expect(list.libraries.find((l) => l.owner === "owner")?.tally).toEqual({
-      changes: 2,
-      for_you: 1,
-    });
-    expect((await call(friend.app, `${API}/seen`)).status).toBe(200);
-    // Agents have no read state.
-    expect((await s.req("/seen")).status).toBe(403);
+    expect(list.libraries.every((l) => !("tally" in l))).toBe(true);
   });
 });
 
@@ -454,7 +416,7 @@ describe("notification mail (TEMPRA-74)", () => {
     expect(await r.text()).toContain("Unsubscribed");
     expect((await s.anon.request("/unsubscribe?k=0000", { method: "POST" })).status).toBe(404);
     const prefs = await (await call(s.app, "/api/v1/account/notifications")).json();
-    expect(prefs).toMatchObject({ immediate: false, digest: false });
+    expect(prefs).toEqual({ email: false });
   });
 
   test("a batch goes after the longest wait even while replies keep coming", async () => {
@@ -462,71 +424,40 @@ describe("notification mail (TEMPRA-74)", () => {
     expect(await flush(s, new Date(Date.now() + MAX_WAIT_MS + 1000))).toMatchObject({ mails: 1 });
   });
 
-  test("read items, mail turned off, and the daily cap are respected", async () => {
+  test("items opened in the app, the email switch off, and the daily cap are respected", async () => {
     const { s } = await replies(2);
     const later = new Date(Date.now() + QUIET_MS + 1000);
-    // Read in the app first: not mailed.
-    await call(s.app, "/api/v1/inbox/read", "POST", {});
+    // Opened in the app first: done, not mailed.
+    for (const i of (await inbox(s.app)).items) {
+      await call(s.app, `/api/v1/inbox/${i.id}/done`, "POST");
+    }
     expect(await flush(s, later)).toMatchObject({ mails: 0, skipped: 2 });
 
-    // Off for this library only: skipped; on for the account still.
-    const { s: s2, friend } = await replies(1);
+    // The one switch (TEMPRA-189), on by default: off, the batch is skipped.
+    const { s: s2 } = await replies(1);
+    expect((await (await call(s2.app, "/api/v1/account/notifications")).json()) as unknown).toEqual(
+      {
+        email: true,
+      },
+    );
     expect(
-      (
-        await call(s2.app, "/api/v1/account/notifications", "PUT", {
-          library: "owner/demo",
-          immediate: false,
-        })
-      ).status,
+      (await call(s2.app, "/api/v1/account/notifications", "PUT", { email: false })).status,
     ).toBe(204);
-    const prefs = (await (await call(s2.app, "/api/v1/account/notifications")).json()) as {
-      immediate: boolean;
-      libraries: { library: string; immediate: boolean | null; digest: boolean | null }[];
-    };
-    expect(prefs.immediate).toBe(true);
-    expect(prefs.libraries).toEqual([{ library: "owner/demo", immediate: false, digest: null }]);
+    expect(
+      (await call(s2.app, "/api/v1/account/notifications", "PUT", { email: "no" })).status,
+    ).toBe(400);
+    expect((await (await call(s2.app, "/api/v1/account/notifications")).json()) as unknown).toEqual(
+      {
+        email: false,
+      },
+    );
     expect(await flush(s2, later)).toMatchObject({ mails: 0, skipped: 1 });
-    void friend;
 
     // The cap: the day's slots taken, the batch is skipped, not held.
     const { s: s3 } = await replies(1);
     for (let i = 0; i < 20; i++)
       await s3.notifications.takeMailSlot(OWNER.id, later.toISOString().slice(0, 10));
     expect(await flush(s3, later)).toMatchObject({ mails: 0, skipped: 1 });
-  });
-
-  test("the digest is opt-in, per library, and only when something happened", async () => {
-    const { s, friend } = await replies(1);
-    const digestDeps = {
-      accounts: s.accounts,
-      notifications: s.notifications,
-      mailer: s.deps.mailer ?? null,
-      origin,
-      now: new Date(Date.now() + 1000),
-      digest: async (doId: string, since: string) => {
-        const lib = await s.deps.libraryByDoId(doId);
-        if (!lib) throw new Error("no library");
-        return lib.digest({ since });
-      },
-    };
-    const before = s.outbox.length;
-    expect(await sendDigests(digestDeps)).toEqual({ mails: 0, people: 0 });
-    await call(s.app, "/api/v1/account/notifications", "PUT", { digest: true });
-    expect(await sendDigests(digestDeps)).toEqual({ mails: 1, people: 1 });
-    const m = s.outbox.slice(before)[0];
-    expect(m?.subject).toBe("Tempra digest: 1 library");
-    expect(m?.text).toContain("owner/demo");
-    expect(m?.text).toContain("1 thread opened, 0 resolved");
-    // The health summary (TEMPRA-66): the open thread, and the concept nobody has verified.
-    expect(m?.text).toMatch(/Now: .*1 open comment\b/);
-    expect(m?.text).toMatch(/Now: .*1 unverified/);
-    expect(m?.headers?.["List-Unsubscribe"]).toContain("/unsubscribe?k=");
-    // Since the last digest, nothing new: no mail.
-    expect(await sendDigests({ ...digestDeps, now: new Date(Date.now() + 2000) })).toEqual({
-      mails: 0,
-      people: 1,
-    });
-    void friend;
   });
 
   test("a single item's subject names who and where", () => {

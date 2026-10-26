@@ -1001,12 +1001,6 @@ a.button.pill-button {
   white-space: nowrap;
 }
 
-.nav-count {
-  color: var(--tempra-color-muted);
-  font-size: var(--tempra-text-meta);
-  font-variant-numeric: tabular-nums;
-}
-
 .nav-row.person {
   padding-left: 8px;
 }

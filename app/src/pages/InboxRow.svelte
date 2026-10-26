@@ -8,14 +8,18 @@
     itemQuote,
     itemTitle,
     kindLabel,
-    markRead,
+    markDone,
     type PageTitles,
   } from "../inbox";
   import LibraryTile from "../LibraryTile.svelte";
   import Moment from "../Moment.svelte";
   import { urlsOf } from "../urls";
 
-  /** One item: its library, kind and time; the title; the detail line, a quote; its actions. */
+  /**
+   * One item: its library, kind and time; the title; the detail line, a quote; its actions. While
+   * it waits, following it (its title, Reply) marks it done (one state, TEMPRA-189); a done item
+   * is drawn quieter, under Earlier.
+   */
   let {
     item: i,
     titles,
@@ -40,13 +44,13 @@
     | { label: string; primary: boolean; href: string }
     | { label: string; primary: boolean; onclick: () => void };
 
-  const unread = $derived(i.read_at === null && i.done_at === null);
+  const waiting = $derived(i.done_at === null);
   const urls = $derived(urlsOf(i.library));
   const href = $derived(itemHref(i));
   const quote = $derived(itemQuote(i));
-  // Following an item, or acting on it, reads it.
-  const read = () => {
-    if (i.read_at === null) void markRead([i.id]);
+  // Following a waiting item (into its thread) is seeing it: it is done.
+  const opened = () => {
+    if (i.done_at === null && i.kind !== "invitation") void markDone(i.id);
   };
   const ownLibrary = $derived(me !== null && urls.owner === me);
   const name = $derived(itemLibrary(i, me));
@@ -72,21 +76,16 @@
   });
 </script>
 
-<li class={unread ? "inbox-row unread" : "inbox-row"}>
-  <span class="inbox-dot" aria-hidden="true"></span>
-  {#if unread}<span class="visually-hidden">{"Unread: "}</span>{/if}
+<li class={waiting ? "inbox-row" : "inbox-row done"}>
   <div class="inbox-main">
     <p class="inbox-meta"><LibraryTile name={i.library_title || urls.slug} shared={!ownLibrary} /><span>{name}</span><span aria-hidden="true">·</span><span>{kindLabel(i)}</span><span aria-hidden="true">·</span><Moment ts={i.created} /></p>
-    <p class="inbox-title"><a {href} onclick={read}>{itemTitle(i, titles)}</a></p>
+    <p class="inbox-title"><a {href} onclick={opened}>{itemTitle(i, titles)}</a></p>
     <p class="inbox-detail">{itemDetail(i)}</p>
     {#if quote}
       <blockquote class="inbox-quote">{quote}</blockquote>
     {/if}
   </div>
   {#if actions.length > 0}
-    <!-- A click bubbling up from an action (a link or a button) reads the item, once; the actions
-      take the keys. -->
-    <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
-    <div class="inbox-actions" onclick={read}>{#each actions as a}{#if "href" in a}<a class={a.primary ? "button primary" : "button"} href={a.href}>{a.label}</a>{:else}<button type="button" class={a.primary ? "primary" : undefined} disabled={busy} onclick={a.onclick}>{a.label}</button>{/if}{/each}</div>
+    <div class="inbox-actions">{#each actions as a}{#if "href" in a}<a class={a.primary ? "button primary" : "button"} href={a.href} onclick={opened}>{a.label}</a>{:else}<button type="button" class={a.primary ? "primary" : undefined} disabled={busy} onclick={a.onclick}>{a.label}</button>{/if}{/each}</div>
   {/if}
 </li>

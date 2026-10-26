@@ -1,8 +1,7 @@
 import type { Me } from "../ui";
 
 /*
- * The account's pages (TEMPRA-14; take 4): first run, Agents, Invitations, Account and
- * Notifications. The pure parts they share; each page is its own component beside this file.
+ * The account's pages (TEMPRA-14; take 4): first run, Agents, Invitations and Account. The pure parts they share; each page is its own component beside this file.
  */
 
 /** The landing page's legal pages (TEMPRA-14). */
@@ -98,12 +97,7 @@ export const DONE: Record<string, string> = {
 
 // ---------------------------------------------------------------- notification mail
 
+/** The one email switch (TEMPRA-189): mentions and replies by email, or not. */
 export interface MailPrefs {
-  immediate: boolean;
-  digest: boolean;
-  libraries: { library: string; immediate: boolean | null; digest: boolean | null }[];
+  email: boolean;
 }
-
-/** A library's setting as the select shows it: following the account, on or off. */
-export const choice = (v: boolean | null) => (v === null ? "" : v ? "on" : "off");
-export const fromChoice = (v: string) => (v === "" ? null : v === "on");

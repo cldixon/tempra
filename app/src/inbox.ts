@@ -1,11 +1,12 @@
 import { actorAgentName, readableName } from "./agents";
-import { api } from "./api";
+import { post } from "./api";
 import { libraryLabel } from "./role";
 import { urlsOf } from "./urls";
 
 /*
- * The Inbox's items and count (TEMPRA-72; take 4, TEMPRA-116), shared by the bell and the Inbox
- * page. Kept apart from the page so the chrome can show it without importing pages.
+ * The Inbox's items and count (TEMPRA-72; take 4, TEMPRA-116; one state, TEMPRA-189), shared by
+ * the bell and the Inbox page. An item is open until it is done: opened, or answered. Kept apart
+ * from the page so the chrome can show it without importing pages.
  */
 
 /** What a person is told of (TEMPRA-173): an invitation, a mention and a reply, nothing else. */
@@ -30,7 +31,6 @@ export interface InboxItem {
   /** `invitation`: the invitation to accept or decline, while it is open. */
   invitation: string | null;
   created: string;
-  read_at: string | null;
   done_at: string | null;
   /** What the row offers: reply, resolve, open, accept, decline. */
   actions: string[];
@@ -40,7 +40,6 @@ export interface InboxItem {
 export interface InboxPage {
   items: InboxItem[];
   next: string | null;
-  unread: number;
   open: number;
 }
 
@@ -51,26 +50,11 @@ export const inboxChanged = (): void => {
   window.dispatchEvent(new Event(INBOX_EVENT));
 };
 
-/**
- * Marks items read (these ids, or all of them, or all of one library's: `owner/slug`), then
- * tells every count to reload.
- */
-export function markRead(ids?: string[], library?: string | null): Promise<void> {
-  return api("/api/v1/inbox/read", {
-    method: "POST",
-    body: JSON.stringify(markReadBody(ids, library)),
-  })
+/** Marks an item done (it was opened), then tells every count to reload. */
+export function markDone(id: string): Promise<void> {
+  return post(`/api/v1/inbox/${encodeURIComponent(id)}/done`, {})
     .then(inboxChanged)
     .catch(() => {});
-}
-
-/** What Mark all read asks for: these items, or all of one library's, or all of them. */
-export function markReadBody(
-  ids?: string[],
-  library?: string | null,
-): { ids?: string[]; library?: string } {
-  if (ids) return { ids };
-  return library ? { library } : {};
 }
 
 /** A path's last part without .md: what names a page that has no title. */

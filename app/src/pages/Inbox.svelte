@@ -6,7 +6,6 @@
     type InboxPage,
     inboxChanged,
     itemLibrary,
-    markRead,
     withNames,
   } from "../inbox";
   import { useAgentLabels, usePageTitles } from "../inbox.svelte.ts";
@@ -21,27 +20,34 @@
   import InboxRow from "./InboxRow.svelte";
 
   /**
-   * The Inbox (take 4, boards 02, 13; TEMPRA-116; tempra-dev: v2/notifications): the one place for
-   * what the person should do or answer across their libraries, newest first, kept until done:
-   * invitations, mentions and replies on their threads, and nothing else (TEMPRA-173). Open and
-   * Done tabs, one library or all; read and done are kept on the server, so they follow the
-   * person. "Older" pages back past the first hundred.
+   * The Inbox (TEMPRA-116; TEMPRA-173, TEMPRA-189; tempra-dev: v2/notifications): what waits on the
+   * person across their libraries, newest first: invitations, mentions and replies, nothing
+   * else. One state: an item is done once opened (a reply or a mention lands in its thread) or
+   * answered (an invitation accepted or declined, a thread resolved), and then it is under
+   * Earlier. Reached by the bell; one library or all. "Older" pages back past the first hundred.
    */
-  let { done, library }: { done: boolean; library: string | null } = $props();
+  let { library }: { library: string | null } = $props();
 
-  /** How many items a page of the Inbox loads. */
+  /** How many waiting items a page loads, and how many done ones Earlier shows. */
   const PAGE = 100;
+  const EARLIER = 20;
 
   useTitle(() => "Inbox");
-  const q = $derived.by(() => {
-    const q = new URLSearchParams({ limit: String(PAGE) });
-    if (done) q.set("done", "1");
+  const query = (more: Record<string, string>) => {
+    const q = new URLSearchParams(more);
     if (library) q.set("library", library);
     return q;
-  });
+  };
+  const q = $derived(query({ limit: String(PAGE) }));
   const loaded = useLoad(
     () => `inbox ${q}`,
     () => api<InboxPage>(`/api/v1/inbox?${q}`),
+    [INBOX_EVENT],
+  );
+  const doneQ = $derived(query({ done: "1", limit: String(EARLIER) }));
+  const done = useLoad(
+    () => `inbox ${doneQ}`,
+    () => api<InboxPage>(`/api/v1/inbox?${doneQ}`),
     [INBOX_EVENT],
   );
   const first = $derived(loaded.data ?? null);
@@ -56,9 +62,11 @@
     },
   );
   const raw = $derived(first ? older.items : null);
-  const labels = useAgentLabels(() => raw);
+  const earlierRaw = $derived(done.data?.items ?? []);
+  const labels = useAgentLabels(() => (raw ? [...raw, ...earlierRaw] : null));
   const items = $derived(raw && withNames(raw, labels.current));
-  const titles = usePageTitles(() => items);
+  const earlier = $derived(withNames(earlierRaw, labels.current));
+  const titles = usePageTitles(() => (items ? [...items, ...earlier] : null));
   const action = useAction();
   const me = useMe();
   const libs = useLibraries();
@@ -79,13 +87,7 @@
         href: urlsOf(i.library).tree(""),
       };
     });
-  const open = $derived(first?.open ?? null);
-  // Mark all read clears what the list shows: one library's items when it is filtered.
-  const unread = $derived(
-    library
-      ? (items ?? []).some((i) => i.read_at === null && i.done_at === null)
-      : (first?.unread ?? 0) > 0,
-  );
+  const isReachable = (i: InboxItem) => reachable.some((l) => `${l.owner}/${l.slug}` === i.library);
 </script>
 
 <header class="view-head">
@@ -93,28 +95,14 @@
     <h1 class="view-title">Inbox</h1>
   </div>
 </header>
-<div class="view-filters inbox-filters">
-  <fieldset class="segmented">
-    <legend class="visually-hidden">Show</legend>
-    <button
-      type="button"
-      aria-pressed={!done}
-      onclick={() => done && navigate(inboxUrl({ library }))}
-      >Open{open !== null && open > 0 ? ` ${open}` : ""}</button
-    >
-    <button
-      type="button"
-      aria-pressed={done}
-      onclick={() => !done && navigate(inboxUrl({ done: true, library }))}>Done</button
-    >
-  </fieldset>
-  <!-- One library filter, whichever way the page was reached (from a home or here). -->
-  {#if library || reachable.length > 1}
+<!-- One library filter, whichever way the page was reached (the bell, or Needs you's old URL). -->
+{#if library || reachable.length > 1}
+  <div class="view-filters inbox-filters">
     <select
       class="pill-select"
       aria-label="Library"
       value={library ?? ""}
-      onchange={(e) => navigate(inboxUrl({ done, library: e.currentTarget.value || null }))}
+      onchange={(e) => navigate(inboxUrl({ library: e.currentTarget.value || null }))}
     >
       <option value="">All libraries</option>
       {#each reachable as l (`${l.owner}/${l.slug}`)}
@@ -124,16 +112,8 @@
         <option value={library}>{itemLibrary({ library, library_title: null }, me.current?.handle ?? null)}</option>
       {/if}
     </select>
-  {/if}
-  {#if unread}
-    <button
-      type="button"
-      class="ghost inbox-mark"
-      disabled={action.busy}
-      onclick={() => void run(() => markRead(undefined, library))}>Mark all read</button
-    >
-  {/if}
-</div>
+  </div>
+{/if}
 {#if action.error}
   <div class="notice">{action.error}</div>
 {/if}
@@ -143,7 +123,7 @@
 <Status loaded={loaded.current}>
   {#snippet children()}
     {#if items === null || items.length === 0}
-      <p class="view-empty">{done ? "Nothing done yet" : "Nothing for you"}</p>
+      <p class="view-empty">Nothing waiting</p>
     {:else}
       <ul class="inbox-list">
         {#each items as i (i.id)}
@@ -151,7 +131,7 @@
             item={i}
             titles={titles.current}
             me={me.current?.handle ?? null}
-            reachable={reachable.some((l) => `${l.owner}/${l.slug}` === i.library)}
+            reachable={isReachable(i)}
             busy={action.busy}
             {run}
             onAccept={accept}
@@ -163,6 +143,24 @@
           <button type="button" onclick={older.loadOlder} disabled={older.paging}>{older.paging ? "Loading…" : "Older"}</button>
         </p>
       {/if}
+    {/if}
+    {#if earlier.length > 0}
+      <section class="inbox-earlier" aria-labelledby="inbox-earlier">
+        <h2 id="inbox-earlier" class="view-section-title">Earlier</h2>
+        <ul class="inbox-list">
+          {#each earlier as i (i.id)}
+            <InboxRow
+              item={i}
+              titles={titles.current}
+              me={me.current?.handle ?? null}
+              reachable={isReachable(i)}
+              busy={action.busy}
+              {run}
+              onAccept={accept}
+            />
+          {/each}
+        </ul>
+      </section>
     {/if}
   {/snippet}
 </Status>

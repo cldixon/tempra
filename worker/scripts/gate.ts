@@ -1410,14 +1410,14 @@ async function browserRenders(
             sidebar.locator(".tree-row").first(),
             views.getByRole("link", { name: /^Activity/ }),
             views.getByRole("link", { name: "Settings", exact: true }),
-            views.getByRole("link", { name: /^Inbox/ }),
           ]) {
             if (!(await part.isVisible())) throw new Error(`the drawer lacks ${part}`);
           }
           const footRows = (await views.locator(".nav-row").allInnerTexts()).map(
             (t) => t.replace(/\s+/g, " ").trim().split(" ")[0],
           );
-          if (JSON.stringify(footRows) !== JSON.stringify(["Activity", "Settings", "Inbox"])) {
+          // The Inbox is the bell's, in no drawer (TEMPRA-189).
+          if (JSON.stringify(footRows) !== JSON.stringify(["Activity", "Settings"])) {
             throw new Error(`the drawer's foot reads ${JSON.stringify(footRows)}`);
           }
           if (shots) await page.screenshot({ path: `${shots}/drawer-phone.png` });
@@ -1516,19 +1516,31 @@ async function browserRenders(
           await sidebar.waitFor({ state: "hidden" });
           await phoneNamed("Members");
           // The account's pages: the mark and "Tempra" on the bar and at the drawer's head, with
-          // search and no switcher, never the page's own name there.
-          await page.goto(`${base}/account`);
+          // search and no switcher, never the page's own name there. Email settings are one
+          // switch on Account, where /notifications lands (TEMPRA-189).
+          await page.goto(`${base}/notifications`);
+          await page.waitForURL(`${base}/account#email`);
+          await main
+            .getByRole("heading", { name: "Email", exact: true })
+            .waitFor({ timeout: 15_000 });
+          if (!(await main.getByLabel("Email me mentions and replies").isChecked())) {
+            throw new Error("the email switch is not on by default");
+          }
           await menu.click();
           await sidebar.waitFor({ state: "visible" });
           await drawerHead("Tempra", false);
           await page.keyboard.press("Escape");
           await sidebar.waitFor({ state: "hidden" });
-          // The library list's drawer: search at its head, then Libraries and the Inbox.
+          // The library list's drawer: search at its head, then Libraries (the Inbox is the
+          // bell's, TEMPRA-189).
           await page.goto(`${base}/`);
           await menu.click();
           await sidebar.waitFor({ state: "visible" });
           const account = sidebar.getByRole("navigation", { name: "Account" });
           await account.getByRole("link", { name: "Libraries", exact: true }).waitFor();
+          if ((await sidebar.getByRole("link", { name: /^Inbox/ }).count()) > 0) {
+            throw new Error("the account's drawer has an Inbox row");
+          }
           await sidebar
             .locator(".drawer-head")
             .getByRole("button", { name: "Search", exact: true })
@@ -2824,7 +2836,7 @@ async function browserRenders(
         // their inbox, its count shows on the open page's bell (take 4) without a reload, and
         // the batched mail lands in the dev outbox.
         await sheetBar
-          .getByRole("link", { name: /^Inbox, \d+ unread$/ })
+          .getByRole("link", { name: /^Inbox, \d+ waiting$/ })
           .waitFor({ timeout: 10_000 });
         const inbox = (await (await apiAs(devCookie, "/api/v1/inbox")).json()) as {
           items: { id: string; kind: string; excerpt: string; href: string }[];
@@ -2864,7 +2876,7 @@ async function browserRenders(
         if ((await threadEl.evaluate((el) => el.tagName)) === "BUTTON") await threadEl.click();
         await threadEl.getByRole("button", { name: "Reopen" }).waitFor({ timeout: 5000 });
         if (!(await stayed())) throw new Error("the page reloaded");
-        // Resolving the thread closed its item (TEMPRA-116): it is under Done, no longer open.
+        // Resolving the thread closed its item (TEMPRA-116): it is done, under Earlier.
         const closed = (await (await apiAs(devCookie, "/api/v1/inbox?all=1")).json()) as {
           items: { id: string; done_at: string | null }[];
         };
@@ -2930,18 +2942,6 @@ async function browserRenders(
           .waitFor({ timeout: 10_000 });
       }
       if (!(await stayed())) throw new Error("the link reloaded the page");
-      // Mark all read on the filtered list marks this library's items only (A-1).
-      const marked = page.waitForRequest(
-        (r) => r.url().endsWith("/api/v1/inbox/read") && r.method() === "POST",
-      );
-      await main.getByRole("button", { name: "Mark all read", exact: true }).click();
-      const sent = (await marked).postDataJSON() as { library?: string };
-      if (sent.library !== `${owner}/${slug}`) {
-        throw new Error(`Mark all read sent ${JSON.stringify(sent)}`);
-      }
-      await main
-        .getByRole("button", { name: "Mark all read", exact: true })
-        .waitFor({ state: "detached", timeout: 10_000 });
       const { count } = (await (
         await apiAs(devCookie, `/api/v1/libraries/${owner}/${slug}/needs`)
       ).json()) as { count: number };
@@ -2959,6 +2959,25 @@ async function browserRenders(
         .locator(`section.thread.open[id="panel-thread-${id}"]`)
         .waitFor({ timeout: 15_000 });
       if (!(await stayed())) throw new Error("Reply reloaded the page");
+      // Opening it was seeing it (one state, TEMPRA-189): done, the bell's count down, and back
+      // in the Inbox it is under Earlier.
+      const deadline = Date.now() + 10_000;
+      for (;;) {
+        const open = (await (await apiAs(devCookie, "/api/v1/inbox")).json()) as {
+          items: { thread: string | null }[];
+        };
+        if (!open.items.some((i) => i.thread === id)) break;
+        if (Date.now() > deadline) throw new Error("opening the reply left it waiting");
+        await page.waitForTimeout(200);
+      }
+      await page.goto(filtered);
+      await inboxHeading.waitFor({ timeout: 15_000 });
+      await main
+        .getByRole("region", { name: "Earlier" })
+        .locator("li.inbox-row.done")
+        .filter({ hasText: "Gate: yes, it is still current." })
+        .waitFor({ timeout: 10_000 });
+      if (shots) await page.screenshot({ path: `${shots}/inbox-earlier.png` });
       const resolved = await fetch(`${libApi}/comments/${id}/resolve`, {
         method: "POST",
         headers: { ...bearer, "Content-Type": "application/json" },

@@ -44,8 +44,6 @@ describe("D1 indexes (TEMPRA-78)", () => {
     "delete a library's notifications": "DELETE FROM notifications WHERE library = ?",
     "delete a library's cursors": "DELETE FROM library_seen WHERE library = ?",
     "delete a library's mail settings": "DELETE FROM notification_prefs WHERE library = ?",
-    "digest recipients": `SELECT DISTINCT p.user FROM notification_prefs p JOIN users u ON u.id = p.user
-      WHERE p.digest = 1 AND u.suspended IS NULL`,
     "shared libraries": `SELECT l.id FROM library_members m JOIN libraries l ON l.id = m.library
       JOIN users u ON u.id = l.owner WHERE m.user = ?1`,
     members: `SELECT m.user, u.handle FROM library_members m JOIN users u ON u.id = m.user
@@ -57,9 +55,6 @@ describe("D1 indexes (TEMPRA-78)", () => {
       WHERE i.library = ? AND i.status = 'pending' AND i.expires > ? ORDER BY i.created DESC`,
     inbox:
       "SELECT id FROM notifications WHERE user = ? AND done_at IS NULL ORDER BY rowid DESC LIMIT ?",
-    "unread counts": `SELECT COALESCE(library, '') AS library, COUNT(*) AS n FROM notifications
-      WHERE user = ? AND read_at IS NULL AND done_at IS NULL GROUP BY library`,
-    "seen cursors": "SELECT library, seq FROM library_seen WHERE user = ?",
     "mail settings": "SELECT library, immediate, digest FROM notification_prefs WHERE user = ?",
     "a connection's created libraries":
       "SELECT library FROM grant_libraries WHERE grant_id = ? AND user = ?",

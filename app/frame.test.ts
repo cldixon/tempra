@@ -44,7 +44,7 @@ beforeEach(() => {
       : url.includes("/events")
         ? { events: [], seq: 8 }
         : url.includes("/inbox/count")
-          ? { unread: 2 }
+          ? { open: 2 }
           : url.includes("/api/v1/libraries")
             ? {
                 libraries: [
@@ -121,7 +121,12 @@ describe("the account's frame (AccountFrame.svelte)", () => {
     expect(brand?.querySelector("button.search-button")?.getAttribute("aria-label")).toBe("Search");
     expect(f.host.querySelector("main.ws-main")?.textContent?.trim()).toBe("Page");
     const rows = [...f.host.querySelectorAll(".nav-row")].map((r) => r.textContent);
-    expect(rows).toEqual(["Libraries", "Inbox 2 unread", "DDev", "NNotes (@ann)"]);
+    // The Inbox is the bell's, in no sidebar (TEMPRA-189); the bell counts what waits.
+    expect(rows).toEqual(["Libraries", "DDev", "NNotes (@ann)"]);
+    const bell = f.host.querySelector("a.bell");
+    expect(bell?.getAttribute("href")).toBe("/inbox");
+    expect(bell?.getAttribute("aria-label")).toBe("Inbox, 2 waiting");
+    expect(bell?.querySelector(".badge")?.textContent).toBe("2");
     expect(f.host.querySelector("section.ws-sidebar")?.hasAttribute("hidden")).toBe(false);
     f.destroy();
   });
