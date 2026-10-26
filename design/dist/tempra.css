@@ -998,20 +998,19 @@ details > summary {
 }
 
 /*
- * Video, audio and PDF figures (TEMPRA-164; tempra-dev: app/media, How people see). A video is
- * drawn as an image is, its stored width and height giving its box, with Enlarge in its corner;
+ * Video, audio and PDF figures (TEMPRA-164; tempra-dev: app/media, How people see). A video
+ * spans the column (its controls need the room), its stored width and height giving its shape,
+ * with Enlarge in its corner;
  * audio is its controls across the text's column; a PDF is a card: a hairline box with its icon,
  * name, type and size, Open and Download as pills.
  */
 .prose .figure-video {
   position: relative;
-  width: fit-content;
-  max-width: 100%;
 }
 
 .prose .figure-media video {
   display: block;
-  max-width: 100%;
+  width: 100%;
   height: auto;
   border-radius: var(--tempra-radius-box);
   background: var(--tempra-color-ground);
@@ -1629,11 +1628,9 @@ details > summary {
 /* A video plays as large as fits; audio and a PDF's card sit in the middle (TEMPRA-164). */
 .lightbox-figure > video {
   display: block;
-  max-width: 100%;
-  max-height: 100%;
-  border-radius: var(--tempra-radius-card);
-  background: var(--tempra-color-bg);
-  box-shadow: var(--tempra-shadow);
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 
 .lightbox-figure > audio {
@@ -5011,9 +5008,10 @@ a.activity-download {
    (TEMPRA-164). */
 .attachment-frame video {
   display: block;
-  max-width: 100%;
+  width: 100%;
   height: auto;
   max-height: 70vh;
+  object-fit: contain;
 }
 
 .attachment-frame audio {
