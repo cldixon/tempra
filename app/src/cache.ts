@@ -64,9 +64,9 @@ export class PageCache {
 }
 
 /**
- * `next`, reusing every part of `prev` with the same content (React Query's replaceEqualDeep):
+ * `next`, reusing every part of `prev` with the same content (structural sharing, as TanStack Query's replaceEqualDeep does):
  * an unchanged answer comes back as `prev` itself, and a changed one keeps the identity of its
- * unchanged parts, so a page's memos and the reader built on them survive a refresh.
+ * unchanged parts, so what a page derives from it, and the reader built on it, survive a refresh.
  */
 export function share<T>(prev: unknown, next: T): T {
   if (Object.is(prev, next)) return prev as T;

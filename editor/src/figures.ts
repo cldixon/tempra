@@ -12,7 +12,7 @@ import type { Code, Image, Paragraph } from "mdast";
 import { type ContainerDirective, checkFigure, type FigureSpec, isFigure } from "./figure";
 import { type DocNode, walk } from "./tree";
 
-/** Fence languages drawn as figures (the app's registry draws them: reader/registry.tsx). */
+/** Fence languages drawn as figures (the app's registry draws them: app/src/reader/registry.ts). */
 export const FIGURE_FENCES: ReadonlySet<string> = new Set(["mermaid"]);
 
 /** A fence's caption: `title="…"` (or `'…'`, or one word) in what follows its language. */

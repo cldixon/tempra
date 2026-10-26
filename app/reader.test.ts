@@ -306,7 +306,8 @@ describe("what the reader draws", () => {
     const { html, root } = draw(
       stored('Hi <img src=x onerror="alert(1)"> there\n\n<div>\nblock\n</div>'),
     );
-    // The DOM's serialization escapes `<`, `>` and `&` in text (React's markup also escaped `"`).
+    // The DOM's serialization escapes `<`, `>` and `&` in text, not quotes; the code's text is
+    // checked exactly below.
     expect(html).toContain(
       '<code class="raw" data-atom="">&lt;img src=x onerror="alert(1)"&gt;</code>',
     );
