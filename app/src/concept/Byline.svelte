@@ -1,7 +1,7 @@
 <script lang="ts">
   import AgentName from "../AgentName.svelte";
-  import { actorText } from "../agents";
   import Avatar from "../Avatar.svelte";
+  import { actorText } from "../agents";
   import Moment from "../Moment.svelte";
   import { EDITING_MS, type Namer } from "./byline";
   import { actedBy, type Concept, type HistoryEvent, standing } from "./data";
@@ -43,10 +43,18 @@
       : null;
   });
   const writer = $derived(
-    pendingAgent ? props.name(pendingAgent.actor, pendingAgent.by ?? null) : who?.agent ? who : null,
+    pendingAgent
+      ? props.name(pendingAgent.actor, pendingAgent.by ?? null)
+      : who?.agent
+        ? who
+        : null,
   );
   const at = $derived(
-    pendingAgent ? Date.parse(pendingAgent.ts) : who?.agent && author ? Date.parse(author.ts) : null,
+    pendingAgent
+      ? Date.parse(pendingAgent.ts)
+      : who?.agent && author
+        ? Date.parse(author.ts)
+        : null,
   );
 
   // True until `at` is EDITING_MS old, turning false on its own when it is.

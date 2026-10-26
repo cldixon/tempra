@@ -46,7 +46,13 @@ const dev = Bun.spawn(["bunx", "cf", "dev", "--port", String(port)], {
 try {
   for (let i = 0; ; i++) {
     if (i > 120) throw new Error("cf dev did not start");
-    if (await fetch(`${base}/healthz`).then((r) => r.ok, () => false)) break;
+    if (
+      await fetch(`${base}/healthz`).then(
+        (r) => r.ok,
+        () => false,
+      )
+    )
+      break;
     await Bun.sleep(500);
   }
   const lib = `${base}/api/v1/libraries/${t.owner}/${t.slug}`;

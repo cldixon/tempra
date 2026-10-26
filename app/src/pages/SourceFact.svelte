@@ -23,7 +23,9 @@
   const outbound = (href: string) => ({ href, rel: "noopener noreferrer", target: "_blank" });
   const cited = $derived((props.uses ?? []).find((u) => u.cites !== null));
   const redirected = $derived(
-    props.source?.final_url && props.source.final_url !== props.source.url ? props.source.final_url : null,
+    props.source?.final_url && props.source.final_url !== props.source.url
+      ? props.source.final_url
+      : null,
   );
 </script>
 

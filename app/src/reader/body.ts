@@ -367,7 +367,13 @@ function markupFigure(ctx: Ctx, n: ContainerDirective, m: FigureMarkup) {
       );
     }
     r.end(out);
-    rows.push({ key: rowKeys[i] ?? `#${i}`, id: idOf(c), offset: offsetOf(ctx, c), group, text: out });
+    rows.push({
+      key: rowKeys[i] ?? `#${i}`,
+      id: idOf(c),
+      offset: offsetOf(ctx, c),
+      group,
+      text: out,
+    });
   });
   const first = m.figures[0];
   const caption = label
@@ -408,7 +414,11 @@ function rawDirective(ctx: Ctx, n: ContainerDirective) {
 }
 
 function cell(ctx: Ctx, c: TableCell, align: string | null | undefined): Cell {
-  return { offset: offsetOf(ctx, c), align: align ?? undefined, text: textblock(ctx, c, c.children) };
+  return {
+    offset: offsetOf(ctx, c),
+    align: align ?? undefined,
+    text: textblock(ctx, c, c.children),
+  };
 }
 
 type Drawn = Block extends infer B ? (B extends Block ? Omit<B, "key" | "id"> : never) : never;

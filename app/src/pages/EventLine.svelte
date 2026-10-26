@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { type EventRow, entryTime } from "../activity";
   import AgentName from "../AgentName.svelte";
-  import type { ActorView } from "../agents";
   import Avatar from "../Avatar.svelte";
+  import { type EventRow, entryTime } from "../activity";
+  import type { ActorView } from "../agents";
   import { localTime } from "../ui";
   import type { Urls } from "../urls";
 

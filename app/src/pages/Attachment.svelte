@@ -1,9 +1,9 @@
 <script lang="ts">
   import AgentName from "../AgentName.svelte";
+  import AtNotice from "../AtNotice.svelte";
   import type { ActedBy } from "../agents";
   import { useActors } from "../agents.svelte.ts";
   import { api } from "../api";
-  import AtNotice from "../AtNotice.svelte";
   import { type FileJson, type HistoryEvent, isConceptPath, type Links } from "../concept/data";
   import { useFrame } from "../frame.svelte.ts";
   import Icon from "../Icon.svelte";
@@ -48,7 +48,9 @@
       return { links, history: history.events };
     },
   );
-  const usedIn = $derived(extra.data ? [...new Set(extra.data.links.inbound.map((l) => l.path))] : null);
+  const usedIn = $derived(
+    extra.data ? [...new Set(extra.data.links.inbound.map((l) => l.path))] : null,
+  );
   // The pages that use it, read for the figures it appears as and the sources citing it; a page
   // that fails to load just says less.
   const pages = $derived(usedIn?.filter(isConceptPath).slice(0, USES_READ).join("\n") ?? null);

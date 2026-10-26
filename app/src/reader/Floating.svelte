@@ -31,7 +31,7 @@
     const gap = 8;
     const w = el.offsetWidth;
     const h = el.offsetHeight;
-    const x = Math.max(gap, Math.min(r.left + r.width / 2 - w / 2, innerWidth - w - gap));
+    const x = Math.max(gap, Math.min(r.left + r.width / 2 - w / 2, window.innerWidth - w - gap));
     const above = r.top - h - gap;
     const y = above >= gap ? above : r.bottom + gap;
     el.style.setProperty("--float-x", `${Math.round(x)}px`);

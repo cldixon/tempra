@@ -2,8 +2,8 @@
   import { useThreads } from "../comments/data.svelte.ts";
   import ConceptPage from "../concept/ConceptPage.svelte";
   import { type FileData, fileKey, isConceptPath, loadFile } from "../concept/data";
-  import { useLiveFile } from "../concept/live.svelte.ts";
   import LiveNotice from "../concept/LiveNotice.svelte";
+  import { useLiveFile } from "../concept/live.svelte.ts";
   import { useLoad } from "../load.svelte.ts";
   import PageColumn from "../PageColumn.svelte";
   import { type Compare, navigate } from "../router";

@@ -12,7 +12,9 @@ export function useThreads(urls: () => Urls, path: () => string | null) {
       const p = path();
       return p === null
         ? { threads: [] as Thread[] }
-        : api<{ threads: Thread[] }>(urls().api("comments", { path: p, status: "all", limit: 200 }));
+        : api<{ threads: Thread[] }>(
+            urls().api("comments", { path: p, status: "all", limit: 200 }),
+          );
     },
   );
 }

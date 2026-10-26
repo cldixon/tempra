@@ -118,7 +118,9 @@ describe("drawn", () => {
     });
     const { host } = draw(Invitations, {});
     await settle(10);
-    expect(host.querySelector(".invitation-from > span:last-child")?.textContent).toBe("@bob invited you");
+    expect(host.querySelector(".invitation-from > span:last-child")?.textContent).toBe(
+      "@bob invited you",
+    );
     expect(host.querySelector(".invitation-access")?.textContent).toBe(
       "Your accessCan read and write",
     );

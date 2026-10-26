@@ -8,8 +8,11 @@
   import type { Urls } from "../urls";
 
   /** A synthesized file (index.md, log.md) in the reader: the file as an agent reads it. */
-  let { urls, head, file }: { urls: Urls; head: number; file: Extract<FileJson, { kind: "derived" }> } =
-    $props();
+  let {
+    urls,
+    head,
+    file,
+  }: { urls: Urls; head: number; file: Extract<FileJson, { kind: "derived" }> } = $props();
   const label = useLibraryLabel(() => urls);
   useTitle(() => `${file.path} · ${label.current}`);
   const prepared = $derived(

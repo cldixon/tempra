@@ -7,14 +7,15 @@
    * Inline content is written with no whitespace between elements: the DOM's text inside a
    * `data-text` element must read exactly as the document's text (dom.ts counts it).
    */
-  import CodeBlock from "./CodeBlock.svelte";
+
+  import type { Block, Inline } from "./body";
   import Caption from "./Caption.svelte";
+  import CodeBlock from "./CodeBlock.svelte";
   import FigureBox from "./FigureBox.svelte";
   import FigureOf from "./FigureOf.svelte";
   import FromHosts from "./FromHosts.svelte";
-  import InlineImage from "./InlineImage.svelte";
-  import type { Block, Inline } from "./body";
   import { figureNumber } from "./figure";
+  import InlineImage from "./InlineImage.svelte";
   import { code, node as nodeBlocks } from "./registry";
 
   let { blocks: list }: { blocks: Block[] } = $props();
@@ -77,7 +78,7 @@
 {/snippet}
 
 {#snippet blocks(nodes: Block[])}
-  {#each nodes as b}
+  {#each nodes as b (b.key)}
     {#if b.kind === "p"}
       <p data-block={b.id} data-text={b.offset}>{@render inline(b.text)}</p>
     {:else if b.kind === "figure"}
@@ -134,7 +135,9 @@
             class={row.group ? "figure-row" : undefined}
             data-block={row.id}
             data-text={row.offset}>{@render inline(row.text)}</p
-          >{/each}<figcaption data-skip="" data-block={b.labelId}
+          >{/each}<!-- Inside FigureBox's figure. --><!-- svelte-ignore a11y_figcaption_parent --><figcaption
+          data-skip=""
+          data-block={b.labelId}
           ><span class="figure-number">{figureNumber(b.number, b.count)}</span
           >{#if b.caption}{" "}{#if typeof b.caption === "string"}{b.caption}{:else}{@render inline(
                 b.caption,

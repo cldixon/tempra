@@ -15,7 +15,13 @@ import {
   walk,
   wordDiff,
 } from "@tempra/editor";
-import { type Component, flushSync, mount as mountComponent, unmount } from "svelte";
+import {
+  type Component,
+  createRawSnippet,
+  flushSync,
+  mount as mountComponent,
+  unmount,
+} from "svelte";
 import { SvelteMap } from "svelte/reactivity";
 import { attachmentSource, type ImageRef, imageSource } from "./src/images";
 import Reader from "./src/Reader.svelte";
@@ -271,7 +277,9 @@ describe("what the reader draws", () => {
     // The definition is drawn beside the body, not in it.
     expect(html).not.toContain("Note.");
     expect(p.footnotes.map((f) => f.label)).toEqual(["a"]);
-    const note = markup(put(Note, { prepared: p, nodes: p.footnotes[0]?.node.children ?? [] }).host);
+    const note = markup(
+      put(Note, { prepared: p, nodes: p.footnotes[0]?.node.children ?? [] }).host,
+    );
     expect(note).toMatch(/^<p data-block="\w+">Note.<\/p>$/);
   });
 
@@ -426,7 +434,9 @@ describe("figures (tempra-dev: app/reader, Figures)", () => {
     const t = p.text.text;
     const caption = root.querySelector("figcaption") as Element;
     // Its last text (Svelte's comment anchors are not text).
-    const inCaption = [...caption.childNodes].filter((n) => n.nodeType === 3 && n.textContent).at(-1) as Node;
+    const inCaption = [...caption.childNodes]
+      .filter((n) => n.nodeType === 3 && n.textContent)
+      .at(-1) as Node;
     expect(inCaption.textContent).toBe(" The tower at dusk");
     // A point in the caption snaps to the text after it (a start) or the figure's atom (an end).
     const before = t.indexOf("Before the figures.");
@@ -495,7 +505,7 @@ describe("figures (tempra-dev: app/reader, Figures)", () => {
       // An inline image that fails: its alt text, still one atom.
       const icon = host.querySelector('img[alt="an icon"]') as HTMLImageElement;
       await act(async () => {
-        icon.dispatchEvent(new window.Event("error") );
+        icon.dispatchEvent(new window.Event("error"));
       });
       const broken = host.querySelector(".image-broken") as HTMLElement;
       expect(broken.hasAttribute("data-atom")).toBe(true);
@@ -585,7 +595,12 @@ describe("figures (tempra-dev: app/reader, Figures)", () => {
         },
         fileHref: (path) => `/o/l/${path}`,
       };
-      const { host, root } = put(Reader, { prepared: p, diff: null, hideFirst: false, figureView: view });
+      const { host, root } = put(Reader, {
+        prepared: p,
+        diff: null,
+        hideFirst: false,
+        figureView: view,
+      });
       expect(host.querySelector("dialog")).toBeNull();
       const button = host.querySelector("button.figure-open") as HTMLButtonElement;
       expect(button.getAttribute("aria-label")).toBe("Enlarge image: A tower");
@@ -627,9 +642,7 @@ describe("figures (tempra-dev: app/reader, Figures)", () => {
       // The arrow keys move too.
       const key = (k: string) =>
         act(async () => {
-          d.dispatchEvent(
-            new window.KeyboardEvent("keydown", { key: k, bubbles: true }) ,
-          );
+          d.dispatchEvent(new window.KeyboardEvent("keydown", { key: k, bubbles: true }));
         });
       await key("ArrowLeft");
       expect(label?.textContent).toBe("fig. 1 of 2");
@@ -641,7 +654,7 @@ describe("figures (tempra-dev: app/reader, Figures)", () => {
   });
 
   test("the full-screen view works with nothing from the page, and steps onto diagrams", async () => {
-    await live(async (window) => {
+    await live(async () => {
       const md = '![](assets/a.png)\n\n```mermaid title="Flow"\nflowchart LR\n  A --> B\n```';
       const p = prepare(stored(md), { href: hrefs, path: "c.md" });
       const { host, root } = put(Reader, { prepared: p, diff: null, hideFirst: false });
@@ -789,7 +802,7 @@ describe("figure markup (TEMPRA-161)", () => {
   });
 
   test("the width is set through the CSSOM; the full-screen view steps through a group", async () => {
-    await live(async (window) => {
+    await live(async () => {
       const md = [
         ':::figure{width=480}\n![One](assets/one.png "One")\n:::',
         ':::figure[Two of them]\n![A](assets/a.png "A")\n![B](assets/b.png "B")\n:::',
@@ -918,13 +931,18 @@ describe("right-sized images (TEMPRA-162)", () => {
       const img = host.querySelector("img") as HTMLImageElement;
       expect(img.className).toBe("image-loading");
       await act(async () => {
-        img.dispatchEvent(new window.Event("load") );
+        img.dispatchEvent(new window.Event("load"));
       });
       expect(img.className).toBe("");
       const figure = p.figures[0];
       if (figure?.kind !== "image") throw new Error("no figure");
-      const { host: box } = put(Lightbox, { figures: p.figures, at: 1, view: { downloadHref: (path) => `/o/l/-/download/${path}` }, onMove: () => {}, onClose: () => {},
-        });
+      const { host: box } = put(Lightbox, {
+        figures: p.figures,
+        at: 1,
+        view: { downloadHref: (path) => `/o/l/-/download/${path}` },
+        onMove: () => {},
+        onClose: () => {},
+      });
       const big = box.querySelector(".lightbox-figure img") as HTMLImageElement;
       expect(big.getAttribute("sizes")).toBe("100vw");
       expect(big.getAttribute("srcset")).toContain("?w=1920 1920w");
@@ -1020,7 +1038,9 @@ describe("video, audio and PDF figures (TEMPRA-164)", () => {
     await live(async (window) => {
       const p = prepare(stored(MEDIA), options);
       const opened: number[] = [];
-      const { host } = put(Body, { prepared: p, diff: null, hideFirst: false }, (n) => opened.push(n));
+      const { host } = put(Body, { prepared: p, diff: null, hideFirst: false }, (n) =>
+        opened.push(n),
+      );
       const enlarge = host.querySelector(
         'button[aria-label="Enlarge video: A 20-second walkthrough"]',
       ) as HTMLButtonElement;
@@ -1030,22 +1050,32 @@ describe("video, audio and PDF figures (TEMPRA-164)", () => {
       expect(host.querySelectorAll("button[aria-label^='Enlarge video']").length).toBe(3);
       const raw = host.querySelector('video[aria-label="No poster"]') as HTMLVideoElement;
       await act(async () => {
-        raw.dispatchEvent(new window.Event("error") );
+        raw.dispatchEvent(new window.Event("error"));
       });
       const broken = host.querySelector('[aria-label="This video can\'t be played: No poster"]');
       expect(broken?.hasAttribute("data-atom")).toBe(true);
 
-      const { host: box } = put(Lightbox, { figures: p.figures, at: 2, view: {
-            fileHref: (path) => `/o/l/${path}`,
-            downloadHref: (path) => `/o/l/-/download/${path}`,
-          }, onMove: () => {}, onClose: () => {},
-        });
+      const { host: box } = put(Lightbox, {
+        figures: p.figures,
+        at: 2,
+        view: {
+          fileHref: (path) => `/o/l/${path}`,
+          downloadHref: (path) => `/o/l/-/download/${path}`,
+        },
+        onMove: () => {},
+        onClose: () => {},
+      });
       const played = box.querySelector(".lightbox-figure > video") as HTMLVideoElement;
       expect(played.getAttribute("src")).toBe(`/o/l/-/media/${H("a")}`);
       expect(played.hasAttribute("controls")).toBe(true);
       expect(box.textContent).toContain("fig. 2 of 7");
-      const { host: pdfBox } = put(Lightbox, { figures: p.figures, at: 5, view: { fileHref: (path) => `/o/l/${path}` }, onMove: () => {}, onClose: () => {},
-        });
+      const { host: pdfBox } = put(Lightbox, {
+        figures: p.figures,
+        at: 5,
+        view: { fileHref: (path) => `/o/l/${path}` },
+        onMove: () => {},
+        onClose: () => {},
+      });
       const card = pdfBox.querySelector(".lightbox-figure > .figure-pdf") as HTMLElement;
       expect(card.querySelector("a")?.getAttribute("href")).toBe("/o/l/docs/paper.pdf");
       const open = [...pdfBox.querySelectorAll("a")].find((a) => a.textContent === "Open file");
@@ -1059,7 +1089,9 @@ describe("a new version redraws only what changed (TEMPRA-177)", () => {
     const v1 = stored("# Title\n\nFirst para.\n\nSecond *para*.\n\n- one\n- two");
     const v2 = reconcile(
       v1,
-      parseMarkdown("# Title\n\nA new para.\n\nFirst para, changed.\n\nSecond *para*.\n\n- one\n- two\n- three"),
+      parseMarkdown(
+        "# Title\n\nA new para.\n\nFirst para, changed.\n\nSecond *para*.\n\n- one\n- two\n- three",
+      ),
     );
     const idOfText = (tree: Doc, text: string) =>
       idOf(tree.children.find((n) => docText({ ...tree, children: [n] }).text === text) as DocNode);
@@ -1080,9 +1112,9 @@ describe("a new version redraws only what changed (TEMPRA-177)", () => {
     props.set("prepared", p2);
     flushSync();
     const after = host.querySelector(`[data-block="${second}"]`) as Element;
-    expect(after).toBe(before);
-    expect(after.firstChild).toBe(words);
-    expect(host.querySelector("li")).toBe(item);
+    expect(after === before).toBe(true);
+    expect(after.firstChild === words).toBe(true);
+    expect(host.querySelector("li") === item).toBe(true);
     // Moved down the text: its offset follows, and the counting holds over the whole body.
     expect(Number(after.getAttribute("data-text"))).toBe(p2.text.text.indexOf("Second para."));
     expect(host.querySelectorAll("li").length).toBe(3);
@@ -1093,5 +1125,78 @@ describe("a new version redraws only what changed (TEMPRA-177)", () => {
       expect(Number(tb.getAttribute("data-text"))).toBe(b?.from ?? -1);
       expect(readText(tb)).toBe(p2.text.text.slice(b?.from, b?.to));
     });
+  });
+});
+
+describe("the reader's overlays", () => {
+  test("highlights, a link's card (Escape closes it), and Comment on selected text", async () => {
+    const g = globalThis as Record<string, unknown>;
+    const saved = { CSS: g.CSS, Highlight: g.Highlight };
+    const sets = new Map<string, { ranges: Range[] }>();
+    g.CSS = {
+      highlights: {
+        set: (name: string, h: { ranges: Range[] }) => sets.set(name, h),
+        delete: (name: string) => sets.delete(name),
+      },
+    };
+    g.Highlight = class {
+      ranges: Range[];
+      constructor(...ranges: Range[]) {
+        this.ranges = ranges;
+      }
+    };
+    try {
+      const p = prepare(stored("Hello [link](https://e.com) world, and more text."));
+      const comments: { from: number; to: number }[] = [];
+      const { host } = put(Reader<string>, {
+        prepared: p,
+        diff: null,
+        hideFirst: false,
+        hover: (h) => (h.kind === "link" ? `To ${h.href}` : null),
+        card: createRawSnippet((text: () => string) => ({ render: () => `<b>${text()}</b>` })),
+        highlights: [{ id: "t1", from: 0, to: 5 }],
+        onComment: (r) => comments.push(r),
+      });
+      await act();
+      expect(sets.get("tempra-comment")?.ranges.map((r) => r.toString())).toEqual(["Hello"]);
+      expect(sets.get("tempra-comment-active")?.ranges).toEqual([]);
+      // A card over the link, describing it; Escape closes it.
+      const link = host.querySelector("a") as HTMLElement;
+      link.dispatchEvent(new window.PointerEvent("pointerover", { bubbles: true }));
+      await act(() => new Promise((r) => setTimeout(r, 300)));
+      const tip = document.querySelector(".floating.tooltip") as HTMLElement;
+      expect(tip.textContent).toBe("To https://e.com");
+      expect(tip.getAttribute("popover")).toBe("manual");
+      expect(tip.getAttribute("role")).toBe("tooltip");
+      expect(link.getAttribute("aria-describedby")).toBe(tip.id);
+      expect(tip.style.getPropertyValue("--float-x")).toMatch(/^\d+px$/);
+      document.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      flushSync();
+      expect(document.querySelector(".floating.tooltip")).toBeNull();
+      expect(link.hasAttribute("aria-describedby")).toBe(false);
+      // Selected text: the toolbar's Comment, then Ctrl+Alt+M.
+      const prose = host.querySelector(".prose") as Element;
+      const sel = document.getSelection() as Selection;
+      sel.removeAllRanges();
+      sel.addRange(rangeOf(prose, 0, 5) as Range);
+      document.dispatchEvent(new window.Event("selectionchange"));
+      await act(() => new Promise((r) => setTimeout(r, 150)));
+      const button = document.querySelector(".selection-tools button") as HTMLButtonElement;
+      expect(button.textContent).toBe("Comment");
+      button.click();
+      flushSync();
+      expect(comments).toEqual([{ from: 0, to: 5 }]);
+      expect(document.querySelector(".selection-tools")).toBeNull();
+      sel.addRange(rangeOf(prose, 11, 16) as Range);
+      document.dispatchEvent(
+        new window.KeyboardEvent("keydown", { ctrlKey: true, altKey: true, code: "KeyM" }),
+      );
+      expect(comments).toEqual([
+        { from: 0, to: 5 },
+        { from: 11, to: 16 },
+      ]);
+    } finally {
+      Object.assign(g, saved);
+    }
   });
 });

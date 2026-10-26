@@ -1,8 +1,8 @@
 <script lang="ts">
-  import type { LiveWrite } from "./activity";
   import AgentName from "./AgentName.svelte";
-  import type { ActorView } from "./agents";
   import Avatar from "./Avatar.svelte";
+  import type { LiveWrite } from "./activity";
+  import type { ActorView } from "./agents";
   import type { Urls } from "./urls";
 
   /**

@@ -33,9 +33,7 @@
   },
   "overrides": [
     {
-      "includes": [
-        "**/*.astro"
-      ],
+      "includes": ["**/*.astro"],
       "linter": {
         "rules": {
           "correctness": {
@@ -46,9 +44,7 @@
       }
     },
     {
-      "includes": [
-        "**/*.svelte"
-      ],
+      "includes": ["**/*.svelte"],
       "linter": {
         "rules": {
           "correctness": {
@@ -64,9 +60,7 @@
       }
     },
     {
-      "includes": [
-        "design/src/**/*.css"
-      ],
+      "includes": ["design/src/**/*.css"],
       "linter": {
         "rules": {
           "style": {

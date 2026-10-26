@@ -10,8 +10,11 @@
   import type { Prepared } from "./prepare";
   import { node } from "./registry";
 
-  let { prepared, diff, hideFirst }: { prepared: Prepared; diff: WordDiff | null; hideFirst: boolean } =
-    $props();
+  let {
+    prepared,
+    diff,
+    hideFirst,
+  }: { prepared: Prepared; diff: WordDiff | null; hideFirst: boolean } = $props();
   const blocks = $derived(bodyBlocks(prepared, diff, hideFirst, (type) => type in node));
 </script>
 

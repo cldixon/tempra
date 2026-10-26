@@ -9,8 +9,12 @@
    * The quiet line under the byline: "Checked by you, Oct 12", and "· changed since" (opening
    * review mode) when the page was edited after. Nothing when nobody has checked it.
    */
-  let { urls, path, standing: s, name }: { urls: Urls; path: string; standing: Standing; name: Namer } =
-    $props();
+  let {
+    urls,
+    path,
+    standing: s,
+    name,
+  }: { urls: Urls; path: string; standing: Standing; name: Namer } = $props();
   const who = $derived(checker(s, name));
 </script>
 

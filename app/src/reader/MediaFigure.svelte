@@ -36,7 +36,7 @@
     atom
   />{:else}{@const source = figure.source}
   <!-- The span only keeps the player's clicks its own; the player handles its own keys. -->
-  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
   <span class={`figure-media figure-${kind}`} data-atom="" onclick={own}
     ><Player {kind} {source} {name} onError={() => (failed = source.src)} />{#if open && kind === "video"}<span
         class="figure-tools"

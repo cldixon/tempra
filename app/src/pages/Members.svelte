@@ -34,7 +34,10 @@
   const c = useConfirm();
   let notice = $state<string | null>(null);
   /** Whom a confirmation is about, for its body. */
-  let subject = $state.raw<{ handle: string; role: "read" | "write" }>({ handle: "", role: "read" });
+  let subject = $state.raw<{ handle: string; role: "read" | "write" }>({
+    handle: "",
+    role: "read",
+  });
   const done = (text: string) => {
     notice = text;
     loaded.reload();

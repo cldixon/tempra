@@ -27,7 +27,7 @@
     hoveredOf,
     rectNear,
   } from "./reader/reading";
-  import { commentKey } from "./ui.ts";
+  import { commentKey } from "./ui";
 
   let {
     prepared,
@@ -207,7 +207,7 @@
 
 <div class="body">
   <!-- A click on a highlighted quote opens its thread, which the Comments panel also lists. -->
-  <!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+  <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
   <div
     bind:this={root}
     class="prose"
@@ -251,7 +251,6 @@
     </Floating>
   {/if}
   {#if tools && onComment}
-    {@const range = tools.range}
     <Floating rect={tools.rect} class="selection-tools">
       <div role="toolbar" aria-label="Selection">
         <!-- Pressing the button must not take the selection away first. -->
@@ -261,6 +260,8 @@
           aria-keyshortcuts="Control+Alt+M Meta+Alt+M"
           onmousedown={(e) => e.preventDefault()}
           onclick={() => {
+            const range = tools?.range;
+            if (!range) return;
             tools = null;
             onComment(range);
             // The draft highlight takes over from the browser's selection.

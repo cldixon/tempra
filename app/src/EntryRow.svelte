@@ -1,8 +1,8 @@
 <script lang="ts">
-  import { type Entry, type Part, type Touched, entryTime, wordsText } from "./activity";
   import AgentName from "./AgentName.svelte";
-  import type { ActorView } from "./agents";
   import Avatar from "./Avatar.svelte";
+  import { type Entry, entryTime, type Part, type Touched, wordsText } from "./activity";
+  import type { ActorView } from "./agents";
   import { localTime } from "./ui";
   import { folderName, type Urls } from "./urls";
 
@@ -10,8 +10,12 @@
    * One Activity entry: who (avatar, name, whom an agent acts for), what they did, the note, the
    * concepts touched, and when.
    */
-  let { entry: e, urls, actor, now }: { entry: Entry; urls: Urls; actor: ActorView; now: number } =
-    $props();
+  let {
+    entry: e,
+    urls,
+    actor,
+    now,
+  }: { entry: Entry; urls: Urls; actor: ActorView; now: number } = $props();
 
   /** How many touched concepts an entry lists before "and n more". */
   const LISTED = 8;

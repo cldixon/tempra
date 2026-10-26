@@ -8,8 +8,12 @@
    * An earlier version on screen with no changes drawn (`?at=` alone): "v3 as it was · note · who
    * · when", Changes in v3 (the diff from the version before) and Back to latest.
    */
-  let { urls, concept: c, standing: s, name }: { urls: Urls; concept: Concept; standing: Standing; name: Namer } =
-    $props();
+  let {
+    urls,
+    concept: c,
+    standing: s,
+    name,
+  }: { urls: Urls; concept: Concept; standing: Standing; name: Namer } = $props();
   const version = $derived(s.current);
   const before = $derived.by(() => {
     const i = version ? s.versions.indexOf(version) : -1;

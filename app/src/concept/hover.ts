@@ -1,7 +1,7 @@
 import type { RootContent } from "mdast";
 import { api } from "../api";
-import type { Hovered } from "../reader/reading";
 import type { Prepared } from "../reader/prepare";
+import type { Hovered } from "../reader/reading";
 import { baseName, enc, type Urls } from "../urls";
 import type { FileJson, JsonObject, Sources } from "./data";
 

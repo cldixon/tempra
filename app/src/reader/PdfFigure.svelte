@@ -9,5 +9,5 @@
 </script>
 
 <!-- The span only keeps the card's clicks its own; its links handle their own keys. -->
-<!-- svelte-ignore a11y_click_events_have_key_events a11y_no_static_element_interactions -->
+<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
 <span class="figure-media" data-atom="" onclick={own}><PdfCard {figure} /></span>

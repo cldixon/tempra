@@ -1,8 +1,8 @@
 <script lang="ts">
   import AgentName from "../AgentName.svelte";
+  import Avatar from "../Avatar.svelte";
   import { type ActorView, actorText } from "../agents";
   import { useActors } from "../agents.svelte.ts";
-  import Avatar from "../Avatar.svelte";
   import { threadElementId } from "../concept/panel";
   import Moment from "../Moment.svelte";
   import { revealOffset } from "../reader/reading";

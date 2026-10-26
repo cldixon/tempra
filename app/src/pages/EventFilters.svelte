@@ -8,8 +8,7 @@
     kind,
     q,
     onChange,
-  }: { kind: string; q: string; onChange(change: { kind?: string; q?: string }): void } =
-    $props();
+  }: { kind: string; q: string; onChange(change: { kind?: string; q?: string }): void } = $props();
 
   let text = $state(untrack(() => q));
   // The URL's text wins when it changes (back and forward, a link).
