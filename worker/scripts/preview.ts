@@ -117,13 +117,41 @@ async function queueId(name: string): Promise<string | null> {
   return (await queues()).find((q) => q.queue_name === name)?.queue_id ?? null;
 }
 
+/** Workers per page of `workers list`. */
+const WORKERS_PAGE = 100;
+
+/**
+ * Every Worker's name, a page at a time: `workers list` answers one page (10 by default), and a
+ * sweep that saw only the first page left older previews' Workers up, so their queues could not
+ * be deleted either (2026-10-26).
+ */
 async function workers(): Promise<string[]> {
-  const r = await json<{ id?: string; name?: string }[] | { result?: { id: string }[] }>([
-    "workers",
+  const names: string[] = [];
+  for (let page = 1; ; page++) {
+    const r = await json<{ id?: string; name?: string }[] | { result?: { id: string }[] }>([
+      "workers",
+      "list",
+      "--per-page",
+      String(WORKERS_PAGE),
+      "--page",
+      String(page),
+    ]);
+    const rows = Array.isArray(r) ? r : (r.result ?? []);
+    names.push(...rows.map((w) => (w as { name?: string; id?: string }).name ?? w.id ?? ""));
+    if (rows.length < WORKERS_PAGE) return names;
+  }
+}
+
+/** A queue's consumers, by id. */
+async function queueConsumers(queue: string): Promise<string[]> {
+  const rows = await json<{ consumer_id?: string }[]>([
+    "queues",
+    "consumers",
     "list",
+    "--queue-id",
+    queue,
   ]);
-  const rows = Array.isArray(r) ? r : (r.result ?? []);
-  return rows.map((w) => (w as { name?: string; id?: string }).name ?? w.id ?? "");
+  return rows.flatMap((c) => (c.consumer_id ? [c.consumer_id] : []));
 }
 
 // ------------------------------------------------------------------ up
@@ -398,6 +426,15 @@ async function down(pr: string) {
     );
     return;
   }
+  // A Worker that consumes a queue cannot be deleted (Cloudflare 10064): detach it first. The
+  // queue itself goes last, once no Worker binds it (11005).
+  const queue = await queueId(names.queue);
+  if (queue) {
+    for (const consumer of await queueConsumers(queue)) {
+      console.log(`Removing ${names.queue}'s consumer ${consumer}`);
+      await cf(["queues", "consumers", "delete", consumer, "--queue-id", queue, "--force"]);
+    }
+  }
   const running = await workers();
   if (running.includes(names.name)) {
     console.log(`Deleting Worker ${names.name}`);
@@ -423,8 +460,7 @@ async function down(pr: string) {
     console.log(`Deleting KV tempra-oauth-pr-${pr}`);
     await cf(["kv", "namespaces", "delete", kv, "--force"]);
   }
-  // After the Worker, its consumer.
-  const queue = await queueId(names.queue);
+  // After the Worker, which binds it as producer and consumer.
   if (queue) {
     console.log(`Deleting Queue ${names.queue}`);
     await cf(["queues", "delete", queue, "--force"]);
