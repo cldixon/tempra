@@ -25,6 +25,13 @@ describe("D1 indexes (TEMPRA-78)", () => {
   // join on a column other than a primary key.
   const queries = {
     libraryByDoId: "SELECT 1 AS ok FROM libraries WHERE do_id = ?",
+    // A session's library request, in one query (TEMPRA-192, `Sessions.access`).
+    "a session's library access": `SELECT s.hash, u.id, l.id AS lib_id, o.id AS lib_owner_id, m.role
+      FROM sessions s JOIN users u ON u.id = s.user
+      LEFT JOIN users o ON o.handle = ?3 AND o.suspended IS NULL
+      LEFT JOIN libraries l ON l.owner = o.id AND l.slug = ?4
+      LEFT JOIN library_members m ON m.library = l.id AND m.user = u.id
+      WHERE s.hash = ?1 AND s.idle_expires > ?2 AND s.expires > ?2 AND u.suspended IS NULL`,
     "token count": `SELECT COUNT(*) FROM tokens WHERE revoked IS NULL AND (expires IS NULL OR expires > ?2) AND ${MINTED_BY}`,
     "account's tokens": `SELECT t.id FROM tokens t JOIN libraries l ON l.id = t.library
       JOIN users o ON o.id = l.owner LEFT JOIN users u ON u.id = t.created_by

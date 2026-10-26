@@ -259,6 +259,13 @@ export function setup() {
   };
   clientFor(LIB.do_id);
   const { d1, db } = bunD1();
+  /** Every D1 statement prepared, in order, so a test can count a request's round trips. */
+  const queries: string[] = [];
+  const prepare = d1.prepare.bind(d1);
+  d1.prepare = (sql: string) => {
+    queries.push(sql);
+    return prepare(sql);
+  };
   const now = new Date().toISOString();
   db.run("INSERT INTO users (id, email, actor, handle, created) VALUES (?, ?, ?, ?, ?)", [
     OWNER.id,
@@ -502,6 +509,7 @@ export function setup() {
     notifications,
     outbox,
     db,
+    queries,
     deps,
     bucket,
     pitr,
