@@ -3,8 +3,9 @@ import type { User } from "./accounts";
 import { sha256Hex } from "./okf/hash";
 
 /**
- * Browser sign-in (v2 spec: Accounts and sign-in): single-use magic links, then a session cookie.
- * Only hashes of link and session secrets are stored, in D1.
+ * Browser sign-in (v2 spec: Accounts and sign-in): single-use magic links, each with a code to
+ * type on the device that asked (TEMPRA-188), then a session cookie. Only hashes of link, code and
+ * session secrets are stored, in D1.
  */
 
 export const SESSION_COOKIE = "__Host-tempra_session";
@@ -14,6 +15,8 @@ export const LINK_MINUTES = 15;
 /** Sign-in emails per address, and per IP, in any hour. */
 export const LINKS_PER_EMAIL_HOUR = 5;
 export const LINKS_PER_IP_HOUR = 20;
+/** Wrong codes against an email's live links before their codes stop working (the links do not). */
+export const CODE_TRIES = 5;
 /** last_seen (and the idle expiry) is written at most this often. */
 const TOUCH_MS = 3_600_000;
 const DAY_MS = 86_400_000;
@@ -21,9 +24,15 @@ const DAY_MS = 86_400_000;
 export interface Sessions {
   /**
    * A new link's secret, or null when this email or IP has asked too often. A link signs in, or,
-   * with purpose "email-change", confirms `email` as the new address of account `user`.
+   * with purpose "email-change", confirms `email` as the new address of account `user`. A sign-in
+   * link may carry a code (`newCode`), stored as its hash, that does what the link does.
    */
-  createLink(email: string, ip: string | null, change?: { user: string }): Promise<string | null>;
+  createLink(
+    email: string,
+    ip: string | null,
+    change?: { user: string } | null,
+    code?: string,
+  ): Promise<string | null>;
   /** Uses up a link of that purpose: its email (and account), or null if unknown, used or expired. */
   consumeLink(
     secret: string,
@@ -31,6 +40,12 @@ export interface Sessions {
     /** For an email change: only this account's link is used up. */
     user?: string,
   ): Promise<{ email: string; user: string | null } | null>;
+  /**
+   * Uses up the live sign-in link of `email` whose code this is (as typed: `normalizeCode`); its
+   * email and account, or null. A wrong code counts a try against every live link of the email,
+   * and at CODE_TRIES their codes no longer work.
+   */
+  consumeCode(email: string, typed: string): Promise<{ email: string; user: string | null } | null>;
   /** A live link of that purpose without using it up: its email and account, or null. */
   peekLink(
     secret: string,
@@ -63,6 +78,32 @@ export const sessionId = (secret: string) => sha256Hex(secret);
 
 export const newSecret = () => bytesToHex(randomBytes(32));
 const hash = (secret: string) => sha256Hex(secret);
+
+/** Crockford's base32: digits and capitals without I, L, O and U, so nothing reads as another. */
+const CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+const CODE_LENGTH = 8;
+
+/** A sign-in code: 8 characters of Crockford's base32 (40 bits), unformatted. */
+export function newCode(): string {
+  // 32 divides 256, so a byte's low five bits are uniform.
+  return [...randomBytes(CODE_LENGTH)].map((b) => CODE_ALPHABET[b & 31]).join("");
+}
+
+/** A code as people read it: two groups of four, `K7QM-X2PD`. */
+export const formatCode = (code: string) => `${code.slice(0, 4)}-${code.slice(4)}`;
+
+/**
+ * A code as typed, in any case, with or without the dash or spaces; O reads as 0, I and L as 1
+ * (Crockford). Null when it cannot be a code.
+ */
+export function normalizeCode(typed: string): string | null {
+  const code = typed.toUpperCase().replace(/[\s-]/g, "").replace(/O/g, "0").replace(/[IL]/g, "1");
+  if (code.length !== CODE_LENGTH) return null;
+  return [...code].every((ch) => CODE_ALPHABET.includes(ch)) ? code : null;
+}
+
+/** What is stored for a code: bound to its email, so a code works only for the address it went to. */
+const codeHash = (email: string, code: string) => sha256Hex(`${email}\n${code}`);
 const iso = (ms: number) => new Date(ms).toISOString();
 
 interface SessionRow {
@@ -78,7 +119,7 @@ interface SessionRow {
 
 export function d1Sessions(db: D1Database, now = () => Date.now()): Sessions {
   return {
-    async createLink(email, ip, change) {
+    async createLink(email, ip, change, code) {
       const t = now();
       const hourAgo = iso(t - 3_600_000);
       const counts = await db
@@ -94,7 +135,8 @@ export function d1Sessions(db: D1Database, now = () => Date.now()): Sessions {
       // Links older than a day are pruned by the daily cron (sweep.ts pruneAccounts).
       await db
         .prepare(
-          "INSERT INTO sign_in_links (hash, email, created, expires, ip, purpose, user) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          `INSERT INTO sign_in_links (hash, email, created, expires, ip, purpose, user, code_hash)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .bind(
           hash(secret),
@@ -104,9 +146,34 @@ export function d1Sessions(db: D1Database, now = () => Date.now()): Sessions {
           ip,
           change ? "email-change" : "sign-in",
           change?.user ?? null,
+          code && !change ? codeHash(email, code) : null,
         )
         .run();
       return secret;
+    },
+
+    async consumeCode(email, typed) {
+      const t = iso(now());
+      const live = `email = ?2 AND purpose = 'sign-in' AND used IS NULL AND expires > ?1
+        AND code_hash IS NOT NULL`;
+      const code = normalizeCode(typed);
+      if (code) {
+        const row = await db
+          .prepare(
+            `UPDATE sign_in_links SET used = ?1
+             WHERE ${live} AND tries < ?3 AND code_hash = ?4
+             RETURNING email, user`,
+          )
+          .bind(t, email, CODE_TRIES, codeHash(email, code))
+          .first<{ email: string; user: string | null }>();
+        if (row) return { email: row.email, user: row.user };
+      }
+      // A wrong code, or one that cannot be a code, is a try against every live code of the email.
+      await db
+        .prepare(`UPDATE sign_in_links SET tries = tries + 1 WHERE ${live}`)
+        .bind(t, email)
+        .run();
+      return null;
     },
 
     async consumeLink(secret, purpose = "sign-in", user) {

@@ -45,7 +45,7 @@ describe("the waitlist (v2 spec: Accounts and sign-in, The waitlist)", () => {
     };
     // invite: sign-in is for accounts, with a way to ask; Request access is its own page.
     let signIn = await page("/sign-in");
-    expect(signIn.text).toContain("We'll email you a link.");
+    expect(signIn.text).toContain("We'll email you a link and a code.");
     expect(signIn.text).toContain('href="/request-access"');
     expect(signIn.text).not.toContain("creates your account");
     const request = await page("/request-access");

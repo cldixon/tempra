@@ -32,6 +32,10 @@ describe("D1 indexes (TEMPRA-78)", () => {
         UNION SELECT rowid FROM tokens WHERE created_by = ?1) ORDER BY t.rowid DESC`,
     "sign-in rate limit": `SELECT (SELECT COUNT(*) FROM sign_in_links WHERE email = ?1 AND created > ?2) AS by_email,
       (SELECT COUNT(*) FROM sign_in_links WHERE ip = ?3 AND created > ?2) AS by_ip`,
+    "sign-in code": `UPDATE sign_in_links SET used = ?1 WHERE email = ?2 AND purpose = 'sign-in'
+      AND used IS NULL AND expires > ?1 AND code_hash IS NOT NULL AND tries < ?3 AND code_hash = ?4`,
+    "sign-in code tries": `UPDATE sign_in_links SET tries = tries + 1 WHERE email = ?2
+      AND purpose = 'sign-in' AND used IS NULL AND expires > ?1 AND code_hash IS NOT NULL`,
     "prune links":
       "DELETE FROM sign_in_links WHERE rowid IN (SELECT rowid FROM sign_in_links WHERE created < ?1 LIMIT 1000)",
     "prune sessions":
