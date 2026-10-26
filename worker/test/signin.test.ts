@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import { LINKS_PER_EMAIL_HOUR, SESSION_COOKIE, safeNext } from "../src/session";
+import {
+  CODE_TRIES,
+  LINKS_PER_EMAIL_HOUR,
+  newCode,
+  normalizeCode,
+  SESSION_COOKIE,
+  safeNext,
+} from "../src/session";
+import { signInMail } from "../src/signin";
 import { ORIGIN, setup } from "./harness";
 
 type S = ReturnType<typeof setup>;
@@ -103,6 +111,79 @@ describe("magic-link sign-in (v2 spec: Accounts and sign-in)", () => {
     expect(await libs.text()).toContain('"owner":"owner","slug":"demo"');
     expect((await s.accounts.user("owner@elsewhere.org")).handle).toBe("owner-2");
     expect((await s.accounts.user("owner@third.org")).handle).toBe("owner-3");
+  });
+
+  test("the code beside the link signs in on the device that asked (TEMPRA-188)", async () => {
+    const s = setup();
+    const r = await post(s, "/sign-in", { email: "Code@Example.com", next: "/agents" });
+    const page = await r.text();
+    // The page that answers has the code field, the email carried along.
+    expect(page).toContain('action="/sign-in/code"');
+    expect(page).toContain('name="email" value="code@example.com"');
+    expect(page).toContain('autocomplete="one-time-code"');
+    const mail = s.outbox[0];
+    const code = /\b[0-9A-Z]{8}\b/.exec(mail?.text ?? "")?.[0] ?? "";
+    // One word, no dash, so a double-tap selects all of it.
+    expect(code).toMatch(/^[0-9A-HJKMNP-TV-Z]{8}$/);
+    expect(mail?.subject).toBe(`Tempra sign-in code: ${code}`);
+    // Only hashes are stored.
+    expect(JSON.stringify(s.db.query("SELECT * FROM sign_in_links").all())).not.toContain(code);
+    // Another email's code is not this one's.
+    expect((await post(s, "/sign-in/code", { email: "other@example.com", code })).status).toBe(400);
+    // Typed in lower case, with a dash: signed in, where it was going.
+    const done = await post(s, "/sign-in/code", {
+      email: "code@example.com",
+      code: `${code.slice(0, 4)}-${code.slice(4)}`.toLowerCase(),
+      next: "/agents",
+    });
+    expect(done.status).toBe(303);
+    expect(done.headers.get("Location")).toBe("/agents");
+    expect(done.headers.get("Set-Cookie")).toContain(SESSION_COOKIE);
+    // One use: the code again, and the link it came with, are spent.
+    expect((await post(s, "/sign-in/code", { email: "code@example.com", code })).status).toBe(400);
+    const t = new URL(/https?:\/\/\S+/.exec(mail?.text ?? "")?.[0] ?? "").searchParams.get("t");
+    expect((await post(s, "/sign-in/link", { t: t ?? "", next: "/" })).status).toBe(400);
+  });
+
+  test("the link uses up its code; wrong codes stop the codes, not the links", async () => {
+    const s = setup();
+    const first = await askLink(s, "guess@example.com");
+    const code = /\b[0-9A-Z]{8}\b/.exec(s.outbox[0]?.text ?? "")?.[0] ?? "";
+    expect((await post(s, "/sign-in/link", { t: first?.t ?? "", next: "/" })).status).toBe(303);
+    const spent = await post(s, "/sign-in/code", { email: "guess@example.com", code });
+    expect(spent.status).toBe(400);
+    expect(await spent.text()).toContain("That code didn");
+
+    const second = await askLink(s, "guess@example.com");
+    const right = /\b[0-9A-Z]{8}\b/.exec(s.outbox[1]?.text ?? "")?.[0] ?? "";
+    for (let i = 0; i < CODE_TRIES; i++) {
+      const wrong = right === "00000000" ? "11111111" : "00000000";
+      expect(
+        (await post(s, "/sign-in/code", { email: "guess@example.com", code: wrong })).status,
+      ).toBe(400);
+    }
+    expect(
+      (await post(s, "/sign-in/code", { email: "guess@example.com", code: right })).status,
+    ).toBe(400);
+    expect((await post(s, "/sign-in/link", { t: second?.t ?? "", next: "/" })).status).toBe(303);
+  });
+
+  test("codes: Crockford's alphabet, typed loosely; the email's link is a hyperlink", () => {
+    for (let i = 0; i < 50; i++) expect(newCode()).toMatch(/^[0-9A-HJKMNP-TV-Z]{8}$/);
+    expect(normalizeCode(" k7qm-x2pd ")).toBe("K7QMX2PD");
+    expect(normalizeCode("O1IL-0000")).toBe("01110000");
+    expect(normalizeCode("K7QM-X2P")).toBeNull();
+    expect(normalizeCode("UUUU-UUUU")).toBeNull();
+    const link = "https://app.tempra.dev/sign-in/link?t=abc&next=%2F";
+    const mail = signInMail(link, "K7QMX2PD");
+    expect(mail.html).toContain('href="https://app.tempra.dev/sign-in/link?t=abc&#38;next=%2F"');
+    expect(mail.html).toContain(">Sign in to Tempra</a>");
+    expect(mail.html).toContain(">K7QMX2PD</p>");
+    expect(mail.subject).toBe("Tempra sign-in code: K7QMX2PD");
+    // The link is a hyperlink, never its raw address as text.
+    expect(mail.html.replace(/href="[^"]*"/g, "")).not.toContain("sign-in/link");
+    expect(mail.text).toContain(link);
+    expect(signInMail(link, null).subject).toBe("Your Tempra sign-in link");
   });
 
   test("an expired link is refused", async () => {
@@ -250,7 +331,7 @@ describe("who may sign up: SIGNUP (v2 spec: A4)", () => {
     for (const email of ["owner@example.com", "friend@example.com", "stranger@example.com"]) {
       const r = await ask(s, email);
       expect(r.status).toBe(200);
-      answers.add((await r.text()).replace(email, "EMAIL"));
+      answers.add((await r.text()).replaceAll(email, "EMAIL"));
     }
     // One answer for all three: the page tells nothing about lists or accounts.
     expect(answers.size).toBe(1);
