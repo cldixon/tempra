@@ -142,9 +142,13 @@ describe("limits (v2 spec: Limits, abuse and metering)", () => {
       { kind: "write", account: "owner", library: "lib-1" },
       { kind: "request", account: "owner", library: "lib-1" },
     ]);
-    // People in the web UI are not metered or limited.
+    // People in the web UI are not limited per token, and a page is not metered; the library's
+    // API answers its shell carries (TEMPRA-175: the tree and the agents) are, one data point
+    // each, as the app's own calls for them would have been.
     await s.app.request(`${UI}/`);
-    expect(s.usage).toHaveLength(3);
+    expect(s.usage.slice(3)).toEqual(
+      Array(2).fill({ kind: "request", account: "owner", library: "lib-1" }),
+    );
   });
 });
 

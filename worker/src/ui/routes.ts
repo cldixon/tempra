@@ -12,6 +12,7 @@ import { LINK_MINUTES, readCookie, SESSION_COOKIE } from "../session";
 import { signedIn } from "../signin";
 import { OkfError } from "../store/errors";
 import { type Authorized, authorizeLibrary, requireOwner } from "../tenancy";
+import { type BootPage, bootData, bootScript, bootUrls } from "./boot";
 import { spaShell } from "./spa";
 import { Urls } from "./urls";
 
@@ -305,10 +306,33 @@ export function registerUiRoutes<E extends AppEnv>(
 ) {
   const get = (path: string, handler: (p: Page) => Promise<Response>) =>
     app.get(path, ui(deps, handler) as never);
-  const shell = (p: Page) => Promise.resolve(spaShell(p.c.req.raw, { theme: p.user.theme }));
+  /**
+   * The SPA's shell, with the page's first API answers in it (TEMPRA-175, boot.ts): each made in
+   * process through this app as the person (the same cookie, so the same checks, limits and
+   * metering as the browser's own call).
+   */
+  const shell = async (p: Page, page: BootPage = { kind: "account" }) => {
+    const origin = new URL(p.c.req.url).origin;
+    const cookie = p.c.req.header("Cookie") ?? "";
+    let ctx: Parameters<typeof app.request>[3];
+    try {
+      ctx = p.c.executionCtx;
+    } catch {}
+    const data = await bootData(bootUrls(page), (url) =>
+      Promise.resolve(
+        app.request(
+          `${origin}${url}`,
+          { headers: { Cookie: cookie, Accept: "application/json" } },
+          p.c.env as E["Bindings"],
+          ctx,
+        ),
+      ),
+    );
+    return spaShell(p.c.req.raw, { theme: p.user.theme, boot: bootScript(data) });
+  };
   const library = async (p: Page) => {
-    await openLibrary(p);
-    return shell(p);
+    const { ref } = await openLibrary(p);
+    return shell(p, { kind: "library", owner: ref.owner, slug: ref.slug });
   };
 
   get("/", async (p) => {
@@ -360,9 +384,9 @@ export function registerUiRoutes<E extends AppEnv>(
 
   // A directory's index.md is the directory page itself.
   const file = async (p: Page, path: string) => {
-    const { urls } = await openLibrary(p);
+    const { urls, ref } = await openLibrary(p);
     if (basename(path) === "index.md") return p.c.redirect(urls.tree(dirname(path)));
-    return shell(p);
+    return shell(p, { kind: "file", owner: ref.owner, slug: ref.slug, path, at: urls.at });
   };
   get("/:owner/:lib/-/files/*", (p) => file(p, tail(p.c, "/-/files/")));
   for (const page of [
