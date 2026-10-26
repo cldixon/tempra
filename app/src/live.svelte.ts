@@ -1,5 +1,8 @@
+import { untrack } from "svelte";
 import { type FeedEvent, type FeedStatus, feedOf } from "./live";
 import type { Urls } from "./urls";
+
+const libraryKey = (urls: Urls) => `${urls.owner}/${urls.slug}`;
 
 /**
  * Whether the library's feed is live or reconnecting, said only once it has been reconnecting
@@ -7,8 +10,10 @@ import type { Urls } from "./urls";
  */
 export function useFeedStatus(urls: () => Urls, quietMs = 4000) {
   let shown = $state<FeedStatus>("live");
+  const key = $derived(libraryKey(urls()));
   $effect(() => {
-    const feed = feedOf(urls());
+    void key;
+    const feed = untrack(() => feedOf(urls()));
     let timer: ReturnType<typeof setTimeout> | undefined;
     const on = (s: FeedStatus) => {
       clearTimeout(timer);
@@ -44,12 +49,17 @@ export function useFeed(
   onEvents: (events: FeedEvent[]) => void,
   onReset: () => void,
 ) {
-  const key = $derived(`${urls().owner}/${urls().slug}`);
+  // The library as a string: the effects below follow it, not the Urls object that names it, so
+  // a page redrawn in the same library keeps its subscription (and makes no catch-up request).
+  const key = $derived(libraryKey(urls()));
   let sub: ReturnType<ReturnType<typeof feedOf>["subscribe"]> | null = null;
   // One subscription per library, made before the sync below runs (effects run in order).
   $effect.pre(() => {
     void key;
-    const s = feedOf(urls()).subscribe({ events: (e) => onEvents(e), reset: () => onReset() });
+    const s = untrack(() => feedOf(urls())).subscribe({
+      events: (e) => onEvents(e),
+      reset: () => onReset(),
+    });
     sub = s;
     return () => {
       s.close();
@@ -59,7 +69,7 @@ export function useFeed(
   $effect(() => {
     const f = from();
     void key;
-    if (f !== null && sub) feedOf(urls()).sync(sub, f);
+    if (f !== null && sub) untrack(() => feedOf(urls())).sync(sub, f);
   });
 }
 
