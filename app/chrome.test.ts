@@ -26,9 +26,15 @@ function setup() {
   const button = d.host.querySelector<HTMLButtonElement>("button.menu-button");
   if (!button) throw new Error("no menu button");
   const list = () => d.host.querySelector(".menu-list");
+  /** A choice in the open list. */
+  const choice = (selector: string) => {
+    const el = list()?.querySelector<HTMLElement>(selector);
+    if (!el) throw new Error(`no ${selector} in the menu`);
+    return el;
+  };
   const key = (el: Element, k: string) =>
     el.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true }));
-  return { ...d, target, button, list, key };
+  return { ...d, target, button, list, choice, key };
 }
 
 describe("Menu", () => {
@@ -68,7 +74,7 @@ describe("Menu", () => {
     const m = setup();
     m.button.click();
     flushSync();
-    (m.list()?.querySelector("a") as HTMLElement).focus();
+    m.choice("a").focus();
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     flushSync();
     expect(m.list()).toBeNull();
@@ -80,10 +86,10 @@ describe("Menu", () => {
     const m = setup();
     m.button.click();
     flushSync();
-    (m.list()?.querySelector("[data-stay]") as HTMLElement).click();
+    m.choice("[data-stay]").click();
     flushSync();
     expect(m.list()).not.toBeNull();
-    (m.list()?.querySelectorAll("button")[0] as HTMLElement).click();
+    m.choice("button:not([data-stay])").click();
     flushSync();
     expect(m.list()).toBeNull();
     m.destroy();
