@@ -1,5 +1,8 @@
 import type { ActedBy } from "./agents";
+import { api } from "./api";
+import { registerPage } from "./prefetch";
 import { day, plural, relativeTime } from "./ui";
+import type { ActivityFilters, Urls } from "./urls";
 
 /*
  * Activity (take 4, TEMPRA-115; tempra-dev: app/activity): what happened, for people. One entry per
@@ -474,3 +477,26 @@ export interface RequestPage {
   requests: LedgerRequest[];
   next: number | null;
 }
+
+/** The cache key of Activity's newest page under its filters (see useLoad). */
+export const activityKey = (urls: Urls, filters: ActivityFilters) =>
+  `activity ${urls.base} ${filters.prefix ?? ""} ${filters.actor ?? ""}`;
+
+/** What Activity loads first: the head, then the newest page of requests its filters match. */
+export async function loadActivity(urls: Urls, filters: ActivityFilters) {
+  // The head first: the feed then replays anything that lands while the page loads.
+  const { seq } = await api<{ seq: number }>(urls.api("stats"));
+  const page = await api<RequestPage>(
+    urls.api("requests", {
+      prefix: filters.prefix || undefined,
+      actor: filters.actor || undefined,
+      limit: REQUESTS_PAGE,
+    }),
+  );
+  return { ...page, head: seq };
+}
+
+registerPage("activity", (route, urls) => ({
+  key: activityKey(urls, route.filters),
+  load: () => loadActivity(urls, route.filters),
+}));

@@ -934,6 +934,83 @@ async function browserRenders(
       },
     );
     await step(
+      "workspace: a slow page keeps the old one on screen, then says it is loading",
+      async () => {
+        // TEMPRA-194: a move to a page not in the cache keeps the page on screen (and its scroll)
+        // for up to 300 ms while the next one's data arrives; past that the next page draws its
+        // loading state, said politely. The address, the tree's row and the bar's path move at
+        // the click. The next page's file is held here so the hold is seen to end by the delay.
+        // Not the page the step before moved to (the first of the folder's others): one this
+        // browser has not opened, so it is not in the cache.
+        const siblings = concepts.filter(
+          (c) => c !== nested && c.split("/").slice(0, -1).join("/") === folder,
+        );
+        const next = siblings[1] ?? concepts.find((c) => c !== nested && c !== siblings[0]);
+        if (!next) throw new Error(`no third concept in ${folder}/ to move to`);
+        await page.locator(".body .prose").waitFor({ timeout: 15_000 });
+        await main.evaluate((el) => {
+          el.scrollTop = 200;
+        });
+        const scrolled = await main.evaluate((el) => el.scrollTop);
+        const title = await main.locator("h1.doc-title").innerText();
+        let release = () => {};
+        const held = new Promise<void>((r) => {
+          release = r;
+        });
+        const hold = async (route: Route) => {
+          await held;
+          await route.continue().catch(() => {});
+        };
+        const fileApi = `**/api/v1/libraries/${owner}/${slug}/files/${enc(next)}*`;
+        await page.route(fileApi, hold);
+        try {
+          const clicked = Date.now();
+          await sidebar.locator(`a[data-path="${next}"]`).click();
+          await page.waitForURL(`${lib}/${enc(next)}`);
+          // Within the hold: the old page, still scrolled, no Loading…, and the frame already
+          // at the new page (its row current, its title last in the bar's path).
+          if (Date.now() - clicked < 200) {
+            if ((await main.locator("h1.doc-title").innerText()) !== title) {
+              throw new Error("the old page left before the hold ended");
+            }
+            if ((await main.getByText("Loading…").count()) > 0) {
+              throw new Error("Loading… showed within the hold");
+            }
+            if (Math.abs((await main.evaluate((el) => el.scrollTop)) - scrolled) > 2) {
+              throw new Error("the old page lost its scroll within the hold");
+            }
+          }
+          if (
+            (await sidebar.locator(`a[aria-current="page"][data-path="${next}"]`).count()) !== 1
+          ) {
+            throw new Error("the tree's row did not follow the click at once");
+          }
+          const path = sheetBar.getByRole("navigation", { name: "Path" });
+          const last = (await path.locator('[aria-current="page"]').innerText()).trim();
+          if (last === title.trim()) throw new Error("the bar's path still named the old page");
+          await main.getByText("Loading…").waitFor({ timeout: 5000 });
+          if (Date.now() - clicked < 250) throw new Error("Loading… showed before the hold ended");
+          const said = (await page.locator('.workspace > p[role="status"]').innerText()).trim();
+          if (said !== "Loading…") throw new Error(`the live region said ${JSON.stringify(said)}`);
+          if ((await main.evaluate((el) => el.scrollTop)) !== 0) {
+            throw new Error("the next page did not start at the top");
+          }
+        } finally {
+          release();
+          await page.unroute(fileApi, hold);
+        }
+        await main
+          .locator("h1.doc-title", { hasNotText: new RegExp(`^${literal(title)}$`) })
+          .waitFor({ timeout: 10_000 });
+        if ((await main.getByText("Loading…").count()) > 0) {
+          throw new Error("Loading… stayed after the page drew");
+        }
+        await page.goBack();
+        await page.waitForURL(`${lib}/${enc(nested)}`);
+        await page.locator(".body .prose").waitFor({ timeout: 15_000 });
+      },
+    );
+    await step(
       "the page's path over it; a folder is not a page, its address reveals it",
       async () => {
         if (!folder) throw new Error("no concept in a folder");

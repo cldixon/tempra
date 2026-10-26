@@ -1,9 +1,36 @@
-import type { LedgerRequest } from "../activity";
+import { byPerson, type LedgerRequest } from "../activity";
 import type { ActedBy } from "../agents";
+import { api } from "../api";
+import { registerPage } from "../prefetch";
 import { fileLabel, type OutlineFile } from "../tree";
+import type { Urls } from "../urls";
 
 /** The requests read for Recently changed and the empty library's line. */
 export const READ = 20;
+
+/** The cache key of a library's home (see useLoad). */
+export const homeKey = (urls: Urls) => `home ${urls.base}`;
+
+/** What the home loads first: the head and page count, and the newest requests. */
+export async function loadHome(urls: Urls) {
+  const [summary, page] = await Promise.all([
+    api<{ seq: number; concepts: number }>(urls.api("summary")),
+    api<{ requests: LedgerRequest[] }>(urls.api("requests", { limit: READ })),
+  ]);
+  return {
+    head: summary.seq,
+    concepts: summary.concepts,
+    requests: page.requests,
+    latest: page.requests.find((r) => !byPerson(r)) ?? null,
+    // No agent among the newest requests, and no older ones: no agent has written here yet.
+    noAgentYet: page.requests.length < READ && !page.requests.some((r) => !byPerson(r)),
+  };
+}
+
+// The home is the library's root; any other folder's address redirects to it.
+registerPage("directory", (route, urls) =>
+  route.dir === "" ? { key: homeKey(urls), load: () => loadHome(urls) } : null,
+);
 
 /** How many pages Recently changed lists. */
 const RECENT = 5;

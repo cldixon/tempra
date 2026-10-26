@@ -1,7 +1,6 @@
 <script lang="ts">
-  import { byPerson, type LedgerRequest, whoWorksHere } from "../activity";
+  import { whoWorksHere } from "../activity";
   import { useActors } from "../agents.svelte.ts";
-  import { api } from "../api";
   import { useFrame } from "../frame.svelte.ts";
   import { useFeed, useTrailing } from "../live.svelte.ts";
   import { useLoad } from "../load.svelte.ts";
@@ -14,7 +13,7 @@
   import { useMe, useTitle } from "../ui.svelte.ts";
   import type { Urls } from "../urls";
   import EmptyLibrary from "./EmptyLibrary.svelte";
-  import { READ, recentlyChanged } from "./home";
+  import { homeKey, loadHome, recentlyChanged } from "./home";
   import RecentlyChanged from "./RecentlyChanged.svelte";
 
   /**
@@ -37,21 +36,8 @@
   const actors = useActors(() => urls);
   const frame = useFrame();
   const loaded = useLoad(
-    () => `home ${urls.base}`,
-    async () => {
-      const [summary, page] = await Promise.all([
-        api<{ seq: number; concepts: number }>(urls.api("summary")),
-        api<{ requests: LedgerRequest[] }>(urls.api("requests", { limit: READ })),
-      ]);
-      return {
-        head: summary.seq,
-        concepts: summary.concepts,
-        requests: page.requests,
-        latest: page.requests.find((r) => !byPerson(r)) ?? null,
-        // No agent among the newest requests, and no older ones: no agent has written here yet.
-        noAgentYet: page.requests.length < READ && !page.requests.some((r) => !byPerson(r)),
-      };
-    },
+    () => homeKey(urls),
+    () => loadHome(urls),
   );
   // Who works here (the owner and members; none until they load, as the owner is always one):
   // only the header's quiet line needs it, so a failure drops only that line.

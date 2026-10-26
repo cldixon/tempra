@@ -1,6 +1,4 @@
 <script lang="ts" module>
-  import { Urls } from "./urls";
-
   /** The settings pages' chunk, fetched once, on the first settings page (pages/settings.ts). */
   let settingsChunk: Promise<typeof import("./pages/settings")> | null = null;
   const settings = () => {
@@ -10,21 +8,6 @@
 
   /** The pages that lay out their column themselves (a concept's columns, the person's views). */
   const OWN_COLUMN = new Set(["file", "directory", "activity"]);
-
-  /**
-   * One Urls per library and pinned sequence, so pages and what they derive see the same object
-   * across navigations (a fragment change must not remount the reader).
-   */
-  const urlsCache = new Map<string, Urls>();
-  function urlsFor(owner: string, slug: string, at: number | undefined): Urls {
-    const key = `${owner}/${slug}@${at ?? ""}`;
-    let urls = urlsCache.get(key);
-    if (!urls) {
-      urls = new Urls(owner, slug, at);
-      urlsCache.set(key, urls);
-    }
-    return urls;
-  }
 </script>
 
 <script lang="ts">
@@ -40,17 +23,21 @@
   import Redirect from "./Redirect.svelte";
   import { match, pageKey } from "./router";
   import { useMe } from "./ui.svelte.ts";
+  import { type Urls, urlsFor } from "./urls";
   import Workspace from "./Workspace.svelte";
 
   const me = useMe();
+  // The page on screen draws from `here.url`; the frame follows the address, which can be ahead of
+  // it for a moment while the next page's data arrives (TEMPRA-194, hold.ts).
   const url = $derived(here.url);
   const route = $derived(match(url));
+  const address = $derived(match(here.address));
   const actor = $derived(me.current?.actor ?? "");
   const key = $derived(pageKey(url, route));
 
   /** For the account's pages: which one, for its frame. */
   const account = $derived.by((): AccountPage | null => {
-    switch (route?.page) {
+    switch (address?.page) {
       case "libraries":
       case "welcome":
       case "agents":
@@ -58,7 +45,7 @@
       case "notifications":
       case "invitations":
       case "inbox":
-        return route.page;
+        return address.page;
       case "redirect":
         return "inbox";
       default:
@@ -67,8 +54,8 @@
   });
 
   /** For a library's pages: the library and where in it the page is (the workspace frame). */
-  const library = $derived.by((): { urls: Urls; place: Place; pinned: Urls } | null => {
-    const r = route;
+  const library = $derived.by((): { urls: Urls; place: Place } | null => {
+    const r = address;
     if (!r || !("owner" in r)) return null;
     const place: Place = { file: null, dir: null, view: null };
     switch (r.page) {
@@ -90,16 +77,16 @@
       default:
         place.view = r.page;
     }
-    return {
-      urls: urlsFor(r.owner, r.slug, undefined),
-      place,
-      pinned: urlsFor(r.owner, r.slug, "at" in r ? r.at : undefined),
-    };
+    return { urls: urlsFor(r.owner, r.slug, undefined), place };
   });
   // Each its own derived, so a navigation that keeps the library keeps the same Urls (a derived
   // passes on a change only when its value is a new one): the frame's loads are not redone.
   const libraryUrls = $derived(library?.urls ?? null);
-  const pinnedUrls = $derived(library?.pinned ?? null);
+  const pinnedUrls = $derived(
+    route && "owner" in route
+      ? urlsFor(route.owner, route.slug, "at" in route ? route.at : undefined)
+      : null,
+  );
   const place = $derived(library?.place ?? null);
   const libraryKey = $derived(libraryUrls ? `${libraryUrls.owner}/${libraryUrls.slug}` : "");
 </script>
