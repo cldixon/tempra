@@ -1,6 +1,7 @@
 <script lang="ts">
   import { type Snippet, untrack } from "svelte";
   import { api, cache } from "./api";
+  import { isConceptPath } from "./concept/data";
   import FeedNotice from "./FeedNotice.svelte";
   import { type Place, SETTINGS_VIEWS } from "./frame";
   import { inboxChanged } from "./inbox";
@@ -13,9 +14,10 @@
   import Shell from "./Shell.svelte";
   import Switcher from "./Switcher.svelte";
   import { loadHidden, saveHidden } from "./sidebar";
+  import TopbarPath from "./TopbarPath.svelte";
   import { type OutlineFile, REFRESH_MS } from "./tree";
   import type { Me } from "./ui";
-  import type { Urls } from "./urls";
+  import { baseName, type Urls } from "./urls";
 
   /**
    * A library's frame, keyed by the library so it stays mounted while the person moves within it:
@@ -116,6 +118,11 @@
   const shared = $derived(library.current !== undefined && isShared(library.current));
 </script>
 
+<!-- The path of a concept being moved to, from the index, while the page on screen waits. -->
+{#snippet nextPath()}{#if place.file && isConceptPath(place.file)}<TopbarPath
+      path={place.file}
+      title={index?.find((f) => f.path === place.file)?.title ?? baseName(place.file).replace(/\.md$/, "")}
+    />{/if}{/snippet}
 <!-- Only the library's own sidebar hides; the settings' is how the person moves between tabs. -->
 <Shell
   library={{ urls, name, shared, home: place.view === "home" }}
@@ -124,6 +131,7 @@
   onHide={settings ? undefined : hide}
   {me}
   {index}
+  {nextPath}
 >
   {#snippet sidebar()}
     {#if settings}

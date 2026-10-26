@@ -19,6 +19,7 @@
   import { pushRecent } from "../recent";
   import { useLibraryTitle, useRole } from "../role.svelte.ts";
   import { type Compare, navigate } from "../router";
+  import TopbarPath from "../TopbarPath.svelte";
   import { anchorId } from "../ui";
   import { dirOf, folderName, type Urls } from "../urls";
   import Byline from "./Byline.svelte";
@@ -298,11 +299,8 @@
 </script>
 
 {#snippet hoverCard(card: Card)}<HoverCard {card} />{/snippet}
-<!-- The page's path over it, as Linear's docs have it (TEMPRA-145): its folders, words and not
-     links (folders are not pages), then its title. -->
-{#snippet path()}<nav class="topbar-crumbs" aria-label="Path"
-    >{#each folders as f (f)}<span class="crumb">{folderName(f)}</span>{/each}<span class="crumb" aria-current="page">{title}</span></nav
-  >{/snippet}
+<!-- The page's path over it (TEMPRA-145). -->
+{#snippet path()}<TopbarPath path={c.path} {title} />{/snippet}
 {#snippet actions()}{#if live && !moved}<LiveChange {urls} {live} />{/if}<PageMenu
     {urls}
     path={c.path}

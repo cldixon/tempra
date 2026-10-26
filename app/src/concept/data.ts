@@ -1,8 +1,8 @@
 import type { Doc, LinkTarget } from "@tempra/editor";
 import type { ActedBy } from "../agents";
-import { api, prefetch } from "../api";
+import { api } from "../api";
 import type { ImageRef } from "../images";
-import { registerPrefetch } from "../prefetch";
+import { registerPage } from "../prefetch";
 import { baseName, dirOf, enc, type Urls } from "../urls";
 
 /**
@@ -173,8 +173,11 @@ export async function loadFile(urls: Urls, path: string): Promise<FileData> {
   };
 }
 
-// Hovering a file in the tree, or picking it in the switcher, starts loading its page.
-registerPrefetch((urls, path) => prefetch(fileKey(urls, path), () => loadFile(urls, path)));
+// What a file's page loads: prefetched from the tree and the switcher, awaited by a navigation.
+registerPage("file", (route, urls) => ({
+  key: fileKey(urls, route.path),
+  load: () => loadFile(urls, route.path),
+}));
 
 /** A concept's title: its frontmatter's, else its file name. */
 export function titleOf(c: Concept): string {

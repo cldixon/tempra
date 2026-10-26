@@ -54,6 +54,8 @@
     me: Me | null;
     /** The library's index, for the pages (null off a library, or until it arrives). */
     index: OutlineFile[] | null;
+    /** The path of the page being moved to, drawn while the page on screen waits for it. */
+    nextPath?: Snippet;
     children: Snippet;
   } = $props();
 
@@ -111,9 +113,11 @@
     };
   });
 
-  // The drawer closes when the person moves to another page, and when the screen widens.
+  // The drawer closes when the person moves to another page (at the click, not once the page
+  // draws), and when the screen widens.
+  const address = $derived(here.address.pathname + here.address.search);
   $effect(() => {
-    void href;
+    void address;
     drawer = false;
   });
   $effect(() => {
@@ -223,7 +227,9 @@
         >{/if}<!-- The page's path, from the page (a concept's folders and title; TEMPRA-145). --><div
         class="topbar-path"
         bind:this={pathSlot}
-      ></div><div class="topbar-tools" bind:this={toolsSlot}></div><div class="topbar-end"
+        hidden={here.held}
+      ></div>{#if here.held}<!-- While the page on screen waits for the next (TEMPRA-194), the
+        bar names where the person is going. --><div class="topbar-path">{@render props.nextPath?.()}</div>{/if}<div class="topbar-tools" bind:this={toolsSlot}></div><div class="topbar-end"
         >{@render props.status?.()}<Bell /><AccountMenu me={props.me} /></div
       ></div>
   </header>
@@ -248,6 +254,8 @@
       ></div>
     {@render props.sidebar()}
   </section>
+  <!-- A move that waits past the hold says so, quietly (TEMPRA-194); the page draws Loading…. -->
+  <p class="visually-hidden" role="status">{here.loading ? "Loading…" : ""}</p>
   <main class="ws-main" bind:this={main} onscroll={(e) => scrolls.set(href, e.currentTarget.scrollTop)}>
     {@render props.children()}
   </main>

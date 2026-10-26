@@ -189,13 +189,14 @@ describe("useFeed", () => {
 });
 
 describe("the location", () => {
-  test("navigate moves here.url; back and forward are told apart", () => {
+  // The address moves at once; the page's URL can wait for the next page's data (hold.test.ts).
+  test("navigate moves here.address; back and forward are told apart", () => {
     navigate("/ann/notes/a.md");
-    expect(here.url.pathname).toBe("/ann/notes/a.md");
+    expect(here.address.pathname).toBe("/ann/notes/a.md");
     expect(lastNavigation()).toBe("push");
     history.pushState(null, "", "/ann/notes/b.md");
     window.dispatchEvent(new Event("popstate"));
-    expect(here.url.pathname).toBe("/ann/notes/b.md");
+    expect(here.address.pathname).toBe("/ann/notes/b.md");
     expect(lastNavigation()).toBe("pop");
   });
 });

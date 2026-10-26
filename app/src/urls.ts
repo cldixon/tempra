@@ -196,3 +196,18 @@ export function urlsOf(library: string): Urls {
   const [owner = "", slug = ""] = library.split("/");
   return new Urls(owner, slug);
 }
+
+/**
+ * One Urls per library and pinned sequence, so pages and what they derive see the same object
+ * across navigations (a fragment change must not remount the reader).
+ */
+const urlsCache = new Map<string, Urls>();
+export function urlsFor(owner: string, slug: string, at: number | undefined): Urls {
+  const key = `${owner}/${slug}@${at ?? ""}`;
+  let urls = urlsCache.get(key);
+  if (!urls) {
+    urls = new Urls(owner, slug, at);
+    urlsCache.set(key, urls);
+  }
+  return urls;
+}

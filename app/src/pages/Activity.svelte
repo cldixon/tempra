@@ -1,7 +1,6 @@
 <script lang="ts">
-  import { REQUESTS_PAGE, type RequestPage } from "../activity";
+  import { activityKey, loadActivity } from "../activity";
   import { useLiveWrites } from "../activity.svelte.ts";
-  import { api } from "../api";
   import Icon from "../Icon.svelte";
   import { useFeed, useTrailing } from "../live.svelte.ts";
   import { useLoad } from "../load.svelte.ts";
@@ -47,21 +46,10 @@
         : urls.activity({ ...filters, view, ...change }),
       { replace },
     );
-  const key = $derived(`activity ${urls.base} ${prefix} ${exact}`);
+  const key = $derived(activityKey(urls, filters));
   const loaded = useLoad(
     () => key,
-    async () => {
-      // The head first: the feed then replays anything that lands while the page loads.
-      const { seq } = await api<{ seq: number }>(urls.api("stats"));
-      const page = await api<RequestPage>(
-        urls.api("requests", {
-          prefix: prefix || undefined,
-          actor: exact || undefined,
-          limit: REQUESTS_PAGE,
-        }),
-      );
-      return { ...page, head: seq };
-    },
+    () => loadActivity(urls, filters),
   );
 
   // Live (tempra-dev: app/live): a write the filters may match reloads the newest page, once per

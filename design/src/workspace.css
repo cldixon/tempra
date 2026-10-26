@@ -605,6 +605,11 @@ a.button.pill-button {
   min-width: 0;
 }
 
+/* The page's own path, while the bar names the page being moved to (TEMPRA-194). */
+.topbar-path[hidden] {
+  display: none;
+}
+
 /* A concept's path: its folders, words not links, then its title (TEMPRA-145). */
 .topbar-crumbs {
   display: flex;
