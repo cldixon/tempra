@@ -31,6 +31,26 @@ class NoSocket {
 const g = globalThis as Record<string, unknown>;
 g.HTMLMediaElement ??= (window as unknown as Record<string, unknown>).HTMLMediaElement;
 
+/** One reply waiting in the Inbox, as the bell's panel lists it. */
+const INBOX_ITEM = {
+  id: "i1",
+  kind: "reply",
+  library: "ann/notes",
+  library_title: "Notes",
+  path: "a.md",
+  thread: "t1",
+  title: "Reader",
+  actor: "human:ann",
+  who: "@ann",
+  agent: false,
+  excerpt: "Done.",
+  invitation: null,
+  created: new Date().toISOString(),
+  done_at: null,
+  actions: ["reply", "resolve"],
+  href: "/ann/notes/a.md#comments",
+};
+
 const realFetch = globalThis.fetch;
 const realSocket = globalThis.WebSocket;
 beforeEach(() => {
@@ -45,14 +65,16 @@ beforeEach(() => {
         ? { events: [], seq: 8 }
         : url.includes("/inbox/count")
           ? { open: 2 }
-          : url.includes("/api/v1/libraries")
-            ? {
-                libraries: [
-                  { owner: "dev", slug: "dev", title: "Dev" },
-                  { owner: "ann", slug: "notes", title: "Notes", role: "read" },
-                ],
-              }
-            : {};
+          : url.includes("/api/v1/inbox?")
+            ? { items: [INBOX_ITEM], next: null, open: 2 }
+            : url.includes("/api/v1/libraries")
+              ? {
+                  libraries: [
+                    { owner: "dev", slug: "dev", title: "Dev" },
+                    { owner: "ann", slug: "notes", title: "Notes", role: "read" },
+                  ],
+                }
+              : {};
     return new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
   }) as typeof fetch;
 });
@@ -123,10 +145,20 @@ describe("the account's frame (AccountFrame.svelte)", () => {
     const rows = [...f.host.querySelectorAll(".nav-row")].map((r) => r.textContent);
     // The Inbox is the bell's, in no sidebar (TEMPRA-189); the bell counts what waits.
     expect(rows).toEqual(["Libraries", "DDev", "NNotes (@ann)"]);
-    const bell = f.host.querySelector("a.bell");
-    expect(bell?.getAttribute("href")).toBe("/inbox");
+    // The bell opens a panel of what waits, each a link, Open Inbox at its foot (TEMPRA-189).
+    const bell = f.host.querySelector<HTMLButtonElement>("button.bell");
     expect(bell?.getAttribute("aria-label")).toBe("Inbox, 2 waiting");
     expect(bell?.querySelector(".badge")?.textContent).toBe("2");
+    expect(f.host.querySelector(".bell-pop")).toBeNull();
+    bell?.click();
+    await settle(10);
+    const pop = f.host.querySelector(".bell-pop");
+    const item = pop?.querySelector<HTMLAnchorElement>("a.bell-item");
+    expect(item?.getAttribute("href")).toBe("/ann/notes/a.md#thread-t1");
+    expect(item?.textContent).toContain("Reader");
+    expect(item?.textContent).toContain("@ann replied to your thread");
+    expect(pop?.querySelector(".bell-more")?.textContent).toBe("1 more");
+    expect(pop?.querySelector("a.bell-foot")?.getAttribute("href")).toBe("/inbox");
     expect(f.host.querySelector("section.ws-sidebar")?.hasAttribute("hidden")).toBe(false);
     f.destroy();
   });

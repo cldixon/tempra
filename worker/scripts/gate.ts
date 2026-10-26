@@ -1330,12 +1330,21 @@ async function browserRenders(
       await page.getByText("Saved.").waitFor({ timeout: 15_000 });
       await page.goto(`${lib}/`);
       await home();
-      // The bell: a link to the Inbox, no popover (TEMPRA-173).
-      const bellHref = await page
+      // The bell opens a panel over the page, with Open Inbox at its foot, and leaves the page
+      // where it was (TEMPRA-189).
+      const bellPop = page.locator(".menu-list.bell-pop");
+      await page
         .locator("header.ws-topbar")
-        .getByRole("link", { name: /^Inbox/ })
+        .getByRole("button", { name: /^Inbox/ })
+        .click();
+      await bellPop.getByText("Inbox", { exact: true }).waitFor({ timeout: 5000 });
+      const bellHref = await bellPop
+        .getByRole("link", { name: "Open Inbox", exact: true })
         .getAttribute("href");
-      if (bellHref !== "/inbox") throw new Error(`the bell links to ${bellHref}`);
+      if (bellHref !== "/inbox") throw new Error(`the bell's foot links to ${bellHref}`);
+      if (page.url() !== `${lib}/`) throw new Error(`the bell left the page: ${page.url()}`);
+      await page.keyboard.press("Escape");
+      await bellPop.waitFor({ state: "detached", timeout: 5000 });
       // The theme: applied at once, kept on the account across a reload, back to the system's.
       const account = page.locator(".menu-list.account");
       await page.getByRole("button", { name: "Account menu" }).click();
@@ -1373,7 +1382,7 @@ async function browserRenders(
             throw new Error("the phone's top bar has a search button");
           }
           for (const control of [
-            topbar.getByRole("link", { name: /^Inbox/ }),
+            topbar.getByRole("button", { name: /^Inbox/ }),
             topbar.getByRole("button", { name: "Account menu" }),
           ]) {
             if (!(await control.isVisible()))
@@ -2836,7 +2845,7 @@ async function browserRenders(
         // their inbox, its count shows on the open page's bell (take 4) without a reload, and
         // the batched mail lands in the dev outbox.
         await sheetBar
-          .getByRole("link", { name: /^Inbox, \d+ waiting$/ })
+          .getByRole("button", { name: /^Inbox, \d+ waiting$/ })
           .waitFor({ timeout: 10_000 });
         const inbox = (await (await apiAs(devCookie, "/api/v1/inbox")).json()) as {
           items: { id: string; kind: string; excerpt: string; href: string }[];
@@ -2908,14 +2917,23 @@ async function browserRenders(
       const row = main
         .locator("li.inbox-row")
         .filter({ hasText: "Gate: yes, it is still current." });
-      // The bell, from the library's home, opens the Inbox; the select filters it to this library.
+      // The bell, from the library's home, lists the reply in its panel, and Open Inbox at its
+      // foot opens the Inbox; the select filters it to this library.
       await page.goto(`${lib}/`);
       await home();
       await markStay();
       await page
         .locator("header.ws-topbar")
-        .getByRole("link", { name: /^Inbox/ })
+        .getByRole("button", { name: /^Inbox/ })
         .click();
+      const bellPop = page.locator(".menu-list.bell-pop");
+      await bellPop
+        .locator("a.bell-item")
+        .filter({ hasText: "replied to your thread" })
+        .first()
+        .waitFor({ timeout: 10_000 });
+      if (shots) await page.screenshot({ path: `${shots}/bell.png` });
+      await bellPop.getByRole("link", { name: "Open Inbox", exact: true }).click();
       await page.waitForURL(`${base}/inbox`);
       await inboxHeading.waitFor({ timeout: 15_000 });
       await row.waitFor({ timeout: 10_000 });
@@ -3013,7 +3031,7 @@ async function browserRenders(
           }
           const moreButton = sheetBar.getByRole("button", { name: "More", exact: true });
           if (!(await moreButton.isVisible())) throw new Error("no ⋯ in the phone's top bar");
-          if (!(await sheetBar.getByRole("link", { name: /^Inbox/ }).isVisible())) {
+          if (!(await sheetBar.getByRole("button", { name: /^Inbox/ }).isVisible())) {
             throw new Error("no bell in the concept's phone bar");
           }
           for (const gone of [

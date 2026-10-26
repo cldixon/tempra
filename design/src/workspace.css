@@ -142,11 +142,6 @@ body.ground {
   display: block;
 }
 
-/* The bell is a link to the Inbox (TEMPRA-173), drawn as the round button. */
-a.icon-button {
-  text-decoration: none;
-}
-
 .icon-button:hover:not(:disabled) {
   color: var(--tempra-color-text);
 }
@@ -684,7 +679,7 @@ a.button.pill-button {
   color: var(--tempra-color-text);
 }
 
-/* The bell: the link to the Inbox, its unread count as a small badge on the corner. */
+/* The bell: what waits in the Inbox as a small badge on the corner. */
 .bell .badge {
   position: absolute;
   top: -4px;
@@ -700,6 +695,88 @@ a.button.pill-button {
   font-size: var(--tempra-text-initial);
   font-weight: var(--tempra-weight-strong);
   line-height: 1;
+}
+
+/*
+ * The bell's panel (TEMPRA-189): "Inbox" over what waits, each item a row (the library's tile, the
+ * page and the detail line, then the library and when), "n more" when there are more, and Open
+ * Inbox at its foot. Rules and greys only.
+ */
+.bell-pop {
+  width: min(360px, calc(100vw - 32px));
+  padding: 0;
+  gap: 0;
+}
+
+.menu-list .bell-head {
+  margin: 0;
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid var(--tempra-color-border);
+  font-size: var(--tempra-text-name);
+  font-weight: var(--tempra-weight-strong);
+}
+
+.menu-list .bell-item {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 2px 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--tempra-color-border);
+  border-radius: 0;
+}
+
+.bell-item .lib-tile {
+  grid-row: span 2;
+  width: 20px;
+  height: 20px;
+  font-size: var(--tempra-text-label);
+}
+
+.bell-item-what strong {
+  font-weight: var(--tempra-weight-medium);
+}
+
+.bell-item-detail {
+  display: block;
+  color: var(--tempra-color-muted);
+}
+
+.bell-item-where {
+  grid-column: 2;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+}
+
+.menu-list .bell-empty,
+.menu-list .bell-more {
+  margin: 0;
+  padding: 24px 16px;
+  color: var(--tempra-color-muted);
+  text-align: center;
+}
+
+.menu-list .bell-more {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--tempra-color-border);
+  font-size: var(--tempra-text-meta);
+}
+
+.menu-list a.bell-foot {
+  padding: 10px 16px;
+  border-radius: 0;
+  font-weight: var(--tempra-weight-medium);
+  text-align: center;
+}
+
+/* On a phone the bell sits near the edge: its panel spans the screen under the bar. */
+@media (max-width: 900px) {
+  .bell-pop {
+    position: fixed;
+    top: calc(var(--tempra-bar) + 4px);
+    right: 16px;
+    left: 16px;
+    width: auto;
+  }
 }
 
 /* Live updates stopped, quietly (F-19): a word before search and the bell; empty, nothing. */
