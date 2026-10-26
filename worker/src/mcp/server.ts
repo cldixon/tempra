@@ -29,6 +29,7 @@ import type { LintWarning } from "../okf/types";
 import {
   MAX_RENDER_SOURCE,
   RENDER_UNAVAILABLE,
+  RENDER_WIDTH,
   type RenderError,
   type RenderRequest,
   type RenderResult,
@@ -126,11 +127,7 @@ const SVG_TEXT_BYTES = 100 * 1024;
 /** Files an `okf://` resource carries as bytes (TEMPRA-155); above it, the download link. */
 const RESOURCE_BYTES = 2 * 1024 * 1024;
 
-/**
- * The width a diagram is drawn at for a model (TEMPRA-166): the reader's column
- * (`--tempra-measure`), so the PNG at 2x is within MODEL_EDGE and the layout is what people see.
- */
-export const RENDER_WIDTH = 680;
+export { RENDER_WIDTH };
 /**
  * Renders per account a minute (tempra-dev: app/media, Limits): the `render` rate limit, counted
  * on WRITE_LIMITER under its own key (`render:<account>`), whose limit is the same 60.
@@ -1623,7 +1620,7 @@ export function buildServer(ctx: McpContext): McpServer {
       "export",
       {
         title: "Export the bundle",
-        description: `${BEYOND}a short-lived download URL (15 minutes) for the whole library as a conformant OKF bundle (tar), with index.md and log.md materialized. \`at\` exports an earlier sequence.`,
+        description: `${BEYOND}a short-lived download URL (15 minutes) for the whole library as a conformant OKF bundle (tar), with index.md and log.md materialized and each Mermaid diagram drawn beside its concept as \`<concept>.diagrams/<n>.svg\` (n its figure number; derived, so import ignores them). \`at\` exports an earlier sequence.`,
         inputSchema: { at: z.number().int().optional(), ...libArg },
         annotations: readOnly,
       },
