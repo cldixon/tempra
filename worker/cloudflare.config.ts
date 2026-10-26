@@ -142,6 +142,13 @@ export default defineConfig(({ mode }) => {
       entrypoint: "src/index.ts",
       ...COMPATIBILITY,
 
+      // The static files (TEMPRA-174): the app's bundle under /_app/, the design stylesheet and
+      // fonts under /_design/, /favicon.svg, written by the app's build (app/build.ts) with a
+      // `_headers` file; the directory is `assetsDirectory` in wrangler.config.ts. Cloudflare
+      // serves a request that matches a file before the Worker runs, so they are neither in the
+      // Worker's script nor counted or metered by it; anything else reaches the Worker.
+      assets: { htmlHandling: "none", notFoundHandling: "none" },
+
       // One host per deployment (v2 spec: Operations); no workers.dev, so no second origin.
       domains: local ? [] : [d.host],
       workersDev: false,

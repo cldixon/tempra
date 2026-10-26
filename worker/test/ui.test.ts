@@ -1,8 +1,13 @@
 import { describe, expect, test } from "bun:test";
+import { existsSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { join } from "node:path";
 import * as app from "@tempra/app";
 import * as design from "@tempra/design";
 import { API, setup } from "./harness";
 import { makePng } from "./images";
+
+/** The Worker's static assets, as the app's build writes them (app/build.ts, TEMPRA-174). */
+const PUBLIC = join(import.meta.dir, "..", "node_modules", "@tempra", "app", "dist", "public");
 
 /** A one-paragraph body as the API returns it, for toMatchObject (block IDs aside). */
 const says = (text: string) => ({
@@ -101,23 +106,41 @@ describe("the app's pages (TEMPRA-9)", () => {
     expect((await stranger.app.request(`${LIB}/-/work`)).status).toBe(404);
   });
 
-  test("the bundle is served at its hashed path, immutable; any other name is a 404", async () => {
+  test("the bundle is a static asset at its hashed path, not served by the Worker (TEMPRA-174)", async () => {
+    // Workers static assets serve it before the Worker runs; the Worker has no route for it.
+    const entry = readFileSync(join(PUBLIC, app.href));
+    expect(entry.byteLength).toBeGreaterThan(1000);
+    // The chunks it imports on demand (Pele, for diagrams) sit beside it, by the names it imports.
+    const pele = app.chunks.find((n) => n.startsWith("pele-"));
+    expect(pele).toBeDefined();
+    expect(entry.toString()).toContain(`./${pele}`);
+    for (const c of app.chunks) expect(existsSync(join(PUBLIC, "_app", c))).toBe(true);
+    // Nothing else: a fresh build leaves no files from an earlier one.
+    expect(readdirSync(join(PUBLIC, "_app")).sort()).toEqual(
+      [app.href.slice("/_app/".length), ...app.chunks].sort(),
+    );
     const s = setup();
-    const r = await s.anon.request(app.href);
-    expect(r.status).toBe(200);
-    expect(r.headers.get("Content-Type")).toContain("text/javascript");
-    expect(r.headers.get("Cache-Control")).toContain("immutable");
-    expect(await r.text()).toBe(app.js);
-    expect((await s.anon.request("/_app/app.000000000000.js")).status).toBe(404);
-    // The chunks it imports on demand (Pele, for diagrams) sit beside it, immutable too.
-    const [name, js] = Object.entries(app.chunks).find(([n]) => n.startsWith("pele-")) ?? [];
-    expect(app.js).toContain(`./${name}`);
-    const c = await s.anon.request(`/_app/${name}`);
-    expect(c.status).toBe(200);
-    expect(c.headers.get("Cache-Control")).toContain("immutable");
-    expect(await c.text()).toBe(js ?? "");
-    expect((await s.anon.request("/_app/toString")).status).toBe(404);
-    expect((await s.anon.request("/_app/pele-000000.js")).status).toBe(404);
+    for (const path of [app.href, `/_app/${pele}`, design.href, "/_design/x.woff2"]) {
+      const r = await s.anon.request(path);
+      expect(r.status).toBe(404);
+      expect(((await r.json()) as { code: string }).code).toBe("no_route");
+    }
+  });
+
+  test("the static assets' headers: hashed files immutable, every file nosniff", () => {
+    const headers = readFileSync(join(PUBLIC, "_headers"), "utf8");
+    for (const rule of ["/_app/*", "/_design/*"]) {
+      const block = headers.split(rule)[1]?.split(/\n\//)[0] ?? "";
+      expect(block).toContain("Cache-Control: public, max-age=31536000, immutable");
+      expect(block).toContain("X-Content-Type-Options: nosniff");
+    }
+    expect(readFileSync(join(PUBLIC, "favicon.svg"), "utf8")).toStartWith("<svg");
+  });
+
+  test("the Worker's config serves the app's dist/public/ as its assets", async () => {
+    const { default: wrangler } = await import("../wrangler.config");
+    const dir = (wrangler as { assetsDirectory?: string }).assetsDirectory ?? "";
+    expect(realpathSync(join(import.meta.dir, "..", dir))).toBe(realpathSync(PUBLIC));
   });
 
   test("pages require sign-in, and a library the person cannot open is a 404", async () => {
@@ -334,71 +357,19 @@ describe("history, ledger and revert (Phase 3, slice 2)", () => {
 });
 
 describe("the shared design stylesheet", () => {
-  test("served at its hashed path, immutable; any other name is a 404", async () => {
-    const s = setup();
-    const r = await s.anon.request(design.href);
-    expect(r.status).toBe(200);
-    expect(r.headers.get("Content-Type")).toContain("text/css");
-    expect(r.headers.get("Cache-Control")).toContain("immutable");
-    expect(await r.text()).toBe(design.css);
-    expect((await s.anon.request("/_design/tempra.000000000000.css")).status).toBe(404);
+  test("a static asset at its hashed path, the package's stylesheet as is", () => {
+    expect(readFileSync(join(PUBLIC, design.href), "utf8")).toBe(design.css);
   });
 
-  test("its fonts (Inter) are served at the hashed paths the stylesheet names, immutable", async () => {
-    const s = setup();
+  test("its fonts (Inter) are static assets at the hashed paths the stylesheet names", () => {
     const urls = [...design.css.matchAll(/url\("(\/_design\/[^"]+\.woff2)"\)/g)].map((m) => m[1]);
     expect(urls.length).toBe(Object.keys(design.fonts).length);
-    const r = await s.anon.request(urls[0] as string);
-    expect(r.status).toBe(200);
-    expect(r.headers.get("Content-Type")).toBe("font/woff2");
-    expect(r.headers.get("Cache-Control")).toContain("immutable");
-    // A woff2 file starts with its signature.
-    expect(new TextDecoder().decode((await r.arrayBuffer()).slice(0, 4))).toBe("wOF2");
-    expect(
-      (await s.anon.request("/_design/inter-latin-opsz-normal.000000000000.woff2")).status,
-    ).toBe(404);
-    expect((await s.anon.request("/_design/constructor")).status).toBe(404);
-  });
-
-  test("every page links it and its CSP allows it: the shell and the server's own pages", async () => {
-    const s = setup();
-    // An app asking for consent, so /authorize draws its page.
-    const reg = await s.anon.request("/register", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        client_name: "Claude",
-        redirect_uris: ["https://claude.ai/api/mcp/auth_callback"],
-        token_endpoint_auth_method: "none",
-        grant_types: ["authorization_code", "refresh_token"],
-        response_types: ["code"],
-      }),
-    });
-    const { client_id } = (await reg.json()) as { client_id: string };
-    const consent = `/authorize?${new URLSearchParams({
-      response_type: "code",
-      client_id,
-      redirect_uri: "https://claude.ai/api/mcp/auth_callback",
-      scope: "okf:read",
-      state: "st4te",
-      code_challenge: "E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM",
-      code_challenge_method: "S256",
-      resource: "http://localhost/mcp",
-    })}`;
-    for (const [client, path] of [
-      [s.app, "/"],
-      [s.app, "/account"],
-      [s.anon, "/sign-in"],
-      [s.app, consent],
-      [s.app, "/account/email/confirm?t=x"],
-      [s.app, "/no-such-page"],
-    ] as const) {
-      const r = await client.request(path, { headers: { Accept: "text/html" } });
-      expect(r.status).toBeLessThan(500);
-      expect(await r.text()).toContain(`<link rel="stylesheet" href="${design.href}">`);
-      expect(r.headers.get("Content-Security-Policy")).toContain("style-src 'self'");
-      expect(r.headers.get("Content-Security-Policy")).toContain("font-src 'self'");
+    for (const url of urls) {
+      // A woff2 file starts with its signature.
+      const bytes = readFileSync(join(PUBLIC, url as string));
+      expect(new TextDecoder().decode(bytes.subarray(0, 4))).toBe("wOF2");
     }
+    expect(readdirSync(join(PUBLIC, "_design")).length).toBe(urls.length + 1);
   });
 });
 

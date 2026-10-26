@@ -41,6 +41,22 @@ import { WORKER_DIR } from "./cf";
 import { mcpSmoke } from "./mcp-smoke";
 import { seed } from "./seed";
 
+/**
+ * On GitHub Actions, each failure and its problems also become an error annotation, so the check's
+ * page says what failed without opening the job's log.
+ */
+if (process.env.GITHUB_ACTIONS === "true") {
+  const log = console.log.bind(console);
+  console.log = (...args: unknown[]) => {
+    log(...args);
+    const line = args.map(String).join(" ");
+    if (/^(FAIL| {2}- )/.test(line)) {
+      const text = line.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
+      log(`::error title=gate::${text.slice(0, 2000)}`);
+    }
+  };
+}
+
 const { values } = parseArgs({
   options: { port: { type: "string" }, keep: { type: "boolean" } },
 });
@@ -2032,9 +2048,11 @@ async function browserRenders(
         const held = new Promise<void>((r) => {
           release = r;
         });
+        // Released and unrouted together, so a held request can find its route already handled
+        // once it goes on; that is the release working, not a failure.
         const hold = async (route: Route) => {
           await held;
-          await route.continue();
+          await route.continue().catch(() => {});
         };
         await page.route("**/-/image/**", hold);
         await wide();
@@ -2152,7 +2170,7 @@ async function browserRenders(
         });
         const holdFile = async (route: Route) => {
           await heldFile;
-          await route.continue();
+          await route.continue().catch(() => {});
         };
         await page.route("**/-/image/**", holdFile);
         await page.goto(`${lib}/${imagePaths[0]}`, { waitUntil: "domcontentloaded" });

@@ -11,6 +11,7 @@
     "app": {
       "name": "@tempra/app",
       "dependencies": {
+        "@tempra/design": "workspace:*",
         "@tempra/editor": "workspace:*",
         "lucide-react": "^1.52.0",
         "pele": "1.6.0",

@@ -57,14 +57,13 @@ describe("session on the REST API", () => {
     expect(account.status).toBe(429);
   });
 
-  test("static files, and requests with a token, do not count against a session", async () => {
+  test("health checks, and requests with a token, do not count against a session", async () => {
     const s = setup();
     const kinds: string[] = [];
     s.deps.rateLimit = async (kind) => {
       kinds.push(kind);
       return kind !== "session";
     };
-    expect((await s.app.request("/favicon.svg")).status).toBe(200);
     expect((await s.app.request("/healthz")).status).toBeLessThan(500);
     // A token wins over a cookie sent alongside it: limited per token.
     const withToken = await s.app.request(`${API}/tree`, {
