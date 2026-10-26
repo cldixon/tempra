@@ -28,8 +28,11 @@ export function useLoad<T>(key: () => string, load: () => Promise<T>): Load<T> {
   const first = untrack(key);
   let result = $state.raw<{ key: string; value: Loaded<T> }>({ key: first, value: initial(first) });
   let tick = $state(0);
+  // The key as a string: a derived only says it changed when the string does, so the load runs
+  // again for a new key, not whenever something the key is made from is redrawn.
+  const current_key = $derived(key());
   $effect(() => {
-    const k = key();
+    const k = current_key;
     const t = tick;
     let live = true;
     untrack(() => {
@@ -70,7 +73,7 @@ export function useLoad<T>(key: () => string, load: () => Promise<T>): Load<T> {
       live = false;
     };
   });
-  const current = $derived(result.key === key() ? result.value : initial(key()));
+  const current = $derived(result.key === current_key ? result.value : initial(current_key));
   return {
     get current() {
       return current;

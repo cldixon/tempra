@@ -1,6 +1,13 @@
 <script lang="ts" module>
   import { Urls } from "./urls";
 
+  /** The settings pages' chunk, fetched once, on the first settings page (pages/settings.ts). */
+  let settingsChunk: Promise<typeof import("./pages/settings")> | null = null;
+  const settings = () => {
+    settingsChunk ??= import("./pages/settings");
+    return settingsChunk;
+  };
+
   /** The pages that lay out their column themselves (a concept's columns, the person's views). */
   const OWN_COLUMN = new Set(["file", "directory", "activity"]);
 
@@ -25,24 +32,11 @@
   import type { AccountPage, Place } from "./frame";
   import { here } from "./location.svelte.ts";
   import PageColumn from "./PageColumn.svelte";
-  import Account from "./pages/Account.svelte";
   import Activity from "./pages/Activity.svelte";
-  import Agents from "./pages/Agents.svelte";
-  import ConnectLibrary from "./pages/ConnectLibrary.svelte";
-  import DeleteLibrary from "./pages/DeleteLibrary.svelte";
   import File from "./pages/File.svelte";
-  import General from "./pages/General.svelte";
   import Home from "./pages/Home.svelte";
   import Inbox from "./pages/Inbox.svelte";
-  import Invitations from "./pages/Invitations.svelte";
   import Libraries from "./pages/Libraries.svelte";
-  import Members from "./pages/Members.svelte";
-  import Notifications from "./pages/Notifications.svelte";
-  import Recovery from "./pages/Recovery.svelte";
-  import Restore from "./pages/Restore.svelte";
-  import Revert from "./pages/Revert.svelte";
-  import Transfer from "./pages/Transfer.svelte";
-  import Welcome from "./pages/Welcome.svelte";
   import Redirect from "./Redirect.svelte";
   import { match, pageKey } from "./router";
   import { useMe } from "./ui.svelte.ts";
@@ -102,7 +96,12 @@
       pinned: urlsFor(r.owner, r.slug, "at" in r ? r.at : undefined),
     };
   });
-  const libraryKey = $derived(library ? `${library.urls.owner}/${library.urls.slug}` : "");
+  // Each its own derived, so a navigation that keeps the library keeps the same Urls (a derived
+  // passes on a change only when its value is a new one): the frame's loads are not redone.
+  const libraryUrls = $derived(library?.urls ?? null);
+  const pinnedUrls = $derived(library?.pinned ?? null);
+  const place = $derived(library?.place ?? null);
+  const libraryKey = $derived(libraryUrls ? `${libraryUrls.owner}/${libraryUrls.slug}` : "");
 </script>
 
 {#snippet page()}
@@ -127,21 +126,21 @@
   {:else if route.page === "libraries"}
     <Libraries create={route.create} />
   {:else if route.page === "welcome"}
-    <Welcome me={me.current} />
+    {#await settings() then S}<S.Welcome me={me.current} />{/await}
   {:else if route.page === "agents"}
-    <Agents me={me.current} newToken={route.newToken} library={route.library} />
+    {#await settings() then S}<S.Agents me={me.current} newToken={route.newToken} library={route.library} />{/await}
   {:else if route.page === "account"}
-    <Account done={route.done} />
+    {#await settings() then S}<S.Account done={route.done} />{/await}
   {:else if route.page === "notifications"}
-    <Notifications />
+    {#await settings() then S}<S.Notifications />{/await}
   {:else if route.page === "invitations"}
-    <Invitations />
+    {#await settings() then S}<S.Invitations />{/await}
   {:else if route.page === "inbox"}
     <Inbox done={route.done} library={route.library} />
   {:else if route.page === "redirect"}
     <Redirect to={route.to} />
-  {:else if library}
-    {@const urls = library.pinned}
+  {:else if pinnedUrls}
+    {@const urls = pinnedUrls}
     {#if route.page === "directory"}
       {#if route.dir === ""}
         <Home {urls} />
@@ -159,29 +158,29 @@
            version view. -->
       <Redirect to={urls.diff(route.path, route.from, route.to)} />
     {:else if route.page === "settings"}
-      <General {urls} />
+      {#await settings() then S}<S.General {urls} />{/await}
     {:else if route.page === "transfer"}
-      <Transfer {urls} />
+      {#await settings() then S}<S.Transfer {urls} />{/await}
     {:else if route.page === "recovery"}
-      <Recovery {urls} />
+      {#await settings() then S}<S.Recovery {urls} />{/await}
     {:else if route.page === "library-connect"}
-      <ConnectLibrary {urls} />
+      {#await settings() then S}<S.ConnectLibrary {urls} />{/await}
     {:else if route.page === "delete"}
-      <DeleteLibrary {urls} />
+      {#await settings() then S}<S.DeleteLibrary {urls} />{/await}
     {:else if route.page === "members"}
-      <Members {urls} me={me.current?.handle ?? null} />
+      {#await settings() then S}<S.Members {urls} me={me.current?.handle ?? null} />{/await}
     {:else if route.page === "revert"}
-      <Revert {urls} request={route.request} {actor} />
+      {#await settings() then S}<S.Revert {urls} request={route.request} {actor} />{/await}
     {:else if route.page === "restore"}
-      <Restore {urls} path={route.path} to={route.to} {actor} />
+      {#await settings() then S}<S.Restore {urls} path={route.path} to={route.to} {actor} />{/await}
     {/if}
   {/if}
 {/snippet}
 
-{#if library}
+{#if libraryUrls && place}
   <!-- A library's pages share one workspace, kept mounted while the person moves within it. -->
   {#key libraryKey}
-    <Workspace urls={library.urls} place={library.place} me={me.current}>
+    <Workspace urls={libraryUrls} {place} me={me.current}>
       {#if route && OWN_COLUMN.has(route.page)}
         {@render page()}
       {:else}
