@@ -1,5 +1,6 @@
 ///<reference types="svelte" />
 ;
+import { untrack } from "svelte";
 import { api, field } from "../api";
 import ComposeDialog from "../ComposeDialog.svelte";
 import ConfirmDialog from "../ConfirmDialog.svelte";
@@ -37,6 +38,7 @@ import ConnectSteps from "./ConnectSteps.svelte";
   
   
   
+  
 
   /**
    * /agents: how agents get into the person's libraries, in one place (2026-10-23; it replaced
@@ -62,7 +64,7 @@ import ConnectSteps from "./ConnectSteps.svelte";
       return { apps: a.apps, tokens: t.tokens, libraries: names };
     },
   );
-  let creating = $state(props.newToken);
+  let creating = $state(untrack(() => props.newToken));
   let minted = $state.raw<Minted | null>(null);
   const action = useAction();
   let notice = $state<string | null>(null);

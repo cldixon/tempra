@@ -1,5 +1,6 @@
 <script lang="ts">
-  import { type LedgerRequest, loadTitles, touchedBy } from "../activity";
+  import { type LedgerRequest, touchedBy } from "../activity";
+  import { useTitles } from "../activity.svelte.ts";
   import { useAgentNames } from "../agents.svelte.ts";
   import { api, field } from "../api";
   import { useAction, useLoad } from "../load.svelte.ts";
@@ -15,11 +16,7 @@
     () => `revert ${urls.revert(request)}`,
     () => api<LedgerRequest>(urls.api(`requests/${encodeURIComponent(request)}`)),
   );
-  // One load of the library's titles, shared by home and Activity (activity's useTitles).
-  const titles = useLoad(
-    () => `titles ${urls.base}`,
-    () => loadTitles(urls),
-  );
+  const titles = useTitles(() => urls);
   /** "you" for the signed-in person, an agent by its name, another person by their handle. */
   const me = useMe();
   const names = useAgentNames(() => urls);

@@ -1,8 +1,10 @@
 ///<reference types="svelte" />
 ;
+import { untrack } from "svelte";
 import { ApiError, api } from "../api";
 import ComposeDialog from "../ComposeDialog.svelte";
 import Icon from "../Icon.svelte";
+import LibraryTile from "../LibraryTile.svelte";
 import { useLoad } from "../load.svelte.ts";
 import PageBar from "../PageBar.svelte";
 import { libraryLabel } from "../role";
@@ -15,21 +17,21 @@ import { cardFacts, type Library, slugFrom } from "./libraries";
 ;type $$ComponentProps =  { create: boolean };function $$render() {
  const newLibrary/*Ωignore_positionΩ*/ = (className: string)/*Ωignore_startΩ*/: ReturnType<import('svelte').Snippet>/*Ωignore_endΩ*/ => { async ()/*Ωignore_positionΩ*/ => {
    { svelteHTML.createElement("button", {        "type":`button`,"class":className,"aria-haspopup":`dialog`,"onclick":() => (creating = true),}); { const $$_nocI1C = __sveltets_2_ensureComponent(Icon); new $$_nocI1C({ target: __sveltets_2_any(), props: {  "name":`plus`,}});}  }
-};return __sveltets_2_any(0)};  const barNew/*Ωignore_positionΩ*/ = ()/*Ωignore_startΩ*/: ReturnType<import('svelte').Snippet>/*Ωignore_endΩ*/ => { async ()/*Ωignore_positionΩ*/ => {;__sveltets_2_ensureSnippet(newLibrary("tool-pill primary bar-new"));};return __sveltets_2_any(0)}; const tile/*Ωignore_positionΩ*/ = (name: string, shared: boolean)/*Ωignore_startΩ*/: ReturnType<import('svelte').Snippet>/*Ωignore_endΩ*/ => { async ()/*Ωignore_positionΩ*/ => {
-   { svelteHTML.createElement("span", {   "class":shared ? "lib-tile shared" : "lib-tile","aria-hidden":`true`,});(name.trim()[0] ?? "?").toUpperCase(); }
-};return __sveltets_2_any(0)}; const cards/*Ωignore_positionΩ*/ = (heading: string, libraries: Library[])/*Ωignore_startΩ*/: ReturnType<import('svelte').Snippet>/*Ωignore_endΩ*/ => { async ()/*Ωignore_positionΩ*/ => {
+};return __sveltets_2_any(0)};  const barNew/*Ωignore_positionΩ*/ = ()/*Ωignore_startΩ*/: ReturnType<import('svelte').Snippet>/*Ωignore_endΩ*/ => { async ()/*Ωignore_positionΩ*/ => {;__sveltets_2_ensureSnippet(newLibrary("tool-pill primary bar-new"));};return __sveltets_2_any(0)}; const cards/*Ωignore_positionΩ*/ = (heading: string, libraries: Library[])/*Ωignore_startΩ*/: ReturnType<import('svelte').Snippet>/*Ωignore_endΩ*/ => { async ()/*Ωignore_positionΩ*/ => {
    { svelteHTML.createElement("section", { "aria-label":heading,});
      { svelteHTML.createElement("h2", { "class":`lib-section-title`,});heading; }
      { svelteHTML.createElement("ul", { "class":`lib-cards`,});
          for(let l of __sveltets_2_ensureArray(libraries)){l.id;
         const facts = cardFacts(l);
          { svelteHTML.createElement("li", {});
-           { svelteHTML.createElement("a", {    "class":`lib-card`,"href":new Urls(l.owner, l.slug).tree(""),}); { svelteHTML.createElement("span", { "class":`lib-card-cover`,});;__sveltets_2_ensureSnippet(tile(l.title || l.slug, (l.role ?? "owner") !== "owner")); } { svelteHTML.createElement("span", {  "class":`lib-card-body`,}); { svelteHTML.createElement("span", { "class":`lib-card-name`,}); { svelteHTML.createElement("span", {});libraryLabel(l); } }if(l.description){ { svelteHTML.createElement("span", { "class":`lib-card-desc`,});l.description; }}if(facts.length > 0){ { svelteHTML.createElement("span", {  "class":`lib-card-meta`,});facts.join(" · "); }} } }
+           { svelteHTML.createElement("a", {    "class":`lib-card`,"href":new Urls(l.owner, l.slug).tree(""),}); { svelteHTML.createElement("span", { "class":`lib-card-cover`,}); { const $$_eliTyrarbiL5C = __sveltets_2_ensureComponent(LibraryTile); new $$_eliTyrarbiL5C({ target: __sveltets_2_any(), props: {    "name":l.title || l.slug,"shared":(l.role ?? "owner") !== "owner",}});} } { svelteHTML.createElement("span", {  "class":`lib-card-body`,}); { svelteHTML.createElement("span", { "class":`lib-card-name`,}); { svelteHTML.createElement("span", {});libraryLabel(l); } }if(l.description){ { svelteHTML.createElement("span", { "class":`lib-card-desc`,});l.description; }}if(facts.length > 0){ { svelteHTML.createElement("span", {  "class":`lib-card-meta`,});facts.join(" · "); }} } }
          }
       }
      }
    }
 };return __sveltets_2_any(0)};
+  
+  
   
   
   
@@ -54,7 +56,7 @@ import { cardFacts, type Library, slugFrom } from "./libraries";
     () => "libraries",
     () => api<{ libraries: Library[] }>("/api/v1/libraries").then((r) => r.libraries),
   );
-  let creating = $state(create);
+  let creating = $state(untrack(() => create));
   const invited = useLoad(
     () => "invitations",
     () => api<{ invitations: unknown[] }>("/api/v1/invitations"),
@@ -101,9 +103,6 @@ import { cardFacts, type Library, slugFrom } from "./libraries";
   }
 ;
 async () => {
-
-
-
 
 
 

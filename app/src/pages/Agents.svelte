@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { api, field } from "../api";
   import ComposeDialog from "../ComposeDialog.svelte";
   import ConfirmDialog from "../ConfirmDialog.svelte";
@@ -9,13 +10,7 @@
   import Status from "../Status.svelte";
   import { day, type Me } from "../ui";
   import { useTitle } from "../ui.svelte.ts";
-  import {
-    type AppGrant,
-    chosenLibrary,
-    liveToken,
-    type Minted,
-    type TokenRow,
-  } from "./account";
+  import { type AppGrant, chosenLibrary, liveToken, type Minted, type TokenRow } from "./account";
   import ConnectSteps from "./ConnectSteps.svelte";
 
   /**
@@ -42,7 +37,7 @@
       return { apps: a.apps, tokens: t.tokens, libraries: names };
     },
   );
-  let creating = $state(props.newToken);
+  let creating = $state(untrack(() => props.newToken));
   let minted = $state.raw<Minted | null>(null);
   const action = useAction();
   let notice = $state<string | null>(null);

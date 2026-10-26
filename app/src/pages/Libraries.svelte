@@ -1,7 +1,9 @@
 <script lang="ts">
+  import { untrack } from "svelte";
   import { ApiError, api } from "../api";
   import ComposeDialog from "../ComposeDialog.svelte";
   import Icon from "../Icon.svelte";
+  import LibraryTile from "../LibraryTile.svelte";
   import { useLoad } from "../load.svelte.ts";
   import PageBar from "../PageBar.svelte";
   import { libraryLabel } from "../role";
@@ -23,7 +25,7 @@
     () => "libraries",
     () => api<{ libraries: Library[] }>("/api/v1/libraries").then((r) => r.libraries),
   );
-  let creating = $state(create);
+  let creating = $state(untrack(() => create));
   const invited = useLoad(
     () => "invitations",
     () => api<{ invitations: unknown[] }>("/api/v1/invitations"),
@@ -78,11 +80,6 @@
 
 {#snippet barNew()}{@render newLibrary("tool-pill primary bar-new")}{/snippet}
 
-<!-- A library's tile (Sidebar's LibraryTile): its initial on a dark square, round when shared. -->
-{#snippet tile(name: string, shared: boolean)}
-  <span class={shared ? "lib-tile shared" : "lib-tile"} aria-hidden="true">{(name.trim()[0] ?? "?").toUpperCase()}</span>
-{/snippet}
-
 <!-- One section of cards; a library as a card: a quiet cover with its tile, then its name, description and facts. -->
 {#snippet cards(heading: string, libraries: Library[])}
   <section aria-label={heading}>
@@ -92,7 +89,7 @@
         {@const facts = cardFacts(l)}
         <li>
           <a class="lib-card" href={new Urls(l.owner, l.slug).tree("")}
-            ><span class="lib-card-cover">{@render tile(l.title || l.slug, (l.role ?? "owner") !== "owner")}</span
+            ><span class="lib-card-cover"><LibraryTile name={l.title || l.slug} shared={(l.role ?? "owner") !== "owner"} /></span
             ><span class="lib-card-body"
               ><span class="lib-card-name"><span>{libraryLabel(l)}</span></span
               >{#if l.description}<span class="lib-card-desc">{l.description}</span>{/if}{#if facts.length > 0}<span

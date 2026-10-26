@@ -65,8 +65,7 @@ export const WHAT_WORDS: Record<Touched["what"], string> = {
 };
 
 /** Where a moved page was: its folder by name. */
-export const folderOf = (path: string) =>
-  dirOf(path) ? folderName(dirOf(path)) : "the top level";
+export const folderOf = (path: string) => (dirOf(path) ? folderName(dirOf(path)) : "the top level");
 
 export interface HistoryRow {
   seq: number;

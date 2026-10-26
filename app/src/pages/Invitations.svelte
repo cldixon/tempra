@@ -1,6 +1,7 @@
 <script lang="ts">
   import { api } from "../api";
   import Avatar from "../Avatar.svelte";
+  import LibraryTile from "../LibraryTile.svelte";
   import { useAction, useLoad } from "../load.svelte.ts";
   import Moment from "../Moment.svelte";
   import Status from "../Status.svelte";
@@ -49,9 +50,7 @@
               >
             </p>
             <div class="invitation-card">
-              <!-- The library's tile (Sidebar's LibraryTile): its initial, round for a shared one. -->
-              <span class="lib-tile shared" aria-hidden="true">{(i.slug.trim()[0] ?? "?").toUpperCase()}</span
-              ><div class="invitation-library">
+              <LibraryTile name={i.slug} shared /><div class="invitation-library">
                 <strong>{i.owner}/{i.slug}</strong><span>Open until {day(i.expires)}</span>
               </div>
             </div>

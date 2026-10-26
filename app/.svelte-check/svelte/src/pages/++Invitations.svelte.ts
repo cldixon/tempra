@@ -2,6 +2,7 @@
 ;
 import { api } from "../api";
 import Avatar from "../Avatar.svelte";
+import LibraryTile from "../LibraryTile.svelte";
 import { useAction, useLoad } from "../load.svelte.ts";
 import Moment from "../Moment.svelte";
 import Status from "../Status.svelte";
@@ -11,6 +12,7 @@ import { Urls } from "../urls";
 import type { PendingInvitation } from "./account";
 function $$render() {
 
+  
   
   
   
@@ -59,8 +61,7 @@ if(action.error){ { svelteHTML.createElement("div", { "class":`notice`,});action
                { const $$_ratavA3C = __sveltets_2_ensureComponent(Avatar); new $$_ratavA3C({ target: __sveltets_2_any(), props: {  "name":i.handle,}});} { svelteHTML.createElement("span", { }); i.handle;  if(i.created){" · "; { const $$_tnemoM4C = __sveltets_2_ensureComponent(Moment); new $$_tnemoM4C({ target: __sveltets_2_any(), props: {  "ts":i.created,}});}} }
              }
              { svelteHTML.createElement("div", { "class":`invitation-card`,});
-              
-               { svelteHTML.createElement("span", {   "class":`lib-tile shared`,"aria-hidden":`true`,});(i.slug.trim()[0] ?? "?").toUpperCase(); } { svelteHTML.createElement("div", { "class":`invitation-library`,});
+                { const $$_eliTyrarbiL3C = __sveltets_2_ensureComponent(LibraryTile); new $$_eliTyrarbiL3C({ target: __sveltets_2_any(), props: {  "name":i.slug,"shared":true,}});} { svelteHTML.createElement("div", { "class":`invitation-library`,});
                  { svelteHTML.createElement("strong", {});i.owner; i.slug; } { svelteHTML.createElement("span", {});  day(i.expires); }
                }
              }

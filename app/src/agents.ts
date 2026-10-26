@@ -98,7 +98,7 @@ export interface ActorView {
 }
 
 /** Each agent's contributor entry by its id. */
-function _agentsById(contributors: Contributor[]): Record<string, Contributor> {
+export function agentsById(contributors: Contributor[]): Record<string, Contributor> {
   const out: Record<string, Contributor> = {};
   for (const c of contributors) if (c.agent) out[c.agent.id] = c;
   return out;

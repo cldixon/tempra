@@ -1,5 +1,6 @@
 ///<reference types="svelte" />
 ;
+import { untrack } from "svelte";
 import { api, field } from "../api";
 import ConfirmDialog from "../ConfirmDialog.svelte";
 import { useConfirm } from "../confirm.svelte.ts";
@@ -31,6 +32,7 @@ import { type AccountData, DONE, LEGAL, post } from "./account";
   
   
   
+  
 
   /** The account: email, handle, limits, sessions, deleting it (v2 spec: Accounts). */
   let { done }:/*Ωignore_startΩ*/$$ComponentProps/*Ωignore_endΩ*/ = $props();
@@ -40,7 +42,8 @@ import { type AccountData, DONE, LEGAL, post } from "./account";
     () => api<AccountData>("/api/v1/account"),
   );
   const action = useAction();
-  let notice = $state<string | null>(done ? (DONE[done] ?? null) : null);
+  // The page opened from a link that says what was done (`?done=`): said once, as React's initial state was.
+  let notice = $state<string | null>(untrack(() => (done ? (DONE[done] ?? null) : null)));
   let devLink = $state<string | null>(null);
   let deleted = $state(false);
   const c = useConfirm();
