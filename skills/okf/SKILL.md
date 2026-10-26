@@ -10,7 +10,7 @@ description: Read and maintain an OKF (Open Knowledge Format) knowledge library 
 - A library (an OKF bundle) is a tree of markdown **concepts**, one idea per file, each with YAML frontmatter.
 - `type` is the only required key. `title`, a one-line `description`, `tags` and `resource` (the URI of the asset described) are recommended.
 - Concepts link to each other with ordinary markdown links. Absolute bundle links (`/tables/orders.md`) are preferred.
-- `sources` lists what a concept was derived from. Individual claims cite a source with a footnote whose label is a `sources[].id`: `…is sharded daily.[^ga4-schema]`. A `resource` inside the library (`/policies/margin-standard.md`) is tracked like a link: it follows moves and is flagged when missing.
+- `sources` lists what a concept was derived from: each entry is `id`, `title` and `resource` (a URL, or a path in this library); `url` is taken as `resource`. Individual claims cite a source with a footnote whose label is a `sources[].id`: `…is sharded daily.[^ga4-schema]`. A `resource` inside the library (`/policies/margin-standard.md`) is tracked like a link: it follows moves and is flagged when missing.
 - Trust: `generated` records who wrote the current content (stamped by the server). `verified` records who checked it (a human or a process, never you). The trust tier is derived from these: unverified, machine-confirmed, or human-reviewed.
 - Lifecycle: `status` is `draft`, `stable` (default) or `deprecated`. `stale_after` is the instant the content should be re-checked: a full datetime with an offset (`2026-12-31T00:00:00Z`), not a plain date.
 - `index.md` (directory listings) and `log.md` (history: the latest 200 requests, then a pointer to `log` with `before` for older ones; exports keep it whole) are synthesized by the server. Never write them. An index is only as good as the titles and descriptions of the concepts in its directory: `work` items of kind `structure` point at what makes one poor (descriptions missing, over 200 characters or repeating the title, titles that read the same, concepts nothing links to, a nested directory holding a single concept, one with no concepts, one with over 50). Fix them by editing or moving concepts; nothing is fixed for you.
@@ -84,7 +84,7 @@ Gross margin equals recognized [revenue](/metrics/revenue.md) minus full COGS.[^
 - A file you made, with a shell that reaches the server: `prepare_upload`, then run the `curl -T <file> '<url>'` line it returns (one PUT within 15 minutes, up to 10 MB; curl prints the write result).
 - Without one: `attach` with `content_base64`, for small files only (advised under about 50 KB; over 256 KB decoded is refused as `base64_too_large`), with `sha256` (or `size`) so damaged bytes are refused, not stored.
 
-Images (PNG, JPEG, GIF, WebP, AVIF, SVG) are checked on write: a broken one is refused with `bad_image`, and the type comes from the bytes. Give an attachment a one-line `description` (up to 500 characters), and an image you did not make its `credit` and `licence` (up to 200 characters each); the file's page shows them.
+Images (PNG, JPEG, GIF, WebP, AVIF, SVG) are checked on write: a broken one is refused with `bad_image`, and the type comes from the bytes. Give an attachment a one-line `description` (up to 500 characters), and give it its `credit` and `licence` (up to 200 characters each); the file's page shows them. A file the person gave you or you made carries its own `credit` and `licence` and needs no `sources` entry: say who supplied it (`Photo supplied by @ann`) and the licence if known.
 
 **Where it lives.** Beside the concept that uses it, named for what it shows: `dir/x.md` uses `dir/x-architecture.png`. Link it by absolute path.
 
@@ -97,7 +97,7 @@ Images (PNG, JPEG, GIF, WebP, AVIF, SVG) are checked on write: a broken one is r
 :::
 ```
 
-`width` is pixels or a share of the column (`60%`), never wider than the image; `layout` is `column` (the default), `wide` or `full`; `frame` draws a hairline round screenshots. In a group the `[…]` label is the caption and each title a small label. Video, audio and PDF use the image spelling (`![A walkthrough](/dir/x-demo.mp4 "Caption")`), with a video's poster attached beside it as `x-demo.poster.png`. Cite an image you did not make in `sources`.
+`width` is pixels or a share of the column (`60%`), never wider than the image; `layout` is `column` (the default), `wide` or `full`; `frame` draws a hairline round screenshots. In a group the `[…]` label is the caption and each title a small label. Video, audio and PDF use the image spelling (`![A walkthrough](/dir/x-demo.mp4 "Caption")`), with a video's poster attached beside it as `x-demo.poster.png`. Cite a work taken from elsewhere (a web image) in `sources`; a file the person gave you or you made carries its own `credit` and `licence` instead.
 
 **Lint**, never a refusal, and in `work` until fixed: `image_no_alt` (say what it shows), `image_external` (hotlinked: `attach` it with `source_url`, point the image at the attached path, cite the original; `work` lists them as one `external_image` item per page), `image_large` (over 2 MB or 4000 px on its long edge; attach a smaller one), `image_not_image` (`![…](x)` on a file that is not an image, video, audio or PDF; link it instead), `figure_invalid` (the markup does not parse; its images show plainly).
 

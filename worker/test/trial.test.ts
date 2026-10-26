@@ -491,3 +491,41 @@ describe("MCP retest 2026-10-06", () => {
     expect((await call("query", { type: "zzz" })).text).toContain("Types here: Memo.");
   });
 });
+
+describe("TEMPRA-199: the 2026-10-26 field report", () => {
+  test("a source's `url` is stored as `resource`, said once, with no diff or lint", () => {
+    const s = newStore();
+    const sent = md(
+      "Cited.[^a] Again.[^b]\n\n[^a]: A.\n\n[^b]: B.\n",
+      "sources:\n  - id: a\n    title: A\n    url: https://e.com/a\n  - id: b\n    resource: https://e.com/b\n    url: https://e.com/other\n",
+    );
+    const r = s.apply(ctx(), [{ op: "write", path: "a.md", content: sent }]).results[0];
+    expect(codes(r?.notices)).toEqual(["source_url_alias"]);
+    expect(r?.notices?.[0]?.message).toContain("`sources[0]`: `url` stored as `resource`");
+    expect(r?.normalized).toBeUndefined();
+    expect(codes(r?.lint)).not.toContain("source_missing_resource");
+    const stored = concept(s, "a.md").markdown;
+    // In place, in the same position; an entry that has a `resource` keeps its `url`.
+    expect(stored).toContain("  - id: a\n    title: A\n    resource: https://e.com/a\n");
+    expect(stored).toContain("    resource: https://e.com/b\n    url: https://e.com/other\n");
+
+    // An import keeps what the bundle says, and lint names it.
+    const imported = s.import(ctx(), [{ path: "b.md", markdown: sent }]);
+    expect(imported.warnings.flatMap((w) => codes(w.lint))).toContain("source_missing_resource");
+  });
+
+  test("hunks that only re-space lines are left out of the stored-form diff", () => {
+    const s = newStore();
+    const table = "| a | bb |\n|-|-|\n| ccc | d |\n";
+    const filler = "Text.\n\n".repeat(6);
+    const r = s.apply(ctx(), [
+      { op: "write", path: "a.md", content: md(`* one\n\n${filler}${table}`) },
+    ]).results[0];
+    expect(codes(r?.notices)).toEqual(["normalized"]);
+    expect(r?.notices?.[0]?.message).toContain(
+      "One place where only spacing changed (table padding, indentation) is left out of it.",
+    );
+    expect(r?.normalized).toContain("+- one");
+    expect(r?.normalized).not.toContain("ccc");
+  });
+});

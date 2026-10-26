@@ -39,7 +39,7 @@ function get(entries: [string, Json][], key: string): Json | undefined {
   return entries.find(([k]) => k === key)?.[1];
 }
 
-function isObject(v: Json | undefined): v is JsonObject {
+export function isObject(v: Json | undefined): v is JsonObject {
   return !!v && typeof v === "object" && !Array.isArray(v);
 }
 

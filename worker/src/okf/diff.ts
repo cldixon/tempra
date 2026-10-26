@@ -87,11 +87,26 @@ export function unifiedDiff(
   labels: { from: string; to: string },
   context = 3,
 ): string {
-  if (before === after) return "";
+  return unifiedDiffExcept(before, after, labels, () => false, context).diff;
+}
+
+/**
+ * A unified diff that leaves out each hunk `ignore` accepts (given the hunk's removed and added
+ * lines), and says how many it left out; "" when no hunk is left.
+ */
+export function unifiedDiffExcept(
+  before: string,
+  after: string,
+  labels: { from: string; to: string },
+  ignore: (removed: string[], added: string[]) => boolean,
+  context = 3,
+): { diff: string; ignored: number } {
+  if (before === after) return { diff: "", ignored: 0 };
   const a = toLines(before);
   const b = toLines(after);
   const ops = myers(a, b);
   const out = [`--- ${labels.from}`, `+++ ${labels.to}`];
+  let ignored = 0;
   let i = 0;
   let aLine = 1;
   let bLine = 1;
@@ -115,6 +130,15 @@ export function unifiedDiff(
     const hunk = ops.slice(start, end);
     const aCount = hunk.filter((o) => o.kind !== "+").length;
     const bCount = hunk.filter((o) => o.kind !== "-").length;
+    const lines = (kind: Op["kind"]) =>
+      hunk.filter((o) => o.kind === kind).map((o) => o.line.replace(NO_EOL, ""));
+    if (ignore(lines("-"), lines("+"))) {
+      ignored++;
+      aLine += aCount;
+      bLine += bCount;
+      i = end;
+      continue;
+    }
     out.push(
       `@@ -${aCount ? aLine : aLine - 1},${aCount} +${bCount ? bLine : bLine - 1},${bCount} @@`,
     );
@@ -127,5 +151,5 @@ export function unifiedDiff(
     bLine += bCount;
     i = end;
   }
-  return `${out.join("\n")}\n`;
+  return { diff: out.length > 2 ? `${out.join("\n")}\n` : "", ignored };
 }

@@ -21,7 +21,7 @@ import {
 import { diagramLint } from "./diagrams";
 import { figureLint } from "./figure-lint";
 import { imageLint } from "./images";
-import { lintFields } from "./lint";
+import { isObject, lintFields } from "./lint";
 import { scanDoc, takeSection, targets } from "./markdown";
 import {
   isExternal,
@@ -200,6 +200,8 @@ export interface BuiltConcept {
   /** Verifications carried by an imported file, to be recorded as verify events. */
   verified: Verification[];
   footnoteRefs: string[];
+  /** The `sources` entries whose `url` was stored as `resource` (TEMPRA-199), by index. */
+  aliased: number[];
 }
 
 /**
@@ -233,6 +235,16 @@ export function buildRecord(parsed: ParsedConcept, opts: BuildOptions): BuiltCon
     lint.push({
       code: "v01_citations",
       message: "v0.1 `# Citations` list migrated into `sources` (OKF §13).",
+    });
+  }
+
+  // `url` is what a writer reaches for in a citation; a source's link is its `resource`
+  // (TEMPRA-199). Imports keep what the bundle says.
+  const aliased = opts.mode === "write" ? aliasSourceUrls(entries) : [];
+  if (aliased.length > 0) {
+    notices.push({
+      code: "source_url_alias",
+      message: `${aliased.map((i) => `\`sources[${i}]\``).join(", ")}: \`url\` stored as \`resource\`. A source entry is \`id\`, \`title\` and \`resource\` (a URL, or a path in this library).`,
     });
   }
 
@@ -283,7 +295,43 @@ export function buildRecord(parsed: ParsedConcept, opts: BuildOptions): BuiltCon
     body: toMarkdown(doc),
     links,
   };
-  return { record, lint, notices, verified, footnoteRefs: scan.footnoteRefs };
+  return { record, lint, notices, verified, footnoteRefs: scan.footnoteRefs, aliased };
+}
+
+/**
+ * Renames `url` to `resource`, in place and in the same position, in each `sources` entry that
+ * has a string `url` and no `resource`; returns the entries' indexes.
+ */
+function aliasSourceUrls(entries: [string, Json][]): number[] {
+  const at = entries.findIndex(([k]) => k === "sources");
+  const list = entries[at]?.[1];
+  if (!Array.isArray(list)) return [];
+  const out: number[] = [];
+  const next = list.map((s, i) => {
+    if (!isObject(s) || "resource" in s || typeof s.url !== "string") return s;
+    out.push(i);
+    return Object.fromEntries(Object.entries(s).map(([k, v]) => [k === "url" ? "resource" : k, v]));
+  });
+  if (out.length > 0) entries[at] = ["sources", next];
+  return out;
+}
+
+/** The entries as the writer sent them: `resource` back to `url` where it was aliased. */
+export function unaliasSourceUrls(entries: [string, Json][], aliased: number[]): [string, Json][] {
+  if (aliased.length === 0) return entries;
+  return entries.map(([k, v]) => {
+    if (k !== "sources" || !Array.isArray(v)) return [k, v];
+    return [
+      k,
+      v.map((s, i) =>
+        aliased.includes(i) && isObject(s)
+          ? Object.fromEntries(
+              Object.entries(s).map(([sk, sv]) => [sk === "resource" ? "url" : sk, sv]),
+            )
+          : s,
+      ),
+    ];
+  });
 }
 
 /** A v0.1 `# Citations` list, taken out of the body into `sources`; null when there is none. */
