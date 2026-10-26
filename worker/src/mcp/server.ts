@@ -1262,7 +1262,7 @@ export function buildServer(ctx: McpContext): McpServer {
       "render",
       {
         title: "Draw a diagram",
-        description: `${BEYOND}draw a Mermaid diagram as the app draws it (Pele, the reader's column and greys) and see it: preview a non-trivial diagram before you write it (layout, labels that fit), or look at one while you review it or fix its \`diagram_invalid\` or \`diagram_unrendered\` lint: pass \`source\` (a mermaid fence's body), or \`path\` and \`figure\` (its number in \`read\`'s Figures list). Returns a line with the diagram type and size, then the drawing as a PNG image; if Pele cannot draw it, its error with line and column, and the line it names; if the PNG cannot be made, the SVG as text. Writes nothing and records nothing in the ledger. At most $RENDERS_PER_MINUTErenders a minute per account.`,
+        description: `${BEYOND}draw a Mermaid diagram as the app draws it (Pele, the reader's column and greys) and see it: preview a non-trivial diagram before you write it (layout, labels that fit), or look at one while you review it or fix its \`diagram_invalid\` or \`diagram_unrendered\` lint: pass \`source\` (a mermaid fence's body), or \`path\` and \`figure\` (its number in \`read\`'s Figures list). Returns a line with the diagram type and size, then the drawing as a PNG image; if Pele cannot draw it, its error with line and column, and the line it names; if the PNG cannot be made, the SVG as text. Writes nothing and records nothing in the ledger. At most ${RENDERS_PER_MINUTE} renders a minute per account.`,
         inputSchema: {
           source: z
             .string()
