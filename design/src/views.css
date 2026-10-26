@@ -602,9 +602,12 @@ a.activity-download {
   color: var(--tempra-color-frame-ink);
 }
 
+/* Its box from the stored width and height before it loads (TEMPRA-162); within 70vh, drawn
+   contained in it. */
 .attachment-frame img {
   display: block;
   max-width: 100%;
+  height: auto;
   max-height: 70vh;
   object-fit: contain;
 }

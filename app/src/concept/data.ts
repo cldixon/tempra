@@ -1,6 +1,7 @@
 import type { Doc, LinkTarget } from "@tempra/editor";
 import type { ActedBy } from "../agents";
 import { api, prefetch } from "../api";
+import type { ImageRef } from "../images";
 import { registerPrefetch } from "../prefetch";
 import { baseName, dirOf, enc, type Urls } from "../urls";
 
@@ -34,6 +35,8 @@ export type FileJson =
       stale: boolean;
       /** Within 14 days of stale_after. */
       stale_soon?: boolean;
+      /** The attachments its images show, by path: hash and size (TEMPRA-162). */
+      images?: Record<string, ImageRef>;
     }
   | { kind: "derived"; path: string; seq: number; doc: Doc }
   | {

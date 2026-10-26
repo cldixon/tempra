@@ -10,16 +10,24 @@ import { imageInfo } from "./media";
  */
 
 /** Formats a variant can take. */
-export type VariantFormat = "webp" | "jpeg" | "png";
+export type VariantFormat = "webp" | "avif" | "jpeg" | "png";
 
-const MEDIA: Record<VariantFormat, "image/webp" | "image/jpeg" | "image/png"> = {
+type VariantMedia = "image/webp" | "image/avif" | "image/jpeg" | "image/png";
+
+const MEDIA: Record<VariantFormat, VariantMedia> = {
   webp: "image/webp",
+  avif: "image/avif",
   jpeg: "image/jpeg",
   png: "image/png",
 };
 
 /** Output quality per format; part of what a cached variant is, so changing it needs new keys. */
-const QUALITY: Record<VariantFormat, number | undefined> = { webp: 80, jpeg: 80, png: undefined };
+const QUALITY: Record<VariantFormat, number | undefined> = {
+  webp: 80,
+  avif: 60,
+  jpeg: 80,
+  png: undefined,
+};
 
 /**
  * The long edges a variant may have. A fixed set keeps the cache bounded and lets the sweep
@@ -64,7 +72,7 @@ export interface ImageTransformerLike {
   input(stream: ReadableStream<Uint8Array>): {
     transform(t: { width: number; height: number; fit: "scale-down" }): {
       output(o: {
-        format: "image/webp" | "image/jpeg" | "image/png";
+        format: VariantMedia;
         quality?: number;
       }): Promise<{ image(): ReadableStream<Uint8Array>; contentType(): string }>;
     };

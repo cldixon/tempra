@@ -21,6 +21,7 @@ import {
   walk,
 } from "@tempra/editor";
 import type { Code, FootnoteDefinition, Image, Nodes, Paragraph } from "mdast";
+import type { ImageSource } from "../images";
 
 /** How links, images and footnote references in a body point. All optional. */
 export interface BodyOptions {
@@ -39,6 +40,11 @@ export interface BodyOptions {
    * Called once per reference, in reading order (the body, then the definitions).
    */
   footnote?(label: string, defined: boolean): { href: string | null; mark: string } | null;
+  /**
+   * How an image stored in the library at `path` loads: the image route by hash, its candidates
+   * and its size (TEMPRA-162). Null or absent: the `href` for the image, with no size.
+   */
+  image?(path: string): ImageSource | null;
 }
 
 export interface Heading {
@@ -80,6 +86,8 @@ export interface ImageFigure extends FigureBase {
   alt: string;
   /** Where it loads from (`href`), or null when it is not shown. */
   src: string | null;
+  /** Where it loads from with its candidates and size when known (`imageSource`); null with `src`. */
+  source: ImageSource | null;
   /** The library path it resolves to, when it is internal. */
   path: string | null;
   /** The figure markup it is drawn by (`:::figure`), when it has some that parses. */
@@ -216,9 +224,11 @@ export function prepare(tree: Doc, options: BodyOptions = {}): Prepared {
         image,
         url: image.url,
         alt: image.alt ?? "",
-        src: imageSrc(options, image.url),
+        src: null,
+        source: imageSource(options, image.url),
         path: target?.kind === "internal" ? target.path : null,
       };
+      f.src = f.source?.src ?? null;
       figures.push(f);
       figureOf.set(image, f);
       if (found.markup) {
@@ -294,4 +304,15 @@ export function imageSrc(options: BodyOptions, url: string): string | null {
   const target = linkTarget(options.path ?? "", url);
   if (options.href) return options.href(target, url, "image");
   return target && target.kind !== "internal" ? target.href : null;
+}
+
+/** Where an image loads from with what the library knows of it (`image`), else as `imageSrc`. */
+export function imageSource(options: BodyOptions, url: string): ImageSource | null {
+  const target = linkTarget(options.path ?? "", url);
+  if (target?.kind === "internal" && !target.dir && options.image) {
+    const known = options.image(target.path);
+    if (known) return known;
+  }
+  const src = imageSrc(options, url);
+  return src === null ? null : { src };
 }
