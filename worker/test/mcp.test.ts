@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import {
@@ -8,7 +9,7 @@ import {
   MODEL_EDGE,
   variantKeysFor,
 } from "../src/images";
-import { PDF_RESOURCE_BYTES } from "../src/mcp/server";
+import { INSTRUCTIONS, PDF_RESOURCE_BYTES } from "../src/mcp/server";
 import { fakeRenderer } from "../src/render";
 import { readTar } from "../src/util/tar";
 import { setup } from "./harness";
@@ -88,6 +89,32 @@ describe("MCP server", () => {
     const tier2Tool = (await full.listTools()).tools.find((t) => t.name === "search");
     expect(tier2Tool?.description?.startsWith("Beyond files:")).toBe(true);
     expect(full.getInstructions()).toContain("Call `start` first");
+  });
+
+  test("INSTRUCTIONS and SKILL.md tell agents the same media story (TEMPRA-160)", () => {
+    const skill = readFileSync(`${import.meta.dir}/../../skills/okf/SKILL.md`, "utf8");
+    for (const term of [
+      "Mermaid",
+      "`render`",
+      "`source_url`",
+      "never hotlink",
+      "`prepare_upload`",
+      "`sha256`",
+      "small files only",
+      "beside the concept that uses it",
+      "`dir/x.md` uses `dir/x-architecture.png`",
+      "the title is the caption",
+      ":::figure",
+      "`sources`",
+      "`images: true`",
+      "`diagrams: true`",
+      "`diagram_invalid`",
+      "`diagram_unrendered`",
+      "`figure_invalid`",
+    ]) {
+      expect(INSTRUCTIONS.toLowerCase()).toContain(term.toLowerCase());
+      expect(skill.toLowerCase()).toContain(term.toLowerCase());
+    }
   });
 
   test("the file-equivalent workflow", async () => {
