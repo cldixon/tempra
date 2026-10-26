@@ -15,5 +15,5 @@
 </script>
 
 {#if who && s.verified}
-  <p class="doc-checked">Checked by {who}, {day(s.verified.event.ts)}{#if s.since > 0}<span class="byline-sep" aria-hidden="true"> · </span><a href={urls.review(path)}>changed since</a>{/if}</p>
+  <p class="doc-checked">Checked by {who}, {day(s.verified.event.ts)}{#if s.since > 0}<span class="byline-sep" aria-hidden="true">{" · "}</span><a href={urls.review(path)}>changed since</a>{/if}</p>
 {/if}

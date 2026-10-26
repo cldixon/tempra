@@ -10,4 +10,4 @@
   const note = $derived(typeof version.event.meta?.note === "string" ? version.event.meta.note : "");
 </script>
 
-<strong class="review-lead">{lead}</strong>{#if note}<span class="review-note"> · {note}</span>{/if}<span class="muted"> · {actorText(by)} · <Moment ts={version.event.ts} /></span>
+<strong class="review-lead">{lead}</strong>{#if note}<span class="review-note">{` · ${note}`}</span>{/if}<span class="muted">{` · ${actorText(by)} · `}<Moment ts={version.event.ts} /></span>

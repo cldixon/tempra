@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -15,16 +15,16 @@ import {
   walk,
   wordDiff,
 } from "@tempra/editor";
-import { Window } from "happy-dom";
-import { act, type ReactNode } from "react";
-import { createRoot } from "react-dom/client";
-import { renderToStaticMarkup } from "react-dom/server";
+import { type Component, flushSync, mount as mountComponent, unmount } from "svelte";
+import { SvelteMap } from "svelte/reactivity";
 import { attachmentSource, type ImageRef, imageSource } from "./src/images";
-import { Reader } from "./src/Reader";
-import { Body, Note } from "./src/reader/Body";
+import Reader from "./src/Reader.svelte";
+import Body from "./src/reader/Body.svelte";
 import { offsetAt, pointAt, rangeOf, readText, textblocks } from "./src/reader/dom";
-import { OpenFigure } from "./src/reader/Figure";
-import { type FigureView, Lightbox } from "./src/reader/Lightbox";
+import Lightbox from "./src/reader/Lightbox.svelte";
+import type { FigureView } from "./src/reader/lightbox";
+import Note from "./src/reader/Note.svelte";
+import { openFigureContext } from "./src/reader/open-figure";
 import { type BodyOptions, prepare } from "./src/reader/prepare";
 import { Urls } from "./src/urls";
 
@@ -47,16 +47,46 @@ function bodies(): { file: string; body: string }[] {
 
 const stored = (md: string): Doc => reconcile(null, parseMarkdown(md));
 
+/** What is mounted in a test, unmounted after it. */
+const mounted: (() => void)[] = [];
+afterEach(() => {
+  for (const done of mounted.splice(0)) done();
+});
+
+/**
+ * A component mounted into the page's DOM and flushed, as the app mounts it; `open` provides the
+ * full-screen view's opener to the figures inside, as the reader does.
+ */
+// biome-ignore lint/suspicious/noExplicitAny: any component.
+function put<P extends Record<string, any>>(c: Component<P>, props: P, open?: (n: number) => void) {
+  const host = document.createElement("div");
+  document.body.append(host);
+  const instance = mountComponent(c, {
+    target: host,
+    props,
+    context: open ? openFigureContext(open) : undefined,
+  });
+  flushSync();
+  let gone = false;
+  const done = () => {
+    if (gone) return;
+    gone = true;
+    unmount(instance);
+    host.remove();
+  };
+  mounted.push(done);
+  return { host, root: { unmount: done } };
+}
+
+/** The markup a host holds, without the comment nodes Svelte anchors its blocks with. */
+const markup = (el: Element) => el.innerHTML.replace(/<!--[\s\S]*?-->/g, "");
+
 /** A body drawn by the reader into a DOM, as the app draws it. */
 function draw(tree: Doc, options: BodyOptions = {}, older?: Doc) {
   const p = prepare(tree, options);
   const diff = older ? wordDiff(docText(older), p.text) : null;
-  const html = renderToStaticMarkup(<Body prepared={p} diff={diff} hideFirst={false} />);
-  const window = new Window();
-  const root = window.document.createElement("div");
-  root.innerHTML = html;
-  window.document.body.append(root);
-  return { p, html, root: root as unknown as Element, diff };
+  const { host } = put(Body, { prepared: p, diff, hideFirst: false });
+  return { p, html: markup(host), root: host as Element, diff };
 }
 
 /** The blocks of a tree that carry IDs, outside footnote definitions (drawn beside the body). */
@@ -241,9 +271,7 @@ describe("what the reader draws", () => {
     // The definition is drawn beside the body, not in it.
     expect(html).not.toContain("Note.");
     expect(p.footnotes.map((f) => f.label)).toEqual(["a"]);
-    const note = renderToStaticMarkup(
-      <Note prepared={p} nodes={p.footnotes[0]?.node.children ?? []} />,
-    );
+    const note = markup(put(Note, { prepared: p, nodes: p.footnotes[0]?.node.children ?? [] }).host);
     expect(note).toMatch(/^<p data-block="\w+">Note.<\/p>$/);
   });
 
@@ -291,7 +319,7 @@ describe("what the reader draws", () => {
 
   test("a leading heading can be hidden and keeps its place in the text", () => {
     const p = prepare(stored("# Same as the title\n\nBody."));
-    const html = renderToStaticMarkup(<Body prepared={p} diff={null} hideFirst />);
+    const html = markup(put(Body, { prepared: p, diff: null, hideFirst: true }).host);
     expect(html).toMatch(/^<h1 id="same-as-the-title" data-block="\w+" data-text="0" hidden="">/);
   });
 });
@@ -318,33 +346,24 @@ const FIGURES = [
   "After the figures.",
 ].join("\n\n");
 
-/** A DOM for components with effects and events (happy-dom as the page's globals). */
-async function live<T>(fn: (window: Window) => Promise<T>): Promise<T> {
-  // A page URL, so relative image paths resolve (happy-dom fails an image whose URL does not).
-  const window = new Window({ url: "https://app.test/o/l/c.md" });
-  const g = globalThis as Record<string, unknown>;
-  const saved = { window: g.window, document: g.document, DOMParser: g.DOMParser };
-  Object.assign(g, {
-    window,
-    document: window.document,
-    DOMParser: window.DOMParser,
-    IS_REACT_ACT_ENVIRONMENT: true,
-  });
+/**
+ * A DOM for components with effects and events: the page's one DOM (test/setup.ts), with
+ * `window` handed to the test for its events.
+ */
+async function live<T>(fn: (window: Window & typeof globalThis) => Promise<T>): Promise<T> {
   try {
     return await fn(window);
   } finally {
-    // React's scheduled work reads `window`: let it run before the globals go back.
+    // Let scheduled work (Pele's chunks, timers) run before the next test.
     await new Promise((r) => setTimeout(r, 20));
-    Object.assign(g, saved);
   }
 }
 
-async function mount(window: Window, el: ReactNode) {
-  const host = window.document.createElement("div");
-  window.document.body.append(host);
-  const root = createRoot(host as unknown as Element);
-  await act(async () => root.render(el));
-  return { host: host as unknown as HTMLElement, root };
+/** Lets effects, promises and timers run, then flushes. */
+async function act(fn: () => unknown = () => {}) {
+  await fn();
+  await new Promise((r) => setTimeout(r, 0));
+  flushSync();
 }
 
 describe("figures (tempra-dev: app/reader, Figures)", () => {
@@ -437,17 +456,12 @@ describe("figures (tempra-dev: app/reader, Figures)", () => {
 
   test("an image is an enlarge button only where the reader offers the full-screen view", () => {
     const p = prepare(stored(FIGURES), { href: hrefs, path: "c.md" });
-    const plain = renderToStaticMarkup(<Body prepared={p} diff={null} hideFirst={false} />);
+    const plain = markup(put(Body, { prepared: p, diff: null, hideFirst: false }).host);
     expect(plain).not.toContain("figure-open");
-    const offered = renderToStaticMarkup(
-      <OpenFigure.Provider value={() => {}}>
-        <Body prepared={p} diff={null} hideFirst={false} />
-      </OpenFigure.Provider>,
-    );
+    const offered = markup(put(Body, { prepared: p, diff: null, hideFirst: false }, () => {}).host);
     expect(offered).toContain('aria-label="Enlarge image: A tower"');
     // The button is inside the atom: the counting is the same.
-    const window = new Window();
-    const root = window.document.createElement("div");
+    const root = document.createElement("div");
     root.innerHTML = offered;
     const para = root.querySelector("figure p[data-text]") as unknown as Element;
     expect(para.querySelector("[data-atom] > button.figure-open > img")).not.toBeNull();
@@ -457,13 +471,10 @@ describe("figures (tempra-dev: app/reader, Figures)", () => {
   test("an image that fails to load shows the broken box, still one atom", async () => {
     await live(async (window) => {
       const p = prepare(stored(FIGURES), { href: hrefs, path: "c.md" });
-      const { host, root } = await mount(
-        window,
-        <Body prepared={p} diff={null} hideFirst={false} />,
-      );
+      const { host, root } = put(Body, { prepared: p, diff: null, hideFirst: false });
       const img = host.querySelector('img[alt="A tower"]') as HTMLImageElement;
       await act(async () => {
-        img.dispatchEvent(new window.Event("error") as unknown as Event);
+        img.dispatchEvent(new window.Event("error"));
       });
       const figure = host.querySelector("figure.figure") as HTMLElement;
       const box = figure.querySelector(".figure-broken") as HTMLElement;
@@ -480,7 +491,7 @@ describe("figures (tempra-dev: app/reader, Figures)", () => {
       // An inline image that fails: its alt text, still one atom.
       const icon = host.querySelector('img[alt="an icon"]') as HTMLImageElement;
       await act(async () => {
-        icon.dispatchEvent(new window.Event("error") as unknown as Event);
+        icon.dispatchEvent(new window.Event("error") );
       });
       const broken = host.querySelector(".image-broken") as HTMLElement;
       expect(broken.hasAttribute("data-atom")).toBe(true);
@@ -531,14 +542,11 @@ describe("figures (tempra-dev: app/reader, Figures)", () => {
     await live(async (window) => {
       const md = "![A chart](https://charts.example.com/c.png)\n\nSee ![dot](https://x.io/d.png).";
       const p = prepare(stored(md), { href: hrefs, path: "c.md" });
-      const { host, root } = await mount(
-        window,
-        <Body prepared={p} diff={null} hideFirst={false} />,
-      );
+      const { host, root } = put(Body, { prepared: p, diff: null, hideFirst: false });
       for (const alt of ["A chart", "dot"]) {
         const img = host.querySelector(`img[alt="${alt}"]`) as HTMLImageElement;
         await act(async () => {
-          img.dispatchEvent(new window.Event("error") as unknown as Event);
+          img.dispatchEvent(new window.Event("error"));
         });
       }
       const box = host.querySelector(".figure-broken") as HTMLElement;
@@ -573,10 +581,7 @@ describe("figures (tempra-dev: app/reader, Figures)", () => {
         },
         fileHref: (path) => `/o/l/${path}`,
       };
-      const { host, root } = await mount(
-        window,
-        <Reader prepared={p} diff={null} hideFirst={false} figureView={view} />,
-      );
+      const { host, root } = put(Reader, { prepared: p, diff: null, hideFirst: false, figureView: view });
       expect(host.querySelector("dialog")).toBeNull();
       const button = host.querySelector("button.figure-open") as HTMLButtonElement;
       expect(button.getAttribute("aria-label")).toBe("Enlarge image: A tower");
@@ -619,7 +624,7 @@ describe("figures (tempra-dev: app/reader, Figures)", () => {
       const key = (k: string) =>
         act(async () => {
           d.dispatchEvent(
-            new window.KeyboardEvent("keydown", { key: k, bubbles: true }) as unknown as Event,
+            new window.KeyboardEvent("keydown", { key: k, bubbles: true }) ,
           );
         });
       await key("ArrowLeft");
@@ -635,10 +640,7 @@ describe("figures (tempra-dev: app/reader, Figures)", () => {
     await live(async (window) => {
       const md = '![](assets/a.png)\n\n```mermaid title="Flow"\nflowchart LR\n  A --> B\n```';
       const p = prepare(stored(md), { href: hrefs, path: "c.md" });
-      const { host, root } = await mount(
-        window,
-        <Reader prepared={p} diff={null} hideFirst={false} />,
-      );
+      const { host, root } = put(Reader, { prepared: p, diff: null, hideFirst: false });
       await act(async () => (host.querySelector("button.figure-open") as HTMLElement).click());
       const d = host.querySelector("dialog.lightbox") as HTMLDialogElement;
       expect(d.querySelector(".lightbox-where")).toBeNull();
@@ -780,10 +782,7 @@ describe("figure markup (TEMPRA-161)", () => {
         ':::figure[Two of them]\n![A](assets/a.png "A")\n![B](assets/b.png "B")\n:::',
       ].join("\n\n");
       const p = prepare(stored(md), { href: hrefs, path: "c.md" });
-      const { host, root } = await mount(
-        window,
-        <Reader prepared={p} diff={null} hideFirst={false} />,
-      );
+      const { host, root } = put(Reader, { prepared: p, diff: null, hideFirst: false });
       const [one, two] = [...host.querySelectorAll("figure")] as HTMLElement[];
       expect(one?.style.getPropertyValue("--figure-width")).toBe("480px");
       expect(two?.style.getPropertyValue("--figure-width")).toBe("");
@@ -902,30 +901,17 @@ describe("right-sized images (TEMPRA-162)", () => {
       const tree = stored(':::figure\n![Big](assets/signin.png "Big")\n:::');
       const p = prepare(tree, options);
       let opened = 0;
-      const { host } = await mount(
-        window,
-        <OpenFigure.Provider value={() => opened++}>
-          <Body prepared={p} diff={null} hideFirst={false} />
-        </OpenFigure.Provider>,
-      );
+      const { host } = put(Body, { prepared: p, diff: null, hideFirst: false }, () => opened++);
       const img = host.querySelector("img") as HTMLImageElement;
       expect(img.className).toBe("image-loading");
       await act(async () => {
-        img.dispatchEvent(new window.Event("load") as unknown as Event);
+        img.dispatchEvent(new window.Event("load") );
       });
       expect(img.className).toBe("");
       const figure = p.figures[0];
       if (figure?.kind !== "image") throw new Error("no figure");
-      const { host: box } = await mount(
-        window,
-        <Lightbox
-          figures={p.figures}
-          at={1}
-          view={{ downloadHref: (path) => `/o/l/-/download/${path}` }}
-          onMove={() => {}}
-          onClose={() => {}}
-        />,
-      );
+      const { host: box } = put(Lightbox, { figures: p.figures, at: 1, view: { downloadHref: (path) => `/o/l/-/download/${path}` }, onMove: () => {}, onClose: () => {},
+        });
       const big = box.querySelector(".lightbox-figure img") as HTMLImageElement;
       expect(big.getAttribute("sizes")).toBe("100vw");
       expect(big.getAttribute("srcset")).toContain("?w=1920 1920w");
@@ -1021,12 +1007,7 @@ describe("video, audio and PDF figures (TEMPRA-164)", () => {
     await live(async (window) => {
       const p = prepare(stored(MEDIA), options);
       const opened: number[] = [];
-      const { host } = await mount(
-        window,
-        <OpenFigure.Provider value={(n) => opened.push(n)}>
-          <Body prepared={p} diff={null} hideFirst={false} />
-        </OpenFigure.Provider>,
-      );
+      const { host } = put(Body, { prepared: p, diff: null, hideFirst: false }, (n) => opened.push(n));
       const enlarge = host.querySelector(
         'button[aria-label="Enlarge video: A 20-second walkthrough"]',
       ) as HTMLButtonElement;
@@ -1036,38 +1017,22 @@ describe("video, audio and PDF figures (TEMPRA-164)", () => {
       expect(host.querySelectorAll("button[aria-label^='Enlarge video']").length).toBe(3);
       const raw = host.querySelector('video[aria-label="No poster"]') as HTMLVideoElement;
       await act(async () => {
-        raw.dispatchEvent(new window.Event("error") as unknown as Event);
+        raw.dispatchEvent(new window.Event("error") );
       });
       const broken = host.querySelector('[aria-label="This video can\'t be played: No poster"]');
       expect(broken?.hasAttribute("data-atom")).toBe(true);
 
-      const { host: box } = await mount(
-        window,
-        <Lightbox
-          figures={p.figures}
-          at={2}
-          view={{
+      const { host: box } = put(Lightbox, { figures: p.figures, at: 2, view: {
             fileHref: (path) => `/o/l/${path}`,
             downloadHref: (path) => `/o/l/-/download/${path}`,
-          }}
-          onMove={() => {}}
-          onClose={() => {}}
-        />,
-      );
+          }, onMove: () => {}, onClose: () => {},
+        });
       const played = box.querySelector(".lightbox-figure > video") as HTMLVideoElement;
       expect(played.getAttribute("src")).toBe(`/o/l/-/media/${H("a")}`);
       expect(played.hasAttribute("controls")).toBe(true);
       expect(box.textContent).toContain("fig. 2 of 7");
-      const { host: pdfBox } = await mount(
-        window,
-        <Lightbox
-          figures={p.figures}
-          at={5}
-          view={{ fileHref: (path) => `/o/l/${path}` }}
-          onMove={() => {}}
-          onClose={() => {}}
-        />,
-      );
+      const { host: pdfBox } = put(Lightbox, { figures: p.figures, at: 5, view: { fileHref: (path) => `/o/l/${path}` }, onMove: () => {}, onClose: () => {},
+        });
       const card = pdfBox.querySelector(".lightbox-figure > .figure-pdf") as HTMLElement;
       expect(card.querySelector("a")?.getAttribute("href")).toBe("/o/l/docs/paper.pdf");
       const open = [...pdfBox.querySelectorAll("a")].find((a) => a.textContent === "Open file");

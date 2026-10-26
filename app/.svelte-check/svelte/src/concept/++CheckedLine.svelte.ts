@@ -25,7 +25,7 @@ import type { Standing } from "./data";
 async () => {
 
 if(who && s.verified){
-   { svelteHTML.createElement("p", { "class":`doc-checked`,});  who; day(s.verified.event.ts);if(s.since > 0){ { svelteHTML.createElement("span", {   "class":`byline-sep`,"aria-hidden":`true`,});   } { svelteHTML.createElement("a", { "href":urls.review(path),});  }} }
+   { svelteHTML.createElement("p", { "class":`doc-checked`,});  who; day(s.verified.event.ts);if(s.since > 0){ { svelteHTML.createElement("span", {   "class":`byline-sep`,"aria-hidden":`true`,});" · "; } { svelteHTML.createElement("a", { "href":urls.review(path),});  }} }
 }
 };
 return { props: {} as any as $$ComponentProps, exports: {}, bindings: __sveltets_$$bindings(''), slots: {}, events: {} }}

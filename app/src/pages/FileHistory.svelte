@@ -21,7 +21,7 @@
         ><span class="attachment-version-who">{v.what} by <AgentName who={props.name(v.actor, v.by)} /></span
         ><span class="attachment-version-size muted">{sizeText(v.size, v.width, v.height)}</span
         ><a class="attachment-version-download" href={props.urls.pinned(v.seq).download(props.path)} download={baseName(props.path)}
-          ><Icon name="download" /> Download<span class="visually-hidden"> the version from {relativeTime(v.ts)}</span></a
+          ><Icon name="download" /> Download<span class="visually-hidden">{` the version from ${relativeTime(v.ts)}`}</span></a
         ></li
       >{/each}
   </ol></section

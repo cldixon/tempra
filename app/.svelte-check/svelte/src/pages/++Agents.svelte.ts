@@ -11,13 +11,7 @@ import { useAction, useLoad } from "../load.svelte.ts";
 import Status from "../Status.svelte";
 import { day, type Me } from "../ui";
 import { useTitle } from "../ui.svelte.ts";
-import {
-    type AppGrant,
-    chosenLibrary,
-    liveToken,
-    type Minted,
-    type TokenRow,
-  } from "./account";
+import { type AppGrant, chosenLibrary, liveToken, type Minted, type TokenRow } from "./account";
 import ConnectSteps from "./ConnectSteps.svelte";
 
 ;type $$ComponentProps =  { me: Me | null; newToken: boolean; library: string | null };function $$render() {

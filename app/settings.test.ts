@@ -118,7 +118,7 @@ describe("drawn", () => {
     });
     const { host } = draw(Invitations, {});
     await settle(10);
-    expect(host.querySelector(".invitation-from span")?.textContent).toBe("@bob invited you");
+    expect(host.querySelector(".invitation-from > span:last-child")?.textContent).toBe("@bob invited you");
     expect(host.querySelector(".invitation-access")?.textContent).toBe(
       "Your accessCan read and write",
     );
@@ -147,7 +147,7 @@ describe("drawn", () => {
     expect(text(host.querySelector("li") as Element)).toBe(
       "@cat, read and write, open until Nov 30 Withdraw…",
     );
-    expect(host.querySelector("p.muted")?.textContent).toBe("Nobody yet.");
+    expect(host.querySelector("h2 + p.muted")?.textContent).toBe("Nobody yet.");
     // Changing the access asks first; the select keeps showing the saved access meanwhile.
     if (!select) throw new Error("no select");
     select.value = "write";

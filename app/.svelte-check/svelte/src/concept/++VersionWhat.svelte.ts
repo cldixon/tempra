@@ -19,7 +19,7 @@ import { actedBy, type Version } from "./data";
 ;
 async () => {
 
- { svelteHTML.createElement("strong", { "class":`review-lead`,});lead; }if(note){ { svelteHTML.createElement("span", { "class":`review-note`,});  note; }} { svelteHTML.createElement("span", { "class":`muted`,});  actorText(by);   { const $$_tnemoM1C = __sveltets_2_ensureComponent(Moment); new $$_tnemoM1C({ target: __sveltets_2_any(), props: {  "ts":version.event.ts,}});} }
+ { svelteHTML.createElement("strong", { "class":`review-lead`,});lead; }if(note){ { svelteHTML.createElement("span", { "class":`review-note`,});` · ${note}`; }} { svelteHTML.createElement("span", { "class":`muted`,});` · ${actorText(by)} · `; { const $$_tnemoM1C = __sveltets_2_ensureComponent(Moment); new $$_tnemoM1C({ target: __sveltets_2_any(), props: {  "ts":version.event.ts,}});} }
 };
 return { props: {} as any as $$ComponentProps, exports: {}, bindings: __sveltets_$$bindings(''), slots: {}, events: {} }}
 const VersionWhat__SvelteComponent_ = __sveltets_2_fn_component($$render());

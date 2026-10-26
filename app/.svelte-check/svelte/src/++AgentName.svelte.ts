@@ -1,6 +1,6 @@
 ///<reference types="svelte" />
 ;
-import type { ActorView } from "./agents.svelte.ts";
+import type { ActorView } from "./agents";
 
 ;type $$ComponentProps =  { who: Pick<ActorView, "name" | "for"> };function $$render() {
 
@@ -15,7 +15,7 @@ import type { ActorView } from "./agents.svelte.ts";
 ;
 async () => {
 
- { svelteHTML.createElement("span", { "class":`agent-name`,}); { svelteHTML.createElement("b", {});who.name; }if(who.for){ { svelteHTML.createElement("span", { "class":`agent-for`,});  who.for; }} }
+ { svelteHTML.createElement("span", { "class":`agent-name`,}); { svelteHTML.createElement("b", {});who.name; }if(who.for){ { svelteHTML.createElement("span", { "class":`agent-for`,});` for ${who.for}`; }} }
 };
 return { props: {} as any as $$ComponentProps, exports: {}, bindings: __sveltets_$$bindings(''), slots: {}, events: {} }}
 const AgentName__SvelteComponent_ = __sveltets_2_fn_component($$render());

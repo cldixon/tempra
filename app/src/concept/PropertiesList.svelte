@@ -105,7 +105,7 @@
 ><section class="panel-section"
   ><h3 class="label">Linked from</h3
   >{#if pages.length > 0}<ul class="linked">
-      {#each pages as l (l.path)}<li><a href={props.urls.pinned(undefined).file(l.path)}>{titles.of(l.path)}</a>{#if l.kind === "source"}<span class="muted"> cites it</span>{/if}</li>{/each}
+      {#each pages as l (l.path)}<li><a href={props.urls.pinned(undefined).file(l.path)}>{titles.of(l.path)}</a>{#if l.kind === "source"}<span class="muted">{" cites it"}</span>{/if}</li>{/each}
     </ul>{:else}<p class="small muted">{atHead ? "Nothing links here." : "Shown for the latest version."}</p>{/if}</section
 >{#if showCheck}<section class="panel-section check" aria-label="Check"
     >{#if s.verified}<p class="check-state">{changesSince(s, props.name)}</p

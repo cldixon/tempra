@@ -344,7 +344,7 @@
         ><header class="doc-head"
           ><!-- On a phone, whose bar has no room for the path: the page's folders above its title
                (TEMPRA-139, TEMPRA-145). --><nav class="doc-crumbs" aria-label="Folders"
-            >{#each folders as f, i (f)}<span>{#if i > 0}<span aria-hidden="true"> / </span>{/if}{folderName(f)}</span>{/each}</nav
+            >{#each folders as f, i (f)}<span>{#if i > 0}<span aria-hidden="true">{" / "}</span>{/if}{folderName(f)}</span>{/each}</nav
           ><h1 class="doc-title">{title}</h1
           >{#if typeof fm.description === "string"}<p class="doc-tagline">{fm.description}</p>{/if}<Byline
             concept={c}
