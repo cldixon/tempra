@@ -20,8 +20,6 @@ interface Library {
   seq?: number;
   concepts?: number;
   attachments?: number;
-  /** Since the person last looked (TEMPRA-72): changes by others, and items for them here. */
-  tally?: { changes: number; for_you?: number };
   /** Its summary could not be read just now (TEMPRA-23): listed and linked, without counts. */
   unavailable?: boolean;
 }
@@ -108,22 +106,14 @@ function Card({ library: l }: { library: Library }) {
   if (shared) facts.push(l.role === "write" ? "Write" : "Read");
   if (typeof l.concepts === "number") facts.push(plural(l.concepts, "page"));
   if (l.unavailable) facts.push("couldn't load just now");
-  const forYou = l.tally?.for_you ? `${l.tally.for_you} for you` : "";
   return (
     <a className="lib-card" href={new Urls(l.owner, l.slug).tree("")}>
       <span className="lib-card-cover">
         <LibraryTile name={name} shared={shared} />
-        {l.tally?.changes ? (
-          <span className="lib-card-live">
-            <span className="change-dot" aria-hidden="true" />
-            {plural(l.tally.changes, "change")} since you looked
-          </span>
-        ) : null}
       </span>
       <span className="lib-card-body">
         <span className="lib-card-name">
           <span>{libraryLabel(l)}</span>
-          {forYou && <span className="lib-card-for">{forYou}</span>}
         </span>
         {l.description && <span className="lib-card-desc">{l.description}</span>}
         {facts.length > 0 && <span className="lib-card-meta">{facts.join(" · ")}</span>}

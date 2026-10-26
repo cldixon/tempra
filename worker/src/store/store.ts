@@ -6,11 +6,13 @@ import {
   type Doc,
   docText,
   headingIds,
+  linkTarget,
   locate,
   occurrences,
   quoteText,
   selectorAt,
   toMarkdown,
+  walk as walkDoc,
 } from "@tempra/editor/doc";
 import { stringify as yamlStringify } from "yaml";
 import {
@@ -106,6 +108,50 @@ export interface RequestContext {
   by?: { person: string; agent?: string } | null;
 }
 
+/**
+ * Provenance of an attachment fetched from a URL (TEMPRA-157): kept in the attach op's ledger
+ * meta as `source`, and read back for the version on screen (`read`); never a citation.
+ */
+export interface AttachSource {
+  via: "url";
+  url: string;
+  /** Where the bytes were after redirects, when that differs from `url`. */
+  final_url?: string;
+  fetched_at: string;
+}
+
+/** An attachment's description is short: a line or two for its page (TEMPRA-170). */
+export const DESCRIPTION_MAX = 500;
+
+/** A description as given: trimmed, at most DESCRIPTION_MAX characters; empty is none. */
+export function checkDescription(d: unknown): string | undefined {
+  if (d === undefined || d === null) return undefined;
+  if (typeof d !== "string") {
+    throw new OkfError(400, "bad_description", "`description` is a short text.");
+  }
+  const t = d.trim();
+  if (t.length > DESCRIPTION_MAX) {
+    throw new OkfError(
+      400,
+      "bad_description",
+      `\`description\` is at most ${DESCRIPTION_MAX} characters; this one is ${t.length}.`,
+    );
+  }
+  return t === "" ? undefined : t;
+}
+
+function checkSource(s: AttachSource): void {
+  if (
+    s?.via !== "url" ||
+    typeof s.url !== "string" ||
+    !s.url.startsWith("https://") ||
+    typeof s.fetched_at !== "string" ||
+    (s.final_url !== undefined && typeof s.final_url !== "string")
+  ) {
+    throw new OkfError(400, "bad_source", "An attachment's source is the URL it was fetched from.");
+  }
+}
+
 export interface BlobRef {
   hash: string;
   size: number;
@@ -131,7 +177,17 @@ export type WriteOp =
       if_match?: string | null;
       if_none_match?: boolean;
     }
-  | { op: "attach"; path: string; blob: BlobRef; if_match?: string | null; if_none_match?: boolean }
+  | {
+      op: "attach";
+      path: string;
+      blob: BlobRef;
+      if_match?: string | null;
+      if_none_match?: boolean;
+      /** Where the bytes came from, when the Worker fetched them (TEMPRA-157). */
+      source?: AttachSource;
+      /** What the file shows, in the writer's words (at most DESCRIPTION_MAX characters). */
+      description?: string;
+    }
   | { op: "edit"; path: string; edits: { old: string; new: string }[]; if_match?: string | null }
   | { op: "move"; path: string; to: string }
   | { op: "delete"; path: string; if_match?: string | null };
@@ -328,6 +384,14 @@ export interface ConceptRow {
   media?: string | null;
 }
 
+/** An attachment an image in a concept shows (FileView `images`). */
+export interface ImageRef {
+  hash: string;
+  media: string | null;
+  width?: number | null;
+  height?: number | null;
+}
+
 export type FileView =
   | {
       kind: "concept";
@@ -348,6 +412,12 @@ export type FileView =
       open_comments: number;
       /** Its figures from the stored blob rows, when asked for (`figures`; MCP `read`, TEMPRA-154). */
       figures?: FigureFact[];
+      /**
+       * The attachments its images show, by library path, from their blob rows, when asked for
+       * (`images`; the reader, TEMPRA-162): what the image route serves by hash and the size the
+       * reader reserves. `width` and `height` are absent when never worked out, null when unknown.
+       */
+      images?: Record<string, ImageRef>;
     }
   | {
       kind: "attachment";
@@ -362,6 +432,10 @@ export type FileView =
        */
       width?: number | null;
       height?: number | null;
+      /** Where this version's bytes were fetched from, when they were (TEMPRA-157). */
+      source: AttachSource | null;
+      /** What the file shows, in its writer's words (TEMPRA-170). */
+      description: string | null;
     }
   | { kind: "derived"; path: string; seq: number; markdown: string };
 
@@ -600,6 +674,36 @@ export class LibraryStore {
         this.refreshImages(snap, r.from_id);
       }
     });
+  }
+
+  /**
+   * An image this library holds, current or past (a blob row of an attachment, which only a write
+   * in this library makes), for the reader's image route (TEMPRA-162): a hash alone grants
+   * nothing, so one this library never stored is null, as is a file that is not an image.
+   */
+  imageBlob(hash: string): {
+    hash: string;
+    size: number;
+    media: string;
+    width: number | null;
+    height: number | null;
+  } | null {
+    if (!/^[0-9a-f]{64}$/.test(hash)) return null;
+    const row = this.sql.all<{
+      size: number;
+      media: string | null;
+      width: number | null;
+      height: number | null;
+    }>("SELECT size, media, width, height FROM blobs WHERE hash = ? AND location = 'r2'", hash)[0];
+    if (!row?.media?.startsWith("image/")) return null;
+    const sized = (row.width ?? 0) > 0 && (row.height ?? 0) > 0;
+    return {
+      hash,
+      size: row.size,
+      media: row.media,
+      width: sized ? row.width : null,
+      height: sized ? row.height : null,
+    };
   }
 
   /**
@@ -1248,7 +1352,7 @@ export class LibraryStore {
       case "write":
         return [this.writeConcept(w, op.path, op.content, op.if_match, op.if_none_match)];
       case "attach":
-        return [this.writeAttachment(w, op.path, op.blob, op.if_match, op.if_none_match)];
+        return [this.writeAttachment(w, op)];
       case "edit":
         return [this.edit(w, op.path, op.edits, op.if_match)];
       case "move":
@@ -1671,13 +1775,47 @@ export class LibraryStore {
     return seq;
   }
 
-  private writeAttachment(
-    w: WriteState,
-    input: string,
-    blob: BlobRef,
-    ifMatch?: string | null,
-    ifNoneMatch?: boolean,
-  ): OpResult {
+  /**
+   * An attachment version's provenance (TEMPRA-157) and description, from the ledger: the newest
+   * attach of these bytes at this file (its concept id) up to `seq` that says them. Kept in the
+   * events and not with the blob, because a blob is shared by every path holding the same bytes,
+   * while where a file came from and what it shows belong to the file.
+   */
+  private provenance(
+    conceptId: string,
+    hash: string,
+    seq: number,
+  ): { source: AttachSource | null; description: string | null } {
+    const rows = this.sql.all<{ meta: string | null }>(
+      `SELECT meta FROM events WHERE concept_id = ? AND hash = ? AND seq <= ?
+         AND op IN ('put', 'import') AND meta IS NOT NULL ORDER BY seq DESC LIMIT 50`,
+      conceptId,
+      hash,
+      seq,
+    );
+    let source: AttachSource | null = null;
+    let description: string | null = null;
+    for (const r of rows) {
+      const m = JSON.parse(r.meta as string) as JsonObject;
+      const s = m.source as Partial<AttachSource> | string | undefined;
+      if (!source && s && typeof s === "object" && typeof s.url === "string") {
+        source = {
+          via: "url",
+          url: s.url,
+          ...(typeof s.final_url === "string" ? { final_url: s.final_url } : {}),
+          fetched_at: String(s.fetched_at ?? ""),
+        };
+      }
+      if (description === null && typeof m.description === "string") description = m.description;
+      if (source && description !== null) break;
+    }
+    return { source, description };
+  }
+
+  private writeAttachment(w: WriteState, op: Extract<WriteOp, { op: "attach" }>): OpResult {
+    const { path: input, blob, if_match: ifMatch, if_none_match: ifNoneMatch } = op;
+    const description = checkDescription(op.description);
+    if (op.source !== undefined) checkSource(op.source);
     const path = normalizePath(input);
     if (!path) throw new OkfError(400, "bad_path", `Invalid path ${JSON.stringify(input)}.`);
     if (isReserved(path)) {
@@ -1727,9 +1865,18 @@ export class LibraryStore {
     const conceptId = cur?.concept_id ?? w.pending.get(path) ?? crypto.randomUUID();
     let seq = cur?.seq ?? 0;
     const sameBytes = cur?.hash === blob.hash;
-    if (!cur || !sameBytes || retyped) {
+    // A new source or description for the same bytes is a write of its own, as a new type is.
+    const had = cur && sameBytes ? this.provenance(cur.concept_id, cur.hash, cur.seq) : null;
+    const described =
+      !!had &&
+      ((op.source !== undefined &&
+        (had.source?.url !== op.source.url || had.source?.final_url !== op.source.final_url)) ||
+        (description !== undefined && had.description !== description));
+    if (!cur || !sameBytes || retyped || described) {
       const meta: JsonObject = {};
       if (w.source) meta.source = w.source;
+      else if (op.source) meta.source = { ...op.source } as unknown as JsonObject;
+      if (description !== undefined) meta.description = description;
       if (retyped) meta.media = { from: before?.media ?? null, to: blob.media };
       seq = this.appendEvent(w.ctx, w.now, {
         op: w.mode === "import" ? "import" : "put",
@@ -2581,7 +2728,10 @@ export class LibraryStore {
   }
 
   /** GET /files/{path}: a concept, an attachment's metadata, or a synthesized index.md / log.md. */
-  read(input: string, opts: { at?: number; computed?: boolean; figures?: boolean } = {}): FileView {
+  read(
+    input: string,
+    opts: { at?: number; computed?: boolean; figures?: boolean; images?: boolean } = {},
+  ): FileView {
     const snap = this.snapshot(opts.at);
     const path = normalizePath(input) ?? "";
     const name = basename(path);
@@ -2614,6 +2764,7 @@ export class LibraryStore {
         size: info.size,
         media: info.media,
         ...(info.dims ?? {}),
+        ...this.provenance(e.concept_id, e.hash, snap.seq),
       };
     }
     const markdown = this.renderEntry(snap, e, opts.computed ?? false);
@@ -2654,7 +2805,28 @@ export class LibraryStore {
       inbound_links: atHead ? this.inboundCount(e.concept_id) : 0,
       open_comments: atHead ? this.openThreadsOf(e.concept_id) : 0,
       ...(opts.figures ? { figures: this.figuresOf(snap, e, doc) } : {}),
+      ...(opts.images ? { images: this.imagesOf(snap, e, doc) } : {}),
     };
+  }
+
+  /** The attachments a concept's images show, as of the snapshot (no bytes; TEMPRA-162). */
+  private imagesOf(snap: View, e: Entry, doc: Doc): Record<string, ImageRef> {
+    const out: Record<string, ImageRef> = {};
+    walkDoc(doc, (n) => {
+      if (n.type !== "image") return undefined;
+      const t = linkTarget(e.path, n.url);
+      if (t?.kind !== "internal" || t.dir || t.path === "" || t.path in out) return undefined;
+      const a = snap.lookup(t.path);
+      if (a?.kind !== "attachment") return undefined;
+      const info = this.blobInfo(a.hash);
+      out[t.path] = {
+        hash: a.hash,
+        media: info.media,
+        ...(info.dims ? { width: info.dims.width, height: info.dims.height } : {}),
+      };
+      return undefined;
+    });
+    return out;
   }
 
   /** A concept's figures, each attachment from its blob row (no bytes; TEMPRA-154). */
@@ -2667,8 +2839,9 @@ export class LibraryStore {
         hash: a.hash,
         size: info.size,
         media: info.media,
-        width: info.dims?.width ?? null,
-        height: info.dims?.height ?? null,
+        // Null when never worked out, 0 when worked out and unknown (blobInfo's dims).
+        width: info.dims === null ? null : (info.dims.width ?? 0),
+        height: info.dims === null ? null : (info.dims.height ?? 0),
       };
     });
   }

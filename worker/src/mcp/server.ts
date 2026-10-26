@@ -3,7 +3,15 @@ import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import type { TokenInfo } from "../auth";
-import { type BlobStore, type LibraryClient, mediaFor, putBlob, withDimensions } from "../client";
+import {
+  type BlobStore,
+  figuresWithDimensions,
+  type LibraryClient,
+  mediaFor,
+  putBlob,
+  withDimensions,
+} from "../client";
+import { type FetchFn, fetchBlob, selfHosts } from "../fetch-source";
 import {
   IMAGE_BYTES_PER_CALL,
   IMAGES_PER_CALL,
@@ -13,12 +21,28 @@ import {
   readBytes,
   toBase64,
 } from "../images";
+import { imageInfo } from "../media";
+import { diagramTypeOf } from "../okf/diagrams";
 import { type FigureFact, figureLine, sizeText } from "../okf/figures";
 import { normalizePath, underPrefix } from "../okf/paths";
 import type { LintWarning } from "../okf/types";
+import {
+  MAX_RENDER_SOURCE,
+  RENDER_UNAVAILABLE,
+  RENDER_WIDTH,
+  type RenderError,
+  type RenderRequest,
+  type RenderResult,
+} from "../render";
 import type { CommentAction, CommentResult } from "../store/comments";
 import { OkfError } from "../store/errors";
-import type { LibraryHealth, RequestContext, WriteOp, WriteResult } from "../store/store";
+import {
+  checkDescription,
+  type LibraryHealth,
+  type RequestContext,
+  type WriteOp,
+  type WriteResult,
+} from "../store/store";
 import { requireOwner } from "../tenancy";
 import { checkBytes, checkDeclared, decodeBase64, prepareUpload } from "../uploads";
 
@@ -57,8 +81,20 @@ export interface McpContext {
   blobs: BlobStore;
   /** Attachment images scaled for the model (images.ts); without it, small originals only. */
   images?: Images;
-  /** Meters what a call sends beyond a request (an image: `read_image`). */
-  meter?(e: { kind: "read_image"; library: string; bytes: number }): void;
+  /**
+   * Meters what a call costs beyond a request: an image sent (`read_image`), a file fetched from
+   * a URL (`fetch`, TEMPRA-157).
+   */
+  meter?(e: { kind: "read_image" | "fetch"; library: string; bytes: number }): void;
+  /** Outbound fetch for `attach` with `source_url` (fetch-source.ts); tests pass a double. */
+  fetch?: FetchFn;
+  /**
+   * Draws a Mermaid source on the render Worker (render.ts, TEMPRA-165), counted against the
+   * caller's account; without it, `render` and `read`'s diagrams say the service is unavailable.
+   */
+  render?(req: RenderRequest, library?: string): Promise<RenderResult>;
+  /** One render against the account's per-minute cap (RENDERS_PER_MINUTE); false when over it. */
+  allowRender?(): Promise<boolean>;
   /** The Worker's origin, for download URLs. */
   origin: string;
 }
@@ -75,9 +111,9 @@ export const INSTRUCTIONS = `This server holds OKF (Open Knowledge Format) libra
 
 How to work:
 1. Call \`start\` first. It opens your library, or lists the libraries you can reach when there are several; then pass \`library\` (owner/slug) on every call. When the person asks for a new library, \`create_library\` makes one they own and opens it (only on a connection they allowed to). Then \`browse\` a directory before reading, follow links, and \`read\` what you need. Check frontmatter (type, status, trust tier, stale) before relying on a body. \`read\` lists a concept's figures; ask for their images with \`images: true\` (or \`figures: [n]\`) when you review a page, change a figure or its caption, or answer a comment on one.
-2. Write conformant concepts: a non-empty \`type\` naming what kind of thing it is (Metric, Protocol, Decision; never a generic word like concept, page or note, and reuse the types \`start\` lists), a \`title\` and one-line \`description\`, absolute links like [x](/dir/x.md), footnotes [^id] keyed to \`sources[].id\`, diagrams as Mermaid in a \`mermaid\` fence (drawn in the app; an unknown type, an empty body or an unclosed bracket or quote comes back as \`diagram_invalid\` lint), one idea per concept.
+2. Write conformant concepts: a non-empty \`type\` naming what kind of thing it is (Metric, Protocol, Decision; never a generic word like concept, page or note, and reuse the types \`start\` lists), a \`title\` and one-line \`description\`, absolute links like [x](/dir/x.md), footnotes [^id] keyed to \`sources[].id\`, diagrams as Mermaid in a \`mermaid\` fence (drawn in the app; an unknown type, an empty body or an unclosed bracket or quote comes back as \`diagram_invalid\` lint), one idea per concept. Preview a non-trivial diagram with \`render\` before writing it, and \`read\` with \`diagrams: true\` to see a page's diagrams drawn.
    Figures: a plain image is \`![alt](/path "caption")\`; for a width, a placement or a group, wrap one to four images in \`:::figure[group caption]{width=480|60% layout=column|wide|full frame}\` and a closing \`:::\` line (markup that does not parse comes back as \`figure_invalid\` lint).
-3. Prefer \`edit\` for small changes, \`write\` for new concepts or rewrites, \`batch\` for related changes so they land as one request. Pass \`if_match\` (the hash from your last read); on a conflict, re-read and reapply. Bodies are stored in a canonical form (\`-\` bullets, \`*\` emphasis, padded tables): what you write reads back normalized, so \`edit\` the text as \`read\` shows it. To add a file (an image, a PDF): with a shell, \`prepare_upload\` and run the curl line it returns; without one, \`attach\` small files (under about 200 KB) as base64 with their \`sha256\`.
+3. Prefer \`edit\` for small changes, \`write\` for new concepts or rewrites, \`batch\` for related changes so they land as one request. Pass \`if_match\` (the hash from your last read); on a conflict, re-read and reapply. Bodies are stored in a canonical form (\`-\` bullets, \`*\` emphasis, padded tables): what you write reads back normalized, so \`edit\` the text as \`read\` shows it. To add a file (an image, a PDF): an image on the public web, \`attach\` with \`source_url\` (the server fetches it and records where from; still cite the original in \`sources\`, and never hotlink it); a file you made, with a shell, \`prepare_upload\` and run the curl line it returns; without one, \`attach\` small files (under about 200 KB) as base64 with their \`sha256\`.
 4. Put a one-line \`note\` on every write. Read the \`lint\` in every write result and fix what it reports; the result's notes say what else to know (ignored fields, the stored form, open comments). A concept with no frontmatter, invalid YAML or no \`type\` is refused. Figures come back as lint, never refused: \`image_no_alt\` (say what the image shows in its alt text), \`image_external\` (hotlinked; bring it in with \`attach\` and \`source_url\`, cite the original in \`sources\`), \`image_large\` (over 2 MB or 4000 px; attach a smaller one), \`image_not_image\` (\`![…](x)\` on a file that is not an image, video, audio or PDF). Keep concepts under 100 KB; split big ones into linked concepts.
 5. Never write index.md or log.md (the server synthesizes them). Never set \`generated\` (the server stamps it) or \`verified\` (not yours to claim). Set \`status\` and \`stale_after\` honestly. Timestamps are full ISO 8601 datetimes with an offset (\`stale_after: 2026-12-31T00:00:00Z\`); a plain date is flagged.
 6. Use \`work\` to find what needs doing: open comments, stale concepts, broken links, lint, and structure (a directory's index.md made poor by its concepts: missing, long or title-repeating descriptions, duplicate titles, concepts nothing links to, a directory with one concept, none, or too many); \`work\` with kind stale_soon lists what goes stale within 14 days. Only a new \`stale_after\` resets a concept's clock; other edits leave it stale.
@@ -90,6 +126,30 @@ const line = (t: string) => ({ type: "text" as const, text: t });
 const SVG_TEXT_BYTES = 100 * 1024;
 /** Files an `okf://` resource carries as bytes (TEMPRA-155); above it, the download link. */
 const RESOURCE_BYTES = 2 * 1024 * 1024;
+
+export { RENDER_WIDTH };
+/**
+ * Renders per account a minute (tempra-dev: app/media, Limits): the `render` rate limit, counted
+ * on WRITE_LIMITER under its own key (`render:<account>`), whose limit is the same 60.
+ */
+export const RENDERS_PER_MINUTE = 60;
+
+/** Pele's error as one line, with its place and the source line it names. */
+export function renderErrorText(e: RenderError, source?: string): string {
+  const at = e.line > 0 ? ` (line ${e.line}${e.column > 0 ? `, column ${e.column}` : ""})` : "";
+  const src = e.line > 0 ? source?.split("\n")[e.line - 1] : undefined;
+  return `${e.message}${at}${src !== undefined ? `\n  ${e.line} | ${src}` : ""}`;
+}
+
+/** What one drawing of a diagram for a model came to. */
+type Drawn =
+  | { kind: "image"; bytes: Uint8Array; media: string; width: number; height: number }
+  /** The PNG could not be drawn or sent: the SVG instead, with why. */
+  | { kind: "svg"; svg: string; why: string }
+  /** Pele refused the source. */
+  | { kind: "refused"; error: RenderError }
+  /** Nothing drawn: the service is unavailable or the account is over its cap. */
+  | { kind: "unavailable"; why: string };
 
 /**
  * The library's health summary for `start` (TEMPRA-66): the daily check's counts by kind, and
@@ -328,6 +388,65 @@ export function buildServer(ctx: McpContext): McpServer {
     return [{ type: "image", data: toBase64(img.bytes), mimeType: img.media }];
   };
 
+  /**
+   * A diagram drawn for a model (TEMPRA-166): the render Worker's PNG (its cache makes a fence
+   * that did not change cost one R2 read), sized like an image for a model; the SVG when the PNG
+   * cannot be drawn (Browser Rendering not enabled, a timeout) or sent; Pele's error; or why
+   * nothing was drawn. Each call counts once against the account's render cap.
+   */
+  const draw = async (
+    source: string,
+    theme: "light" | "dark",
+    library?: string,
+  ): Promise<Drawn> => {
+    const unavailable = (message = RENDER_UNAVAILABLE): Drawn => ({
+      kind: "unavailable",
+      why: `the render service is unavailable${message.slice(RENDER_UNAVAILABLE.length)}`,
+    });
+    if (!ctx.render) return unavailable();
+    if (source.length > MAX_RENDER_SOURCE) {
+      return {
+        kind: "refused",
+        error: {
+          message: `The diagram is longer than the limit of ${MAX_RENDER_SOURCE} characters.`,
+          line: 0,
+          column: 0,
+        },
+      };
+    }
+    if (ctx.allowRender && !(await ctx.allowRender())) {
+      return {
+        kind: "unavailable",
+        why: `over the limit of ${RENDERS_PER_MINUTE} renders a minute for this account; try again in a minute`,
+      };
+    }
+    const r = await ctx.render({ source, theme, width: RENDER_WIDTH, png: true }, library);
+    if (r.png) {
+      const img = await images.fitForModel(r.png, "image/png");
+      if ("bytes" in img) {
+        const info = imageInfo(img.bytes);
+        return {
+          kind: "image",
+          bytes: img.bytes,
+          media: img.media,
+          width: info?.ok ? info.width : 0,
+          height: info?.ok ? info.height : 0,
+        };
+      }
+      if (r.svg) return { kind: "svg", svg: r.svg, why: "the PNG is too large to send" };
+    }
+    if (r.svg) {
+      return {
+        kind: "svg",
+        svg: r.svg,
+        why: r.error ? r.error.message : "the render service drew no PNG",
+      };
+    }
+    const error = r.error ?? { message: "Nothing was drawn.", line: 0, column: 0 };
+    if (error.message.startsWith(RENDER_UNAVAILABLE)) return unavailable(error.message);
+    return { kind: "refused", error };
+  };
+
   const readOnly = { readOnlyHint: true, openWorldHint: false };
   const writes = { readOnlyHint: false, destructiveHint: false, openWorldHint: false };
 
@@ -481,29 +600,32 @@ export function buildServer(ctx: McpContext): McpServer {
   );
 
   /**
-   * The figures `read` of a concept sends as images (TEMPRA-154): internal raster images, each
-   * after a line naming it, within IMAGES_PER_CALL and IMAGE_BYTES_PER_CALL; then what was left
-   * out and why. External images are never fetched; diagrams wait for the render tool.
+   * The figures `read` of a concept sends as images: internal raster images (TEMPRA-154) and
+   * drawn diagrams (TEMPRA-166), each after a line naming it, within IMAGES_PER_CALL and
+   * IMAGE_BYTES_PER_CALL together; then what was left out and why. `want` is every image, every
+   * diagram, or figures by number (either kind). External images are never fetched.
    */
   const figureImages = async (
     token: TokenInfo,
     figures: FigureFact[],
-    want: true | number[],
+    want: { images: boolean; diagrams: boolean } | number[],
   ): Promise<CallToolResult["content"]> => {
     const left = new Map<number, string>();
     const asked: FigureFact[] = [];
-    if (want === true) asked.push(...figures);
-    else {
+    if (!Array.isArray(want)) {
+      asked.push(...figures.filter((f) => (f.kind === "diagram" ? want.diagrams : want.images)));
+    } else {
       for (const n of [...new Set(want)].sort((a, b) => a - b)) {
         const f = figures[n - 1];
         if (f) asked.push(f);
         else left.set(n, `no such figure (this page has ${figures.length})`);
       }
     }
-    const candidates: (FigureFact & { kind: "image" })[] = [];
+    const candidates: FigureFact[] = [];
     for (const f of asked) {
       if (f.kind === "diagram") {
-        left.set(f.n, "diagram images arrive with the render tool (TEMPRA-166)");
+        if (f.lang !== "mermaid") left.set(f.n, `not a Mermaid diagram (${f.lang})`);
+        else candidates.push(f);
       } else if (f.status === "external") {
         left.set(f.n, "external images are not fetched (TEMPRA-163)");
       } else if (f.status === "missing" || !f.blob) {
@@ -517,15 +639,58 @@ export function buildServer(ctx: McpContext): McpServer {
     for (const f of candidates.slice(IMAGES_PER_CALL)) {
       left.set(f.n, `over the cap of ${IMAGES_PER_CALL} images a call; ask with figures: [${f.n}]`);
     }
+    type Got =
+      | { f: FigureFact & { kind: "image" }; img: Awaited<ReturnType<Images["forModel"]>> }
+      | { f: FigureFact & { kind: "diagram" }; drawn: Drawn };
     const fetched = await Promise.all(
-      candidates.slice(0, IMAGES_PER_CALL).map(async (f) => ({
-        f,
-        img: await images.forModel(f.blob as NonNullable<typeof f.blob>),
-      })),
+      candidates
+        .slice(0, IMAGES_PER_CALL)
+        .map(
+          async (f): Promise<Got> =>
+            f.kind === "diagram"
+              ? { f, drawn: await draw(f.source, "light", token.library.id) }
+              : { f, img: await images.forModel(f.blob as NonNullable<typeof f.blob>) },
+        ),
     );
     const out: CallToolResult["content"] = [];
     let bytes = 0;
-    for (const { f, img } of fetched) {
+    const overBytes = (n: number) =>
+      `over the cap of ${sizeText(IMAGE_BYTES_PER_CALL)} of images a call; ask with figures: [${n}]`;
+    for (const got of fetched) {
+      if ("drawn" in got) {
+        const { f, drawn } = got;
+        const name = `Figure ${f.n}: ${f.title || `diagram (${f.type ?? f.lang})`}`;
+        if (drawn.kind === "refused") {
+          left.set(f.n, `Pele could not draw it: ${renderErrorText(drawn.error, f.source)}`);
+        } else if (drawn.kind === "unavailable") {
+          left.set(f.n, `not drawn: ${drawn.why}`);
+        } else if (drawn.kind === "svg") {
+          const svgBytes = new TextEncoder().encode(drawn.svg).byteLength;
+          if (svgBytes > SVG_TEXT_BYTES) {
+            left.set(
+              f.n,
+              `not drawn as a PNG (${drawn.why}), and its SVG is over ${sizeText(SVG_TEXT_BYTES)}`,
+            );
+          } else if (bytes + svgBytes > IMAGE_BYTES_PER_CALL) left.set(f.n, overBytes(f.n));
+          else {
+            bytes += svgBytes;
+            out.push(line(`${name} (as SVG: ${drawn.why})\n${drawn.svg}`));
+          }
+        } else if (bytes + drawn.bytes.byteLength > IMAGE_BYTES_PER_CALL) {
+          left.set(f.n, overBytes(f.n));
+        } else {
+          bytes += drawn.bytes.byteLength;
+          ctx.meter?.({
+            kind: "read_image",
+            library: token.library.id,
+            bytes: drawn.bytes.byteLength,
+          });
+          out.push(line(name));
+          out.push({ type: "image", data: toBase64(drawn.bytes), mimeType: drawn.media });
+        }
+        continue;
+      }
+      const { f, img } = got;
       if ("missing" in img) {
         left.set(f.n, `its bytes are missing (/${f.path})`);
         continue;
@@ -538,10 +703,7 @@ export function buildServer(ctx: McpContext): McpServer {
         continue;
       }
       if (bytes + img.bytes.byteLength > IMAGE_BYTES_PER_CALL) {
-        left.set(
-          f.n,
-          `over the cap of ${sizeText(IMAGE_BYTES_PER_CALL)} of images a call; ask with figures: [${f.n}]`,
-        );
+        left.set(f.n, overBytes(f.n));
         continue;
       }
       bytes += img.bytes.byteLength;
@@ -570,11 +732,17 @@ export function buildServer(ctx: McpContext): McpServer {
       .describe(
         `For a concept: true adds its figures' images after the markdown (at most ${IMAGES_PER_CALL}).`,
       ),
+    diagrams: z
+      .boolean()
+      .optional()
+      .describe(
+        "For a concept: true adds its Mermaid diagrams drawn as images, as people see them, after the markdown (sharing the cap with `images`).",
+      ),
     figures: z
       .array(z.number().int().min(1))
       .optional()
       .describe(
-        "For a concept: only these figures' images, by number as the Figures list gives them.",
+        "For a concept: only these figures (images or diagrams), by number as the Figures list gives them.",
       ),
     ...(tier2
       ? {
@@ -593,7 +761,7 @@ export function buildServer(ctx: McpContext): McpServer {
     "read",
     {
       title: "Read a file",
-      description: `Read a concept as OKF markdown (frontmatter and body), with its hash, sequence, trust tier, staleness, lint, inbound link count and its figures above it (one line each, numbered as the app numbers them: path or URL, alt, caption, size, and ok, missing or external). Pass the hash as \`if_match\` when you edit, replace or delete. Check trust tier and \`stale\` before relying on the content. Ask for the figures' images with \`images: true\` (or \`figures: [n]\`) when you review the page, change a figure or its caption, or answer a comment on one; they come after the markdown, each after a line naming it, at most ${IMAGES_PER_CALL} and ${IMAGE_BYTES_PER_CALL / 1048576} MB a call, what was left out listed with the reason; external images are not fetched. Also reads index.md and log.md (the latest 200 requests; \`log\` pages back further); for an attachment returns its size and a short-lived download URL, and for an image (PNG, JPEG, GIF, WebP) the image itself, scaled to at most 1568 px (SVG as its text).`,
+      description: `Read a concept as OKF markdown (frontmatter and body), with its hash, sequence, trust tier, staleness, lint, inbound link count and its figures above it (one line each, numbered as the app numbers them: path or URL, alt, caption, dimensions, size, and ok, missing or external; diagrams by type). Pass the hash as \`if_match\` when you edit, replace or delete. Check trust tier and \`stale\` before relying on the content. Ask for the figures' images with \`images: true\`, for the Mermaid diagrams drawn as people see them with \`diagrams: true\`, or for some figures of either kind with \`figures: [n]\`, when you review the page, change a figure or its caption, or answer a comment on one; they come after the markdown, each after a line naming it, at most ${IMAGES_PER_CALL} and ${IMAGE_BYTES_PER_CALL / 1048576} MB a call in all, what was left out listed with the reason (for a diagram that does not draw, Pele's error); external images are not fetched. Also reads index.md and log.md (the latest 200 requests; \`log\` pages back further); for an attachment returns its size and a short-lived download URL, and for an image (PNG, JPEG, GIF, WebP) the image itself, scaled to at most 1568 px (SVG as its text).`,
       inputSchema: readSchema,
       annotations: readOnly,
     },
@@ -602,6 +770,7 @@ export function buildServer(ctx: McpContext): McpServer {
         path: string;
         image?: boolean;
         images?: boolean;
+        diagrams?: boolean;
         figures?: number[];
         at?: number;
         library?: string;
@@ -627,6 +796,12 @@ export function buildServer(ctx: McpContext): McpServer {
               `seq: ${view.seq}`,
               `size: ${view.size} bytes · media: ${view.media ?? "unknown"}`,
               ...(view.width && view.height ? [`dimensions: ${view.width}×${view.height} px`] : []),
+              ...(view.source
+                ? [
+                    `source: ${view.source.url}, fetched ${view.source.fetched_at}${view.source.final_url ? ` (from ${view.source.final_url} after redirects)` : ""}; cite it in \`sources\` where you use it`,
+                  ]
+                : []),
+              ...(view.description ? [`description: ${view.description}`] : []),
               `download (15 minutes): ${url}`,
             ].join("\n"),
           );
@@ -637,7 +812,7 @@ export function buildServer(ctx: McpContext): McpServer {
           typeof view.frontmatter.status === "string"
             ? view.frontmatter.status
             : "not set (reads as stable)";
-        const figures = view.figures ?? [];
+        const figures = await figuresWithDimensions(picked.lib, ctx.blobs, view.figures ?? []);
         const result = text(
           [
             `path: ${view.path}`,
@@ -655,7 +830,11 @@ export function buildServer(ctx: McpContext): McpServer {
             view.markdown,
           ].join("\n"),
         );
-        const want = args.figures ?? (args.images ? true : null);
+        const want =
+          args.figures ??
+          (args.images || args.diagrams
+            ? { images: !!args.images, diagrams: !!args.diagrams }
+            : null);
         if (want) result.content.push(...(await figureImages(picked.token, figures, want)));
         return result;
       },
@@ -823,10 +1002,23 @@ export function buildServer(ctx: McpContext): McpServer {
     {
       title: "Add an attachment",
       description:
-        "Store a small non-markdown file (an image, a script, a PDF) at a path, e.g. `references/attesters/check.py`, from its bytes as base64. Base64 is for small files (under about 200 KB): every character is typed out, and a long run gets cut short or garbled. If you can run a shell, use `prepare_upload` instead and PUT the real file; it takes up to 10 MB. Pass `sha256` (hex; `sha256sum file`, or `hashlib.sha256(data).hexdigest()`) or at least `size` in bytes, so bytes that arrive damaged are refused (`checksum_mismatch`, with what arrived) instead of stored. Images (PNG, JPEG, GIF, WebP, AVIF, SVG) are checked on write: a broken or truncated one is refused with `bad_image`, and an image's type is taken from its bytes, not from `media` or the extension. Replacing needs `if_match`. Reading it back with `read` returns a short-lived download URL.",
+        "Store a non-markdown file (an image, a script, a PDF) at a path, e.g. `figures/latency.png`, from exactly one of `source_url` or `content_base64`. An image on the public web goes in with `source_url`: the server fetches it (https only, no credentials in the URL, at most 3 redirects, 10 s, up to 10 MB; images, video, audio and PDF only, judged by the bytes), so nothing passes through you, and records the URL and fetch time as the file's source; a refused fetch is `fetch_refused` naming the rule. That source is not a citation: cite the original in the concept's `sources` too. Never hotlink a web image in a concept; bring it in this way. `content_base64` is for small files you made (under about 200 KB): every character is typed out, and a long run gets cut short or garbled. If you can run a shell, use `prepare_upload` instead and PUT the real file; it takes up to 10 MB. Pass `sha256` (hex; `sha256sum file`, or `hashlib.sha256(data).hexdigest()`) or at least `size` in bytes, so bytes that arrive damaged are refused (`checksum_mismatch`, with what arrived) instead of stored. Images (PNG, JPEG, GIF, WebP, AVIF, SVG) are checked on write: a broken or truncated one is refused with `bad_image`, and an image's type is taken from its bytes, not from `media` or the extension. `description` says in a line what the file shows (up to 500 characters). Replacing needs `if_match`. Reading it back with `read` returns its facts (source and description included) and a short-lived download URL.",
       inputSchema: {
         path: z.string(),
-        content_base64: z.string(),
+        source_url: z
+          .string()
+          .optional()
+          .describe(
+            "A public https URL the server fetches the file from; instead of content_base64.",
+          ),
+        content_base64: z
+          .string()
+          .optional()
+          .describe("The file's bytes as base64, for small files; instead of source_url."),
+        description: z
+          .string()
+          .optional()
+          .describe("What the file shows, in a line (at most 500 characters)."),
         media: z.string().optional().describe("MIME type; guessed from the extension if omitted."),
         sha256: z
           .string()
@@ -839,16 +1031,82 @@ export function buildServer(ctx: McpContext): McpServer {
       },
       annotations: writes,
     },
-    guarded(async ({ path, content_base64, media, sha256, size, if_match, note, library }) => {
-      const { token, lib } = pick(library);
-      checkWrite(token, path);
-      const declared = checkDeclared({ size, sha256 });
-      const bytes = decodeBase64(content_base64);
-      checkBytes(bytes, declared);
-      const blob = await putBlob(ctx.blobs, bytes, media ?? mediaFor(path), path);
-      const res = await lib.apply(request(note), [{ op: "attach", path, blob, if_match }]);
-      return text(writeText("Stored", res));
-    }),
+    guarded(
+      async ({
+        path,
+        source_url,
+        content_base64,
+        description,
+        media,
+        sha256,
+        size,
+        if_match,
+        note,
+        library,
+      }) => {
+        const { token, lib } = pick(library);
+        checkWrite(token, path);
+        if ((source_url === undefined) === (content_base64 === undefined)) {
+          throw new OkfError(
+            400,
+            "bad_attach",
+            "Pass exactly one of `source_url` (a public https URL the server fetches) or `content_base64` (a small file's bytes).",
+          );
+        }
+        const declared = checkDeclared({ size, sha256 });
+        const desc = checkDescription(description);
+        const clean = normalizePath(path) ?? path;
+        if (source_url !== undefined) {
+          if (!clean || clean.endsWith(".md")) {
+            throw new OkfError(
+              400,
+              "bad_attachment",
+              "Markdown files are concepts, not attachments.",
+            );
+          }
+          const got = await fetchBlob(
+            {
+              fetch: ctx.fetch ?? ((u, i) => fetch(u, i)),
+              blobs: ctx.blobs,
+              selfHosts: selfHosts(ctx.origin),
+            },
+            source_url,
+            clean,
+          );
+          ctx.meter?.({ kind: "fetch", library: token.library.id, bytes: got.bytes.byteLength });
+          checkBytes(got.bytes, declared);
+          const res = await lib.apply(request(note), [
+            {
+              op: "attach",
+              path,
+              blob: got.blob,
+              if_match,
+              source: got.source,
+              ...(desc !== undefined ? { description: desc } : {}),
+            },
+          ]);
+          return text(
+            [
+              writeText("Stored", res),
+              `Fetched ${got.bytes.byteLength} bytes from ${got.source.final_url ?? got.source.url} as ${got.blob.media ?? "unknown"}. Cite the original in the concept's \`sources\` too.`,
+            ].join("\n"),
+          );
+        }
+        const bytes = decodeBase64(content_base64 as string);
+        checkBytes(bytes, declared);
+        const blob = await putBlob(ctx.blobs, bytes, media ?? mediaFor(path), path);
+        const res = await lib.apply(request(note), [
+          {
+            op: "attach",
+            path,
+            blob,
+            if_match,
+            ...(desc !== undefined ? { description: desc } : {}),
+          },
+        ]);
+        return text(writeText("Stored", res));
+      },
+    ),
   );
 
   server.registerTool(
@@ -863,12 +1121,16 @@ export function buildServer(ctx: McpContext): McpServer {
         size: z.number().int().optional().describe("The file's length in bytes."),
         sha256: z.string().optional().describe("The file's SHA-256 as hex."),
         if_match: z.string().optional().describe("Replacing a file: its current hash."),
+        description: z
+          .string()
+          .optional()
+          .describe("What the file shows, in a line (at most 500 characters)."),
         note: z.string().optional().describe("One line for the ledger."),
         ...libArg,
       },
       annotations: writes,
     },
-    guarded(async ({ path, media, size, sha256, if_match, note, library }) => {
+    guarded(async ({ path, media, size, sha256, if_match, description, note, library }) => {
       const picked = pick(library);
       checkWrite(picked.token, path);
       const clean = normalizePath(path);
@@ -880,11 +1142,13 @@ export function buildServer(ctx: McpContext): McpServer {
         );
       }
       const req = request(note);
+      const desc = checkDescription(description);
       const up = await prepareUpload(picked.lib, ctx.origin, {
         path: clean,
         media: media ?? mediaFor(clean),
         ...checkDeclared({ size, sha256 }),
         if_match,
+        ...(desc !== undefined ? { description: desc } : {}),
         note: req.note ?? null,
         actor: req.actor,
         by: req.by,
@@ -907,6 +1171,134 @@ export function buildServer(ctx: McpContext): McpServer {
   // ------------------------------------------------------------------ tier 2: beyond files
 
   if (tier2) {
+    server.registerTool(
+      "render",
+      {
+        title: "Draw a diagram",
+        description: `${BEYOND}draw a Mermaid diagram as the app draws it (Pele, the reader's column and greys) and see it, to check its layout and labels before you write it or while you review it: pass \`source\` (a mermaid fence's body), or \`path\` and \`figure\` (its number in \`read\`'s Figures list). Returns a line with the diagram type and size, then the drawing as a PNG image; if Pele cannot draw it, its error with line and column, and the line it names; if the PNG cannot be made, the SVG as text. Writes nothing and records nothing in the ledger. At most ${RENDERS_PER_MINUTE} renders a minute per account.`,
+        inputSchema: {
+          source: z
+            .string()
+            .optional()
+            .describe("The diagram's Mermaid source: what goes inside a ```mermaid fence."),
+          path: z
+            .string()
+            .optional()
+            .describe("A concept holding the diagram, with `figure`, instead of `source`."),
+          figure: z
+            .number()
+            .int()
+            .min(1)
+            .optional()
+            .describe("The diagram's figure number in that concept, as `read` lists it."),
+          theme: z
+            .enum(["light", "dark"])
+            .optional()
+            .describe("The app's light (default) or dark theme."),
+          ...libArg,
+        },
+        annotations: readOnly,
+      },
+      guarded(
+        async (args: {
+          source?: string;
+          path?: string;
+          figure?: number;
+          theme?: "light" | "dark";
+          library?: string;
+        }) => {
+          let source: string;
+          let what: string;
+          let library: string | undefined;
+          if (args.source !== undefined) {
+            if (args.path !== undefined || args.figure !== undefined) {
+              throw new OkfError(
+                400,
+                "bad_request",
+                "Pass `source`, or `path` and `figure`, not both.",
+              );
+            }
+            // A whole fence pasted in is drawn as its body.
+            source =
+              /^\s*(`{3,}|~{3,})\s*mermaid\b[^\n]*\n([\s\S]*?)\n?\s*\1\s*$/i.exec(
+                args.source,
+              )?.[2] ?? args.source;
+            what = "Diagram";
+            library =
+              args.library || ctx.libraries.length === 1
+                ? pick(args.library).token.library.id
+                : undefined;
+          } else {
+            if (args.path === undefined || args.figure === undefined) {
+              throw new OkfError(
+                400,
+                "bad_request",
+                "Pass `source` (the diagram's Mermaid), or `path` and `figure`.",
+              );
+            }
+            const picked = pick(args.library);
+            library = picked.token.library.id;
+            const view = await picked.lib.read(args.path, { figures: true });
+            if (view.kind !== "concept") {
+              throw new OkfError(400, "not_a_concept", `${args.path} is not a concept.`);
+            }
+            const figures = view.figures ?? [];
+            const f = figures[args.figure - 1];
+            if (!f) {
+              throw new OkfError(
+                404,
+                "no_figure",
+                `${view.path} has no figure ${args.figure} (it has ${figures.length}).`,
+              );
+            }
+            if (f.kind !== "diagram") {
+              throw new OkfError(
+                400,
+                "not_a_diagram",
+                `Figure ${f.n} of ${view.path} is an image, not a diagram; \`read\` it with figures: [${f.n}].`,
+              );
+            }
+            source = f.source;
+            what = `Figure ${f.n} of /${view.path}${f.title ? ` (${JSON.stringify(f.title)})` : ""}`;
+          }
+          if (source.trim() === "") {
+            throw new OkfError(400, "bad_request", "The diagram's source is empty.");
+          }
+          const theme = args.theme ?? "light";
+          const type = diagramTypeOf(source);
+          const head = `${what} · mermaid${type ? `, ${type}` : ""} · ${theme}`;
+          const drawn = await draw(source, theme, library);
+          if (drawn.kind === "unavailable") {
+            return { ...text(`${head}\nNot drawn: ${drawn.why}.`), isError: true };
+          }
+          if (drawn.kind === "refused") {
+            return text(
+              `${head}\nPele could not draw it: ${renderErrorText(drawn.error, source)}\nFix the source and render it again; the app shows a diagram that does not draw as its source.`,
+            );
+          }
+          if (drawn.kind === "svg") {
+            const size = new TextEncoder().encode(drawn.svg).byteLength;
+            return text(
+              size > SVG_TEXT_BYTES
+                ? `${head}\nDrawn, but the PNG could not be made (${drawn.why}) and the SVG is ${sizeText(size)}, over ${sizeText(SVG_TEXT_BYTES)}; it draws, so the source is valid.`
+                : `${head}\nDrawn, but the PNG could not be made (${drawn.why}); the SVG follows as text (${sizeText(size)}).\n${drawn.svg}`,
+            );
+          }
+          ctx.meter?.({
+            kind: "read_image",
+            library: library ?? "",
+            bytes: drawn.bytes.byteLength,
+          });
+          return {
+            content: [
+              line(`${head} · ${drawn.width > 0 ? `${drawn.width}×${drawn.height} px` : "drawn"}`),
+              { type: "image", data: toBase64(drawn.bytes), mimeType: drawn.media },
+            ],
+          };
+        },
+      ),
+    );
+
     server.registerTool(
       "search",
       {
@@ -1228,7 +1620,7 @@ export function buildServer(ctx: McpContext): McpServer {
       "export",
       {
         title: "Export the bundle",
-        description: `${BEYOND}a short-lived download URL (15 minutes) for the whole library as a conformant OKF bundle (tar), with index.md and log.md materialized. \`at\` exports an earlier sequence.`,
+        description: `${BEYOND}a short-lived download URL (15 minutes) for the whole library as a conformant OKF bundle (tar), with index.md and log.md materialized and each Mermaid diagram drawn beside its concept as \`<concept>.diagrams/<n>.svg\` (n its figure number; derived, so import ignores them). \`at\` exports an earlier sequence.`,
         inputSchema: { at: z.number().int().optional(), ...libArg },
         annotations: readOnly,
       },

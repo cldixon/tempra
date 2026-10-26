@@ -3,16 +3,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import type { LedgerEvent, LedgerRequest } from "./src/activity";
 import { actorView } from "./src/agents";
 import { StatusPills } from "./src/concept/Byline";
-import { forYouCards, type InboxItem, type InboxPage } from "./src/inbox";
-import { fateOf, typeName } from "./src/pages/File";
-import {
-  EmptyLibrary,
-  ForYou,
-  inboxHref,
-  recentlyChanged,
-  SinceLine,
-  sinceYouLooked,
-} from "./src/pages/Home";
+import { AttachmentImage, fateOf, sizeFact, typeName } from "./src/pages/File";
+import { EmptyLibrary, recentlyChanged } from "./src/pages/Home";
 import type { OutlineFile } from "./src/Tree";
 import { Urls } from "./src/urls";
 
@@ -39,72 +31,6 @@ describe("the library's home (take 4)", () => {
     { path: "app/reader.md", kind: "concept", title: "Reader", seq: 6 },
     { path: "app/shot.png", kind: "attachment", seq: 7 },
   ];
-
-  const item = (over: Partial<InboxItem>): InboxItem => ({
-    id: "i1",
-    kind: "reply",
-    library: "cl_dixon/tempra-dev",
-    library_title: "Tempra",
-    path: "app/reader.md",
-    thread: "t1",
-    title: null,
-    actor: "claude-code/dev",
-    who: "Claude Code",
-    agent: true,
-    excerpt: "Atoms count as one character.",
-    count: null,
-    invitation: null,
-    created: hour(1),
-    read_at: null,
-    done_at: null,
-    actions: ["reply", "resolve"],
-    href: "/cl_dixon/tempra-dev/app/reader.md#comments",
-    ...over,
-  });
-  const page = (items: InboxItem[], open = items.length): InboxPage => ({
-    items,
-    next: null,
-    unread: items.length,
-    open,
-  });
-
-  test("for you here: the library's open Inbox items, one of each kind first, up to three", () => {
-    const items = [
-      item({}),
-      item({ id: "i2", thread: "t2" }),
-      item({
-        id: "i3",
-        kind: "verify",
-        path: "app/diagrams.md",
-        title: "Diagrams",
-        thread: null,
-        count: 2,
-        actions: ["review", "dismiss"],
-        href: "/cl_dixon/tempra-dev/app/diagrams.md?review=1",
-      }),
-      item({ id: "i4", thread: "t3" }),
-    ];
-    // A reply names its page by path only: the title comes from the tree's outline.
-    const titles = { "cl_dixon/tempra-dev app/reader.md": "Reader" };
-    const cards = forYouCards(items, titles);
-    expect(cards.map((c) => c.kind)).toEqual(["Reply", "To check", "Reply"]);
-    expect(cards[0]?.title).toBe("Claude Code on Reader");
-    expect(cards[0]?.detail).toBe("Atoms count as one character.");
-    expect(cards[0]?.href).toBe("/cl_dixon/tempra-dev/app/reader.md#thread-t1");
-    expect(cards[1]?.title).toBe("Diagrams");
-    expect(cards[1]?.detail).toBe("2 edits by Claude Code since you checked");
-    // Without the outline, the page's name stands in, never the raw path.
-    expect(forYouCards([item({})])[0]?.title).toBe("Claude Code on reader");
-    const html = renderToStaticMarkup(
-      <ForYou urls={urls} inbox={page(items, 5)} titles={titles} />,
-    );
-    expect(html).toContain("For you here");
-    expect(html).toContain(`href="${inboxHref(urls)}"`);
-    expect(inboxHref(urls)).toBe("/inbox?library=cl_dixon/tempra-dev");
-    expect(html).toContain("All 5 in Inbox");
-    // Done in the Inbox, gone from the home: nothing open, nothing shown.
-    expect(renderToStaticMarkup(<ForYou urls={urls} inbox={page([])} />)).toBe("");
-  });
 
   test("an empty library: the connect steps, waiting with the pulsing dot, Import a bundle", () => {
     const waiting = renderToStaticMarkup(
@@ -164,39 +90,6 @@ describe("the library's home (take 4)", () => {
     concept_id: `c${seq}`,
     meta: { by: { person: "u1", agent: "a1" } },
     ...over,
-  });
-
-  test("since you last looked: pages, files and comments by others, dated by the cursor", () => {
-    const events = [
-      event(10, { ts: "2026-10-12T12:00:00Z" }),
-      event(11),
-      event(12, { path: "app/p11.md" }),
-      event(13, { path: "app/shot.png" }),
-      event(14, { op: "comment" }),
-      // The person's own edit in the app is not news to them.
-      event(15, { actor: me, path: "app/mine.md", meta: { by: { person: "u1" } } }),
-      event(16, { op: "verify" }),
-    ];
-    const what = sinceYouLooked(events, 10, me);
-    expect(what).toMatchObject({ from: events[0]?.ts, pages: 1, files: 1, comments: 1 });
-    expect(what.who).toHaveLength(1);
-    const html = renderToStaticMarkup(
-      <SinceLine
-        urls={urls}
-        what={what}
-        name={(a, by) => view(a, by).name}
-        now={Date.parse("2026-10-20T12:00:00Z")}
-      />,
-    );
-    expect(html).toContain(
-      "Since Oct 12: Claude Code changed 1 page and 1 file and left 1 comment",
-    );
-    expect(html).toContain(`href="${urls.activity()}"`);
-    // Nothing new (or only the person's own): no line at all.
-    const none = sinceYouLooked(events.slice(0, 1), 10, me);
-    expect(
-      renderToStaticMarkup(<SinceLine urls={urls} what={none} name={() => "x"} now={Date.now()} />),
-    ).toBe("");
   });
 
   test("recently changed: the newest pages still here, each once, with who and when", () => {
@@ -281,5 +174,43 @@ describe("a page's status pills (TEMPRA-139)", () => {
     expect(pills("stable", false)).toBe("");
     expect(pills(null, false)).toBe("");
     expect(pills(" Stable ", false)).toBe("");
+  });
+});
+
+describe("an attachment's image (TEMPRA-162)", () => {
+  const file = {
+    kind: "attachment" as const,
+    path: "app/shot.png",
+    seq: 7,
+    size: 1_258_291,
+    media: "image/png",
+    hash: "a".repeat(64),
+    width: 2400,
+    height: 1500,
+  };
+
+  test("from the image route, its size known before it loads; Size says it", () => {
+    const html = renderToStaticMarkup(
+      <AttachmentImage urls={urls} file={file} onError={() => {}} />,
+    );
+    expect(html).toContain(`src="/cl_dixon/tempra-dev/-/image/${file.hash}"`);
+    expect(html).toContain('width="2400"');
+    expect(html).toContain('height="1500"');
+    expect(html).toContain('class="image-loading"');
+    expect(html).toContain(`/-/image/${file.hash}?w=1920 1920w`);
+    expect(html).toContain('sizes="(max-width: 900px) 100vw, 70vw"');
+    expect(html).not.toContain('loading="lazy"');
+    expect(sizeFact(file, null)).toBe("1.2 MB · 2400 × 1500");
+  });
+
+  test("an image from before, not yet sized: the original, the size once drawn", () => {
+    const legacy = { ...file, width: null, height: null };
+    const html = renderToStaticMarkup(
+      <AttachmentImage urls={urls} file={legacy} onError={() => {}} />,
+    );
+    expect(html).not.toContain("width=");
+    expect(html).not.toContain("srcset");
+    expect(sizeFact(legacy, null)).toBe("1.2 MB");
+    expect(sizeFact(legacy, { w: 30, h: 20 })).toBe("1.2 MB · 30 × 20");
   });
 });

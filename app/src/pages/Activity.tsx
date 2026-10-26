@@ -1,4 +1,4 @@
-import { type FormEvent, Fragment, type ReactNode, useEffect, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useState } from "react";
 import { AgentName } from "../AgentName";
 import {
   byPerson,
@@ -14,7 +14,6 @@ import {
   LIVE_MS,
   LiveEntry,
   type LiveWrite,
-  NewDivider,
   titleOf,
   toEntry,
   useNow,
@@ -24,7 +23,7 @@ import { actorLabel, agentLabel, useActors } from "../agents";
 import { api, useLoad } from "../api";
 import { isAgentChange } from "../changes";
 import { Avatar, Icon } from "../chrome";
-import { markSeen, useFeed, useLastSeen, useTrailing } from "../live";
+import { useFeed, useTrailing } from "../live";
 import { useLibraryLabel, useRole } from "../role";
 import { type Done, navigate } from "../router";
 import { localTime, plural, Status, useTitle } from "../ui";
@@ -47,7 +46,8 @@ interface Page {
  * what happened in the library, in two views under one switch. The Summary (the default) tells
  * each request as a sentence, grouped by day, with an agent writing now as a live entry at the
  * top; Every event is the ledger as a table, with Download. `-/ledger` opens Every event. Both
- * follow the change feed, mark what came after the person's seen cursor, and move it forward.
+ * follow the change feed. Nothing is marked "new since you looked" (TEMPRA-173): a person comes
+ * here to look, and is not kept count of.
  * The view and filters are in the URL, so a view can be linked and back and forward restore it.
  */
 export function Activity(props: {
@@ -131,22 +131,6 @@ export function Activity(props: {
   // A clock that ticks while something reads as live, so the dot stops when the writes do.
   const now = useNow(writing || liveSeqs.size > 0 ? 5000 : 30_000);
 
-  // Looking moves the seen cursor forward; what was new when the page opened stays marked. Only
-  // the whole ledger moves it: a filtered view (a folder, someone, a kind, text) shows part of
-  // what came in, and moving the cursor past the rest would mark it seen (A-11, TEMPRA-121).
-  const seen = useLastSeen(urls, true);
-  const filtered =
-    Boolean(prefix || exact) ||
-    (filters.who !== undefined && filters.who !== "everyone") ||
-    (view === "events" && Boolean(filters.kind || filters.q));
-  const newest =
-    loaded.state === "ready" && !filtered
-      ? (loaded.data.requests[0]?.events.at(-1)?.seq ?? null)
-      : null;
-  useEffect(() => {
-    if (newest !== null) markSeen(urls, newest);
-  }, [newest, urls]);
-
   return (
     <PageColumn>
       <header className="view-head">
@@ -210,7 +194,6 @@ export function Activity(props: {
                   requests={requests}
                   empty={page.requests.length === 0}
                   titles={titles.state === "ready" ? titles.data.titles : {}}
-                  seen={seen}
                   who={filters.who ?? "everyone"}
                   writing={isLive(writing, now) ? writing : null}
                   now={now}
@@ -221,7 +204,6 @@ export function Activity(props: {
                   me={actor}
                   requests={requests}
                   empty={page.requests.length === 0}
-                  seen={seen}
                   filter={{ who: filters.who, kind: filters.kind, q: filters.q }}
                   more={more}
                   live={liveSeqs}
@@ -380,12 +362,11 @@ function Summary(props: {
   requests: LedgerRequest[];
   empty: boolean;
   titles: Record<string, string>;
-  seen: number | null;
   who: Who;
   writing: LiveWrite | null;
   now: number;
 }) {
-  const { urls, titles, seen, who, writing, now } = props;
+  const { urls, titles, who, writing, now } = props;
   const actors = useActors(urls, props.me || null);
   const ids = new Set<string>();
   const entries: Entry[] = [];
@@ -401,10 +382,6 @@ function Summary(props: {
   const days = groupByDay(entries, now);
   // The live entry heads today's entries (a day of its own when nothing else happened today).
   if (live && days[0]?.label !== "Today") days.unshift({ label: "Today", items: [] });
-  // The divider goes under the last entry after the cursor, when earlier ones follow it (a first
-  // look, or everything loaded being new, marks nothing).
-  const firstSeen = seen === null ? -1 : entries.findIndex((e) => e.last <= seen);
-  const lastNew = firstSeen > 0 ? entries[firstSeen - 1]?.id : undefined;
   return (
     <>
       {entries.length === 0 && !live && (
@@ -424,16 +401,13 @@ function Summary(props: {
             />
           )}
           {day.items.map((e) => (
-            <Fragment key={e.id}>
-              <EntryRow
-                entry={e}
-                urls={urls}
-                actor={actors.view(e.actor, e.by)}
-                now={now}
-                isNew={seen !== null && e.last > seen}
-              />
-              {e.id === lastNew && <NewDivider />}
-            </Fragment>
+            <EntryRow
+              key={e.id}
+              entry={e}
+              urls={urls}
+              actor={actors.view(e.actor, e.by)}
+              now={now}
+            />
           ))}
         </section>
       ))}
@@ -443,22 +417,20 @@ function Summary(props: {
 
 /**
  * Every event: the ledger as a table, newest first. Who and when are named on a request's first
- * row; the newest rows carry the dot, solid after the seen cursor and pulsing while an agent's
- * write is fresh. A request's first row links its revert for those who may write.
+ * row; a row an agent's fresh write made carries the pulsing dot. A request's first row links its revert for those who may write.
  */
 function EveryEvent(props: {
   urls: Urls;
   me: string;
   requests: LedgerRequest[];
   empty: boolean;
-  seen: number | null;
   filter: { who?: Who; kind?: string; q?: string };
   /** Older requests are still to load ("Older"). */
   more: boolean;
   live: Map<number, number>;
   now: number;
 }) {
-  const { urls, seen, live, now } = props;
+  const { urls, live, now } = props;
   const actors = useActors(urls, props.me || null);
   const role = useRole(urls);
   const rows = eventRows(props.requests, props.filter);
@@ -501,13 +473,7 @@ function EveryEvent(props: {
                 row={row}
                 urls={urls}
                 actor={actors.view(row.request.actor, row.request.by)}
-                dot={
-                  (live.get(row.event.seq) ?? 0) > now - LIVE_MS
-                    ? "live"
-                    : seen !== null && row.event.seq > seen
-                      ? "new"
-                      : null
-                }
+                live={(live.get(row.event.seq) ?? 0) > now - LIVE_MS}
                 revert={
                   // Revert is one of the owner's recovery tools (TEMPRA-124).
                   row.lead &&
@@ -528,11 +494,11 @@ function EventLine(props: {
   row: EventRow;
   urls: Urls;
   actor: ReturnType<ReturnType<typeof useActors>["view"]>;
-  dot: "live" | "new" | null;
+  live: boolean;
   revert: boolean;
   now: number;
 }) {
-  const { row, urls, actor, dot, now } = props;
+  const { row, urls, actor, live, now } = props;
   const e = row.event;
   // A deleted file is shown as it was just before; a comment opens on its page.
   const href =
@@ -542,11 +508,9 @@ function EventLine(props: {
   return (
     <tr className={row.lead ? "lead" : undefined}>
       <td className="events-seq">
-        {dot && (
-          <span className={dot === "live" ? "change-dot live" : "change-dot"}>
-            <span className="visually-hidden">
-              {dot === "live" ? "Being written now" : "New since you looked"}
-            </span>
+        {live && (
+          <span className="change-dot live">
+            <span className="visually-hidden">Being written now</span>
           </span>
         )}
         {e.seq}

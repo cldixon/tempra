@@ -10,12 +10,14 @@ import {
   bundleFiles,
   bundleTar,
   describeBlob,
+  imagesWithDimensions,
   type LibraryClient,
   mediaFor,
   putBlob,
   WORKER_ATTACHMENT_CAP,
   withDimensions,
 } from "./client";
+import { type FetchFn, fetchBlob } from "./fetch-source";
 import type { Images } from "./images";
 import { notificationsOf, registerInboxApi } from "./inbox-api";
 import { registerLegalRoutes } from "./legal";
@@ -28,11 +30,17 @@ import { normalizePath, underPrefix } from "./okf/paths";
 import type { JsonObject } from "./okf/types";
 import { fromThisSite } from "./origin";
 import type { RestoreOutcome, RestoreRecord } from "./recovery";
-import type { RenderDiagram } from "./render";
+import type { RenderContext, RenderDiagram } from "./render";
 import { readCookie, SESSION_COOKIE, type Sessions } from "./session";
 import { type Mailer, registerSignInRoutes } from "./signin";
 import { OkfError } from "./store/errors";
-import type { ConceptContent, RequestContext, WriteOp, WriteResult } from "./store/store";
+import {
+  type ConceptContent,
+  checkDescription,
+  type RequestContext,
+  type WriteOp,
+  type WriteResult,
+} from "./store/store";
 import {
   type AccountGrant,
   type Authorized,
@@ -74,6 +82,11 @@ export interface Deps extends UsageDeps {
    * images go out as stored when they are small enough.
    */
   images?: Images;
+  /**
+   * Outbound fetch for attaching from a URL (TEMPRA-157, fetch-source.ts); absent, the global
+   * fetch. Tests pass a double.
+   */
+  fetch?: FetchFn;
   /** Checks for /healthz: each dependency's name and "ok" or what failed. */
   health?: () => Promise<Record<string, string>>;
   /** Nightly exports in R2 (spec: Backups and recovery), for the UI. */
@@ -276,6 +289,63 @@ type WireOp =
       if_none_match?: boolean;
     };
 
+/**
+ * `POST …/files/{path}?from=<url>`, or a JSON body `{ source_url, description?, note? }`
+ * (TEMPRA-157): the Worker fetches a public https file and attaches it at `path`, as MCP `attach`
+ * with `source_url` does, with the URL and fetch time in the ledger. A write: it counts against
+ * the caller's write limit like any POST, and the fetch is metered as `fetch`.
+ */
+async function attachFromUrl(c: C, path: string): Promise<Response> {
+  requireWrite(c, path);
+  const type = (c.req.header("Content-Type") ?? "").toLowerCase();
+  const body = type.startsWith("application/json")
+    ? await json<{ source_url?: unknown; description?: unknown; note?: unknown }>(c)
+    : {};
+  const from = c.req.query("from") ?? body.source_url;
+  if (typeof from !== "string" || from === "") {
+    throw new OkfError(
+      400,
+      "bad_attach",
+      "POST /files/{path} attaches from a URL: pass ?from=<https URL> or a JSON body { source_url }; or POST /files/{path}/move.",
+    );
+  }
+  const clean = normalizePath(path);
+  if (!clean || clean.endsWith(".md")) {
+    throw new OkfError(400, "bad_attachment", "Markdown files are concepts, not attachments.");
+  }
+  const description = checkDescription(c.req.query("description") ?? body.description);
+  const d = c.var.deps;
+  const got = await fetchBlob(
+    {
+      fetch: d.fetch ?? ((u, i) => fetch(u, i)),
+      blobs: d.blobs,
+      selfHosts: [new URL(c.req.url).hostname],
+    },
+    from,
+    clean,
+  );
+  d.meter?.({
+    kind: "fetch",
+    account: tokenAdmission(c.var.token).account,
+    library: c.var.token.library.id,
+    bytes: got.bytes.byteLength,
+  });
+  const ifMatch = etag(c.req.header("If-Match"));
+  const ifNoneMatch = c.req.header("If-None-Match")?.trim() === "*";
+  const res = await c.var.lib.apply(requestContext(c, body.note), [
+    {
+      op: "attach",
+      path: clean,
+      blob: got.blob,
+      if_match: ifMatch,
+      if_none_match: ifNoneMatch,
+      source: got.source,
+      ...(description !== undefined ? { description } : {}),
+    },
+  ]);
+  return writeResponse(c, res);
+}
+
 export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   const app = new Hono<Env>();
 
@@ -376,16 +446,18 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
 
   app.get(`${BASE}/files/*`, async (c) => {
     const path = tail(c, "/files/");
-    const view = await c.var.lib.read(path, { at: num(c, "at"), computed: bool(c, "computed") });
-    c.header("X-Seq", String(view.seq));
     const wantsJson = (c.req.header("Accept") ?? "").includes("application/json");
+    const view = await c.var.lib.read(path, {
+      at: num(c, "at"),
+      computed: bool(c, "computed"),
+      // The reader's images: each one's hash and size (TEMPRA-162).
+      images: wantsJson,
+    });
+    c.header("X-Seq", String(view.seq));
     if (view.kind === "attachment" && wantsJson) {
       // A description, not the bytes: what the app shows on an attachment's page.
-      const { kind, path, seq, hash, size, media, width, height } = await withDimensions(
-        c.var.lib,
-        c.var.deps.blobs,
-        view,
-      );
+      const { kind, path, seq, hash, size, media, width, height, source, description } =
+        await withDimensions(c.var.lib, c.var.deps.blobs, view);
       c.header("ETag", `"${hash}"`);
       return c.json({
         kind,
@@ -396,6 +468,9 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
         media: media ?? null,
         width: width ?? null,
         height: height ?? null,
+        // Where the bytes were fetched from, and what the file shows (TEMPRA-157, TEMPRA-170).
+        source: source ?? null,
+        description: description ?? null,
       });
     }
     if (view.kind === "attachment") {
@@ -421,6 +496,9 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     c.header("ETag", `"${view.hash}"`);
     if (wantsJson) {
       const { markdown: _, ...rest } = view;
+      if (rest.images) {
+        rest.images = await imagesWithDimensions(c.var.lib, c.var.deps.blobs, rest.images);
+      }
       return c.json(rest);
     }
     return c.body(view.markdown, 200, { "Content-Type": "text/markdown; charset=utf-8" });
@@ -487,8 +565,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
 
   app.post(`${BASE}/files/*`, async (c) => {
     const path = tail(c, "/files/");
-    if (!path.endsWith("/move"))
-      throw new OkfError(404, "no_route", "POST /files/{path}/move only.");
+    if (!path.endsWith("/move")) return attachFromUrl(c, path);
     const from = path.slice(0, -"/move".length);
     const body = await json<{ to: string; note?: string }>(c);
     if (typeof body.to !== "string") throw new OkfError(400, "bad_move", "Send { to }.");
@@ -508,6 +585,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
       size?: unknown;
       sha256?: unknown;
       if_match?: unknown;
+      description?: unknown;
       note?: unknown;
     }>(c);
     const path = typeof body.path === "string" && body.path !== "" ? body.path : null;
@@ -518,12 +596,14 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
       sha256: typeof body.sha256 === "string" ? body.sha256 : undefined,
     });
     const media = typeof body.media === "string" && body.media ? body.media : null;
+    const description = path ? checkDescription(body.description) : undefined;
     const ctx = requestContext(c, body.note);
     const prepared = await prepareUpload(c.var.lib, new URL(c.req.url).origin, {
       path,
       media: media ?? (path ? mediaFor(path) : null),
       ...declared,
       if_match: typeof body.if_match === "string" ? body.if_match : undefined,
+      ...(description !== undefined ? { description } : {}),
       note: ctx.note ?? null,
       actor: ctx.actor,
       by: ctx.by,
@@ -693,7 +773,11 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   app.get(`${BASE}/export`, async (c) => {
     const format = c.req.query("format") ?? "tar";
     if (format !== "tar") throw new OkfError(400, "bad_format", "Only format=tar is supported.");
-    return exportTar(c.var.lib, c.var.deps.blobs, num(c, "at"), c.var.token.library.slug);
+    const who = tokenAdmission(c.var.token);
+    return exportTar(c.var.lib, c.var.deps, num(c, "at"), c.var.token.library.slug, {
+      account: who.account,
+      library: who.library,
+    });
   });
 
   // ------------------------------------------------------------------ tier 2 extras
@@ -969,25 +1053,6 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     return c.body(null, 204);
   });
 
-  /** Tells a member the owner changed their access (TEMPRA-72); never fails the change. */
-  const accessChanged = async (c: C, user: string, excerpt: string) => {
-    const ref = c.var.token.library;
-    await c.var.deps.notifications
-      ?.add([
-        {
-          user,
-          library: ref.id,
-          kind: "access",
-          place: `${ref.owner}/${ref.slug}`,
-          actor: c.var.token.actor,
-          by_user: c.var.token.created_by ?? null,
-          excerpt,
-          mail: true,
-        },
-      ])
-      .catch((e) => console.error(JSON.stringify({ notify_failed: "access", error: String(e) })));
-  };
-
   /** A member by handle, for changing their role or removing them. */
   const memberNamed = async (c: C) => {
     const accounts = c.var.deps.accounts;
@@ -1021,11 +1086,6 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
       role,
       c.var.token.created_by ?? null,
     );
-    await accessChanged(
-      c,
-      person.id,
-      role === "write" ? "Now read and write" : "Now read and comment",
-    );
     return c.json({ handle: person.handle, role });
   });
 
@@ -1036,7 +1096,6 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     const leaving = person.id === c.var.token.created_by;
     if (!leaving) requireOwner(c.var.token.role, "remove members");
     await c.var.deps.accounts.unshare(c.var.token.library.id, person.id);
-    if (!leaving) await accessChanged(c, person.id, "Removed from the library");
     return c.body(null, 204);
   });
 
@@ -1089,8 +1148,14 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     const bad = new OkfError(403, "bad_download", "This download link is invalid or has expired.");
     if (!lib) throw bad;
     const payload = await lib.openDownload(c.req.param("token"));
-    if (payload.k === "export")
-      return exportTar(lib, d.blobs, payload.at, payload.name ?? "library");
+    if (payload.k === "export") {
+      // The link is the credential; the library's owner is whose renders the diagrams count as.
+      const ref = await d.accounts.libraryByDoId(c.req.param("lib"));
+      return exportTar(lib, d, payload.at, payload.name ?? "library", {
+        account: ref?.owner ?? c.req.param("lib"),
+        library: ref?.id,
+      });
+    }
     const obj = await d.blobs.get(payload.hash);
     if (!obj) throw new OkfError(404, "not_found", "The file's bytes are missing.");
     return c.body(obj.body as ReadableStream, 200, {
@@ -1144,7 +1209,15 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     if (grant.path === null) return c.json(blob, 201);
     const res = await notifying(d, token, d.library(token)).apply(
       { actor: grant.actor, request_id: crypto.randomUUID(), note: grant.note, by: grant.by },
-      [{ op: "attach", path: grant.path, blob, if_match: grant.if_match }],
+      [
+        {
+          op: "attach",
+          path: grant.path,
+          blob,
+          if_match: grant.if_match,
+          ...(grant.description ? { description: grant.description } : {}),
+        },
+      ],
     );
     return writeResponse(c, res);
   });
@@ -1574,14 +1647,20 @@ function bearer(c: C): string {
   return m[1];
 }
 
-/** A conformant bundle as a tar, attachments read from blob storage. */
+/**
+ * A conformant bundle as a tar, attachments read from blob storage, with each Mermaid fence drawn
+ * beside its concept as SVG when a renderer is there (TEMPRA-168).
+ */
 async function exportTar(
   lib: LibraryClient,
-  blobs: BlobStore,
+  d: Deps,
   at: number | undefined,
   name: string,
+  ctx: RenderContext,
 ) {
-  const bundle = await bundleTar(lib, blobs, at);
+  const bundle = await bundleTar(lib, d.blobs, at, {
+    diagrams: d.renderDiagram ? { render: d.renderDiagram, ctx } : undefined,
+  });
   return new Response(bundle.bytes as unknown as ArrayBuffer, {
     headers: {
       "Content-Type": "application/x-tar",

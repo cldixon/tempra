@@ -3,6 +3,7 @@ import { useActors } from "../agents";
 import { Icon } from "../chrome";
 import { CommentsList } from "../comments/CommentsPanel";
 import { highlightsOf, placeThreads, type Thread, useDraft } from "../comments/data";
+import { imageSource } from "../images";
 import { Reader } from "../Reader";
 import { type BodyOptions, prepare } from "../reader/prepare";
 import { pushRecent } from "../recent";
@@ -87,6 +88,10 @@ export function ConceptPage(props: {
     const options: BodyOptions = {
       path: c.path,
       href: bodyHref(urls),
+      image: (path) => {
+        const ref = c.images?.[path];
+        return ref ? imageSource(urls, ref) : null;
+      },
       exists: (path) => !broken.has(path),
       footnote: (label, defined) => {
         if (!sourceIds.has(label) && !defined) return null;
@@ -96,7 +101,7 @@ export function ConceptPage(props: {
       },
     };
     return { prepared: prepare(c.doc, options), numbers };
-  }, [c.path, c.doc, urls, sources, links]);
+  }, [c.path, c.doc, c.images, urls, sources, links]);
   // A leading heading that repeats the title is not shown twice (the stored body is unchanged).
   const first = prepared.headings[0];
   const hideFirst =

@@ -211,16 +211,18 @@ describe("the inbox (TEMPRA-72)", () => {
     ]);
   });
 
-  test("a new thread tells who wrote the concept, while they can reach the library", async () => {
+  test("a new thread tells no one but whom it mentions (TEMPRA-173)", async () => {
     const { s, friend } = await shared();
     await write(friend.app, "notes/plan.md");
     await open(s.app, "notes/plan.md", "Can we split this?");
+    expect((await inbox(friend.app)).items).toEqual([]);
+    await open(s.app, "notes/plan.md", "@friend and this?");
     expect((await inbox(friend.app)).items).toMatchObject([
-      { kind: "thread", path: "notes/plan.md", excerpt: "Can we split this?" },
+      { kind: "mention", path: "notes/plan.md", excerpt: "@friend and this?" },
     ]);
     // Removed from the library: no more items from it.
     await s.accounts.unshare(LIB.id, friend.user.id);
-    await open(s.app, "notes/plan.md", "And another.");
+    await open(s.app, "notes/plan.md", "@friend once more");
     expect((await inbox(friend.app)).items).toHaveLength(1);
   });
 
@@ -261,7 +263,7 @@ describe("the inbox (TEMPRA-72)", () => {
     ).toBe(403);
   });
 
-  test("an invitation is an inbox item, done once answered; access changes are told", async () => {
+  test("an invitation is an inbox item, done once answered; access changes are not items", async () => {
     const s = setup();
     const friend = await s.stranger("friend@example.com");
     expect(
@@ -276,10 +278,11 @@ describe("the inbox (TEMPRA-72)", () => {
     };
     await call(friend.app, `/api/v1/invitations/${inv.invitations[0]?.id}/accept`, "POST");
     expect((await inbox(friend.app)).items).toEqual([]);
+    // An access change tells no one (TEMPRA-173): the library's list shows the new role.
     await call(s.app, `${API}/members/friend`, "PUT", { role: "write" });
-    expect((await inbox(friend.app)).items).toMatchObject([
-      { kind: "access", excerpt: "Now read and write" },
-    ]);
+    expect((await inbox(friend.app)).items).toEqual([]);
+    await call(s.app, `${API}/members/friend`, "DELETE");
+    expect((await inbox(friend.app)).items).toEqual([]);
   });
 
   // The Inbox page's calls (TEMPRA-130): Mark all read on a filtered list, Accept from a row,
@@ -290,7 +293,7 @@ describe("the inbox (TEMPRA-72)", () => {
     await write(s.app, "a.md");
     const id = await open(friend.app, "a.md", "A question");
     await call(s.app, `${API}/comments/${id}`, "POST", { body: "An answer" });
-    // The owner opens a thread on the friend's own library: a new thread in friend/demo.
+    // The owner mentions the friend on the friend's own library: a mention in friend/demo.
     await s.accounts.share(friend.lib.id, OWNER.id, "read", friend.user.id);
     const theirs = "/api/v1/libraries/friend/demo";
     const put = await friend.app.request(`${theirs}/files/b.md`, {
@@ -300,17 +303,18 @@ describe("the inbox (TEMPRA-72)", () => {
     });
     expect(put.status).toBeLessThan(300);
     expect(
-      (await call(s.app, `${theirs}/comments`, "POST", { path: "b.md", body: "Hello" })).status,
+      (await call(s.app, `${theirs}/comments`, "POST", { path: "b.md", body: "@friend Hello" }))
+        .status,
     ).toBe(201);
     const before = (await inbox(friend.app)).items;
-    expect(before.map((i) => i.kind).sort()).toEqual(["reply", "thread"]);
+    expect(before.map((i) => i.kind).sort()).toEqual(["mention", "reply"]);
 
     const r = await call(friend.app, "/api/v1/inbox/read", "POST", { library: "owner/demo" });
     expect((await r.json()) as unknown).toEqual({ read: 1 });
     const after = await inbox(friend.app);
     const byKind = Object.fromEntries(after.items.map((i) => [i.kind, i.read_at]));
     expect(byKind.reply).not.toBeNull();
-    expect(byKind.thread).toBeNull();
+    expect(byKind.mention).toBeNull();
     expect(after.unread).toBe(1);
   });
 
@@ -551,7 +555,7 @@ describe("notification mail (TEMPRA-74)", () => {
   });
 });
 
-describe("the Inbox's verify items (TEMPRA-116)", () => {
+describe("what content writes tell people (TEMPRA-116, TEMPRA-173)", () => {
   /** The current hash of a file, or none when it is not there. */
   const hashOf = async (s: S, path: string) => {
     const r = await s.app.request(`${API}/files/${path}`, {
@@ -591,64 +595,21 @@ describe("the Inbox's verify items (TEMPRA-116)", () => {
   const staleDoc = (title: string, after: string) =>
     `---\ntype: Metric\ntitle: ${title}\ndescription: A metric.\nstale_after: ${after}\n---\n# ${title}\n\nBody.\n`;
 
-  test("an agent's edit to a page a person verified is one keyed item, closed by verifying", async () => {
+  test("an edit to a page a person verified tells no one (TEMPRA-173)", async () => {
     const { s, friend, agent } = await shared();
     await write(s.app, "metrics/margin.md");
     expect((await verify(friend.app, "metrics/margin.md")).status).toBe(200);
-    for (const n of [1, 2]) {
-      const r = await put(s, agent, "metrics/margin.md", edited("Margin", n));
-      expect(r.status).toBeLessThan(300);
-      // The notice is the Worker's, never the caller's.
-      expect(await r.json()).not.toHaveProperty("notify");
-    }
-    const { items, unread } = await inbox(friend.app);
-    expect(unread).toBe(1);
-    expect(items).toMatchObject([
-      {
-        kind: "verify",
-        path: "metrics/margin.md",
-        title: "Margin",
-        count: 2,
-        excerpt: "2 edits since you verified",
-        actor: "claude-code/laptop",
-        href: "/owner/demo/metrics/margin.md?review=1",
-        actions: ["review", "dismiss"],
-        library: "owner/demo",
-      },
-    ]);
-    // The owner never verified it: nothing for them.
-    expect((await inbox(s.app)).items).toEqual([]);
-    // Verifying closes it, for everyone.
-    expect((await verify(friend.app, "metrics/margin.md")).status).toBe(200);
-    expect((await inbox(friend.app)).items).toEqual([]);
-    const done = (await (await call(friend.app, "/api/v1/inbox?done=1")).json()) as {
-      items: InboxItem[];
-      open: number;
-    };
-    expect(done.items.map((i) => i.kind)).toEqual(["verify"]);
-    expect(done.items[0]?.done_at).not.toBeNull();
-    expect(done.open).toBe(0);
+    const r = await put(s, agent, "metrics/margin.md", edited("Margin", 1));
+    expect(r.status).toBeLessThan(300);
+    // The notice is the Worker's, never the caller's.
+    expect(await r.json()).not.toHaveProperty("notify");
+    for (const app of [s.app, friend.app]) expect((await inbox(app)).items).toEqual([]);
   });
 
-  test("the person acting in the app is not told of their own edit; their agent's is news", async () => {
-    const { s, agent } = await shared();
-    await write(s.app, "metrics/margin.md");
-    expect((await verify(s.app, "metrics/margin.md")).status).toBe(200);
-    expect((await saveAs(s, s.app, "metrics/margin.md", edited("Margin", 1))).status).toBeLessThan(
-      300,
-    );
-    expect((await inbox(s.app)).items).toEqual([]);
-    expect((await put(s, agent, "metrics/margin.md", edited("Margin", 2))).status).toBeLessThan(
-      300,
-    );
-    expect((await inbox(s.app)).items.map((i) => i.kind)).toEqual(["verify"]);
-  });
-
-  test("a moved page takes its verify item along", async () => {
+  test("a moved page takes its open items along", async () => {
     const { s, friend, agent } = await shared();
     await write(s.app, "metrics/margin.md");
-    await verify(friend.app, "metrics/margin.md");
-    await put(s, agent, "metrics/margin.md", edited("Margin", 1));
+    await open(s.app, "metrics/margin.md", "@friend is this right?");
     const moved = await s.req("/batch", {
       method: "POST",
       token: agent,
@@ -659,7 +620,7 @@ describe("the Inbox's verify items (TEMPRA-116)", () => {
     });
     expect(moved.status).toBeLessThan(300);
     expect((await inbox(friend.app)).items).toMatchObject([
-      { kind: "verify", path: "metrics/gross-margin.md" },
+      { kind: "mention", path: "metrics/gross-margin.md" },
     ]);
   });
 

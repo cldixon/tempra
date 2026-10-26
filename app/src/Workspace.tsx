@@ -10,7 +10,6 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
-import { type AgentChange, useAgentChanges } from "./changes";
 import { AccountMenu, Bell, Icon } from "./chrome";
 import { inboxChanged } from "./inbox";
 import { useFeed, useFeedStatus } from "./live";
@@ -74,9 +73,6 @@ interface Frame {
   narrow: boolean;
   /** The library's index (`GET …/outline`, as the tree loaded it); null until it arrives. */
   index: OutlineFile[] | null;
-  /** The latest of agents' recent changes, and the clock it is read against (changes.ts). */
-  latest: AgentChange | undefined;
-  now: number;
   /** The top bar's slots a page fills through PageBar: its path, its tools. */
   slots: { tools: HTMLElement | null; path: HTMLElement | null };
   /** Tells the frame a page has tools of its own (a concept's), which take the phone bar's end. */
@@ -91,8 +87,6 @@ const FrameContext = createContext<Frame>({
   sidebar: true,
   narrow: false,
   index: null,
-  latest: undefined,
-  now: 0,
   slots: { tools: null, path: null },
   setOwnTools: () => {},
   setModal: () => {},
@@ -439,7 +433,7 @@ function Brand(props: { library?: BrandLibrary; onSearch?: () => void; short?: b
   );
 }
 
-const NO_CHANGES = { index: null, latest: undefined, now: 0 };
+const NO_INDEX = { index: null };
 
 /** Ctrl or Cmd+K opens search, and again closes it, on every page (TEMPRA-127). */
 function useSearchKey(toggle: () => void) {
@@ -466,7 +460,6 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
   const [switching, setSwitching] = useState(false);
   const [index, setIndex] = useState<OutlineFile[] | null>(null);
   const [indexSeq, setIndexSeq] = useState<number | null>(null);
-  const agents = useAgentChanges(urls, indexSeq);
   const libs = useLibraries();
   const library =
     libs.state === "ready"
@@ -510,13 +503,7 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
   const sidebarContent = settings ? (
     <SettingsSidebar urls={urls} place={place} />
   ) : (
-    <LibrarySidebar
-      urls={urls}
-      place={place}
-      changes={agents.changes}
-      now={agents.now}
-      onIndex={onIndex}
-    />
+    <LibrarySidebar urls={urls} place={place} onIndex={onIndex} />
   );
   const chrome: Chrome = {
     library: { urls, name, shared, home: place.view === "home" },
@@ -527,10 +514,7 @@ export function Workspace(props: { urls: Urls; place: Place; me: Me | null; chil
     onHide: settings ? undefined : hide,
     status: <FeedNotice urls={urls} />,
   };
-  const frame = useMemo(
-    () => ({ index, latest: agents.latest, now: agents.now }),
-    [index, agents.latest, agents.now],
-  );
+  const frame = useMemo(() => ({ index }), [index]);
   return (
     <>
       <Shell chrome={chrome} me={props.me} frame={frame}>
@@ -597,7 +581,7 @@ export function AccountFrame(props: { page: AccountPage; me: Me | null; children
   };
   return (
     <>
-      <Shell chrome={chrome} me={props.me} frame={NO_CHANGES}>
+      <Shell chrome={chrome} me={props.me} frame={NO_INDEX}>
         {props.children}
       </Shell>
       <LibrarySearch open={searching} onClose={() => setSearching(false)} />

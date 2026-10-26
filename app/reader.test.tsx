@@ -19,12 +19,14 @@ import { Window } from "happy-dom";
 import { act, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
+import { type ImageRef, imageSource } from "./src/images";
 import { Reader } from "./src/Reader";
 import { Body, Note } from "./src/reader/Body";
 import { offsetAt, pointAt, rangeOf, readText, textblocks } from "./src/reader/dom";
 import { OpenFigure } from "./src/reader/Figure";
-import type { FigureView } from "./src/reader/Lightbox";
+import { type FigureView, Lightbox } from "./src/reader/Lightbox";
 import { type BodyOptions, prepare } from "./src/reader/prepare";
+import { Urls } from "./src/urls";
 
 const FIXTURES = join(import.meta.dir, "..", "fixtures");
 
@@ -741,6 +743,138 @@ describe("figure markup (TEMPRA-161)", () => {
         "/o/l/-/download/assets/b.png",
       );
       await act(async () => root.unmount());
+    });
+  });
+});
+
+describe("right-sized images (TEMPRA-162)", () => {
+  const urls = new Urls("o", "l");
+  const H = (c: string) => c.repeat(64);
+  /** What the concept's JSON says of each image (`images`), as the concept page reads it. */
+  const known: Record<string, ImageRef> = {
+    "assets/signin.png": { hash: H("a"), media: "image/png", width: 2400, height: 1500 },
+    "assets/wide.png": { hash: H("b"), media: "image/jpeg", width: 1000, height: 2000 },
+    "assets/before.png": { hash: H("c"), media: "image/png", width: 800, height: 400 },
+    "assets/after.png": { hash: H("d"), media: "image/png", width: 300, height: 200 },
+    "assets/icon.png": { hash: H("e"), media: "image/png", width: 32, height: 32 },
+    "assets/full.png": { hash: H("f"), media: "image/gif", width: 640, height: 480 },
+    // From before TEMPRA-152 and not yet worked out, or one that does not decode.
+    "assets/chart.png": { hash: H("1"), media: "image/png" },
+    "assets/plain.png": { hash: H("2"), media: "image/png", width: null, height: null },
+  };
+  const options: BodyOptions = {
+    href: hrefs,
+    path: "c.md",
+    image: (path) => (known[path] ? imageSource(urls, known[path]) : null),
+  };
+  const imgOf = (root: Element, alt: string) => root.querySelector(`img[alt="${alt}"]`) as Element;
+
+  test("from the image route, with the stored width and height and srcset up to its own width", () => {
+    const { root } = draw(stored(MARKUP), options);
+    const signin = imgOf(root, "The sign-in page");
+    expect(signin.getAttribute("src")).toBe(`/o/l/-/image/${H("a")}`);
+    expect(signin.getAttribute("width")).toBe("2400");
+    expect(signin.getAttribute("height")).toBe("1500");
+    expect(signin.getAttribute("loading")).toBe("lazy");
+    expect(signin.getAttribute("class")).toBe("image-loading");
+    // Every edge under its long edge, described by the width it comes at, then the original.
+    expect(signin.getAttribute("srcset")).toBe(
+      [
+        `/o/l/-/image/${H("a")}?w=320 320w`,
+        `/o/l/-/image/${H("a")}?w=640 640w`,
+        `/o/l/-/image/${H("a")}?w=768 768w`,
+        `/o/l/-/image/${H("a")}?w=1092 1092w`,
+        `/o/l/-/image/${H("a")}?w=1280 1280w`,
+        `/o/l/-/image/${H("a")}?w=1568 1568w`,
+        `/o/l/-/image/${H("a")}?w=1920 1920w`,
+        `/o/l/-/image/${H("a")} 2400w`,
+      ].join(", "),
+    );
+    // width=480 caps it; on a phone it spans the screen.
+    expect(signin.getAttribute("sizes")).toBe("(max-width: 900px) 100vw, 480px");
+    // A portrait image: its edges are its long side, so a 640 one is 320 wide.
+    const wide = imgOf(root, "The workspace");
+    expect(wide.getAttribute("srcset")?.split(", ").slice(0, 2)).toEqual([
+      `/o/l/-/image/${H("b")}?w=320 160w`,
+      `/o/l/-/image/${H("b")}?w=640 320w`,
+    ]);
+    expect(wide.getAttribute("srcset")).toEndWith(`/o/l/-/image/${H("b")} 1000w`);
+    expect(wide.getAttribute("sizes")).toBe("(max-width: 900px) 100vw, 960px");
+    // A group: each image its share of the row.
+    expect(imgOf(root, "Crumbs").getAttribute("sizes")).toBe("(max-width: 900px) 100vw, 480px");
+    expect(imgOf(root, "Crumbs").getAttribute("srcset")).toBe(
+      `/o/l/-/image/${H("c")}?w=320 320w, /o/l/-/image/${H("c")}?w=640 640w, /o/l/-/image/${H("c")}?w=768 768w, /o/l/-/image/${H("c")} 800w`,
+    );
+    // Smaller than every edge: the original alone, with its size.
+    const after = imgOf(root, "The path");
+    expect(after.hasAttribute("srcset")).toBe(false);
+    expect(after.hasAttribute("sizes")).toBe(false);
+    expect(after.getAttribute("width")).toBe("300");
+    // A GIF keeps its frames: its size, no variants.
+    const gif = imgOf(root, "The page");
+    expect(gif.getAttribute("width")).toBe("640");
+    expect(gif.hasAttribute("srcset")).toBe(false);
+    // An image in running text: the same route and size.
+    const icon = imgOf(root, "an icon");
+    expect(icon.getAttribute("src")).toBe(`/o/l/-/image/${H("e")}`);
+    expect(icon.getAttribute("width")).toBe("32");
+    expect(icon.hasAttribute("data-atom")).toBe(true);
+  });
+
+  test("without a known size, just the original; unknown images keep their download", () => {
+    const { root } = draw(stored(MARKUP), options);
+    for (const alt of ["A chart", "A plain one"]) {
+      const img = imgOf(root, alt);
+      expect(img.getAttribute("src")).toStartWith("/o/l/-/image/");
+      expect(img.hasAttribute("width")).toBe(false);
+      expect(img.hasAttribute("height")).toBe(false);
+      expect(img.hasAttribute("srcset")).toBe(false);
+      expect(img.hasAttribute("class")).toBe(false);
+    }
+    // Not in `images` (a missing file, an earlier version's): the href, as before.
+    expect(imgOf(root, "Listed").getAttribute("src")).toBe("/o/l/-/download/assets/listed.png");
+    expect(imgOf(root, "4").getAttribute("src")).toBe("https://e.com/4.png");
+    // Counting is unchanged.
+    counts("markup, right-sized", stored(MARKUP), options);
+  });
+
+  test("the grey box goes once the image loads; the full-screen view downloads the original", async () => {
+    await live(async (window) => {
+      const tree = stored(':::figure\n![Big](assets/signin.png "Big")\n:::');
+      const p = prepare(tree, options);
+      let opened = 0;
+      const { host } = await mount(
+        window,
+        <OpenFigure.Provider value={() => opened++}>
+          <Body prepared={p} diff={null} hideFirst={false} />
+        </OpenFigure.Provider>,
+      );
+      const img = host.querySelector("img") as HTMLImageElement;
+      expect(img.className).toBe("image-loading");
+      await act(async () => {
+        img.dispatchEvent(new window.Event("load") as unknown as Event);
+      });
+      expect(img.className).toBe("");
+      const figure = p.figures[0];
+      if (figure?.kind !== "image") throw new Error("no figure");
+      const { host: box } = await mount(
+        window,
+        <Lightbox
+          figures={p.figures}
+          at={1}
+          view={{ downloadHref: (path) => `/o/l/-/download/${path}` }}
+          onMove={() => {}}
+          onClose={() => {}}
+        />,
+      );
+      const big = box.querySelector(".lightbox-figure img") as HTMLImageElement;
+      expect(big.getAttribute("sizes")).toBe("100vw");
+      expect(big.getAttribute("srcset")).toContain("?w=1920 1920w");
+      expect(big.hasAttribute("loading")).toBe(false);
+      const download = [...box.querySelectorAll("a")].find((a) =>
+        a.textContent?.includes("Download"),
+      );
+      expect(download?.getAttribute("href")).toBe("/o/l/-/download/assets/signin.png");
     });
   });
 });

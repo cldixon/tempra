@@ -17,8 +17,10 @@ import {
   loadFile,
 } from "../concept/data";
 import { LiveNotice, useLiveFile } from "../concept/live";
+import { imageSource } from "../images";
 import { Moment } from "../Moment";
 import { Reader } from "../Reader";
+import { Img } from "../reader/Figure";
 import { prepare } from "../reader/prepare";
 import { useLibraryLabel } from "../role";
 import type { Compare } from "../router";
@@ -27,6 +29,9 @@ import { fileLabel } from "../Tree";
 import { AtNotice, formatSize, Status, useCopy, useMe, useScrollToHash, useTitle } from "../ui";
 import { baseName, dirOf, enc, folderName, type Urls } from "../urls";
 import { PageColumn, useFrame } from "../Workspace";
+
+/** The attachment page's image: the screen on a phone, else most of the window (views.css). */
+const ATTACHMENT_SIZES = "(max-width: 900px) 100vw, 70vw";
 
 /** What the last server action did, said once on the page it returns to (`?done=`). */
 const DONE: Record<string, (actor: string) => string> = {
@@ -114,6 +119,41 @@ export function typeName(media: string | null, path: string): string {
 }
 
 /**
+ * An attachment's image on its page, from the image route (TEMPRA-162): its box reserved from
+ * the stored size, a grey box until it loads, its scaled widths for the screen; Download stays the
+ * original.
+ */
+export function AttachmentImage(props: {
+  urls: Urls;
+  file: AttachmentFile;
+  onLoad?(img: HTMLImageElement): void;
+  onError(): void;
+}) {
+  return (
+    <Img
+      source={imageSource(props.urls, props.file)}
+      alt={baseName(props.file.path)}
+      sizes={ATTACHMENT_SIZES}
+      lazy={false}
+      onLoad={props.onLoad}
+      onError={props.onError}
+    />
+  );
+}
+
+/**
+ * Size: its bytes, and its pixels from the image's header (TEMPRA-152), known before the image
+ * loads; else what the browser found once it did.
+ */
+export function sizeFact(
+  file: Pick<AttachmentFile, "size" | "width" | "height">,
+  loaded: { w: number; h: number } | null,
+): string {
+  const px = file.width && file.height ? { w: file.width, h: file.height } : loaded;
+  return `${formatSize(file.size)}${px ? ` · ${px.w} × ${px.h}` : ""}`;
+}
+
+/**
  * An attachment (board 28): the image (or a file icon) large on a dark frame; beside it the
  * filename, Download and Copy link, then Type, Size, Added (who, when, from its history) and
  * Used in (the concepts that link it, from the links route).
@@ -138,8 +178,6 @@ function Attachment(props: { urls: Urls; head: number; file: AttachmentFile }) {
     return out;
   }, [frame.index]);
   const [loaded, setSize] = useState<{ w: number; h: number } | null>(null);
-  // The server's size from the image's header (TEMPRA-152), known before the image loads.
-  const size = file.width && file.height ? { w: file.width, h: file.height } : loaded;
   const [broken, setBroken] = useState(false);
   const copied = useCopy();
   const image = file.media?.startsWith("image/") && !broken;
@@ -152,12 +190,10 @@ function Attachment(props: { urls: Urls; head: number; file: AttachmentFile }) {
       <AtNotice urls={urls} head={props.head} current={urls.pinned(undefined).file(file.path)} />
       <div className="attachment-frame">
         {image ? (
-          <img
-            src={href}
-            alt={baseName(file.path)}
-            onLoad={(e) =>
-              setSize({ w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })
-            }
+          <AttachmentImage
+            urls={urls}
+            file={file}
+            onLoad={(img) => setSize({ w: img.naturalWidth, h: img.naturalHeight })}
             onError={() => setBroken(true)}
           />
         ) : (
@@ -192,10 +228,7 @@ function Attachment(props: { urls: Urls; head: number; file: AttachmentFile }) {
           </div>
           <div>
             <dt>Size</dt>
-            <dd>
-              {formatSize(file.size)}
-              {size && ` · ${size.w} × ${size.h}`}
-            </dd>
+            <dd>{sizeFact(file, loaded)}</dd>
           </div>
           {added && (
             <div>

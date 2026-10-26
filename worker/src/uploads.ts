@@ -22,6 +22,8 @@ export interface UploadGrant {
   size?: number;
   sha256?: string;
   if_match?: string;
+  /** What the file shows, kept with the attach op (TEMPRA-157, for the file's page). */
+  description?: string;
   note: string | null;
   actor: string;
   by: RequestContext["by"];

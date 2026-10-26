@@ -105,7 +105,8 @@ const depsFor = (env: Env): Deps => {
     notifications: d1Notifications(env.DB),
     async rateLimit(kind, key) {
       const limiter =
-        kind === "write"
+        // Renders share WRITE_LIMITER's 60 a minute under their own `render:` keys (TEMPRA-166).
+        kind === "write" || kind === "render"
           ? env.WRITE_LIMITER
           : kind === "session"
             ? env.SESSION_LIMITER

@@ -40,24 +40,9 @@ import {
   X,
 } from "lucide-react";
 import { type ReactNode, useCallback, useEffect, useId, useRef, useState } from "react";
-import { api, useLoad } from "./api";
-import {
-  INBOX_EVENT,
-  type InboxPage,
-  itemDetail,
-  itemHref,
-  itemLibrary,
-  itemTitle,
-  kindLabel,
-  markRead,
-  useAgentLabels,
-  usePageTitles,
-  useUnread,
-  withNames,
-} from "./inbox";
-import { Moment } from "./Moment";
+import { useUnread } from "./inbox";
 import { THEMES, useTheme } from "./theme";
-import { type Me, useMe } from "./ui";
+import type { Me } from "./ui";
 
 /*
  * The app's chrome (take 2, TEMPRA-53): the icons, menus and the avatar shared by the workspace
@@ -293,98 +278,25 @@ export function Menu(props: {
 }
 
 /**
- * The bell (take 4, board 03; TEMPRA-116): the Inbox's unread count as a badge, and a popover of
- * the latest few items (the page, the Inbox row's detail line, the library, kind and time, an
- * unread dot) with Mark all read and Open inbox; loading, a failure (with Retry) and nothing for
- * the person each say so (F-14). The count follows the feed and every action on an item.
+ * The bell: the way to the Inbox, with its unread count as a badge (TEMPRA-173: no popover; the
+ * Inbox is the one list). The count follows the feed and every action on an item.
  */
 export function Bell() {
   const unread = useUnread();
-  const [open, setOpen] = useState(false);
-  const latest = useLoad("inbox-latest", () => api<InboxPage>("/api/v1/inbox?limit=5"));
-  const { reload } = latest;
-  useEffect(() => {
-    window.addEventListener(INBOX_EVENT, reload);
-    return () => window.removeEventListener(INBOX_EVENT, reload);
-  }, [reload]);
-  // Read when the popover draws (it opens on a state change, so this is fresh enough).
-  const now = Date.now();
-  const raw = latest.state === "ready" ? latest.data.items : null;
-  const labels = useAgentLabels(raw);
-  // A reply names its page by path: titles from the library's outline, once the popover opens.
-  const titles = usePageTitles(open ? raw : null);
-  const handle = useMe()?.handle ?? null;
-  const items = withNames(raw ?? [], labels);
   return (
-    <Menu
-      label={
-        <>
-          <Icon name="bell" />
-          {unread > 0 && (
-            <span className="badge" aria-hidden="true">
-              {unread > 99 ? "99+" : unread}
-            </span>
-          )}
-        </>
-      }
-      name={unread > 0 ? `Inbox, ${unread} unread` : "Inbox"}
+    <a
+      className="icon-button bell"
+      href="/inbox"
+      aria-label={unread > 0 ? `Inbox, ${unread} unread` : "Inbox"}
       title="Inbox"
-      buttonClass="icon-button bell"
-      listClass="bell-pop"
-      align="end"
-      onOpen={setOpen}
     >
-      <div className="bell-pop-head">
-        <span>Inbox</span>
-        {unread > 0 && (
-          <button type="button" data-stay onClick={() => void markRead()}>
-            Mark all read
-          </button>
-        )}
-      </div>
-      {open && latest.state === "loading" && <div className="bell-empty">Loading…</div>}
-      {open && latest.state === "error" && (
-        <div className="bell-empty" role="alert">
-          Couldn't load the Inbox.{" "}
-          <button type="button" data-stay onClick={reload}>
-            Retry
-          </button>
-        </div>
+      <Icon name="bell" />
+      {unread > 0 && (
+        <span className="badge" aria-hidden="true">
+          {unread > 99 ? "99+" : unread}
+        </span>
       )}
-      {open && latest.state === "ready" && items.length === 0 && (
-        <div className="bell-empty">Nothing for you</div>
-      )}
-      {items.map((i) => {
-        return (
-          <a
-            key={i.id}
-            className="bell-item"
-            href={itemHref(i)}
-            onClick={() => i.read_at === null && void markRead([i.id])}
-          >
-            <span className="lib-tile" aria-hidden="true">
-              {(itemLibrary(i, handle)[0] ?? "?").toUpperCase()}
-            </span>
-            <span className="bell-item-what">
-              <strong>{itemTitle(i, titles)}</strong>
-              <span className="bell-item-detail">{itemDetail(i)}</span>
-            </span>
-            <span className="bell-item-where">
-              {itemLibrary(i, handle)} · {kindLabel(i)} · <Moment ts={i.created} now={now} />
-            </span>
-            {i.read_at === null && (
-              <>
-                <span className="unread-dot" aria-hidden="true" />
-                <span className="visually-hidden">unread</span>
-              </>
-            )}
-          </a>
-        );
-      })}
-      <a className="bell-foot" href="/inbox">
-        Open inbox
-      </a>
-    </Menu>
+    </a>
   );
 }
 

@@ -11,7 +11,10 @@ export interface FigureBlob {
   hash: string;
   size: number;
   media: string | null;
-  /** Null when not known (never worked out, or not an image that says). */
+  /**
+   * Null when never worked out (an image stored before TEMPRA-152: `read` works it out, see
+   * `figuresWithDimensions` in client.ts); 0 when worked out and the bytes do not say.
+   */
   width: number | null;
   height: number | null;
 }
@@ -41,6 +44,8 @@ export type FigureFact =
       /** The diagram type its header names (flowchart, sequence, …), or null. */
       type: string | null;
       title: string | null;
+      /** The fence's body, what the render Worker draws (TEMPRA-166). */
+      source: string;
     };
 
 /** The figures of a concept at `conceptPath`; `blobAt` reads an attachment's blob row by path. */
@@ -57,6 +62,7 @@ export function figureFacts(
         lang: (f.node.lang ?? "").toLowerCase(),
         type: diagramTypeOf(f.node.value),
         title: fenceTitle(f.node.meta),
+        source: f.node.value,
       };
     }
     const { image } = f;

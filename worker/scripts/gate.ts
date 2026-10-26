@@ -29,7 +29,7 @@ import {
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { deflateSync } from "node:zlib";
-import { type Browser, chromium } from "playwright-core";
+import { type Browser, chromium, type Route } from "playwright-core";
 import { SESSION_REQUESTS_PER_MINUTE } from "../cloudflare.config";
 import { FEED_FULL, FEED_SOCKETS_PER_ACCOUNT, FEED_SOCKETS_PER_LIBRARY } from "../src/feed";
 import { readTar, writeTar } from "../src/util/tar";
@@ -529,6 +529,32 @@ const CRC_TABLE = Array.from({ length: 256 }, (_, n) => {
 
 /** A plain grey PNG, `width` by `height` (8-bit greyscale), for the gate's figures. */
 function greyPng(width: number, height: number, shade: number): Uint8Array {
+  return greyscalePng(width, height, () => shade);
+}
+
+/**
+ * A busy greyscale PNG, like a screenshot in bytes: tiles of shades with a little noise, so it
+ * compresses about as badly as one (1600 by 1000 is about a megabyte).
+ */
+function busyPng(width: number, height: number): Uint8Array {
+  let seed = 11;
+  const rand = () => {
+    seed = (Math.imul(seed, 1103515245) + 12345) >>> 0;
+    return seed >>> 24;
+  };
+  const tiles = Array.from({ length: Math.ceil(width / 24) * Math.ceil(height / 24) }, rand);
+  const across = Math.ceil(width / 24);
+  return greyscalePng(width, height, (x, y) => {
+    const tile = tiles[Math.floor(y / 24) * across + Math.floor(x / 24)] ?? 0;
+    return Math.max(0, Math.min(255, tile + (rand() % 24) - 12));
+  });
+}
+
+function greyscalePng(
+  width: number,
+  height: number,
+  shade: (x: number, y: number) => number,
+): Uint8Array {
   const crc = (bytes: Uint8Array) => {
     let c = 0xffffffff;
     for (const b of bytes) c = (CRC_TABLE[(c ^ b) & 0xff] ?? 0) ^ (c >>> 8);
@@ -549,7 +575,9 @@ function greyPng(width: number, height: number, shade: number): Uint8Array {
   h.setUint32(4, height);
   header.set([8, 0, 0, 0, 0], 8); // 8-bit greyscale, no interlace
   const raw = new Uint8Array(height * (width + 1));
-  for (let y = 0; y < height; y++) raw.fill(shade, y * (width + 1) + 1, (y + 1) * (width + 1));
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) raw[y * (width + 1) + 1 + x] = shade(x, y);
+  }
   const parts = [
     new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
     chunk("IHDR", header),
@@ -567,7 +595,7 @@ function greyPng(width: number, height: number, shade: number): Uint8Array {
 
 /**
  * The app in a real browser, signed in as the seeded user (layout take 4, TEMPRA-113 to 118):
- * the library's home (no sections, no housekeeping, For you here), the workspace (the bar's
+ * the library's home (no sections, no housekeeping, nothing counted for the person), the workspace (the bar's
  * mark, library, switcher, search and page path, the tree, the foot's Activity and Settings, the
  * quick switcher, the hidden sidebar; at phone width the bar's mark and library, the drawer with
  * the bar's parts at its head, the tree, Activity, Settings and the Inbox, the home stacked, a
@@ -579,8 +607,8 @@ function greyPng(width: number, height: number, shade: number): Uint8Array {
  * (Mark as checked, the Checked line, review mode), comments in the panel, a concept on a
  * phone (its top bar with Copy page under ⋯,
  * On this page, every panel as a bottom sheet), the Markdown view,
- * figures in the full-screen view, the Inbox (a reply waiting, a page to check, the bell, Done,
- * filtered to the library from the home's For you here and from Needs you's old URL), and
+ * figures in the full-screen view, the Inbox (a reply waiting, reached by the bell, filtered to
+ * the library and from Needs you's old URL; nothing for a checked page an agent edited), and
  * Activity with its two views (Summary and
  * Every event), all drawn from the API; links move within the app without reloading the page, and
  * nothing is refused by the CSP or throws. GATE_SCREENSHOTS=<dir> saves screenshots of them.
@@ -918,13 +946,6 @@ async function browserRenders(
       },
     );
     await step("workspace: the tree follows an agent's write and move, live", async () => {
-      // The person has seen everything so far: no solid dot until an agent writes.
-      const libPath = `/api/v1/libraries/${owner}/${slug}`;
-      const { seq: head } = (await (await apiAs(devCookie, `${libPath}/summary`)).json()) as {
-        seq: number;
-      };
-      const seen = await apiAs(devCookie, `${libPath}/seen`, "PUT", { seq: head });
-      if (!seen.ok) throw new Error(`PUT …/seen: ${seen.status}`);
       await page.reload();
       await sidebar.locator(".tree a").first().waitFor({ timeout: 15_000 });
       const put = await fetch(`${libApi}/files/gate-live.md`, {
@@ -935,23 +956,10 @@ async function browserRenders(
       if (!put.ok) throw new Error(`write: ${put.status}`);
       const row = sidebar.locator('a[data-path="gate-live.md"]');
       await row.waitFor({ timeout: 5000 });
-      // The change dot (take 4, TEMPRA-129): pulsing while the agent writes, named for its
-      // person, not by the raw actor (TEMPRA-77): "… for @dev is editing this now".
-      await sidebar
-        .locator(".tree-row", { has: page.locator(`a[data-path="gate-live.md"]`) })
-        .locator('.tree-mark[title*=" for @"][title$="is editing this now"] .change-dot.live')
-        .waitFor({ timeout: 5000 });
-      // After it (a fresh look, the write no longer live): solid, changed since the person
-      // looked; take 3's grey is gone.
-      await page.reload();
-      await sidebar
-        .locator(".tree-row", { has: page.locator(`a[data-path="gate-live.md"]`) })
-        .locator('.tree-mark[title="Changed since you last looked"] .change-dot:not(.live)')
-        .waitFor({ timeout: 15_000 });
-      if ((await sidebar.locator(".change-dot.cool, .change-dot.warm").count()) > 0) {
-        throw new Error("the tree still draws take 3's warm or grey dot");
+      // The tree does not mark change (TEMPRA-173): no dot, live or since the person looked.
+      if ((await sidebar.locator(".change-dot").count()) > 0) {
+        throw new Error("the tree marks change");
       }
-      if (shots) await page.screenshot({ path: `${shots}/tree-dot.png` });
       const target = folder ? `${folder}/gate-live.md` : "moved/gate-live.md";
       const moved = await fetch(`${libApi}/files/gate-live.md/move`, {
         method: "POST",
@@ -984,16 +992,9 @@ async function browserRenders(
       await dialog.waitFor({ state: "hidden", timeout: 5000 });
       await agentDeletes(target);
     });
-    // TEMPRA-121: what changed since the person last looked, on the home's one line and in
-    // Recently changed; Activity marks only what is new, under one divider, and moves the cursor:
-    // back on the home (no reload) the line, the section's dot and the tree's dot are gone.
-    await step("home: since you last looked, Recently changed, and a second look", async () => {
-      const libPath = `/api/v1/libraries/${owner}/${slug}`;
-      const { seq: head } = (await (await apiAs(devCookie, `${libPath}/summary`)).json()) as {
-        seq: number;
-      };
-      const put = await apiAs(devCookie, `${libPath}/seen`, "PUT", { seq: head });
-      if (!put.ok) throw new Error(`PUT …/seen: ${put.status}`);
+    // What an agent wrote shows in Recently changed and in Activity; nothing counts it for the
+    // person (TEMPRA-173): no "since you last looked" line, no tree dot, no Activity divider.
+    await step("home: Recently changed, and nothing counted since the last look", async () => {
       const path = folder ? `${folder}/gate-since.md` : "gate-since.md";
       const wrote = await fetch(`${libApi}/files/${enc(path)}`, {
         method: "PUT",
@@ -1001,13 +1002,8 @@ async function browserRenders(
         body: "---\ntype: Note\ntitle: Gate since\ndescription: Written after the last look.\n---\nNew.\n",
       });
       if (!wrote.ok) throw new Error(`write: ${wrote.status}`);
-      // A fresh load: the write is past the cursor, and no longer arriving live.
       await page.goto(`${lib}/`);
       await home();
-      const since = main.locator(".home-since");
-      await since
-        .filter({ hasText: /^Since earlier today: .+ changed 1 page · See Activity$/ })
-        .waitFor({ timeout: 15_000 });
       const recent = main.getByRole("region", { name: "Recently changed" });
       await recent
         .locator(".home-recent-row")
@@ -1016,43 +1012,29 @@ async function browserRenders(
         .waitFor({ timeout: 10_000 });
       const meta = await recent.locator(".home-recent-meta").first().innerText();
       if (!/ · just now$/.test(meta)) throw new Error(`Recently changed says "${meta}"`);
-      // The tree's solid dot: on the file, or rolled up on a closed folder that holds it.
-      const treeDot = sidebar.locator('nav[aria-label="Files"] .change-dot');
-      await treeDot.first().waitFor({ timeout: 5000 });
-      if (shots) await page.screenshot({ path: `${shots}/home-since.png` });
+      if ((await main.getByText(/^Since /).count()) > 0) throw new Error("the home counts change");
+      if ((await main.getByRole("region", { name: "For you here" }).count()) > 0) {
+        throw new Error("the home still has For you here");
+      }
+      if ((await sidebar.locator(".change-dot").count()) > 0)
+        throw new Error("the tree marks change");
+      if (shots) await page.screenshot({ path: `${shots}/home-recent.png` });
       await markStay();
       await sidebar
         .getByRole("navigation", { name: "Library" })
         .getByRole("link", { name: /^Activity/ })
         .click();
       await page.waitForURL(`${lib}/-/activity`);
-      // One divider under the new entry (older entries follow it); no dot on every row.
-      const divider = main.locator(".entry-divider");
-      await divider.waitFor({ timeout: 15_000 });
-      if ((await divider.count()) !== 1) throw new Error(`${await divider.count()} dividers`);
+      await main.locator(".activity-day .entry").first().waitFor({ timeout: 15_000 });
       const above = await main.locator(".activity-day .entry").first().innerText();
       if (!above.includes("Gate since")) throw new Error(`the newest entry reads "${above}"`);
-      if ((await main.locator(".activity-day .entry-side .change-dot").count()) > 0) {
-        throw new Error("Activity still draws a dot on each new entry");
+      if ((await main.getByText("New since you looked").count()) > 0) {
+        throw new Error("Activity still marks what is new since the last look");
       }
-      if (shots) await page.screenshot({ path: `${shots}/activity-new.png` });
-      // The cursor moves (the server has it) ...
-      const deadline = Date.now() + 10_000;
-      for (;;) {
-        const { seq } = (await (await apiAs(devCookie, `${libPath}/seen`)).json()) as {
-          seq: number | null;
-        };
-        if (seq !== null && seq > head) break;
-        if (Date.now() > deadline) throw new Error(`the cursor stayed at ${seq}`);
-        await page.waitForTimeout(200);
-      }
-      // ... and the home, a second look in the same page load, has nothing new to say.
       // Home is the library's name in the bar (TEMPRA-145).
       await sheetBar.locator(".topbar-brand a.brand-name").click();
       await page.waitForURL(`${lib}/`);
       await home();
-      await since.waitFor({ state: "detached", timeout: 10_000 });
-      await treeDot.first().waitFor({ state: "detached", timeout: 10_000 });
       if (!(await stayed())) throw new Error("moving between home and Activity reloaded the page");
       await agentDeletes(path);
     });
@@ -1241,12 +1223,12 @@ async function browserRenders(
       await page.getByText("Saved.").waitFor({ timeout: 15_000 });
       await page.goto(`${lib}/`);
       await home();
-      // The bell: the inbox's latest few, and the way to the inbox.
-      await page.getByRole("button", { name: /^Inbox/ }).click();
-      const bell = page.locator(".menu-list.bell-pop");
-      await bell.getByRole("link", { name: "Open inbox", exact: true }).waitFor({ timeout: 5000 });
-      await page.keyboard.press("Escape");
-      await bell.waitFor({ state: "detached", timeout: 5000 });
+      // The bell: a link to the Inbox, no popover (TEMPRA-173).
+      const bellHref = await page
+        .locator("header.ws-topbar")
+        .getByRole("link", { name: /^Inbox/ })
+        .getAttribute("href");
+      if (bellHref !== "/inbox") throw new Error(`the bell links to ${bellHref}`);
       // The theme: applied at once, kept on the account across a reload, back to the system's.
       const account = page.locator(".menu-list.account");
       await page.getByRole("button", { name: "Account menu" }).click();
@@ -1284,7 +1266,7 @@ async function browserRenders(
             throw new Error("the phone's top bar has a search button");
           }
           for (const control of [
-            topbar.getByRole("button", { name: /^Inbox/ }),
+            topbar.getByRole("link", { name: /^Inbox/ }),
             topbar.getByRole("button", { name: "Account menu" }),
           ]) {
             if (!(await control.isVisible()))
@@ -1786,6 +1768,204 @@ async function browserRenders(
       for (const [path] of [["gate-markup.md"], ...images]) await agentDeletes(path);
     });
 
+    // Reader images (TEMPRA-162; tempra-dev: app/media, How people see): every image from the
+    // image route by hash, its box reserved from the stored size, so nothing moves as images
+    // load; a phone gets a scaled copy (cf dev's Images stand-in scales locally), far smaller
+    // than the original; the attachment page knows the size before the image draws. The page
+    // stays until after the busy minute, so that covers a page of figures.
+    const imagesPage = "gate-images.md";
+    /** What the gate reads of an img in the page (the scripts have no DOM types). */
+    type ImgLike = {
+      complete: boolean;
+      naturalWidth: number;
+      currentSrc: string;
+      getAttribute(name: string): string | null;
+      getBoundingClientRect(): { top: number; height: number };
+    };
+    const imagePaths = ["gate-image-big.png", "gate-image-small.png"];
+    await step(
+      "reader images: right-sized, from the image route, with no layout shift",
+      async () => {
+        const bytes = busyPng(1600, 1000);
+        for (const [path, body] of [
+          [imagePaths[0], bytes],
+          [imagePaths[1], greyPng(300, 200, 0xaa)],
+        ] as const) {
+          const put = await fetch(`${libApi}/files/${path}`, {
+            method: "PUT",
+            headers: { ...bearer, "Content-Type": "image/png", "X-Note": "gate: an image" },
+            body,
+          });
+          if (!put.ok) throw new Error(`upload ${path}: ${put.status} ${await put.text()}`);
+        }
+        const put = await fetch(`${libApi}/files/${imagesPage}`, {
+          method: "PUT",
+          headers: { ...bearer, "Content-Type": "text/markdown", "X-Note": "gate: images" },
+          body: [
+            "---\ntype: Note\ntitle: Gate images\ndescription: A page of figures.\n---",
+            "Before the figures.\n",
+            `![A busy screenshot](/${imagePaths[0]} "A big one")\n`,
+            "Between the figures.\n",
+            `![A small block](/${imagePaths[1]} "A small one")\n`,
+            `:::figure{layout=wide}\n![The busy one again](/${imagePaths[0]})\n:::\n`,
+            "After the figures, the paragraph whose place must not move.\n",
+          ].join("\n"),
+        });
+        if (!put.ok) throw new Error(`write: ${put.status} ${await put.text()}`);
+        const hash = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
+        // Images held back until the text is measured, so the measure is before they load.
+        let release = () => {};
+        const held = new Promise<void>((r) => {
+          release = r;
+        });
+        const hold = async (route: Route) => {
+          await held;
+          await route.continue();
+        };
+        await page.route("**/-/image/**", hold);
+        await wide();
+        await page.goto(`${lib}/${imagesPage}`, { waitUntil: "domcontentloaded" });
+        const after = page.locator(".body p[data-text]", { hasText: "After the figures" });
+        await after.waitFor({ timeout: 15_000 });
+        /** The paragraph's place in the body (the page scrolls inside main, so not the window). */
+        const top = () =>
+          after.evaluate((el) => {
+            const body = el.closest(".body");
+            return Math.round(
+              el.getBoundingClientRect().top - (body?.getBoundingClientRect().top ?? 0),
+            );
+          });
+        const imgs = page.locator(".body img");
+        const allIn = () =>
+          imgs.evaluateAll((els) =>
+            els.every((el) => {
+              const i = el as unknown as ImgLike;
+              return i.complete && i.naturalWidth > 0;
+            }),
+          );
+        const until = async (what: string, ok: () => Promise<boolean>) => {
+          for (let i = 0; !(await ok()); i++) {
+            if (i > 200) throw new Error(`timed out: ${what}`);
+            await page.waitForTimeout(100);
+          }
+        };
+        const first = await imgs.first().evaluate((el) => {
+          const img = el as unknown as ImgLike;
+          const style = (
+            globalThis as unknown as {
+              getComputedStyle(e: unknown): { backgroundColor: string };
+            }
+          ).getComputedStyle(el);
+          return {
+            src: img.getAttribute("src"),
+            width: img.getAttribute("width"),
+            height: img.getAttribute("height"),
+            srcset: img.getAttribute("srcset"),
+            complete: img.complete && img.naturalWidth > 0,
+            box: img.getBoundingClientRect().height,
+            background: style.backgroundColor,
+          };
+        });
+        if (first.src !== `/${owner}/${slug}/-/image/${hash}`) throw new Error(`src: ${first.src}`);
+        if (first.width !== "1600" || first.height !== "1000") {
+          throw new Error(`dimensions: ${first.width} × ${first.height}`);
+        }
+        if (!first.srcset?.includes("?w=640 640w") || first.srcset.includes("1920w")) {
+          throw new Error(`srcset: ${first.srcset}`);
+        }
+        if (first.complete || first.box < 100) {
+          throw new Error(`no box reserved before the image loads: ${JSON.stringify(first)}`);
+        }
+        if (/rgba\(0, 0, 0, 0\)|transparent/.test(first.background)) {
+          throw new Error("no grey box while the image loads");
+        }
+        const before = await top();
+        if (shots) await page.screenshot({ path: `${shots}/images-loading.png` });
+        release();
+        await page.unroute("**/-/image/**", hold);
+        // Every image in, the lazy ones too.
+        await main.evaluate((el) => {
+          el.scrollTop = el.scrollHeight;
+        });
+        await until("every image loaded", allIn);
+        const later = await top();
+        if (Math.abs(later - before) > 1) {
+          throw new Error(`the text moved ${later - before}px as the images loaded`);
+        }
+        if (shots) {
+          await main.evaluate((el) => {
+            el.scrollTop = 0;
+          });
+          await page.screenshot({ path: `${shots}/images-loaded.png`, fullPage: true });
+        }
+        // On a phone: a scaled copy, well under 200 KB, where the original is about a megabyte.
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.reload();
+        const big = page.locator(".body img").first();
+        await big.waitFor({ timeout: 15_000 });
+        await until("the phone's image loaded", () =>
+          big.evaluate((el) => {
+            const i = el as unknown as ImgLike;
+            return i.complete && i.naturalWidth > 0;
+          }),
+        );
+        const phone = await big.evaluate(async (el) => {
+          const url = (el as unknown as ImgLike).currentSrc;
+          const r = await fetch(url);
+          return {
+            url,
+            type: r.headers.get("Content-Type"),
+            bytes: (await r.arrayBuffer()).byteLength,
+          };
+        });
+        const original = await page.evaluate(async (url) => {
+          const r = await fetch(url);
+          return (await r.arrayBuffer()).byteLength;
+        }, `/${owner}/${slug}/-/image/${hash}`);
+        console.log(
+          `  reader images: the original ${Math.round(original / 1024)} KB; at phone width ${new URL(phone.url).search || "(original)"} as ${phone.type}, ${Math.round(phone.bytes / 1024)} KB (${Math.round((100 * (original - phone.bytes)) / original)}% saved)`,
+        );
+        if (!phone.url.includes("?w="))
+          throw new Error(`the phone loads the original: ${phone.url}`);
+        if (phone.bytes >= 200 * 1024) {
+          throw new Error(`the phone's image is ${Math.round(phone.bytes / 1024)} KB`);
+        }
+        // The attachment page: its size before the image draws, its box reserved.
+        await usual();
+        let releaseFile = () => {};
+        const heldFile = new Promise<void>((r) => {
+          releaseFile = r;
+        });
+        const holdFile = async (route: Route) => {
+          await heldFile;
+          await route.continue();
+        };
+        await page.route("**/-/image/**", holdFile);
+        await page.goto(`${lib}/${imagePaths[0]}`, { waitUntil: "domcontentloaded" });
+        const facts = main.locator(".attachment-facts");
+        await facts.locator("dd", { hasText: "1600 × 1000" }).waitFor({ timeout: 15_000 });
+        const pending = await main.locator(".attachment-frame img").evaluate((el) => {
+          const img = el as unknown as ImgLike;
+          return {
+            loaded: img.complete && img.naturalWidth > 0,
+            height: img.getBoundingClientRect().height,
+          };
+        });
+        if (pending.loaded || pending.height < 100) {
+          throw new Error(`the attachment page's image: ${JSON.stringify(pending)}`);
+        }
+        const download = await main
+          .locator(".attachment-side")
+          .getByRole("link", { name: "Download" })
+          .getAttribute("href");
+        if (download !== `/${owner}/${slug}/-/download/${imagePaths[0]}`) {
+          throw new Error(`Download: ${download}`);
+        }
+        releaseFile();
+        await page.unroute("**/-/image/**", holdFile);
+      },
+    );
+
     // Verify a concept as a person, let an agent change it, and see the change over the text.
     const concept = concepts[0] ?? "";
     const url = `${base}/${owner}/${slug}/${enc(concept)}`;
@@ -1958,14 +2138,10 @@ async function browserRenders(
         await properties().waitFor({ state: "detached", timeout: 5000 });
       },
     );
-    // The Inbox's verify items (TEMPRA-116): the person verified the concept and an agent edited
-    // it since, so it waits in their Inbox and on the bell; Review opens review mode, Dismiss
-    // moves it to Done.
-    await step("Inbox: a page the person verified, edited by an agent, to verify", async () => {
+    // An agent edited a page the person checked: the page says so ("changed since"), and
+    // nothing reaches their Inbox (TEMPRA-173).
+    await step("Inbox: an edit to a page the person checked tells them nothing", async () => {
       const reviewHref = `/${owner}/${slug}/${enc(concept)}?review=1`;
-      const row = page
-        .locator("main.ws-main li.inbox-row")
-        .filter({ has: page.locator(`a[href="${reviewHref}"]`) });
       await page.goto(`${base}/inbox`);
       await page
         .locator("main.ws-main")
@@ -1981,59 +2157,11 @@ async function browserRenders(
       if ((await accountBrand.getByRole("button", { name: "Switch library" }).count()) > 0) {
         throw new Error("an account page's bar has a library switcher");
       }
-      await row.waitFor({ timeout: 10_000 });
-      await row.getByText("To check").waitFor({ timeout: 5000 });
-      await row.getByText(/^1 edit by .+ since you checked$/).waitFor({ timeout: 5000 });
-      // The bell lists it; Mark all read clears the badge.
-      const bellButton = page.getByRole("button", { name: /^Inbox, \d+ unread$/ });
-      await bellButton.waitFor({ timeout: 10_000 });
-      await bellButton.click();
-      const bell = page.locator(".menu-list.bell-pop");
-      await bell.locator(`a.bell-item[href="${reviewHref}"]`).waitFor({ timeout: 5000 });
-      // In the Inbox row's words (F-14): the page, then the detail line.
-      await bell
-        .getByText(/^1 edit by .+ since you checked$/)
-        .first()
-        .waitFor({ timeout: 5000 });
-      if (shots) await page.screenshot({ path: `${shots}/bell.png` });
-      await bell.getByRole("button", { name: "Mark all read" }).click();
-      await page.getByRole("button", { name: "Inbox", exact: true }).waitFor({ timeout: 10_000 });
-      if ((await page.locator(".bell .badge").count()) > 0) throw new Error("the badge stayed");
-      await page.keyboard.press("Escape");
-      await bell.waitFor({ state: "detached", timeout: 5000 });
-      // Review opens the page in review mode.
-      await row.getByRole("link", { name: "Review", exact: true }).click();
-      await page.waitForURL(`${url}?review=1`);
-      await page.getByRole("region", { name: "Review" }).waitFor({ timeout: 15_000 });
-      // The home's For you here draws the same open items (TEMPRA-130, H-5).
-      const card = main.locator(`a.home-card[href="${reviewHref}"]`);
-      await page.goto(`${lib}/`);
-      await home();
-      await card.waitFor({ timeout: 15_000 });
-      // Dismiss marks it done: gone from Open, listed under Done.
-      await page.goto(`${base}/inbox`);
-      await row.waitFor({ timeout: 15_000 });
-      await row.getByRole("button", { name: "Dismiss", exact: true }).click();
-      await row.waitFor({ state: "detached", timeout: 10_000 });
-      // Done in the Inbox, gone from the home.
-      await page.goto(`${lib}/`);
-      await home();
-      await card.waitFor({ state: "detached", timeout: 15_000 });
-      await page.goto(`${base}/inbox`);
-      await main
-        .getByRole("heading", { level: 1, name: "Inbox", exact: true })
-        .waitFor({ timeout: 15_000 });
-      await page
-        .locator("main.ws-main .inbox-filters")
-        .getByRole("button", { name: "Done", exact: true })
-        .click();
-      await page.waitForURL(`${base}/inbox?done=1`);
-      // Newest first: the one just dismissed (an earlier one, closed by verifying, is below).
-      await row
-        .first()
-        .getByText(/^1 edit by .+ since you checked$/)
-        .waitFor({ timeout: 10_000 });
-      if (shots) await page.screenshot({ path: `${shots}/inbox-done.png` });
+      if ((await main.locator(`li.inbox-row a[href="${reviewHref}"]`).count()) > 0) {
+        throw new Error("the Inbox lists a page to check");
+      }
+      if ((await main.getByText("To check").count()) > 0)
+        throw new Error("the Inbox says To check");
       // Checking from review mode's bar, with a note, clears "changed since" (TEMPRA-122).
       await page.goto(`${url}?review=1`);
       const bar = page.getByRole("region", { name: "Review" });
@@ -2354,7 +2482,7 @@ async function browserRenders(
         // their inbox, its count shows on the open page's bell (take 4) without a reload, and
         // the batched mail lands in the dev outbox.
         await sheetBar
-          .getByRole("button", { name: /^Inbox, \d+ unread$/ })
+          .getByRole("link", { name: /^Inbox, \d+ unread$/ })
           .waitFor({ timeout: 10_000 });
         const inbox = (await (await apiAs(devCookie, "/api/v1/inbox")).json()) as {
           items: { id: string; kind: string; excerpt: string; href: string }[];
@@ -2403,11 +2531,10 @@ async function browserRenders(
         }
       },
     );
-    // The Inbox (take 4, TEMPRA-116) and the home's For you here (TEMPRA-117): an agent's reply
-    // on a thread the person opened waits on them on the home, as a card from GET …/needs, and
-    // in the Inbox, filtered to the library from the home's "All n in Inbox" and from Needs
+    // The Inbox (TEMPRA-116, TEMPRA-173): an agent's reply on a thread the person opened waits
+    // in the Inbox, reached by the bell, filtered to the library by its select and from Needs
     // you's old URL.
-    await step("Inbox: an agent's reply waits on the home and in the Inbox", async () => {
+    await step("Inbox: an agent's reply waits in the Inbox", async () => {
       const target = concepts.find((c) => c !== concept) ?? concept;
       const posted = await apiAs(devCookie, `/api/v1/libraries/${owner}/${slug}/comments`, "POST", {
         path: target,
@@ -2427,27 +2554,23 @@ async function browserRenders(
       const row = main
         .locator("li.inbox-row")
         .filter({ hasText: "Gate: yes, it is still current." });
-      // The home's For you here: the reply as a card, and "All n in Inbox" to the Inbox
-      // filtered to this library.
+      // The bell, from the library's home, opens the Inbox; the select filters it to this library.
       await page.goto(`${lib}/`);
       await home();
       await markStay();
-      const forYou = main.getByRole("region", { name: "For you here" });
-      await forYou
-        .locator("a.home-card")
-        .filter({ hasText: "Gate: yes, it is still current." })
-        .waitFor({ timeout: 15_000 });
-      if (shots) await page.screenshot({ path: `${shots}/home-for-you.png` });
-      const all = forYou.getByRole("link", { name: /^All \d+ in Inbox$/ });
-      const allHref = await all.getAttribute("href");
-      if (allHref !== `/inbox?library=${owner}/${slug}`) throw new Error(`All n: ${allHref}`);
-      await all.click();
-      await page.waitForURL(filtered);
+      await page
+        .locator("header.ws-topbar")
+        .getByRole("link", { name: /^Inbox/ })
+        .click();
+      await page.waitForURL(`${base}/inbox`);
       await inboxHeading.waitFor({ timeout: 15_000 });
       await row.waitFor({ timeout: 10_000 });
       await row.getByText("replied to your thread").waitFor({ timeout: 5000 });
       // One library filter (TEMPRA-130, A-12): the select, set to this library.
       const filter = main.getByRole("combobox", { name: "Library" });
+      await filter.selectOption(`${owner}/${slug}`);
+      await page.waitForURL(filtered);
+      await row.waitFor({ timeout: 10_000 });
       if ((await filter.inputValue({ timeout: 5000 })) !== `${owner}/${slug}`) {
         throw new Error(`the library filter: ${await filter.inputValue()}`);
       }
@@ -2529,7 +2652,7 @@ async function browserRenders(
           }
           const moreButton = sheetBar.getByRole("button", { name: "More", exact: true });
           if (!(await moreButton.isVisible())) throw new Error("no ⋯ in the phone's top bar");
-          if (!(await sheetBar.getByRole("button", { name: /^Inbox/ }).isVisible())) {
+          if (!(await sheetBar.getByRole("link", { name: /^Inbox/ }).isVisible())) {
             throw new Error("no bell in the concept's phone bar");
           }
           for (const gone of [
@@ -3223,6 +3346,9 @@ async function browserRenders(
         }
       },
     );
+    await step("reader images: the page of figures goes", async () => {
+      for (const path of [imagesPage, ...imagePaths]) await agentDeletes(path);
+    });
     // axe (TEMPRA-133): the gate's pages, light and dark, a concept with its Comments panel, and
     // the phone's drawer and sheet, with no serious or critical issue. After the busy minute, so
     // its loads are not counted there.
