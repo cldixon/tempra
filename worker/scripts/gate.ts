@@ -475,11 +475,22 @@ async function openBrowser() {
       if (!stuck) await diagnose("closing the browser");
     }
   };
-  /** Signs in the way a person does: the email form, then the (dev, on-page) link. */
-  const signInAs = async (email: string, next: string) => {
+  /**
+   * Signs in the way a person does: the email form, then the (dev, on-page) link, or with
+   * `byCode` the code typed on the page that asked, loosely (lower case; TEMPRA-188).
+   */
+  const signInAs = async (email: string, next: string, byCode = false) => {
     await page.goto(`${base}/sign-in?next=${encodeURIComponent(next)}`);
     await page.locator('input[name="email"]').fill(email);
     await page.getByRole("button", { name: "Email me a link" }).click();
+    if (byCode) {
+      const code = (await page.locator("#dev-code").innerText()).trim();
+      if (!/^[0-9A-Z]{8}$/.test(code)) throw new Error(`the dev code reads "${code}"`);
+      await page.getByLabel("Code").fill(code.toLowerCase());
+      await page.getByRole("button", { name: "Continue" }).click();
+      await page.waitForURL((u) => !u.pathname.startsWith("/sign-in"), { timeout: 15_000 });
+      return;
+    }
     const link = await page.locator('a[href*="/sign-in/link?t="]').first().getAttribute("href");
     await page.goto(new URL(link ?? "", base).href);
     await page.getByRole("button", { name: "Continue" }).click();
@@ -4184,7 +4195,7 @@ async function freshAccountConnects(): Promise<string[]> {
     // (the sidebar, the switcher), and Open goes there, in place (a shared library, F-2).
     await step("the invitee accepts from the Inbox and opens the library", async () => {
       await context.clearCookies();
-      await b.signInAs("stranger@localhost", "/inbox");
+      await b.signInAs("stranger@localhost", "/inbox", true);
       const href = new URL(`${lib}/`).pathname;
       const listed = page.locator(`nav[aria-label="Shared with you"] a[href="${href}"]`);
       if ((await listed.count()) > 0) throw new Error("listed before accepting");
