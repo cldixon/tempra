@@ -46,8 +46,9 @@ import type { Figure } from "./prepare";
   const figure = $derived(figures[at - 1]);
   let dialog: HTMLDialogElement | undefined = $state();
   let close: HTMLButtonElement | undefined = $state();
-  const label = `${$props.id()}-label`;
-  const caption = `${label}-caption`;
+  const uid = $props.id();
+  const label = `${uid}-label`;
+  const caption = `${uid}-caption`;
 
   // Opened modally once, closed (and the focus given back) when it goes.
   $effect(() => {
