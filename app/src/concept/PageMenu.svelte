@@ -35,7 +35,7 @@
   ><hr /><button
     type="button"
     class="menu-item"
-    onclick={() => link.copy(async () => new URL(props.urls.pinned(props.urls.at).file(props.path), location.href).href)}
+    onclick={() => link.copy(new URL(props.urls.pinned(props.urls.at).file(props.path), location.href).href)}
     ><Icon name="link" /> Copy link</button
   ><a class="menu-item" href={props.urls.raw(props.path)} download={baseName(props.path)}><Icon name="download" /> Download <span class="menu-hint">.md</span></a
   ></Menu

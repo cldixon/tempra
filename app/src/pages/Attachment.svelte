@@ -1,19 +1,17 @@
 <script lang="ts">
   import AgentName from "../AgentName.svelte";
   import AtNotice from "../AtNotice.svelte";
-  import type { ActedBy } from "../agents";
   import { useActors } from "../agents.svelte.ts";
   import { api } from "../api";
   import { type FileJson, type HistoryEvent, isConceptPath, type Links } from "../concept/data";
-  import { useFrame } from "../frame.svelte.ts";
+  import { useTitleOf } from "../frame.svelte.ts";
   import Icon from "../Icon.svelte";
   import { attachmentSource, mediaKind } from "../images";
   import { useLoad } from "../load.svelte.ts";
   import Moment from "../Moment.svelte";
   import Player from "../reader/Player.svelte";
-  import { useLibraryLabel } from "../role.svelte.ts";
-  import { fileLabel } from "../tree";
-  import { useCopy, useMe, useTitle } from "../ui.svelte.ts";
+  import { useLibraryTitle } from "../role.svelte.ts";
+  import { useCopy } from "../ui.svelte.ts";
   import { baseName, enc, type Urls } from "../urls";
   import AttachmentImage from "./AttachmentImage.svelte";
   import { describedAs, figureUse, type Use, versionsOf } from "./attachment";
@@ -29,11 +27,11 @@
    * appears as); under them File history, every version with its own Download.
    */
   let { urls, head, file }: { urls: Urls; head: number; file: AttachmentFile } = $props();
-  const label = useLibraryLabel(() => urls);
-  useTitle(() => `${baseName(file.path)} · ${label.current}`);
-  const me = useMe();
+  useLibraryTitle(
+    () => urls,
+    () => baseName(file.path),
+  );
   const actors = useActors(() => urls);
-  const frame = useFrame();
   const extra = useLoad(
     () => `attachment ${urls.base} ${file.path} ${file.seq}`,
     async () => {
@@ -70,11 +68,9 @@
     },
   );
   const usesShown = $derived(uses.data ?? null);
-  const titles = $derived.by(() => {
-    const out = new Map<string, string>();
-    for (const f of frame.index ?? []) out.set(f.path, fileLabel(f));
-    return out;
-  });
+  // The pages that use it by title, as the frame's outline names them.
+  const titleOf = useTitleOf();
+  const titles = $derived(new Map((usedIn ?? []).map((p) => [p, titleOf.of(p)])));
   let natural = $state<{ w: number; h: number } | null>(null);
   let broken = $state(false);
   const copied = useCopy();
@@ -89,7 +85,7 @@
   );
   const added = $derived(versions?.at(-1));
   const current = $derived(versions?.find((v) => v.current) ?? null);
-  const name = (actor: string, by: ActedBy | null) => actors.view(actor, by);
+  const name = actors.view;
   const described = $derived(describedAs(file.description, usesShown));
 </script>
 

@@ -1,16 +1,15 @@
 <script lang="ts">
   import { REQUESTS_PAGE, type RequestPage } from "../activity";
-  import { useLiveWrites, useTitles } from "../activity.svelte.ts";
+  import { useLiveWrites } from "../activity.svelte.ts";
   import { api } from "../api";
   import Icon from "../Icon.svelte";
   import { useFeed, useTrailing } from "../live.svelte.ts";
   import { useLoad } from "../load.svelte.ts";
   import PageColumn from "../PageColumn.svelte";
-  import { useLibraryLabel } from "../role.svelte.ts";
+  import { useLibraryTitle } from "../role.svelte.ts";
   import { type Done, navigate } from "../router";
   import Status from "../Status.svelte";
   import { plural } from "../ui";
-  import { useTitle } from "../ui.svelte.ts";
   import type { ActivityFilters, Urls } from "../urls";
   import EventFilters from "./EventFilters.svelte";
   import EveryEvent from "./EveryEvent.svelte";
@@ -27,15 +26,13 @@
    * here to look, and is not kept count of.
    * The view and filters are in the URL, so a view can be linked and back and forward restore it.
    */
-  let {
-    urls,
-    actor,
-    filters,
-    done = null,
-  }: { urls: Urls; actor: string; filters: ActivityFilters; done?: Done } = $props();
+  let { urls, filters, done = null }: { urls: Urls; filters: ActivityFilters; done?: Done } =
+    $props();
 
-  const label = useLibraryLabel(() => urls);
-  useTitle(() => `Activity · ${label.current}`);
+  useLibraryTitle(
+    () => urls,
+    () => "Activity",
+  );
   const view = $derived(filters.view === "events" ? "events" : "summary");
   const prefix = $derived(filters.prefix ?? "");
   const exact = $derived(filters.actor ?? "");
@@ -47,7 +44,6 @@
         : urls.activity({ ...filters, view, ...change }),
       { replace },
     );
-  const titles = useTitles(() => urls);
   const key = $derived(`activity ${urls.base} ${prefix} ${exact}`);
   const loaded = useLoad(
     () => key,
@@ -66,16 +62,14 @@
   );
 
   // Live (tempra-dev: app/live): a write the filters may match reloads the newest page, once per
-  // burst; titles follow too. An agent's write is remembered as writing now (the pulsing dot).
+  // burst (pages' titles come from the frame's index, which follows the feed itself). An agent's
+  // write is remembered as writing now (the pulsing dot).
   const reload = useTrailing(() => loaded.reload());
-  const reloadTitles = useTrailing(() => titles.reload(), 1500);
-  // A clock that ticks while something reads as live, so the dot stops when the writes do.
   const live = useLiveWrites();
   useFeed(
     () => urls,
     () => loaded.data?.head ?? null,
     (events) => {
-      reloadTitles();
       live.heard(events);
       const under = (p: string | null) =>
         !prefix || p === prefix || !!p?.startsWith(`${prefix.replace(/\/$/, "")}/`);
@@ -116,7 +110,6 @@
     </fieldset>
     <WhoFilter
       {urls}
-      me={actor}
       {view}
       who={filters.who ?? "everyone"}
       actor={exact}
@@ -135,10 +128,8 @@
             {#if view === "summary"}
               <Summary
                 {urls}
-                me={actor}
                 {requests}
                 empty={page.requests.length === 0}
-                titles={titles.data?.titles ?? {}}
                 who={filters.who ?? "everyone"}
                 writing={live.writing}
                 now={live.now}
@@ -146,13 +137,11 @@
             {:else}
               <EveryEvent
                 {urls}
-                me={actor}
                 {requests}
                 empty={page.requests.length === 0}
                 filter={{ who: filters.who, kind: filters.kind, q: filters.q }}
                 {more}
                 pulses={live.pulses}
-                now={live.now}
               />
             {/if}
           {/snippet}

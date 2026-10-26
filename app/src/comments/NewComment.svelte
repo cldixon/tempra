@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { api } from "../api";
+  import { post } from "../api";
   import { useAction } from "../load.svelte.ts";
   import MentionArea from "../MentionArea.svelte";
   import { useMentionable } from "../mentions.svelte.ts";
@@ -36,13 +36,10 @@
     if (!body) return;
     const draft = props.draft;
     void action.run(async () => {
-      const r = await api<{ thread: Thread }>(props.urls.api("comments"), {
-        method: "POST",
-        body: JSON.stringify({
-          path: props.path,
-          body,
-          anchor: draft ? { quote: draft.quote, from: draft.from } : null,
-        }),
+      const r = await post<{ thread: Thread }>(props.urls.api("comments"), {
+        path: props.path,
+        body,
+        anchor: draft ? { quote: draft.quote, from: draft.from } : null,
       });
       text = "";
       props.onDone();

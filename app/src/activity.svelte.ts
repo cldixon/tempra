@@ -1,23 +1,14 @@
-import { isLive, LIVE_MS, type LiveWrite, loadTitles } from "./activity";
+import { isLive, LIVE_MS, type LiveWrite } from "./activity";
 import { isAgentChange } from "./changes";
 import type { FeedEvent } from "./live";
-import { useLoad } from "./load.svelte.ts";
 import { useNow } from "./ui.svelte.ts";
-import type { Urls } from "./urls";
-
-/** One load of a library's titles, shared by home and Activity. */
-export function useTitles(urls: () => Urls) {
-  return useLoad(
-    () => `titles ${urls().base}`,
-    () => loadTitles(urls()),
-  );
-}
 
 /**
  * Agents' writes as they arrive on the feed (tempra-dev: app/live): the last one, read as
  * writing now (the Summary's live entry) for LIVE_MS, and each event's arrival by seq (Every
- * event's pulsing rows). `heard` takes a batch from useFeed, `reset` a rollback. The clock ticks
- * every 5 s while anything has been heard, so the dot stops when the writes do.
+ * event's pulsing rows). `heard` takes a batch from useFeed, `reset` a rollback. Its clock (useNow)
+ * ticks every 5 s once anything has been heard, else every 30 s, so the dot stops when the writes
+ * do.
  */
 export function useLiveWrites() {
   let last = $state.raw<LiveWrite | null>(null);
@@ -31,10 +22,6 @@ export function useLiveWrites() {
     /** An agent writing now, or null once its last write is LIVE_MS old. */
     get writing() {
       return isLive(last, clock.current) ? last : null;
-    },
-    /** When each event an agent made arrived, by seq. */
-    get seqs() {
-      return seqs;
     },
     /** Whether the event with this seq arrived recently enough to pulse. */
     pulses(seq: number) {

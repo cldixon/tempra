@@ -47,7 +47,7 @@ export function sizeFact(
 }
 
 /** What became of a path, from its history: moved elsewhere, deleted, or nothing known. */
-export type Fate =
+type Fate =
   | { kind: "moved"; to: string; actor: string; by: ReturnType<typeof actedBy>; ts: string }
   | { kind: "deleted"; actor: string; by: ReturnType<typeof actedBy>; ts: string }
   | null;

@@ -8,28 +8,25 @@
 
   /**
    * Every event: the ledger as a table, newest first. Who and when are named on a request's first
-   * row; a row an agent's fresh write made carries the pulsing dot. A request's first row links its revert for those who may write.
+   * row; a row an agent's fresh write made carries the pulsing dot. A request's first row links
+   * its revert for the owner.
    */
   let {
     urls,
-    me,
     requests,
     empty,
     filter,
     more,
     pulses,
-    now,
   }: {
     urls: Urls;
-    me: string;
     requests: LedgerRequest[];
     empty: boolean;
     filter: { who?: Who; kind?: string; q?: string };
     /** Older requests are still to load ("Older"). */
     more: boolean;
-    /** Whether the event with this seq is an agent's fresh write (read against `now`). */
+    /** Whether the event with this seq is an agent's fresh write (by the live clock). */
     pulses(seq: number): boolean;
-    now: number;
   } = $props();
 
   const actors = useActors(() => urls);
@@ -78,7 +75,6 @@
               role.current === "owner" &&
               row.request.events.some((e) => e.op !== "verify" && e.op !== "comment")
             }
-            {now}
           />
         {/each}
       </tbody>

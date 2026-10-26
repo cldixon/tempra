@@ -1,12 +1,12 @@
 <script lang="ts">
   import { untrack } from "svelte";
-  import { ApiError, api } from "../api";
+  import { api, field, post } from "../api";
   import ComposeDialog from "../ComposeDialog.svelte";
   import Icon from "../Icon.svelte";
   import LibraryTile from "../LibraryTile.svelte";
-  import { useLoad } from "../load.svelte.ts";
+  import { useAction, useLoad } from "../load.svelte.ts";
   import PageBar from "../PageBar.svelte";
-  import { libraryLabel } from "../role";
+  import { isShared, libraryLabel } from "../role";
   import { navigate } from "../router";
   import Status from "../Status.svelte";
   import { useMe, useTitle } from "../ui.svelte.ts";
@@ -39,36 +39,25 @@
   const me = useMe();
   let title = $state("");
   let slug = $state<string | null>(null);
-  let error = $state<string | null>(null);
-  let busy = $state(false);
+  const action = useAction();
   const address = $derived(slug ?? slugFrom(title));
   function close() {
     title = "";
     slug = null;
-    error = null;
+    action.setError(null);
     creating = false;
   }
-  async function submit(e: SubmitEvent & { currentTarget: HTMLFormElement }) {
+  function submit(e: SubmitEvent & { currentTarget: HTMLFormElement }) {
     e.preventDefault();
-    const description = String(new FormData(e.currentTarget).get("description") ?? "")
-      .replace(/\s+/g, " ")
-      .trim();
-    busy = true;
-    error = null;
-    try {
-      const lib = await api<Library>("/api/v1/libraries", {
-        method: "POST",
-        body: JSON.stringify({
-          slug: address,
-          title: title.trim() || undefined,
-          description: description || undefined,
-        }),
+    const description = field(e.currentTarget, "description").replace(/\s+/g, " ");
+    void action.run(async () => {
+      const lib = await post<Library>("/api/v1/libraries", {
+        slug: address,
+        title: title.trim() || undefined,
+        description: description || undefined,
       });
       navigate(new Urls(lib.owner, lib.slug).tree(""));
-    } catch (err) {
-      error = err instanceof ApiError ? err.message : String(err);
-      busy = false;
-    }
+    });
   }
 </script>
 
@@ -89,7 +78,7 @@
         {@const facts = cardFacts(l)}
         <li>
           <a class="lib-card" href={new Urls(l.owner, l.slug).tree("")}
-            ><span class="lib-card-cover"><LibraryTile name={l.title || l.slug} shared={(l.role ?? "owner") !== "owner"} /></span
+            ><span class="lib-card-cover"><LibraryTile name={l.title || l.slug} shared={isShared(l)} /></span
             ><span class="lib-card-body"
               ><span class="lib-card-name"><span>{libraryLabel(l)}</span></span
               >{#if l.description}<span class="lib-card-desc">{l.description}</span>{/if}{#if facts.length > 0}<span
@@ -111,8 +100,8 @@
   onClose={close}
   title="New library"
   action="Create library"
-  {busy}
-  {error}
+  busy={action.busy}
+  error={action.error}
   onSubmit={submit}
 >
   {#snippet context()}{me.current ? `@${me.current.handle}` : "You"}{/snippet}
@@ -160,8 +149,8 @@
 {/if}
 <Status loaded={loaded.current}>
   {#snippet children(libs)}
-    {@const yours = libs.filter((l) => (l.role ?? "owner") === "owner")}
-    {@const shared = libs.filter((l) => (l.role ?? "owner") !== "owner")}
+    {@const yours = libs.filter((l) => !isShared(l))}
+    {@const shared = libs.filter(isShared)}
     {#if libs.length === 0}<p class="muted">No libraries yet.</p>{/if}
     {#if yours.length > 0}{@render cards("Yours", yours)}{/if}
     {#if shared.length > 0}{@render cards("Shared with you", shared)}{/if}

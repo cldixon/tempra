@@ -1,4 +1,3 @@
-import { api } from "../api";
 import type { Me } from "../ui";
 
 /*
@@ -8,9 +7,6 @@ import type { Me } from "../ui";
 
 /** The landing page's legal pages (TEMPRA-14). */
 export const LEGAL = "https://tempra.dev";
-
-export const post = (url: string, body: unknown, method = "POST") =>
-  api(url, { method, body: JSON.stringify(body) });
 
 // ---------------------------------------------------------------- agents
 

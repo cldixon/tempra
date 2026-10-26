@@ -1,12 +1,12 @@
 <script lang="ts">
   import AgentName from "../AgentName.svelte";
-  import { ApiError } from "../api";
   import { useTitleOf } from "../frame.svelte.ts";
   import Moment from "../Moment.svelte";
   import { day, plural } from "../ui";
   import type { Urls } from "../urls";
   import type { Namer } from "./byline";
-  import { changesSince, markChecked } from "./checked";
+  import { changesSince } from "./checked";
+  import { useCheck } from "./checked.svelte.ts";
   import { actedBy, type Concept, type Json, type Links, type Standing } from "./data";
 
   /**
@@ -76,20 +76,11 @@
       !(s.verified && s.since === 0) &&
       !(!s.verified && (!props.mayVerify || props.reviewing)),
   );
-  let busy = $state(false);
-  let error = $state<string | null>(null);
-  async function check() {
-    busy = true;
-    error = null;
-    try {
-      await markChecked(props.urls, props.concept.path);
-      props.onVerified();
-    } catch (err) {
-      error = err instanceof ApiError ? err.message : String(err);
-    } finally {
-      busy = false;
-    }
-  }
+  const check = useCheck(
+    () => props.urls,
+    () => props.concept.path,
+    () => props.onVerified(),
+  );
 </script>
 
 {#snippet notSet()}<span class="muted">not set</span>{/snippet}
@@ -109,5 +100,5 @@
     </ul>{:else}<p class="small muted">{atHead ? "Nothing links here." : "Shown for the latest version."}</p>{/if}</section
 >{#if showCheck}<section class="panel-section check" aria-label="Check"
     >{#if s.verified}<p class="check-state">{changesSince(s, props.name)}</p
-      ><!-- In review mode the bar over the text has Mark as checked and Done. -->{#if !props.reviewing}<div class="actions"><a class="button" href={props.urls.review(props.concept.path)}>Show changes</a></div>{/if}{:else}<div class="actions"><button type="button" disabled={busy} onclick={check}>Mark as checked</button></div>{/if}{#if error}<p class="small warn">{error}</p>{/if}</section
+      ><!-- In review mode the bar over the text has Mark as checked and Done. -->{#if !props.reviewing}<div class="actions"><a class="button" href={props.urls.review(props.concept.path)}>Show changes</a></div>{/if}{:else}<div class="actions"><button type="button" disabled={check.busy} onclick={() => check.check()}>Mark as checked</button></div>{/if}{#if check.error}<p class="small warn">{check.error}</p>{/if}</section
   >{/if}

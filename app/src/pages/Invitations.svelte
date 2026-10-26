@@ -1,6 +1,6 @@
 <script lang="ts">
   import Avatar from "../Avatar.svelte";
-  import { api } from "../api";
+  import { api, post } from "../api";
   import LibraryTile from "../LibraryTile.svelte";
   import { useAction, useLoad } from "../load.svelte.ts";
   import Moment from "../Moment.svelte";
@@ -19,11 +19,8 @@
   const action = useAction();
   const answer = (i: PendingInvitation, accept: boolean) =>
     action.run(async () => {
-      await api(
+      await post(
         `/api/v1/invitations/${encodeURIComponent(i.id)}/${accept ? "accept" : "decline"}`,
-        {
-          method: "POST",
-        },
       );
       if (accept) {
         // A full load: the library list and the workspace learn the new library.

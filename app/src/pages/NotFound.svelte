@@ -3,14 +3,13 @@
   import { useActors } from "../agents.svelte.ts";
   import { ApiError, api } from "../api";
   import type { HistoryEvent } from "../concept/data";
-  import { useFrame } from "../frame.svelte.ts";
+  import { useFrame, useTitleOf } from "../frame.svelte.ts";
   import Icon from "../Icon.svelte";
   import { useLoad } from "../load.svelte.ts";
   import Moment from "../Moment.svelte";
   import PageColumn from "../PageColumn.svelte";
-  import { fileLabel } from "../tree";
-  import { useMe, useTitle } from "../ui.svelte.ts";
-  import { baseName, dirOf, enc, folderName, type Urls } from "../urls";
+  import { useTitle } from "../ui.svelte.ts";
+  import { dirOf, enc, folderName, type Urls } from "../urls";
   import { fateOf } from "./file";
 
   /**
@@ -19,9 +18,9 @@
    */
   let { urls, path }: { urls: Urls; path: string } = $props();
   useTitle(() => "Not found");
-  const me = useMe();
   const actors = useActors(() => urls);
   const frame = useFrame();
+  const titles = useTitleOf();
   const fate = useLoad(
     () => `fate ${urls.base} ${path}`,
     async () => {
@@ -42,8 +41,7 @@
   // Where it went, by its title and folder (H-13), as the tree names it.
   const where = $derived.by(() => {
     if (f?.kind !== "moved") return "";
-    const moved = frame.index?.find((x) => x.path === f.to);
-    return `${moved ? fileLabel(moved) : baseName(f.to).replace(/\.md$/, "")}${dirOf(f.to) ? ` (${folderName(dirOf(f.to))})` : ""}`;
+    return `${titles.of(f.to)}${dirOf(f.to) ? ` (${folderName(dirOf(f.to))})` : ""}`;
   });
 </script>
 

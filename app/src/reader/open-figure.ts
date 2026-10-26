@@ -6,7 +6,7 @@ import { getContext, setContext } from "svelte";
 
 const KEY = Symbol("open-figure");
 
-export type OpenFigure = (n: number) => void;
+type OpenFigure = (n: number) => void;
 
 /** Provides the full-screen view to the figures inside this component (Reader.svelte). */
 export function provideOpenFigure(open: OpenFigure) {

@@ -17,10 +17,9 @@
   import Reader from "../Reader.svelte";
   import { type BodyOptions, prepare } from "../reader/prepare";
   import { pushRecent } from "../recent";
-  import { useRole } from "../role.svelte.ts";
+  import { useLibraryTitle, useRole } from "../role.svelte.ts";
   import { type Compare, navigate } from "../router";
   import { anchorId } from "../ui";
-  import { useMe, useTitle } from "../ui.svelte.ts";
   import { dirOf, folderName, type Urls } from "../urls";
   import Byline from "./Byline.svelte";
   import CheckedLine from "./CheckedLine.svelte";
@@ -34,8 +33,7 @@
   import { type Card, hoverCards } from "./hover";
   import type { Live } from "./live";
   import LiveAnnouncer from "./LiveAnnouncer.svelte";
-  import LiveNotice from "./LiveNotice.svelte";
-  import NewVersion from "./NewVersion.svelte";
+  import LiveChange from "./LiveChange.svelte";
   import PageActions from "./PageActions.svelte";
   import PageMenu from "./PageMenu.svelte";
   import Panel from "./Panel.svelte";
@@ -76,13 +74,15 @@
   const c = $derived(props.data.concept);
   const sources = $derived(props.data.sources);
   const links = $derived(props.data.links);
-  const me = useMe();
   const actors = useActors(() => props.urls);
   const name = actors.view;
   const role = useRole(() => props.urls);
   const fm = $derived(c.frontmatter);
   const title = $derived(titleOf(c));
-  useTitle(() => `${title} · ${urls.slug}`);
+  useLibraryTitle(
+    () => urls,
+    () => title,
+  );
   const status = $derived(typeof fm.status === "string" ? fm.status : null);
   const current = $derived(urls.at === undefined || urls.at >= props.head);
   // The Markdown view is in the URL (`?view=markdown`), so back and a shared link keep it.
@@ -164,7 +164,16 @@
   // takes it instead), and closing it gives the focus back to the control that opened it (⋯ for
   // History and Properties), unless the person has moved on. Both wait for the panel to draw (and
   // for the page to be taken out of inert, where the panel overlays it).
-  let focusTo = $state<{ to: "heading" | "opener" } | null>(null);
+  function focusAfterDraw(to: "heading" | "opener") {
+    void tick().then(() => {
+      if (to === "heading") {
+        panelBox?.querySelector<HTMLElement>(".panel-head h2")?.focus();
+      } else {
+        const back = opener?.isConnected ? opener : actionsButton();
+        back?.focus();
+      }
+    });
+  }
   function openPanel(which: PanelName, focus = true) {
     const focused = document.activeElement;
     if (focused instanceof HTMLElement && !panelBox?.contains(focused)) {
@@ -178,13 +187,13 @@
             : focused;
     }
     panel = which;
-    focusTo = focus ? { to: "heading" } : null;
+    if (focus) focusAfterDraw("heading");
   }
   function closePanel() {
     const focused = document.activeElement;
     const lost = !focused || focused === document.body || panelBox?.contains(focused);
     panel = null;
-    focusTo = lost ? { to: "opener" } : null;
+    if (lost) focusAfterDraw("opener");
   }
   // Where the panel overlays the page (under 960px of page, and the phone's sheet: the
   // stylesheet's call, read from the panel's position), it is modal (C-26, P-4): the page, the top
@@ -210,19 +219,6 @@
   $effect(() => {
     frame.setModal(modal);
     return () => frame.setModal(false);
-  });
-  $effect(() => {
-    const f = focusTo;
-    if (!f) return;
-    focusTo = null;
-    void tick().then(() => {
-      if (f.to === "heading") {
-        panelBox?.querySelector<HTMLElement>(".panel-head h2")?.focus();
-      } else {
-        const back = opener?.isConnected ? opener : actionsButton();
-        back?.focus();
-      }
-    });
   });
   function togglePanel(which: PanelName) {
     if (panel === which) closePanel();
@@ -307,7 +303,7 @@
 {#snippet path()}<nav class="topbar-crumbs" aria-label="Path"
     >{#each folders as f (f)}<span class="crumb">{folderName(f)}</span>{/each}<span class="crumb" aria-current="page">{title}</span></nav
   >{/snippet}
-{#snippet actions()}{#if live && !moved}<NewVersion {urls} {live} />{/if}<PageMenu
+{#snippet actions()}{#if live && !moved}<LiveChange {urls} {live} />{/if}<PageMenu
     {urls}
     path={c.path}
     {panel}
@@ -327,9 +323,10 @@
           {mayVerify}
           error={changes.error}
           onVerified={props.onVerified}
-        />{/if}{#if props.notice}<div class="notice">{props.notice}</div>{/if}{#if moved && live}<LiveNotice
+        />{/if}{#if props.notice}<div class="notice">{props.notice}</div>{/if}{#if moved && live}<LiveChange
           {urls}
           {live}
+          notice
         />{/if}<LiveAnnouncer {urls} {live} />{#if !compare && !current}<VersionBar
           {urls}
           concept={c}

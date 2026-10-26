@@ -1,40 +1,33 @@
 <script lang="ts">
-  import {
-    byPerson,
-    type Entry,
-    groupByDay,
-    type LedgerRequest,
-    type LiveWrite,
-    titleOf,
-    toEntry,
-  } from "../activity";
+  import { byPerson, type Entry, groupByDay, type LedgerRequest, type LiveWrite, toEntry } from "../activity";
   import { useActors } from "../agents.svelte.ts";
   import EntryRow from "../EntryRow.svelte";
+  import { useTitleOf } from "../frame.svelte.ts";
   import LiveEntry from "../LiveEntry.svelte";
   import type { Urls, Who } from "../urls";
 
-  /** The Summary: the live entry, then one entry per request, by day. */
+  /**
+   * The Summary: the live entry, then one entry per request, by day; pages named by their titles
+   * in the frame's index. `now` is the live clock, quick while an agent writes.
+   */
   let {
     urls,
-    me,
     requests,
     empty,
-    titles,
     who,
     writing,
     now,
   }: {
     urls: Urls;
-    me: string;
     requests: LedgerRequest[];
     empty: boolean;
-    titles: Record<string, string>;
     who: Who;
     writing: LiveWrite | null;
     now: number;
   } = $props();
 
   const actors = useActors(() => urls);
+  const titles = useTitleOf();
   const entries = $derived.by(() => {
     const ids = new Set<string>();
     const out: Entry[] = [];
@@ -43,7 +36,7 @@
       ids.add(r.request_id);
       if (who === "people" && !byPerson(r)) continue;
       if (who === "agents" && byPerson(r)) continue;
-      const e = toEntry(r, titles);
+      const e = toEntry(r, titles.of);
       if (e) out.push(e);
     }
     return out;
@@ -68,7 +61,7 @@
         write={live}
         {urls}
         actor={actors.view(live.actor, live.by)}
-        title={titleOf(live.path, titles)}
+        title={titles.of(live.path)}
       />
     {/if}
     {#each day.items as e (e.id)}

@@ -1,10 +1,9 @@
 <script lang="ts">
-  import { api, field } from "../api";
+  import { field, post } from "../api";
   import { useAction } from "../load.svelte.ts";
   import { librariesChanged } from "../role";
-  import { useLibraries, useLibraryLabel, useRole } from "../role.svelte.ts";
+  import { useLibrary, useLibraryTitle, useRole } from "../role.svelte.ts";
   import { navigate } from "../router";
-  import { useTitle } from "../ui.svelte.ts";
   import type { Urls } from "../urls";
 
   /**
@@ -13,29 +12,30 @@
    * member's settings are Members alone, so General sends them there.
    */
   let { urls }: { urls: Urls } = $props();
-  const label = useLibraryLabel(() => urls);
-  useTitle(() => `General · ${label.current}`);
-  const libs = useLibraries();
+  useLibraryTitle(
+    () => urls,
+    () => "General",
+  );
+  const library = useLibrary(() => urls);
+  const lib = $derived(library.current);
   const role = useRole(() => urls);
   const action = useAction();
   let notice = $state<string | null>(null);
   $effect(() => {
     if (role.current === "read") navigate(urls.members(), { replace: true });
   });
-  const lib = $derived(
-    libs.data?.libraries.find((l) => l.owner === urls.owner && l.slug === urls.slug),
-  );
 
   function save(e: SubmitEvent & { currentTarget: HTMLFormElement }) {
     e.preventDefault();
     const form = e.currentTarget;
-    const title = field(form, "title").trim();
-    const description = field(form, "description").trim();
+    const title = field(form, "title");
+    const description = field(form, "description");
     void action.run(async () => {
-      await api(urls.apiRoot(), {
-        method: "PATCH",
-        body: JSON.stringify({ title: title || null, description: description || null }),
-      });
+      await post(
+        urls.apiRoot(),
+        { title: title || null, description: description || null },
+        "PATCH",
+      );
       notice = "Saved.";
       librariesChanged();
     });

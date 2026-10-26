@@ -5,16 +5,17 @@
   import { useFeed, useTrailing } from "../live.svelte.ts";
   import { useLoad } from "../load.svelte.ts";
   import Moment from "../Moment.svelte";
-  import { useLibraryLabel, useRole } from "../role.svelte.ts";
+  import { useLibraryTitle, useRole } from "../role.svelte.ts";
   import Status from "../Status.svelte";
-  import { useTitle } from "../ui.svelte.ts";
   import type { Urls } from "../urls";
   import ConnectSteps from "./ConnectSteps.svelte";
 
   /** A library's Connect tab: the steps naming it, and (live) whether an agent has written yet. */
   let { urls }: { urls: Urls } = $props();
-  const label = useLibraryLabel(() => urls);
-  useTitle(() => `Connect · ${label.current}`);
+  useLibraryTitle(
+    () => urls,
+    () => "Connect",
+  );
   const loaded = useLoad(
     () => `connect ${urls.base}`,
     async () => {

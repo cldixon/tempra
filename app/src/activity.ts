@@ -1,7 +1,5 @@
 import type { ActedBy } from "./agents";
-import { api } from "./api";
-import { plural, relativeTime } from "./ui";
-import { baseName, type Urls } from "./urls";
+import { day, plural, relativeTime } from "./ui";
 
 /*
  * Activity (take 4, TEMPRA-115; tempra-dev: app/activity): what happened, for people. One entry per
@@ -88,10 +86,8 @@ export interface Entry {
   named: boolean;
 }
 
-/** A concept's title from the outline, else its file name. */
-export function titleOf(path: string, titles: Record<string, string>): string {
-  return titles[path] ?? baseName(path).replace(/\.md$/, "");
-}
+/** A page's title by its path (`useTitleOf().of`: the outline's title, else its file name). */
+export type TitleOf = (path: string) => string;
 
 /** "+38 −12 words", or null when nothing changed. */
 export function wordsText(w: Words | null): string | null {
@@ -100,7 +96,7 @@ export function wordsText(w: Words | null): string | null {
 }
 
 /** Joins clauses as a person writes a list: "a", "a and b", "a, b and c". */
-export function joinParts(clauses: Part[][]): Part[] {
+function joinParts(clauses: Part[][]): Part[] {
   const out: Part[] = [];
   clauses.forEach((c, i) => {
     if (i > 0) out.push(i === clauses.length - 1 ? " and " : ", ");
@@ -120,7 +116,7 @@ const asWords = (v: unknown): Words | null => {
 const isConcept = (path: string) => path.endsWith(".md");
 
 /** What a request's content events did, one row per concept, in the order it was first touched. */
-export function touchedBy(events: LedgerEvent[], titles: Record<string, string>): Touched[] {
+export function touchedBy(events: LedgerEvent[], titleOf: TitleOf): Touched[] {
   const byConcept = new Map<string, LedgerEvent[]>();
   for (const e of events) {
     if (e.op === "comment" || e.op === "verify") continue;
@@ -158,7 +154,7 @@ export function touchedBy(events: LedgerEvent[], titles: Record<string, string>)
     const from = typeof moved?.meta?.from_path === "string" ? moved.meta.from_path : null;
     out.push({
       path: last.path,
-      title: titleOf(last.path, titles),
+      title: titleOf(last.path),
       what,
       words: what === "edited" || what === "rewrote" || what === "reverted" ? words : null,
       from: what === "moved" ? from : null,
@@ -209,7 +205,7 @@ function contentClauses(touched: Touched[], imported: boolean): Part[][] {
 }
 
 /** The comment clauses: "replied on Reader and resolved it", "opened a thread on Tenancy". */
-function commentClauses(events: LedgerEvent[], titles: Record<string, string>): Part[][] {
+function commentClauses(events: LedgerEvent[], titleOf: TitleOf): Part[][] {
   const threads = new Map<string, { path: string; seq: number; kinds: string[] }>();
   for (const e of events) {
     if (e.op !== "comment") continue;
@@ -222,7 +218,7 @@ function commentClauses(events: LedgerEvent[], titles: Record<string, string>): 
   if (threads.size === 0) return [];
   const on = (t: { path: string; seq: number }): Part => ({
     concept: t.path,
-    title: titleOf(t.path, titles),
+    title: titleOf(t.path),
     seq: t.seq,
     gone: false,
     words: null,
@@ -246,12 +242,12 @@ function commentClauses(events: LedgerEvent[], titles: Record<string, string>): 
 }
 
 /** The verification clause: "verified A", "verified A and B", "verified A and 2 more". */
-function verifyClauses(events: LedgerEvent[], titles: Record<string, string>): Part[][] {
+function verifyClauses(events: LedgerEvent[], titleOf: TitleOf): Part[][] {
   const seen = new Map<string, LedgerEvent>();
   for (const e of events) if (e.op === "verify") seen.set(e.path, e);
   if (seen.size === 0) return [];
   const items: Part[][] = [...seen.values()].map((e) => [
-    { concept: e.path, title: titleOf(e.path, titles), seq: e.seq, gone: false, words: null },
+    { concept: e.path, title: titleOf(e.path), seq: e.seq, gone: false, words: null },
   ]);
   if (items.length > 2)
     return [["verified ", ...(items[0] ?? []), ` and ${items.length - 1} more`]];
@@ -276,19 +272,19 @@ function commentQuote(events: LedgerEvent[]): string | null {
  */
 export function toEntry(
   r: LedgerRequest,
-  titles: Record<string, string>,
+  titleOf: TitleOf,
   opts: { hideComments?: boolean } = {},
 ): Entry | null {
   const events = opts.hideComments ? r.events.filter((e) => e.op !== "comment") : r.events;
   const first = events[0];
   const last = events[events.length - 1];
   if (!first || !last) return null;
-  const touched = touchedBy(events, titles);
+  const touched = touchedBy(events, titleOf);
   const imported = events.every((e) => e.op === "import");
   const clauses = [
     ...contentClauses(touched, imported),
-    ...commentClauses(events, titles),
-    ...verifyClauses(events, titles),
+    ...commentClauses(events, titleOf),
+    ...verifyClauses(events, titleOf),
   ];
   return {
     id: r.request_id,
@@ -382,7 +378,7 @@ export function eventNote(e: LedgerEvent, r: Pick<LedgerRequest, "note">): strin
 }
 
 /** The filters Every event applies in the app (who and the folder go to the server). */
-export interface EventFilter {
+interface EventFilter {
   who?: "everyone" | "agents" | "people";
   kind?: string;
   /** Text to find in the path or the note, case aside. */
@@ -434,28 +430,17 @@ export const isLive = (w: Pick<LiveWrite, "at"> | null | undefined, now: number)
 
 // ---------------------------------------------------------------- times
 
-/** A local day as a key ("2026-10-19"). */
-const dayKey = (d: Date) => `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
+/** The time of day as `localTime` writes it ("4:52 PM"), in the reader's time zone. */
+const CLOCK = new Intl.DateTimeFormat(undefined, { timeStyle: "short" });
 
-const shortDate = (d: Date, now: Date) =>
-  d.toLocaleDateString("en", {
-    month: "short",
-    day: "numeric",
-    ...(d.getFullYear() === now.getFullYear() ? {} : { year: "numeric" }),
-  });
-
-const clock = (d: Date) =>
-  `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
-
-/** "Today", "Yesterday", or the date: the heading of a day's entries (local time). */
+/** "Today", "Yesterday", or the date (`day`): the heading of a day's entries (local time). */
 export function dayLabel(ts: string, now: number): string {
-  const d = new Date(ts);
-  const today = new Date(now);
+  const d = new Date(ts).toDateString();
   const yesterday = new Date(now);
-  yesterday.setDate(today.getDate() - 1);
-  if (dayKey(d) === dayKey(today)) return "Today";
-  if (dayKey(d) === dayKey(yesterday)) return "Yesterday";
-  return shortDate(d, today);
+  yesterday.setDate(yesterday.getDate() - 1);
+  if (d === new Date(now).toDateString()) return "Today";
+  if (d === yesterday.toDateString()) return "Yesterday";
+  return day(ts);
 }
 
 /** Entries in order, split into days, newest first as they come. */
@@ -466,52 +451,19 @@ export function groupByDay<T extends { ts: string }>(
   const days: { label: string; items: T[] }[] = [];
   for (const item of items) {
     const label = dayLabel(item.ts, now);
-    const day = days[days.length - 1];
-    if (day?.label === label) day.items.push(item);
+    const last = days[days.length - 1];
+    if (last?.label === label) last.items.push(item);
     else days.push({ label, items: [item] });
   }
   return days;
 }
 
 /**
- * When, beside an entry: "14 min ago" today (relativeTime), the clock time on an earlier day
- * under its day's heading, or (compact, with no headings) "yesterday" and the date.
+ * When, beside an entry under its day's heading: "14 min ago" today (relativeTime), the time of
+ * day on an earlier day.
  */
-export function entryTime(ts: string, now: number, compact = false): string {
-  const label = dayLabel(ts, now);
-  if (label === "Today") return relativeTime(ts, now);
-  if (!compact) return clock(new Date(ts));
-  return label === "Yesterday" ? "yesterday" : label;
-}
-
-/** A moment as words: "today, 09:12", "yesterday, 18:40", "Oct 12, 18:40". */
-export function momentText(ts: string, now: number): string {
-  const label = dayLabel(ts, now);
-  return `${label === "Today" || label === "Yesterday" ? label.toLowerCase() : label}, ${clock(new Date(ts))}`;
-}
-
-// ---------------------------------------------------------------- data
-
-/** The library's titles by path and its top-level folders, from `GET …/outline`. */
-export interface Titles {
-  seq: number;
-  titles: Record<string, string>;
-  folders: string[];
-}
-
-/** Titles and top-level folders from the outline (the same index the tree reads). */
-export async function loadTitles(urls: Urls): Promise<Titles> {
-  const r = await api<{ seq: number; files: { path: string; title?: string | null }[] }>(
-    urls.api("outline"),
-  );
-  const titles: Record<string, string> = {};
-  const folders = new Set<string>();
-  for (const f of r.files) {
-    if (f.title) titles[f.path] = f.title;
-    const i = f.path.indexOf("/");
-    if (i > 0) folders.add(f.path.slice(0, i));
-  }
-  return { seq: r.seq, titles, folders: [...folders].sort() };
+export function entryTime(ts: string, now: number): string {
+  return dayLabel(ts, now) === "Today" ? relativeTime(ts, now) : CLOCK.format(new Date(ts));
 }
 
 /** Requests per page of Activity, as the ledger pages them. */

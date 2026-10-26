@@ -1,9 +1,9 @@
 <script lang="ts">
   import AgentName from "../AgentName.svelte";
   import Avatar from "../Avatar.svelte";
-  import { type EventRow, entryTime } from "../activity";
+  import type { EventRow } from "../activity";
   import type { ActorView } from "../agents";
-  import { localTime } from "../ui";
+  import Moment from "../Moment.svelte";
   import type { Urls } from "../urls";
 
   /** One row of Every event. */
@@ -13,14 +13,12 @@
     actor,
     live,
     revert,
-    now,
   }: {
     row: EventRow;
     urls: Urls;
     actor: ActorView;
     live: boolean;
     revert: boolean;
-    now: number;
   } = $props();
 
   /** Events that made a version of a file, so a diff shows what they changed. */
@@ -39,7 +37,7 @@
   <td class="events-seq">{#if live}<span class="change-dot live"><span class="visually-hidden">Being written now</span></span>{/if}{e.seq}</td>
   <td class="events-when">
     {#if row.lead}
-      <time datetime={e.ts} title={localTime(e.ts)}>{entryTime(e.ts, now, true)}</time>
+      <Moment ts={e.ts} />
     {/if}
   </td>
   <td class="events-who">

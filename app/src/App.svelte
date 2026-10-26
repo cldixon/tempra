@@ -170,9 +170,9 @@
     {:else if route.page === "members"}
       {#await settings() then S}<S.Members {urls} me={me.current?.handle ?? null} />{/await}
     {:else if route.page === "revert"}
-      {#await settings() then S}<S.Revert {urls} request={route.request} {actor} />{/await}
+      {#await settings() then S}<S.Revert {urls} request={route.request} />{/await}
     {:else if route.page === "restore"}
-      {#await settings() then S}<S.Restore {urls} path={route.path} to={route.to} {actor} />{/await}
+      {#await settings() then S}<S.Restore {urls} path={route.path} to={route.to} />{/await}
     {/if}
   {/if}
 {/snippet}

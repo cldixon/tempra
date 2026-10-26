@@ -9,14 +9,12 @@
    */
   let {
     urls,
-    me,
     view,
     who,
     actor,
     onChange,
   }: {
     urls: Urls;
-    me: string;
     view: "summary" | "events";
     who: Who;
     actor: string;

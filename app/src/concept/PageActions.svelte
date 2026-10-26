@@ -4,7 +4,8 @@
   import { day, plural } from "../ui";
   import type { Urls } from "../urls";
   import type { Namer } from "./byline";
-  import { checker, markChecked } from "./checked";
+  import { checker } from "./checked";
+  import { useCheck } from "./checked.svelte.ts";
   import type { Standing } from "./data";
 
   /*
@@ -34,7 +35,12 @@
     onVerified(): void;
   } = $props();
 
-  let failed = $state(false);
+  const check = useCheck(
+    () => props.urls,
+    () => props.path,
+    () => props.onVerified(),
+  );
+  const failed = $derived(check.error !== null);
   const s = $derived(props.standing);
   const changed = $derived(props.current && s.verified !== null && s.since > 0);
   const who = $derived(checker(s, props.name));
@@ -43,15 +49,6 @@
   const name = $derived(
     props.openCount > 0 ? `Actions, ${plural(props.openCount, "open comment")}` : "Actions",
   );
-  async function check() {
-    failed = false;
-    try {
-      await markChecked(props.urls, props.path);
-      props.onVerified();
-    } catch {
-      failed = true;
-    }
-  }
 </script>
 
 <div class="page-actions" hidden={props.hidden}>
@@ -60,7 +57,7 @@
       ><Icon name="comments" /> Comment{#if props.openCount > 0}<span class="menu-count">{props.openCount} open</span>{/if}</button
     >{#if props.current && !props.reviewing && changed}<a class="menu-item" href={props.urls.review(props.path)}
         ><Icon name="review" /> Review changes<span class="menu-count">{plural(s.since, "change")}</span></a
-      >{/if}{#if props.current && !s.verified && props.mayVerify}<button type="button" class="menu-item" data-stay={failed || undefined} onclick={check}
+      >{/if}{#if props.current && !s.verified && props.mayVerify}<button type="button" class="menu-item" data-stay={failed || undefined} onclick={() => check.check()}
         ><Icon name="check" /> {failed ? "Could not mark as checked" : "Mark as checked"}</button
       >{/if}{#if props.current && s.verified && s.since === 0 && who}<p class="menu-line">Checked by {who}, {day(s.verified.event.ts)}</p>{/if}
   </Menu>

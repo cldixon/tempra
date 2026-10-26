@@ -3,6 +3,7 @@
   import Avatar from "../Avatar.svelte";
   import { actorText } from "../agents";
   import Moment from "../Moment.svelte";
+  import { useNow } from "../ui.svelte.ts";
   import { EDITING_MS, type Namer } from "./byline";
   import { actedBy, type Concept, type HistoryEvent, standing } from "./data";
   import type { Live } from "./live";
@@ -57,21 +58,15 @@
         : null,
   );
 
-  // True until `at` is EDITING_MS old, turning false on its own when it is.
-  let now = $state(Date.now());
+  // True until `at` is EDITING_MS old, turning false on its own when it is: the clock ticks each
+  // second while it holds, and slowly otherwise; each tick or new `at` reads the time afresh.
   const since = $derived(props.current ? at : null);
-  $effect(() => {
-    const ts = since;
-    if (ts === null) return;
-    const left = ts + EDITING_MS - Date.now();
-    if (left <= 0) return;
-    now = Date.now();
-    const timer = setTimeout(() => {
-      now = Date.now();
-    }, left + 50);
-    return () => clearTimeout(timer);
+  const now = useNow(() => (recent ? 1000 : 60_000));
+  const recent = $derived.by(() => {
+    void now.current;
+    return since !== null && Date.now() - since < EDITING_MS;
   });
-  const editing = $derived(since !== null && now - since < EDITING_MS && writer !== null);
+  const editing = $derived(recent && writer !== null);
   // The agent is named once: when the one writing now wrote the version on screen, "editing
   // now" follows its name; another writer is named in that clause.
   const same = $derived(writer !== null && who !== null && actorText(writer) === actorText(who));
