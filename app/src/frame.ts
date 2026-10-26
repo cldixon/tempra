@@ -33,4 +33,4 @@ export const SETTINGS_VIEWS: ReadonlySet<Place["view"]> = new Set([
 ]);
 
 /** The account's pages: the library list and the Inbox, or the account's settings. */
-export type AccountPage = "libraries" | "inbox" | "welcome" | "account" | "agents" | "invitations";
+export type AccountPage = "libraries" | "welcome" | "account" | "agents" | "invitations";

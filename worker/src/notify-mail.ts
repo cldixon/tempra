@@ -79,7 +79,7 @@ export function composeBatch(origin: string, key: string, items: Item[]): Compos
   const subject =
     items.length === 1 && first
       ? `${who(first.actor)} ${KIND_TEXT[first.kind] ?? first.kind}${first.path ? ` on ${first.path}` : ""}`
-      : `${items.length} new in your Tempra inbox`;
+      : `${items.length} new notifications in Tempra`;
   const text = items
     .map((i) => `${itemLine(i)}:\n${i.excerpt ? `  ${i.excerpt}\n` : ""}  ${itemLink(origin, i)}\n`)
     .join("\n");
@@ -92,8 +92,8 @@ export function composeBatch(origin: string, key: string, items: Item[]): Compos
   const f = footer(origin, key);
   return {
     subject,
-    text: `${text}\nYour inbox: ${origin}/inbox\n${f.text}`,
-    html: `${html}<p><a href="${esc(`${origin}/inbox`)}">Your inbox</a></p>${f.html}`,
+    text: `${text}\nTempra: ${origin}/\n${f.text}`,
+    html: `${html}<p><a href="${esc(`${origin}/`)}">Open Tempra</a></p>${f.html}`,
     headers: f.headers,
   };
 }

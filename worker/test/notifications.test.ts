@@ -398,7 +398,7 @@ describe("notification mail (TEMPRA-74)", () => {
     expect(mails).toHaveLength(1);
     const m = mails[0];
     expect(m?.to).toBe("owner@example.com");
-    expect(m?.subject).toBe("3 new in your Tempra inbox");
+    expect(m?.subject).toBe("3 new notifications in Tempra");
     expect(m?.text).toContain("@friend replied on a.md in owner/demo");
     expect(m?.text).toContain(`${origin}/owner/demo/a.md#comments`);
     expect(m?.html).toContain("<ul>");

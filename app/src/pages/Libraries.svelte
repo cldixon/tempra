@@ -143,7 +143,7 @@
 </ComposeDialog>
 {#if waiting > 0}
   <p>
-    <a href="/inbox">{waiting === 1 ? "An invitation" : `${waiting} invitations`} to a library</a>
+    <a href="/invitations">{waiting === 1 ? "An invitation" : `${waiting} invitations`} to a library</a>
     {waiting === 1 ? "is" : "are"} waiting for you.
   </p>
 {/if}

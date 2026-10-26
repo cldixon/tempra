@@ -51,6 +51,23 @@ const INBOX_ITEM = {
   href: "/ann/notes/a.md#comments",
 };
 
+const INVITE_ITEM = {
+  ...INBOX_ITEM,
+  id: "i2",
+  kind: "invitation",
+  library: "sam/plans",
+  library_title: "Plans",
+  path: null,
+  thread: null,
+  title: null,
+  actor: "human:sam",
+  who: "@sam",
+  excerpt: "write",
+  invitation: "inv1",
+  actions: ["accept", "decline"],
+  href: "/invitations",
+};
+
 const realFetch = globalThis.fetch;
 const realSocket = globalThis.WebSocket;
 beforeEach(() => {
@@ -64,9 +81,9 @@ beforeEach(() => {
       : url.includes("/events")
         ? { events: [], seq: 8 }
         : url.includes("/inbox/count")
-          ? { open: 2 }
+          ? { open: 3 }
           : url.includes("/api/v1/inbox?")
-            ? { items: [INBOX_ITEM], next: null, open: 2 }
+            ? { items: [INBOX_ITEM, INVITE_ITEM], next: null, open: 3 }
             : url.includes("/api/v1/libraries")
               ? {
                   libraries: [
@@ -136,29 +153,46 @@ describe("the tree's rules (Tree.svelte, tree.ts)", () => {
 describe("the account's frame (AccountFrame.svelte)", () => {
   test("the bar, the sidebar and the page", async () => {
     const children = createRawSnippet(() => ({ render: () => "<p>Page</p>" }));
+    // The library list has no sidebar and no drawer: its page lists the libraries (TEMPRA-189).
     const f = draw(AccountFrame, { page: "libraries", me: null, children });
     await settle(10);
     const brand = f.host.querySelector(".topbar-brand");
     expect(brand?.textContent).toBe("TTempra");
     expect(brand?.querySelector("button.search-button")?.getAttribute("aria-label")).toBe("Search");
     expect(f.host.querySelector("main.ws-main")?.textContent?.trim()).toBe("Page");
-    const rows = [...f.host.querySelectorAll(".nav-row")].map((r) => r.textContent);
-    // The Inbox is the bell's, in no sidebar (TEMPRA-189); the bell counts what waits.
-    expect(rows).toEqual(["Libraries", "DDev", "NNotes (@ann)"]);
-    // The bell opens a panel of what waits, each a link, Open Inbox at its foot (TEMPRA-189).
+    expect(f.host.querySelector("section.ws-sidebar")).toBeNull();
+    expect(f.host.querySelector("button.ws-menu")).toBeNull();
+    expect(f.host.querySelector(".workspace.bare")).not.toBeNull();
+    // The bell is the notifications: a panel of what waits, a reply a link to its thread, an
+    // invitation answered in place; no Inbox page to link to.
     const bell = f.host.querySelector<HTMLButtonElement>("button.bell");
-    expect(bell?.getAttribute("aria-label")).toBe("Inbox, 2 waiting");
-    expect(bell?.querySelector(".badge")?.textContent).toBe("2");
+    expect(bell?.getAttribute("aria-label")).toBe("Notifications, 3 waiting");
+    expect(bell?.querySelector(".badge")?.textContent).toBe("3");
     expect(f.host.querySelector(".bell-pop")).toBeNull();
     bell?.click();
     await settle(10);
     const pop = f.host.querySelector(".bell-pop");
+    expect(pop?.querySelector(".bell-head")?.textContent).toBe("Notifications");
     const item = pop?.querySelector<HTMLAnchorElement>("a.bell-item");
     expect(item?.getAttribute("href")).toBe("/ann/notes/a.md#thread-t1");
     expect(item?.textContent).toContain("Reader");
     expect(item?.textContent).toContain("@ann replied to your thread");
+    const invite = pop?.querySelector("div.bell-item");
+    expect(invite?.textContent).toContain("Plans");
+    expect(invite?.textContent).toContain("@sam invited you to write");
+    const answers = [...(invite?.querySelectorAll("button") ?? [])].map((b) => b.textContent);
+    expect(answers).toEqual(["Accept", "Decline"]);
     expect(pop?.querySelector(".bell-more")?.textContent).toBe("1 more");
-    expect(pop?.querySelector("a.bell-foot")?.getAttribute("href")).toBe("/inbox");
+    expect(pop?.querySelector('a[href="/inbox"]')).toBeNull();
+    f.destroy();
+  });
+
+  test("Invitations keep the account's sidebar", async () => {
+    const children = createRawSnippet(() => ({ render: () => "<p>Page</p>" }));
+    const f = draw(AccountFrame, { page: "invitations", me: null, children });
+    await settle(10);
+    const rows = [...f.host.querySelectorAll(".nav-row")].map((r) => r.textContent);
+    expect(rows).toEqual(["Libraries", "DDev", "NNotes (@ann)"]);
     expect(f.host.querySelector("section.ws-sidebar")?.hasAttribute("hidden")).toBe(false);
     f.destroy();
   });

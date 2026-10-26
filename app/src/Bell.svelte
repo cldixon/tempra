@@ -5,17 +5,17 @@
   import Menu from "./Menu.svelte";
 
   /**
-   * The bell (TEMPRA-189): what waits as a badge, and a panel under it listing what waits, each
-   * one a link, with Open Inbox at its foot, so a look at the Inbox never leaves the page. The
-   * count follows the feed and every action on an item.
+   * The bell (TEMPRA-189): the person's notifications, on every page. What waits is a badge; the
+   * panel under it lists it, so a look never leaves the page. The count follows the feed and every
+   * action on an item.
    */
   const open = useOpenCount();
   const n = $derived(open.current);
 </script>
 
 <Menu
-  name={n > 0 ? `Inbox, ${n} waiting` : "Inbox"}
-  title="Inbox"
+  name={n > 0 ? `Notifications, ${n} waiting` : "Notifications"}
+  title="Notifications"
   buttonClass="icon-button bell"
   listClass="bell-pop"
   align="end"
@@ -24,5 +24,7 @@
     <Icon name="bell" />
     {#if n > 0}<span class="badge" aria-hidden="true">{n > 99 ? "99+" : n}</span>{/if}
   {/snippet}
-  <BellList />
+  {#snippet children(close: () => void)}
+    <BellList {close} />
+  {/snippet}
 </Menu>

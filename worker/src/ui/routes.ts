@@ -342,9 +342,11 @@ export function registerUiRoutes<E extends AppEnv>(
     }
     return shell(p);
   });
-  for (const path of ["/welcome", "/agents", "/account", "/invitations", "/inbox"]) {
+  for (const path of ["/welcome", "/agents", "/account", "/invitations"]) {
     get(path, shell);
   }
+  // There is no Inbox page (TEMPRA-189): notifications are the bell's panel, on every page.
+  app.get("/inbox", (c) => c.redirect("/", 302));
   // Email settings are one switch on the Account page (TEMPRA-189).
   app.get("/notifications", (c) => c.redirect("/account#email", 301));
   // Agents (2026-10-23) took the place of Connect an agent, Tokens and Connected apps; a link to
@@ -407,12 +409,11 @@ export function registerUiRoutes<E extends AppEnv>(
     return p.c.redirect(`/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.slug)}/`, 308);
   });
 
-  // Needs you retired into the Inbox (take 4, TEMPRA-116): its URL lands on the Inbox filtered
-  // to the library, after the same check as the library's pages.
+  // Needs you is retired (TEMPRA-116), and so is the Inbox page (TEMPRA-189): its URL lands on
+  // the library's home, after the same check as the library's pages.
   get("/:owner/:lib/-/needs", async (p) => {
     const { ref } = await openLibrary(p);
-    const library = `${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.slug)}`;
-    return p.c.redirect(`/inbox?library=${library}`, 308);
+    return p.c.redirect(`/${encodeURIComponent(ref.owner)}/${encodeURIComponent(ref.slug)}/`, 308);
   });
 
   // The markdown exactly as an export writes it (spec: raw-source view).

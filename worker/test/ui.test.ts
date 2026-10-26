@@ -66,7 +66,6 @@ describe("the app's pages (TEMPRA-9)", () => {
       "/welcome",
       "/agents",
       "/account",
-      "/inbox",
     ]) {
       const r = await page(s, path);
       expect(r.status).toBe(200);
@@ -89,11 +88,14 @@ describe("the app's pages (TEMPRA-9)", () => {
     expect(one.html).not.toMatch(/<style|\sstyle=/);
   });
 
-  test("Needs you's URL lands on the Inbox filtered to the library (TEMPRA-116)", async () => {
+  test("Needs you's URL lands on the library's home, the Inbox's on the list (TEMPRA-189)", async () => {
     const s = setup();
     const r = await page(s, `${LIB}/-/needs`);
     expect(r.status).toBe(308);
-    expect(r.headers.get("Location")).toBe("/inbox?library=owner/demo");
+    expect(r.headers.get("Location")).toBe("/owner/demo/");
+    const inbox = await page(s, "/inbox?library=owner/demo");
+    expect(inbox.status).toBe(302);
+    expect(inbox.headers.get("Location")).toBe("/");
     const stranger = await s.stranger("needs@example.com");
     expect((await stranger.app.request(`${LIB}/-/needs`)).status).toBe(404);
   });

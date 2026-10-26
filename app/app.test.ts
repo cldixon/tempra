@@ -24,10 +24,8 @@ describe("routes follow the server's URLs (tempra-dev: v2/urls-and-handles)", ()
     expect(at(urls.since("a/b.md", 7))).toMatchObject({ compare: { kind: "since", seq: 7 } });
     expect(at(urls.file("a/b.md"))).toMatchObject({ page: "file", compare: undefined });
     expect(at(urls.thread("a/b.md", "t1"))).toMatchObject({ page: "file", path: "a/b.md" });
-    // The old `-/needs` URL redirects to the Inbox filtered to the library (TEMPRA-116).
-    expect(urls.inbox()).toBe("/inbox?library=ann/notes");
-    expect(at(urls.inbox())).toEqual({ page: "inbox", library: "ann/notes" });
-    expect(at("/ann/notes/-/needs")).toEqual({ page: "redirect", to: "/inbox?library=ann/notes" });
+    // The old `-/needs` URL lands on the library's home: the bell holds what waits (TEMPRA-189).
+    expect(at("/ann/notes/-/needs")).toEqual({ page: "redirect", to: "/ann/notes/" });
     expect(at(urls.activity())).toMatchObject({
       page: "activity",
       filters: { view: "summary", who: "everyone" },
@@ -99,10 +97,9 @@ describe("routes follow the server's URLs (tempra-dev: v2/urls-and-handles)", ()
     });
     expect(at("/ann/notes/-/connect")).toMatchObject({ page: "library-connect" });
     expect(at("/invitations")).toEqual({ page: "invitations" });
-    expect(at("/inbox")).toEqual({ page: "inbox", library: null });
-    // One state (TEMPRA-189): older links to the Done tab land on the Inbox.
-    expect(at("/inbox?all=1")).toEqual({ page: "inbox", library: null });
-    expect(at("/inbox?done=1&library=ann/notes")).toEqual({ page: "inbox", library: "ann/notes" });
+    // No Inbox page (TEMPRA-189): notifications are the bell's panel; its old links land on `/`.
+    expect(at("/inbox")).toEqual({ page: "redirect", to: "/" });
+    expect(at("/inbox?done=1&library=ann/notes")).toEqual({ page: "redirect", to: "/" });
     expect(at("/notifications")).toEqual({ page: "redirect", to: "/account#email" });
     for (const p of ["activity", "transfer", "recovery", "delete", "members"]) {
       expect(at(`/ann/notes/-/${p}`)).toMatchObject({ page: p, owner: "ann", slug: "notes" });

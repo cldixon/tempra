@@ -1,4 +1,4 @@
-import { type ActivityFilters, type ActivityView, inboxUrl } from "./urls";
+import type { ActivityFilters, ActivityView } from "./urls";
 
 /** The pages the app draws itself; every other URL is a server page, loaded in full. */
 export type Route =
@@ -7,7 +7,6 @@ export type Route =
   | { page: "agents"; newToken: boolean; library: string | null }
   | { page: "account"; done: string | null }
   | { page: "invitations" }
-  | { page: "inbox"; library: string | null }
   /** A page that moved: the app replaces the URL with `to` (as the server answers with a 308). */
   | { page: "redirect"; to: string }
   | { page: "members"; owner: string; slug: string }
@@ -95,9 +94,8 @@ export function match(url: URL): Route | null {
   // Email settings are one switch on the Account page (TEMPRA-189).
   if (path === "/notifications") return { page: "redirect", to: "/account#email" };
   if (path === "/invitations") return { page: "invitations" };
-  // The Inbox (TEMPRA-116, TEMPRA-189): what waits, then Earlier; all libraries or one. Older
-  // links' `?done=1` and `?all=1` land on the same page.
-  if (path === "/inbox") return { page: "inbox", library: q.get("library")?.trim() || null };
+  // The Inbox page went (TEMPRA-189): notifications are the bell's panel, on every page.
+  if (path === "/inbox") return { page: "redirect", to: "/" };
   const m = /^\/([^/]+)\/([^/]+)\/(.*)$/.exec(path);
   if (!m) return null;
   const owner = decode(m[1] ?? "");
@@ -139,11 +137,9 @@ export function match(url: URL): Route | null {
       // The For agents page is retired (TEMPRA-144): its address lands on the library's home.
       case "work":
         return tail === "" ? { page: "redirect", to: `/${owner}/${slug}/` } : null;
-      // The old `-/needs` URL: the Inbox, filtered to the library (TEMPRA-116).
+      // The old `-/needs` URL (TEMPRA-116): the library's home, the bell holding what waits.
       case "needs":
-        return tail === ""
-          ? { page: "redirect", to: inboxUrl({ library: `${owner}/${slug}` }) }
-          : null;
+        return tail === "" ? { page: "redirect", to: `/${owner}/${slug}/` } : null;
       case "settings":
       case "transfer":
       case "recovery":

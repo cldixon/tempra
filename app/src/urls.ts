@@ -72,10 +72,6 @@ export class Urls {
   restore(path: string, to: number) {
     return `${this.base}-/restore/${enc(path)}${query({ to })}`;
   }
-  /** The Inbox, filtered to this library. */
-  inbox() {
-    return inboxUrl({ library: `${this.owner}/${this.slug}` });
-  }
   /**
    * Activity (take 4, TEMPRA-115): the Summary (requests grouped by day) or Every event (the
    * ledger as a table), filtered as the page's controls set.
@@ -181,16 +177,7 @@ export function folderName(path: string) {
   return name ? name[0]?.toUpperCase() + name.slice(1) : path;
 }
 
-/** The account's Inbox: Open or Done, all libraries or one (`owner/slug`). */
-export function inboxUrl(opts: { library?: string | null } = {}): string {
-  const q = new URLSearchParams();
-  if (opts.library) q.set("library", opts.library);
-  // The slash between owner and slug reads better left as it is.
-  const s = q.toString().replace(/%2F/g, "/");
-  return s ? `/inbox?${s}` : "/inbox";
-}
-
-/** A library's Urls from its "owner/slug" (as the Inbox's items and the API name it). */
+/** A library's Urls from its "owner/slug" (as notifications and the API name it). */
 export function urlsOf(library: string): Urls {
   const [owner = "", slug = ""] = library.split("/");
   return new Urls(owner, slug);

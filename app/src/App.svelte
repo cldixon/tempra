@@ -18,7 +18,6 @@
   import Activity from "./pages/Activity.svelte";
   import File from "./pages/File.svelte";
   import Home from "./pages/Home.svelte";
-  import Inbox from "./pages/Inbox.svelte";
   import Libraries from "./pages/Libraries.svelte";
   import Redirect from "./Redirect.svelte";
   import { match, pageKey } from "./router";
@@ -43,10 +42,9 @@
       case "agents":
       case "account":
       case "invitations":
-      case "inbox":
         return address.page;
       case "redirect":
-        return "inbox";
+        return "libraries";
       default:
         return null;
     }
@@ -119,8 +117,6 @@
     {#await settings() then S}<S.Account done={route.done} />{/await}
   {:else if route.page === "invitations"}
     {#await settings() then S}<S.Invitations />{/await}
-  {:else if route.page === "inbox"}
-    <Inbox library={route.library} />
   {:else if route.page === "redirect"}
     <Redirect to={route.to} />
   {:else if pinnedUrls}
