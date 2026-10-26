@@ -14,7 +14,7 @@ export const LINK_REST_MS = 80;
 /**
  * What following a link would load first, when it is worth loading ahead; null otherwise. Only
  * the app's own pages that registered a load (prefetch.ts), within `library` when the frame is a
- * library's (an account page, the Inbox, follows links into any library); never a link that opens
+ * library's (an account page follows links into any library); never a link that opens
  * elsewhere, a download, another site, or a page already in the cache (it draws from there at once
  * and is checked again when it opens).
  */
