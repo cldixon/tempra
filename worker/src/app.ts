@@ -29,7 +29,7 @@ import { normalizePath, underPrefix } from "./okf/paths";
 import type { JsonObject } from "./okf/types";
 import { fromThisSite } from "./origin";
 import type { RestoreOutcome, RestoreRecord } from "./recovery";
-import type { RenderDiagram } from "./render";
+import type { RenderContext, RenderDiagram } from "./render";
 import { readCookie, SESSION_COOKIE, type Sessions } from "./session";
 import { type Mailer, registerSignInRoutes } from "./signin";
 import { OkfError } from "./store/errors";
@@ -764,7 +764,11 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   app.get(`${BASE}/export`, async (c) => {
     const format = c.req.query("format") ?? "tar";
     if (format !== "tar") throw new OkfError(400, "bad_format", "Only format=tar is supported.");
-    return exportTar(c.var.lib, c.var.deps.blobs, num(c, "at"), c.var.token.library.slug);
+    const who = tokenAdmission(c.var.token);
+    return exportTar(c.var.lib, c.var.deps, num(c, "at"), c.var.token.library.slug, {
+      account: who.account,
+      library: who.library,
+    });
   });
 
   // ------------------------------------------------------------------ tier 2 extras
@@ -1135,8 +1139,14 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     const bad = new OkfError(403, "bad_download", "This download link is invalid or has expired.");
     if (!lib) throw bad;
     const payload = await lib.openDownload(c.req.param("token"));
-    if (payload.k === "export")
-      return exportTar(lib, d.blobs, payload.at, payload.name ?? "library");
+    if (payload.k === "export") {
+      // The link is the credential; the library's owner is whose renders the diagrams count as.
+      const ref = await d.accounts.libraryByDoId(c.req.param("lib"));
+      return exportTar(lib, d, payload.at, payload.name ?? "library", {
+        account: ref?.owner ?? c.req.param("lib"),
+        library: ref?.id,
+      });
+    }
     const obj = await d.blobs.get(payload.hash);
     if (!obj) throw new OkfError(404, "not_found", "The file's bytes are missing.");
     return c.body(obj.body as ReadableStream, 200, {
@@ -1628,14 +1638,20 @@ function bearer(c: C): string {
   return m[1];
 }
 
-/** A conformant bundle as a tar, attachments read from blob storage. */
+/**
+ * A conformant bundle as a tar, attachments read from blob storage, with each Mermaid fence drawn
+ * beside its concept as SVG when a renderer is there (TEMPRA-168).
+ */
 async function exportTar(
   lib: LibraryClient,
-  blobs: BlobStore,
+  d: Deps,
   at: number | undefined,
   name: string,
+  ctx: RenderContext,
 ) {
-  const bundle = await bundleTar(lib, blobs, at);
+  const bundle = await bundleTar(lib, d.blobs, at, {
+    diagrams: d.renderDiagram ? { render: d.renderDiagram, ctx } : undefined,
+  });
   return new Response(bundle.bytes as unknown as ArrayBuffer, {
     headers: {
       "Content-Type": "application/x-tar",

@@ -96,7 +96,7 @@ These tools have no equivalent in a folder of files. Use them instead of greppin
 | A concept's past versions | `history`, `read(path, at)`, `diff` |
 | See a Mermaid diagram drawn, before or after writing it | `render` |
 | Undo a change or a whole request (the library's owner only) | `revert` |
-| The whole bundle as files | `export` |
+| The whole bundle as files (each Mermaid diagram drawn beside its concept as `<concept>.diagrams/<n>.svg`, which import ignores) | `export` |
 
 A good maintenance session: `start`, `log` to see what changed, `work` to pick an item, fix it, repeat.
 

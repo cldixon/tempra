@@ -20,6 +20,13 @@ export const RENDER_TIMEOUT_MS = 30_000;
 /** The largest source sent, in characters; the render Worker refuses above it too. */
 export const MAX_RENDER_SOURCE = 50_000;
 
+/**
+ * The width a diagram is drawn at for a model (TEMPRA-166) and in exports (TEMPRA-168): the
+ * reader's column (`--tempra-measure`), so the PNG at 2x is within MODEL_EDGE and the layout is
+ * what people see.
+ */
+export const RENDER_WIDTH = 680;
+
 /** The Renderer entrypoint's RPC, as the RENDER binding exposes it. */
 export interface RenderService {
   render(req: RenderRequest): Promise<RenderResult>;

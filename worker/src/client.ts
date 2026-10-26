@@ -1,3 +1,4 @@
+import { type DiagramExport, drawnDiagrams, isDrawnDiagram } from "./diagram-export";
 import { checkAttachment, formatOf, imageInfo } from "./media";
 import type { FigureFact } from "./okf/figures";
 import { sha256Hex } from "./okf/hash";
@@ -394,7 +395,8 @@ export function mediaFor(path: string, header?: string | null): string | null {
 /**
  * Turns uploaded bundle files into import files: markdown as concepts, everything else stored in
  * the blob store first. `strip` drops leading directories; dot-directories (.git, .obsidian) are
- * skipped.
+ * skipped, and so are drawn diagrams beside a concept (`<concept>.diagrams/<n>.svg`, TEMPRA-168),
+ * which an export derives and an import never makes attachments of.
  */
 export async function bundleFiles(
   blobs: BlobStore,
@@ -402,9 +404,12 @@ export async function bundleFiles(
   strip = 0,
 ): Promise<ImportFile[]> {
   const files: ImportFile[] = [];
-  for (const f of raw) {
-    const path = normalizePath(f.path.split("/").slice(strip).join("/"));
+  const paths = raw.map((f) => normalizePath(f.path.split("/").slice(strip).join("/")));
+  const concepts = new Set(paths.filter((p): p is string => !!p?.endsWith(".md")));
+  for (const [i, f] of raw.entries()) {
+    const path = paths[i];
     if (!path || path.split("/").some((s) => s.startsWith("."))) continue;
+    if (isDrawnDiagram(path, concepts)) continue;
     if (path.endsWith(".md")) files.push({ path, markdown: new TextDecoder().decode(f.bytes) });
     else files.push({ path, blob: await putBlob(blobs, f.bytes, mediaFor(path), path) });
   }
@@ -412,11 +417,16 @@ export async function bundleFiles(
   return files;
 }
 
-/** A library's bundle as tar bytes, attachments read from blob storage (spec: Reads and export). */
+/**
+ * A library's bundle as tar bytes, attachments read from blob storage (spec: Reads and export).
+ * With `diagrams`, each concept's Mermaid fences are drawn beside it as SVG (TEMPRA-168): on for
+ * downloads, off for the nightly export so it stays small (TEMPRA-83).
+ */
 export async function bundleTar(
   lib: { exportBundle(at?: number): unknown },
   blobs: BlobStore,
   at?: number,
+  opts: { diagrams?: DiagramExport } = {},
 ): Promise<{ seq: number; bytes: Uint8Array; files: number }> {
   const bundle = (await lib.exportBundle(at)) as {
     seq: number;
@@ -430,6 +440,11 @@ export async function bundleTar(
       const bytes = await blobBytes(blobs, f.blob.hash);
       if (!bytes) throw new OkfError(500, "blob_missing", `Bytes for ${f.path} are missing.`);
       files.push({ path: f.path, bytes });
+    }
+  }
+  if (opts.diagrams) {
+    for (const d of await drawnDiagrams(bundle.files, opts.diagrams)) {
+      files.push({ path: d.path, bytes: enc.encode(d.svg) });
     }
   }
   return { seq: bundle.seq, bytes: writeTar(files), files: files.length };
