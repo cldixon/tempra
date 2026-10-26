@@ -13,6 +13,7 @@ import {
   safeNext,
   sessionCookie,
 } from "./session";
+import type { Found } from "./tenancy";
 
 /**
  * Sign-in for the UI (v2 spec: Accounts and sign-in): email magic links, each with a code to type
@@ -57,6 +58,27 @@ export async function signedIn(
     const user = await deps.sessions.user(secret);
     if (user) return user;
   }
+  return notSignedIn(req);
+}
+
+/**
+ * `signedIn` for a library's page, image or download (TEMPRA-201): the person, with the library
+ * {owner}/{slug} and their membership found in the same D1 query (`Sessions.access`), for
+ * `authorizeLibrary` to decide on.
+ */
+export async function signedInTo(
+  req: Request,
+  deps: Pick<Deps, "sessions">,
+  owner: string,
+  slug: string,
+): Promise<{ user: User; found: Found } | Response> {
+  const secret = readCookie(req, SESSION_COOKIE);
+  const got = secret ? await deps.sessions.access(secret, owner, slug) : null;
+  return got ? { user: got.user, found: got } : notSignedIn(req);
+}
+
+/** No session: the sign-in page for a page load, a 401 page for anything else. */
+function notSignedIn(req: Request): Response {
   const url = new URL(req.url);
   if (req.method === "GET" || req.method === "HEAD") {
     const next = encodeURIComponent(url.pathname + url.search);

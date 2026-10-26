@@ -45,11 +45,11 @@ import {
 } from "./store/store";
 import {
   type AccountGrant,
-  type Authorized,
   authorizeLibrary,
   createLibraryForGrant,
   type Found,
   requireOwner,
+  sessionToken,
 } from "./tenancy";
 import { registerUiRoutes } from "./ui/routes";
 import { STARTER } from "./ui/starter";
@@ -1592,24 +1592,6 @@ async function connectionGrant(c: C, token: string): Promise<AccountGrant> {
     );
   }
   return grant;
-}
-
-/**
- * The signed-in person acting on a library they may reach, as the token the routes act with:
- * attributed to their human: actor, with their role there (a `read` member reads and comments).
- */
-function sessionToken(user: User, { role, ...library }: Authorized): TokenInfo {
-  return {
-    id: `session:${user.id}`,
-    actor: user.actor,
-    scope: role === "read" ? "read" : "write",
-    prefix: null,
-    mcp_tiers: "all",
-    library,
-    created_by: user.id,
-    role,
-    person: user.handle,
-  };
 }
 
 function bearer(c: C): string {

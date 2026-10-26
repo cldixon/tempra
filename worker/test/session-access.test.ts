@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { sha256Hex } from "../src/okf/hash";
-import { API, LIB, OWNER, setup } from "./harness";
+import { API, LIB, OWNER, setup, UI } from "./harness";
+import { makePng } from "./images";
 
 /*
  * A session's library request authorizes in one D1 query (TEMPRA-192, `Sessions.access`): the
@@ -81,5 +82,52 @@ describe("a session's library request", () => {
     expect((await friend.app.request(`${API}/stats`)).status).toBe(404);
     await s.sessions.end(s.ownerSession);
     expect((await s.app.request(`${API}/stats`)).status).toBe(401);
+  });
+});
+
+describe("a session's library page, image or download (TEMPRA-201)", () => {
+  const PNG = makePng(64, 32);
+  const HASH = new Bun.CryptoHasher("sha256").update(PNG).digest("hex");
+  async function withFiles() {
+    const s = setup();
+    await s.req("/files/notes/a.md", {
+      method: "PUT",
+      body: "---\ntype: Note\n---\nA.\n",
+      headers: { "Content-Type": "text/markdown" },
+    });
+    await s.req("/files/img/a.png", {
+      method: "PUT",
+      headers: { "Content-Type": "image/png" },
+      body: PNG as unknown as BodyInit,
+    });
+    return s;
+  }
+
+  test("one D1 query before the library, for the owner and for a member", async () => {
+    const s = await withFiles();
+    const friend = await s.stranger("friend@example.com");
+    await s.accounts.share(LIB.id, friend.user.id, "read", OWNER.id);
+    for (const who of [s.app, friend.app]) {
+      for (const path of [`${UI}/-/raw/notes/a.md`, `${UI}/-/image/${HASH}`]) {
+        s.queries.length = 0;
+        expect((await who.request(path)).status).toBe(200);
+        expect(s.queries).toHaveLength(1);
+      }
+    }
+  });
+
+  test("a stranger and a removed member are told nothing; no session goes to sign-in", async () => {
+    const s = await withFiles();
+    const image = `${UI}/-/image/${HASH}`;
+    const stranger = await s.stranger("stranger@example.com");
+    expect((await stranger.app.request(image)).status).toBe(404);
+    const friend = await s.stranger("friend@example.com");
+    await s.accounts.share(LIB.id, friend.user.id, "read", OWNER.id);
+    expect((await friend.app.request(image)).status).toBe(200);
+    await s.accounts.unshare(LIB.id, friend.user.id);
+    expect((await friend.app.request(image)).status).toBe(404);
+    const anon = await s.anon.request(image);
+    expect(anon.status).toBe(302);
+    expect(anon.headers.get("Location")).toStartWith("/sign-in?next=");
   });
 });
