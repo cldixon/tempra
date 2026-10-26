@@ -1,4 +1,4 @@
-import { type ActivityFilters, type ActivityView, inboxUrl } from "./urls";
+import type { ActivityFilters, ActivityView } from "./urls";
 
 /** The pages the app draws itself; every other URL is a server page, loaded in full. */
 export type Route =
@@ -6,9 +6,7 @@ export type Route =
   | { page: "welcome" }
   | { page: "agents"; newToken: boolean; library: string | null }
   | { page: "account"; done: string | null }
-  | { page: "notifications" }
   | { page: "invitations" }
-  | { page: "inbox"; done: boolean; library: string | null }
   /** A page that moved: the app replaces the URL with `to` (as the server answers with a 308). */
   | { page: "redirect"; to: string }
   | { page: "members"; owner: string; slug: string }
@@ -93,17 +91,11 @@ export function match(url: URL): Route | null {
     };
   }
   if (path === "/account") return { page: "account", done: q.get("done") };
-  if (path === "/notifications") return { page: "notifications" };
+  // Email settings are one switch on the Account page (TEMPRA-189).
+  if (path === "/notifications") return { page: "redirect", to: "/account#email" };
   if (path === "/invitations") return { page: "invitations" };
-  // The Inbox (take 4, TEMPRA-116): Open or Done (take 3's `?all=1` showed done ones too), all
-  // libraries or one.
-  if (path === "/inbox") {
-    return {
-      page: "inbox",
-      done: q.get("done") === "1" || q.get("all") === "1",
-      library: q.get("library")?.trim() || null,
-    };
-  }
+  // The Inbox page went (TEMPRA-189): notifications are the bell's panel, on every page.
+  if (path === "/inbox") return { page: "redirect", to: "/" };
   const m = /^\/([^/]+)\/([^/]+)\/(.*)$/.exec(path);
   if (!m) return null;
   const owner = decode(m[1] ?? "");
@@ -145,11 +137,9 @@ export function match(url: URL): Route | null {
       // The For agents page is retired (TEMPRA-144): its address lands on the library's home.
       case "work":
         return tail === "" ? { page: "redirect", to: `/${owner}/${slug}/` } : null;
-      // The old `-/needs` URL: the Inbox, filtered to the library (TEMPRA-116).
+      // The old `-/needs` URL (TEMPRA-116): the library's home, the bell holding what waits.
       case "needs":
-        return tail === ""
-          ? { page: "redirect", to: inboxUrl({ library: `${owner}/${slug}` }) }
-          : null;
+        return tail === "" ? { page: "redirect", to: `/${owner}/${slug}/` } : null;
       case "settings":
       case "transfer":
       case "recovery":

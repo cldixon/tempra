@@ -43,8 +43,8 @@
   let props: {
     /** The library the pages are in (the bar names it, with its switcher); none on account pages. */
     library?: BrandLibrary;
-    /** The sidebar's content (the drawer's on a phone). */
-    sidebar: Snippet;
+    /** The sidebar's content (the drawer's on a phone); none on a page with no sidebar. */
+    sidebar?: Snippet;
     /** Opens search (Ctrl or Cmd+K too): the library's quick switcher, or the libraries'. */
     onSearch?: () => void;
     /** The sidebar can be hidden (a library's own pages): its state and the way to change it. */
@@ -172,7 +172,9 @@
     return () => document.removeEventListener("keydown", onKey);
   });
 
-  const showSidebar = $derived(!props.hidden || narrow.current);
+  // A page with no sidebar (the library list, TEMPRA-189) has no drawer either: its bar keeps the
+  // mark, Tempra and search on a phone too.
+  const showSidebar = $derived(!!props.sidebar && (!props.hidden || narrow.current));
   const beside = $derived(showSidebar && !narrow.current);
   const slots = $derived({ tools: toolsSlot ?? null, path: pathSlot ?? null });
   provideFrame({
@@ -200,6 +202,7 @@
     [
       "workspace",
       showSidebar ? "" : "sidebar-hidden",
+      props.sidebar ? "" : "bare",
       drawer ? "drawer-open" : "",
     ]
       .filter(Boolean)
@@ -212,14 +215,14 @@
     <!-- Over the sidebar: the mark, the library's name and its switcher, search (TEMPRA-145). -->
     <div class="topbar-brand"><Brand library={props.library} onSearch={props.onSearch} /></div>
     <div class="topbar-page"
-      ><button
+      >{#if props.sidebar}<button
         bind:this={menuButton}
         type="button"
         class="icon-button touch ws-menu"
         aria-label="Menu"
         aria-expanded={drawer}
         onclick={() => (drawer = !drawer)}><Icon name="menu" /></button
-      ><!-- On a phone, the mark and the library's name; the page's title names the page
+      >{/if}<!-- On a phone, the mark and the library's name; the page's title names the page
         (TEMPRA-140, TEMPRA-145). --><div class="ws-topbar-place"
         ><Brand library={props.library} short /></div
       >{#if !showSidebar && props.onHide}<button
@@ -239,7 +242,7 @@
   </header>
   <!-- The page dimmed behind the open drawer; a tap on it closes the drawer. -->
   {#if drawer}<div class="ws-scrim" aria-hidden="true"></div>{/if}
-  <section
+  {#if props.sidebar}<section
     bind:this={sidebar}
     tabindex="-1"
     class={drawer ? "ws-sidebar open" : "ws-sidebar"}
@@ -257,7 +260,7 @@
         onclick={() => (drawer = false)}><Icon name="close" /></button
       ></div>
     {@render props.sidebar()}
-  </section>
+  </section>{/if}
   <!-- A move that waits past the hold says so, quietly (TEMPRA-194); the page draws Loading…. -->
   <p class="visually-hidden" role="status">{here.loading ? "Loading…" : ""}</p>
   <main class="ws-main" bind:this={main} onscroll={(e) => scrolls.set(href, e.currentTarget.scrollTop)}>

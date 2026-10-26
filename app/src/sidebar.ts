@@ -1,10 +1,10 @@
 /*
  * The frame's sidebars (take 4, TEMPRA-113; tempra-dev: app/workspace): a library's (the tree,
  * then a fixed foot of its tools: Activity, Settings; TEMPRA-145, after Linear's docs), its
- * settings' (a way back, then the tabs by role), the account's (Libraries, the Inbox, the
- * person's libraries) and the account's settings' (a way back, then each page). The bar over
- * them holds the mark, the library and its switcher, and search. On a phone each is the drawer's
- * content under the same at its head; the library's adds the Inbox at its foot.
+ * settings' (a way back, then the tabs by role), the account's (Libraries, the person's
+ * libraries) and the account's settings' (a way back, then each page). The bar over them holds
+ * the mark, the library and its switcher, and search. On a phone each is the drawer's content
+ * under the same at its head. The Inbox is the bell's (TEMPRA-189), in no sidebar.
  */
 
 import type { AccountPage, Place } from "./frame";
@@ -33,7 +33,6 @@ export function settingsTabs(urls: Urls, role: string | null) {
 /** The account settings' pages, in the sidebar's order. */
 export const ACCOUNT_SETTINGS: readonly [AccountPage, string, string][] = [
   ["account", "/account", "Account"],
-  ["notifications", "/notifications", "Notifications"],
   ["agents", "/agents", "Agents"],
 ];
 

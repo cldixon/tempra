@@ -4,7 +4,7 @@ import { LINK_REST_MS, linkLoad, linkOf } from "./links";
 /**
  * Loads a page ahead when the pointer rests on a link to it, the keyboard reaches it, or a finger
  * touches it (phones have no hover) (TEMPRA-193): one delegated listener for the frame, so the
- * tree, a page's body, Recently changed, Activity, the Inbox, the cards and Linked from all do it
+ * tree, a page's body, Recently changed, Activity, the bell's panel, the cards and Linked from all do it
  * the same way. `prefetch` keeps its guards: nothing while a load is on its way, a fresh one is
  * here, or the session is holding back after a 429.
  */

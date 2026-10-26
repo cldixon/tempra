@@ -489,7 +489,7 @@ describe("the account's theme (take 4, TEMPRA-113)", () => {
     expect((await dark.json()) as unknown).toEqual({ theme: "dark" });
     const me = (await (await s.app.request("/api/v1/me")).json()) as { theme: string | null };
     expect(me.theme).toBe("dark");
-    for (const path of ["/", "/owner/demo/", "/owner/demo/a.md", "/inbox"]) {
+    for (const path of ["/", "/owner/demo/", "/owner/demo/a.md", "/agents"]) {
       const r = await s.app.request(path, { redirect: "manual" });
       expect(r.status).toBe(200);
       expect(await r.text()).toContain('<html lang="en" data-theme="dark"><head>');

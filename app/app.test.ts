@@ -4,7 +4,6 @@ import { actorView } from "./src/agents";
 import { initials } from "./src/chrome";
 import { versionHref } from "./src/concept/history";
 import { panelInUrl, threadInHash } from "./src/concept/panel";
-import { markReadBody } from "./src/inbox";
 import { followsInPlace, match, pageKey } from "./src/router";
 import { Urls } from "./src/urls";
 
@@ -25,10 +24,8 @@ describe("routes follow the server's URLs (tempra-dev: v2/urls-and-handles)", ()
     expect(at(urls.since("a/b.md", 7))).toMatchObject({ compare: { kind: "since", seq: 7 } });
     expect(at(urls.file("a/b.md"))).toMatchObject({ page: "file", compare: undefined });
     expect(at(urls.thread("a/b.md", "t1"))).toMatchObject({ page: "file", path: "a/b.md" });
-    // The old `-/needs` URL redirects to the Inbox filtered to the library (TEMPRA-116).
-    expect(urls.inbox()).toBe("/inbox?library=ann/notes");
-    expect(at(urls.inbox())).toEqual({ page: "inbox", done: false, library: "ann/notes" });
-    expect(at("/ann/notes/-/needs")).toEqual({ page: "redirect", to: "/inbox?library=ann/notes" });
+    // The old `-/needs` URL lands on the library's home: the bell holds what waits (TEMPRA-189).
+    expect(at("/ann/notes/-/needs")).toEqual({ page: "redirect", to: "/ann/notes/" });
     expect(at(urls.activity())).toMatchObject({
       page: "activity",
       filters: { view: "summary", who: "everyone" },
@@ -100,13 +97,10 @@ describe("routes follow the server's URLs (tempra-dev: v2/urls-and-handles)", ()
     });
     expect(at("/ann/notes/-/connect")).toMatchObject({ page: "library-connect" });
     expect(at("/invitations")).toEqual({ page: "invitations" });
-    expect(at("/inbox")).toEqual({ page: "inbox", done: false, library: null });
-    expect(at("/inbox?all=1")).toEqual({ page: "inbox", done: true, library: null });
-    expect(at("/inbox?done=1&library=ann/notes")).toEqual({
-      page: "inbox",
-      done: true,
-      library: "ann/notes",
-    });
+    // No Inbox page (TEMPRA-189): notifications are the bell's panel; its old links land on `/`.
+    expect(at("/inbox")).toEqual({ page: "redirect", to: "/" });
+    expect(at("/inbox?done=1&library=ann/notes")).toEqual({ page: "redirect", to: "/" });
+    expect(at("/notifications")).toEqual({ page: "redirect", to: "/account#email" });
     for (const p of ["activity", "transfer", "recovery", "delete", "members"]) {
       expect(at(`/ann/notes/-/${p}`)).toMatchObject({ page: p, owner: "ann", slug: "notes" });
     }
@@ -256,10 +250,4 @@ describe("the concept page (TEMPRA-128)", () => {
     expect(initials(me.mark)).toBe("DE");
     expect(initials(actorView("human:ann_lee", null, {}, "human:dev").mark)).toBe("AL");
   });
-});
-
-test("Mark all read on a filtered Inbox marks that library's items only (TEMPRA-130, A-1)", () => {
-  expect(markReadBody(undefined, "ann/notes")).toEqual({ library: "ann/notes" });
-  expect(markReadBody(undefined, null)).toEqual({});
-  expect(markReadBody(["i1"], "ann/notes")).toEqual({ ids: ["i1"] });
 });

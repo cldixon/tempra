@@ -4,16 +4,16 @@ import { type AgentLabels, INBOX_EVENT, type InboxItem, type PageTitles } from "
 import { useLoad } from "./load.svelte.ts";
 import { urlsOf } from "./urls";
 
-/** The unread count, for the bell and the sidebar's Inbox row: reloads when told it changed. */
-export function useUnread() {
+/** What waits in the Inbox, for the bell: reloads when told it changed, and on focus. */
+export function useOpenCount() {
   const loaded = useLoad(
     () => "inbox-count",
-    () => api<{ unread: number }>("/api/v1/inbox/count"),
+    () => api<{ open: number }>("/api/v1/inbox/count"),
     [INBOX_EVENT, "focus"],
   );
   return {
     get current(): number {
-      return loaded.data?.unread ?? 0;
+      return loaded.data?.open ?? 0;
     },
   };
 }

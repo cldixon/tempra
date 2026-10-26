@@ -312,7 +312,6 @@ describe("GET /api/v1/libraries (TEMPRA-23)", () => {
     unavailable?: boolean;
     seq?: number;
     health?: unknown;
-    tally?: { changes: number; for_you?: number };
   };
   const list = async (s: ReturnType<typeof setup>) => {
     const r = await s.app.request("/api/v1/libraries");
@@ -354,24 +353,14 @@ describe("GET /api/v1/libraries (TEMPRA-23)", () => {
     expect(good?.unavailable).toBeUndefined();
     expect(good?.seq).toBeNumber();
     expect(good?.health).toBeDefined();
-    expect(good?.tally).toEqual({ changes: 0, for_you: 0 });
   });
 
-  test("a library with no object, or a failing tally, still lists", async () => {
+  test("a library with no object still lists", async () => {
     const s = setup();
     s.deps.libraryByDoId = async () => null;
     expect(await list(s)).toEqual([
       { id: "lib-1", owner: "owner", slug: "demo", role: "owner", unavailable: true },
     ]);
-    const s2 = setup();
-    const n = s2.deps.notifications;
-    if (!n) throw new Error("no notifications");
-    n.unread = async () => {
-      throw new Error("D1 down");
-    };
-    const [row] = await list(s2);
-    expect(row?.unavailable).toBeUndefined();
-    expect(row?.tally).toEqual({ changes: 0 });
   });
 });
 

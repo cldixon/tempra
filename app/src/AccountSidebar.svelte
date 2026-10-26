@@ -1,16 +1,14 @@
 <script lang="ts">
   import type { AccountPage } from "./frame";
-  import { useUnread } from "./inbox.svelte.ts";
   import NavRow from "./NavRow.svelte";
   import { isShared, libraryLabel, type ReachableLibrary } from "./role";
   import { useLibraries } from "./role.svelte.ts";
   import { byKind } from "./sidebar";
   import { Urls } from "./urls";
 
-  /** The account's sidebar: Libraries, the Inbox, then the person's libraries by kind. */
+  /** The account's sidebar: Libraries, then the person's libraries by kind (the Inbox is the bell's). */
   let { page }: { page: AccountPage } = $props();
   const libs = useLibraries();
-  const unread = useUnread();
   const kinds = $derived(byKind(libs.data?.libraries ?? []));
 </script>
 
@@ -23,13 +21,6 @@
 {/snippet}
 <nav class="nav" aria-label="Account">
   <NavRow href="/" current={page === "libraries"} icon="libraries" label="Libraries" />
-  <NavRow
-    href="/inbox"
-    current={page === "inbox" || page === "invitations"}
-    icon="inbox"
-    label="Inbox"
-    unread={unread.current}
-  />
 </nav>
 <div class="sidebar-scroll">
   {#if kinds.yours.length > 0}

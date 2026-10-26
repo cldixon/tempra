@@ -4919,67 +4919,8 @@ export class LibraryStore {
     };
   }
 
-  /**
-   * What happened since a person last looked (TEMPRA-72): changes to content after `since`, by
-   * anyone but that person acting in the app themselves (their agents count: the owner wants to
-   * see what their agents did). Counted in requests, so a batch is one change.
-   */
-  activity(opts: { since: number; person?: string | null }) {
-    const since = Math.max(0, Math.floor(opts.since || 0));
-    const row = this.sql.all<{ n: number; last: number | null }>(
-      `SELECT COUNT(DISTINCT request_id) AS n, MAX(seq) AS last FROM events
-       WHERE seq > ? AND op != 'comment'
-         AND NOT (? != '' AND COALESCE(json_extract(meta, '$.by.person'), '') = ?
-                  AND json_extract(meta, '$.by.agent') IS NULL)`,
-      since,
-      opts.person ?? "",
-      opts.person ?? "",
-    )[0];
-    return { since, head: this.headSeq(), changes: row?.n ?? 0 };
-  }
-
-  /**
-   * The daily digest's counts for one library (TEMPRA-74): what happened since `since` (an ISO
-   * time), by people and by agents, comment threads opened and resolved, and where the library
-   * stands: the library health summary's counts (TEMPRA-66) and its unverified concepts.
-   */
-  digest(opts: { since: string }) {
-    const rows = this.sql.all<{
-      actor: string;
-      op: string;
-      meta: string | null;
-      request_id: string;
-    }>("SELECT actor, op, meta, request_id FROM events WHERE ts >= ? ORDER BY seq", opts.since);
-    const people = new Set<string>();
-    const agents = new Set<string>();
-    let opened = 0;
-    let resolved = 0;
-    for (const r of rows) {
-      if (r.op === "comment") {
-        const kind = (r.meta ? (JSON.parse(r.meta) as JsonObject) : {}).comment as
-          | { kind?: string }
-          | undefined;
-        if (kind?.kind === "open") opened++;
-        if (kind?.kind === "resolve") resolved++;
-        continue;
-      }
-      (r.actor.startsWith("human:") ? people : agents).add(r.request_id);
-    }
-    // The library's health summary (TEMPRA-66), as the daily pass left it.
-    const health = this.health();
-    return {
-      head: this.headSeq(),
-      changes: { people: people.size, agents: agents.size },
-      threads: { opened, resolved },
-      health: { ...health.counts, unverified: health.unverified.total } as Record<string, number>,
-    };
-  }
-
-  /**
-   * Counts for the MCP `start` entry point and the library list; with a person's cursor, also
-   * what changed since they last looked (`activity`).
-   */
-  summary(seen?: { since: number; person?: string | null }) {
+  /** Counts for the MCP `start` entry point and the library list. */
+  summary() {
     // Counted in SQL, never a record per concept (TEMPRA-86); types in the order the paths were
     // first stored, as a walk of the snapshot met them.
     const rows = this.sql.all<{ kind: Kind; type: string; n: number }>(
@@ -5012,7 +4953,6 @@ export class LibraryStore {
           `SELECT COUNT(*) AS n FROM threads t JOIN paths p ON p.concept_id = t.concept_id
            WHERE t.status = 'open'`,
         )[0]?.n ?? 0,
-      ...(seen ? { activity: this.activity(seen) } : {}),
     };
   }
 

@@ -8,11 +8,11 @@ import type { ImportResult, OpResult, RenderJob, RequestContext, WriteNotice } f
 import { tokenAdmission } from "./usage";
 
 /**
- * Notifications (TEMPRA-58 design, TEMPRA-72, TEMPRA-73): items addressed to one person are
- * fanned out into D1 by the Worker once a write has committed in the library, so the inbox, its
- * unread count and each library's "for you" count are one D1 query, never a call to every
- * library the person reaches. General activity is never an item: it is counted from each
- * library's ledger after the person's cursor ("seen up to seq N", here too).
+ * Notifications (TEMPRA-58 design, TEMPRA-72, TEMPRA-73; TEMPRA-173, TEMPRA-189): items addressed
+ * to one person are fanned out into D1 by the Worker once a write has committed in the library,
+ * so the inbox and its count are one D1 query, never a call to every library the person reaches.
+ * An item is open until it is done: opened, or resolved by what it asks for (one state, TEMPRA-189).
+ * What happens in a library is never an item; the person looks at Activity.
  *
  * Who is told (TEMPRA-173; tempra-dev: decisions/notifications-from-zero): a person hears of
  * three things only, an invitation, a mention and a reply. A reply goes to everyone who opened or
@@ -76,17 +76,17 @@ export interface Closes {
   moved: { from: string; to: string }[];
 }
 
-/** An account's mail settings; a library's override is null where it follows the account. */
+/**
+ * An account's mail setting (TEMPRA-189): one switch for mentions and replies, on by default
+ * (stored as the account's `immediate`). Invitations always mail.
+ */
 export interface Prefs {
-  immediate: boolean;
-  digest: boolean;
-  libraries: { library: string; immediate: boolean | null; digest: boolean | null }[];
+  email: boolean;
 }
 
-/** Defaults: mail what is addressed to me at once; the digest is opt-in. */
-export const DEFAULT_PREFS = { immediate: true, digest: false };
+export const DEFAULT_PREFS: Prefs = { email: true };
 
-/** Notification mails a person gets a day, at most (immediate batches and the digest). */
+/** Notification mails a person gets a day, at most. */
 export const MAILS_PER_DAY = 20;
 
 export interface Notifications {
@@ -104,25 +104,14 @@ export interface Notifications {
   closeAfterWrite(library: string, closes: Closes): Promise<void>;
   /** Closes a resolved thread's reply and mention items, for everyone. */
   closeThread(library: string, thread: string): Promise<void>;
-  /** Unread items, in all and per library. */
-  unread(user: string): Promise<{ total: number; libraries: Record<string, number> }>;
-  /** Marks items read: these ids, a library's, or all; returns how many changed. */
-  markRead(user: string, which: { ids?: string[]; library?: string }): Promise<number>;
-  /** Marks an item done (and read); false when it is not the person's. */
+  /** How many items wait on the person: the bell's count. */
+  openCount(user: string): Promise<number>;
+  /** Marks an item done (opened, or by hand); false when it is not the person's. */
   markDone(user: string, id: string, done?: boolean): Promise<boolean>;
   /** Marks done every item of a kind from a place ({owner}/{slug}): an answered invitation. */
   settle(user: string, kind: ItemKind, place: string): Promise<void>;
-  /** The person's cursors, by library id. */
-  seen(user: string): Promise<Record<string, number>>;
-  /** Moves a cursor forward (never back). */
-  setSeen(user: string, library: string, seq: number): Promise<number>;
   prefs(user: string): Promise<Prefs>;
-  /** Sets the account's settings (library "") or a library's override (null follows the account). */
-  setPrefs(
-    user: string,
-    library: string,
-    set: { immediate?: boolean | null; digest?: boolean | null },
-  ): Promise<void>;
+  setPrefs(user: string, prefs: Prefs): Promise<void>;
   /** The account's one-click unsubscribe key, made on first use. */
   unsubscribeKey(user: string): Promise<string>;
   /** Turns all notification mail off for the key's account; its user, or null for no such key. */
@@ -132,10 +121,6 @@ export interface Notifications {
   setMail(ids: string[], state: "sent" | "skipped"): Promise<void>;
   /** Takes one of the day's mails for the person; false when they are at the cap. */
   takeMailSlot(user: string, day: string, cap?: number): Promise<boolean>;
-  /** Accounts with the digest on, for their account or any library. */
-  digestUsers(): Promise<string[]>;
-  setDigestAt(user: string, at: string): Promise<void>;
-  digestAt(user: string): Promise<string | null>;
   recordFailure(day: string): Promise<void>;
   failures(day: string): Promise<number>;
 }
@@ -263,37 +248,12 @@ export function d1Notifications(db: D1Database): Notifications {
         .bind(now, library, thread)
         .run();
     },
-    async unread(user) {
-      const r = await db
-        .prepare(
-          `SELECT COALESCE(library, '') AS library, COUNT(*) AS n FROM notifications
-           WHERE user = ? AND read_at IS NULL AND done_at IS NULL GROUP BY library`,
-        )
+    async openCount(user) {
+      const row = await db
+        .prepare("SELECT COUNT(*) AS n FROM notifications WHERE user = ? AND done_at IS NULL")
         .bind(user)
-        .all<{ library: string; n: number }>();
-      const libraries: Record<string, number> = {};
-      let total = 0;
-      for (const row of r.results) {
-        total += row.n;
-        if (row.library) libraries[row.library] = row.n;
-      }
-      return { total, libraries };
-    },
-    async markRead(user, which) {
-      const now = new Date().toISOString();
-      const ids = (which.ids ?? []).slice(0, 200);
-      const where = which.ids
-        ? `id IN (${ids.map(() => "?").join(", ") || "''"})`
-        : which.library
-          ? "library = ?"
-          : "1 = 1";
-      const r = await db
-        .prepare(
-          `UPDATE notifications SET read_at = ? WHERE user = ? AND read_at IS NULL AND ${where}`,
-        )
-        .bind(now, user, ...(which.ids ? ids : which.library ? [which.library] : []))
-        .run();
-      return r.meta.changes ?? 0;
+        .first<{ n: number }>();
+      return row?.n ?? 0;
     },
     async markDone(user, id, done = true) {
       const now = new Date().toISOString();
@@ -315,63 +275,20 @@ export function d1Notifications(db: D1Database): Notifications {
         .bind(now, now, user, kind, place)
         .run();
     },
-    async seen(user) {
-      const r = await db
-        .prepare("SELECT library, seq FROM library_seen WHERE user = ?")
-        .bind(user)
-        .all<{ library: string; seq: number }>();
-      return Object.fromEntries(r.results.map((x) => [x.library, x.seq]));
-    },
-    async setSeen(user, library, seq) {
-      const n = Math.max(0, Math.floor(seq));
-      await db
-        .prepare(
-          `INSERT INTO library_seen (user, library, seq, updated) VALUES (?1, ?2, ?3, ?4)
-           ON CONFLICT (user, library) DO UPDATE SET seq = MAX(seq, ?3), updated = ?4`,
-        )
-        .bind(user, library, n, new Date().toISOString())
-        .run();
-      const row = await db
-        .prepare("SELECT seq FROM library_seen WHERE user = ? AND library = ?")
-        .bind(user, library)
-        .first<{ seq: number }>();
-      return row?.seq ?? n;
-    },
     async prefs(user) {
-      const r = await db
-        .prepare("SELECT library, immediate, digest FROM notification_prefs WHERE user = ?")
+      const row = await db
+        .prepare("SELECT immediate FROM notification_prefs WHERE user = ? AND library = ''")
         .bind(user)
-        .all<{ library: string; immediate: number | null; digest: number | null }>();
-      const account = r.results.find((x) => x.library === "");
-      return {
-        immediate: bool(account?.immediate) ?? DEFAULT_PREFS.immediate,
-        digest: bool(account?.digest) ?? DEFAULT_PREFS.digest,
-        libraries: r.results
-          .filter((x) => x.library !== "" && (x.immediate !== null || x.digest !== null))
-          .map((x) => ({
-            library: x.library,
-            immediate: bool(x.immediate),
-            digest: bool(x.digest),
-          })),
-      };
+        .first<{ immediate: number | null }>();
+      return { email: bool(row?.immediate) ?? DEFAULT_PREFS.email };
     },
-    async setPrefs(user, library, set) {
-      const cols: string[] = [];
-      const vals: (number | null)[] = [];
-      for (const k of ["immediate", "digest"] as const) {
-        if (set[k] === undefined) continue;
-        // The account's own settings are never "follow"; a library's may be.
-        if (library === "" && set[k] === null) continue;
-        cols.push(k);
-        vals.push(flag(set[k]));
-      }
-      if (cols.length === 0) return;
+    async setPrefs(user, prefs) {
       await db
         .prepare(
-          `INSERT INTO notification_prefs (user, library, ${cols.join(", ")}) VALUES (?, ?, ${cols.map(() => "?").join(", ")})
-           ON CONFLICT (user, library) DO UPDATE SET ${cols.map((c) => `${c} = excluded.${c}`).join(", ")}`,
+          `INSERT INTO notification_prefs (user, library, immediate) VALUES (?, '', ?)
+           ON CONFLICT (user, library) DO UPDATE SET immediate = excluded.immediate`,
         )
-        .bind(user, library, ...vals)
+        .bind(user, flag(prefs.email))
         .run();
     },
     async unsubscribeKey(user) {
@@ -401,19 +318,10 @@ export function d1Notifications(db: D1Database): Notifications {
         .bind(key)
         .first<{ user: string }>();
       if (!row) return null;
-      // Every library's override goes too: one click means no more notification mail.
-      await db.batch([
-        db
-          .prepare(
-            "UPDATE notification_prefs SET immediate = 0, digest = 0 WHERE user = ? AND library = ''",
-          )
-          .bind(row.user),
-        db
-          .prepare(
-            "UPDATE notification_prefs SET immediate = NULL, digest = NULL WHERE user = ? AND library != ''",
-          )
-          .bind(row.user),
-      ]);
+      await db
+        .prepare("UPDATE notification_prefs SET immediate = 0 WHERE user = ? AND library = ''")
+        .bind(row.user)
+        .run();
       return row.user;
     },
     async pendingMail() {
@@ -459,31 +367,6 @@ export function d1Notifications(db: D1Database): Notifications {
         .bind(user, day, cap)
         .run();
       return (r.meta.changes ?? 0) > 0;
-    },
-    async digestUsers() {
-      const r = await db
-        .prepare(
-          `SELECT DISTINCT p.user FROM notification_prefs p JOIN users u ON u.id = p.user
-           WHERE p.digest = 1 AND u.suspended IS NULL`,
-        )
-        .all<{ user: string }>();
-      return r.results.map((x) => x.user);
-    },
-    async setDigestAt(user, at) {
-      await db
-        .prepare(
-          `INSERT INTO notification_prefs (user, library, digest_at) VALUES (?, '', ?)
-           ON CONFLICT (user, library) DO UPDATE SET digest_at = excluded.digest_at`,
-        )
-        .bind(user, at)
-        .run();
-    },
-    async digestAt(user) {
-      const row = await db
-        .prepare("SELECT digest_at FROM notification_prefs WHERE user = ? AND library = ''")
-        .bind(user)
-        .first<{ digest_at: string | null }>();
-      return row?.digest_at ?? null;
     },
     async recordFailure(day) {
       await db

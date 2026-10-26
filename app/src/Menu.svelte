@@ -19,7 +19,8 @@
     align?: "start" | "end";
     /** Opens above its button (a menu at the bottom of the sidebar). */
     up?: boolean;
-    children: Snippet;
+    /** The list's content; it is handed a way to close the menu (after an action that waits). */
+    children: Snippet<[() => void]>;
   } = $props();
 
   const id = $props.id();
@@ -133,7 +134,7 @@
         if (choice && !choice.hasAttribute("data-stay")) setOpen(false);
       }}
     >
-      {@render props.children()}
+      {@render props.children(() => setOpen(false))}
     </div>
   {/if}
 </div>

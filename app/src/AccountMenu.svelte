@@ -8,8 +8,8 @@
   import type { Me } from "./ui";
 
   /**
-   * The avatar and its menu (take 4, board 08): who, then Account, Notifications, Agents; the
-   * theme; Sign out.
+   * The avatar and its menu (take 4, board 08): who, then Account and Agents; the theme; Sign
+   * out. Email settings are on Account (TEMPRA-189).
    */
   let { me }: { me: Me | null } = $props();
   const handle = $derived(me?.handle ?? "");
@@ -31,7 +31,6 @@
   </div>
   <hr />
   <a class="menu-item" href="/account"><Icon name="user" />Account</a>
-  <a class="menu-item" href="/notifications"><Icon name="bell" />Notifications</a>
   <a class="menu-item" href="/agents"><Icon name="plug" />Agents</a>
   <hr />
   <div class="menu-theme">

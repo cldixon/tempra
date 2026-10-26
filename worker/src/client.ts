@@ -46,8 +46,6 @@ export const LIBRARY_METHODS = [
   "setMaintenance",
   "stats",
   "contributors",
-  "activity",
-  "digest",
   "setDimensions",
   "imageBlob",
   "mediaBlob",

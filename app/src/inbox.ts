@@ -1,11 +1,12 @@
 import { actorAgentName, readableName } from "./agents";
-import { api } from "./api";
+import { post } from "./api";
 import { libraryLabel } from "./role";
 import { urlsOf } from "./urls";
 
 /*
- * The Inbox's items and count (TEMPRA-72; take 4, TEMPRA-116), shared by the bell and the Inbox
- * page. Kept apart from the page so the chrome can show it without importing pages.
+ * A person's notifications and their count (TEMPRA-72; one state and the bell, TEMPRA-189): the
+ * items of the API's `/api/v1/inbox`, drawn by the bell's panel. An item is open until it is
+ * done: opened, or answered.
  */
 
 /** What a person is told of (TEMPRA-173): an invitation, a mention and a reply, nothing else. */
@@ -30,7 +31,6 @@ export interface InboxItem {
   /** `invitation`: the invitation to accept or decline, while it is open. */
   invitation: string | null;
   created: string;
-  read_at: string | null;
   done_at: string | null;
   /** What the row offers: reply, resolve, open, accept, decline. */
   actions: string[];
@@ -40,7 +40,6 @@ export interface InboxItem {
 export interface InboxPage {
   items: InboxItem[];
   next: string | null;
-  unread: number;
   open: number;
 }
 
@@ -51,26 +50,11 @@ export const inboxChanged = (): void => {
   window.dispatchEvent(new Event(INBOX_EVENT));
 };
 
-/**
- * Marks items read (these ids, or all of them, or all of one library's: `owner/slug`), then
- * tells every count to reload.
- */
-export function markRead(ids?: string[], library?: string | null): Promise<void> {
-  return api("/api/v1/inbox/read", {
-    method: "POST",
-    body: JSON.stringify(markReadBody(ids, library)),
-  })
+/** Marks an item done (it was opened), then tells every count to reload. */
+export function markDone(id: string): Promise<void> {
+  return post(`/api/v1/inbox/${encodeURIComponent(id)}/done`, {})
     .then(inboxChanged)
     .catch(() => {});
-}
-
-/** What Mark all read asks for: these items, or all of one library's, or all of them. */
-export function markReadBody(
-  ids?: string[],
-  library?: string | null,
-): { ids?: string[]; library?: string } {
-  if (ids) return { ids };
-  return library ? { library } : {};
 }
 
 /** A path's last part without .md: what names a page that has no title. */
@@ -117,26 +101,14 @@ export function itemWho(
   return i.who === i.actor ? actorAgentName(i.actor) : readableName(i.who);
 }
 
-/** Items with `who` in people's words (itemWho), for the row, the bell and the home's cards. */
+/** Items with `who` in people's words (itemWho), for the bell's panel. */
 export const withNames = (items: InboxItem[], labels: AgentLabels): InboxItem[] =>
   items.map((i) => ({ ...i, who: itemWho(i, labels) }));
 
 /** Pages' titles by "owner/slug path", for items the server names by path only (replies). */
 export type PageTitles = Record<string, string>;
 
-/** The kind, as the row's meta line says it. */
-export function kindLabel(i: InboxItem): string {
-  switch (i.kind) {
-    case "reply":
-      return "Reply";
-    case "mention":
-      return "Mention";
-    case "invitation":
-      return "Invitation";
-  }
-}
-
-/** The row's detail line: "Claude Code replied to your thread". */
+/** The item's detail line: "Claude Code replied to your thread". */
 export function itemDetail(i: InboxItem): string {
   switch (i.kind) {
     case "reply":
@@ -148,11 +120,6 @@ export function itemDetail(i: InboxItem): string {
     default:
       return i.excerpt;
   }
-}
-
-/** The quote a row shows under its detail line: what was said, when something was. */
-export function itemQuote(i: InboxItem): string | null {
-  return i.kind === "invitation" ? null : i.excerpt || null;
 }
 
 /** Where following the item leads: a thread opens in the page's Comments panel. */

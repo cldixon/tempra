@@ -9,10 +9,14 @@
   import ThemeChoice from "../ThemeChoice.svelte";
   import { useTheme } from "../theme.svelte.ts";
   import { localTime } from "../ui";
-  import { useTitle } from "../ui.svelte.ts";
+  import { useScrollToHash, useTitle } from "../ui.svelte.ts";
   import { type AccountData, DONE, LEGAL } from "./account";
+  import EmailSwitch from "./EmailSwitch.svelte";
 
-  /** The account: email, handle, limits, sessions, deleting it (v2 spec: Accounts). */
+  /**
+   * The account: email, handle, limits, appearance, email settings (TEMPRA-189), sessions,
+   * deleting it (v2 spec: Accounts).
+   */
   let { done }: { done: string | null } = $props();
   useTitle(() => "Account");
   const loaded = useLoad(
@@ -20,6 +24,8 @@
     () => api<AccountData>("/api/v1/account"),
   );
   const action = useAction();
+  // Mail's "Email settings" link, and /notifications, land on the Email section (#email).
+  useScrollToHash(() => loaded.state === "ready");
   // The page opened from a link that says what was done (`?done=`): said once, from the first
   // value of the prop, and then replaced by what the page does next.
   let notice = $state<string | null>(untrack(() => (done ? (DONE[done] ?? null) : null)));
@@ -126,6 +132,8 @@
       <p class="field-row">
         <span>Theme</span><ThemeChoice value={theme.current} onChange={theme.choose} />
       </p>
+      <h2 id="email">Email</h2>
+      <EmailSwitch />
       <h2>Sessions</h2>
       <div class="table-wrap">
         <table class="list">

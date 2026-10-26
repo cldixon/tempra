@@ -1881,11 +1881,6 @@ body.ground {
   display: block;
 }
 
-/* The bell is a link to the Inbox (TEMPRA-173), drawn as the round button. */
-a.icon-button {
-  text-decoration: none;
-}
-
 .icon-button:hover:not(:disabled) {
   color: var(--tempra-color-text);
 }
@@ -2263,6 +2258,12 @@ a.button.pill-button {
   grid-template-columns: auto minmax(0, 1fr);
 }
 
+/* A page with no sidebar (the library list, TEMPRA-189): the mark, Tempra and search stand on
+   their own, with no rule after them. */
+.bare .topbar-brand {
+  border-right: 0;
+}
+
 /* Over the sidebar, as Linear's docs have it (TEMPRA-145): the Tempra mark, the library's name
    (its home) with ⌄ for the switcher, and the round search button. */
 .topbar-brand {
@@ -2423,7 +2424,7 @@ a.button.pill-button {
   color: var(--tempra-color-text);
 }
 
-/* The bell: the link to the Inbox, its unread count as a small badge on the corner. */
+/* The bell: what waits in the Inbox as a small badge on the corner. */
 .bell .badge {
   position: absolute;
   top: -4px;
@@ -2439,6 +2440,111 @@ a.button.pill-button {
   font-size: var(--tempra-text-initial);
   font-weight: var(--tempra-weight-strong);
   line-height: 1;
+}
+
+/*
+ * The bell's panel, the person's notifications (TEMPRA-189): "Notifications" over what waits, each
+ * item a row (the library's tile, the page and the detail line, then the library and when; an
+ * invitation's Accept and Decline under them), "n more" when there are more. Rules and greys only.
+ */
+.bell-pop {
+  width: min(360px, calc(100vw - 32px));
+  padding: 0;
+  gap: 0;
+}
+
+.menu-list .bell-head {
+  margin: 0;
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid var(--tempra-color-border);
+  font-size: var(--tempra-text-name);
+  font-weight: var(--tempra-weight-strong);
+}
+
+.menu-list .bell-item {
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  gap: 2px 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--tempra-color-border);
+  border-radius: 0;
+}
+
+.bell-item .lib-tile {
+  grid-row: span 2;
+  width: 20px;
+  height: 20px;
+  font-size: var(--tempra-text-label);
+}
+
+.bell-item-what strong {
+  font-weight: var(--tempra-weight-medium);
+}
+
+.bell-item-detail {
+  display: block;
+  color: var(--tempra-color-muted);
+}
+
+.bell-item-where {
+  grid-column: 2;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+}
+
+.menu-list .bell-empty,
+.menu-list .bell-more {
+  margin: 0;
+  padding: 24px 16px;
+  color: var(--tempra-color-muted);
+  text-align: center;
+}
+
+.menu-list .bell-more {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--tempra-color-border);
+  font-size: var(--tempra-text-meta);
+}
+
+.bell-item-actions {
+  display: flex;
+  grid-column: 2;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+/* The invitation's answers are the base pills, not the menu's rows. */
+.menu-list .bell-item-actions button {
+  width: auto;
+  padding: 5px 12px;
+  border: 1px solid var(--tempra-color-border);
+  border-radius: var(--tempra-radius-pill);
+  background: var(--tempra-color-bg);
+}
+
+.menu-list .bell-item-actions button.primary,
+.menu-list .bell-item-actions button.primary:hover:not(:disabled) {
+  border-color: var(--tempra-color-text);
+  background: var(--tempra-color-text);
+  color: var(--tempra-color-bg);
+  font-weight: var(--tempra-weight-medium);
+}
+
+.menu-list .bell-error {
+  margin: 0;
+  padding: 10px 16px;
+  color: var(--tempra-color-text);
+}
+
+/* On a phone the bell sits near the edge: its panel spans the screen under the bar. */
+@media (max-width: 900px) {
+  .bell-pop {
+    position: fixed;
+    top: calc(var(--tempra-bar) + 4px);
+    right: 16px;
+    left: 16px;
+    width: auto;
+  }
 }
 
 /* Live updates stopped, quietly (F-19): a word before search and the bell; empty, nothing. */
@@ -2740,12 +2846,6 @@ a.button.pill-button {
   white-space: nowrap;
 }
 
-.nav-count {
-  color: var(--tempra-color-muted);
-  font-size: var(--tempra-text-meta);
-  font-variant-numeric: tabular-nums;
-}
-
 .nav-row.person {
   padding-left: 8px;
 }
@@ -2982,6 +3082,21 @@ button.tree-name {
   .topbar-path,
   .show-sidebar {
     display: none;
+  }
+
+  /* With no drawer, the bar keeps the desktop's mark, Tempra and search. */
+  .bare .topbar-brand {
+    display: flex;
+    flex: 1;
+    padding: 0 0 0 10px;
+  }
+
+  .bare .ws-topbar-place {
+    display: none;
+  }
+
+  .bare .topbar-page {
+    flex: none;
   }
 
   .topbar-page {
@@ -3276,7 +3391,7 @@ ul.events {
   line-height: var(--tempra-line-height);
 }
 
-/* ---------- Notifications (TEMPRA-72, TEMPRA-73): mentions (the Inbox is inbox.css) ---------- */
+/* ---------- Mentions in the comment boxes (TEMPRA-73) ---------- */
 
 /* The comment box with its @ suggestions under it. */
 .mention-box {
@@ -5219,186 +5334,6 @@ a.activity-download {
   display: inline-flex;
   align-items: center;
   gap: var(--tempra-space-1);
-}
-
-/* ---------- The Inbox (take 4, boards 02 and 13; TEMPRA-116) ---------- */
-
-/*
- * One list, newest first, between hairline rules: an unread dot in the gutter, the library, kind
- * and time on a quiet line, the title, the detail line and a quote, and the row's actions on the
- * right. Lines and greys only.
- */
-
-.inbox-filters .inbox-mark {
-  margin-left: auto;
-  color: var(--tempra-color-muted);
-}
-
-.inbox-list {
-  margin: 0;
-  padding: 0;
-  border-top: 1px solid var(--tempra-color-border);
-  list-style: none;
-}
-
-.inbox-row {
-  display: grid;
-  grid-template-columns: var(--tempra-space-4) minmax(0, 1fr) auto;
-  align-items: start;
-  gap: 0 var(--tempra-space-2);
-  padding: var(--tempra-space-3) 0;
-  border-bottom: 1px solid var(--tempra-color-border);
-}
-
-.inbox-dot {
-  justify-self: center;
-  width: var(--tempra-dot);
-  height: var(--tempra-dot);
-  margin-top: calc(var(--tempra-text-meta) * 0.6);
-  border-radius: 50%;
-}
-
-.inbox-row.unread .inbox-dot {
-  background: var(--tempra-color-text);
-}
-
-.inbox-main {
-  display: flex;
-  flex-direction: column;
-  gap: var(--tempra-space-1);
-  min-width: 0;
-}
-
-.inbox-main p {
-  margin: 0;
-}
-
-.inbox-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: var(--tempra-space-2);
-  color: var(--tempra-color-muted);
-  font-size: var(--tempra-text-meta);
-}
-
-.inbox-meta .lib-tile {
-  width: 18px;
-  height: 18px;
-  font-size: var(--tempra-text-label);
-}
-
-.inbox-title a {
-  color: var(--tempra-color-text);
-  font-weight: var(--tempra-weight-medium);
-  text-decoration: none;
-}
-
-.inbox-title a:hover {
-  text-decoration: underline;
-}
-
-.inbox-detail {
-  color: var(--tempra-color-muted);
-}
-
-.inbox-quote {
-  margin: var(--tempra-space-1) 0 0;
-  padding: 0 0 0 var(--tempra-space-3);
-  border-left: 2px solid var(--tempra-color-border);
-  color: var(--tempra-color-muted);
-}
-
-.inbox-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: var(--tempra-space-2);
-}
-
-@media (max-width: 900px) {
-  .inbox-row {
-    grid-template-columns: var(--tempra-space-4) minmax(0, 1fr);
-  }
-
-  .inbox-actions {
-    grid-column: 2;
-    justify-content: flex-start;
-    margin-top: var(--tempra-space-2);
-  }
-
-  .inbox-actions .button,
-  .inbox-actions button {
-    min-height: var(--tempra-touch);
-  }
-}
-
-/* ---------- An invitation (take 4, board 30; TEMPRA-135) ---------- */
-
-/* Who invited and when, the library as a card, the access offered, Accept and Decline. */
-.invitations {
-  display: flex;
-  flex-direction: column;
-  gap: var(--tempra-space-4);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.invitation {
-  display: flex;
-  flex-direction: column;
-  gap: var(--tempra-space-3);
-  max-width: 32rem;
-}
-
-.invitation p {
-  margin: 0;
-}
-
-.invitation-from {
-  display: flex;
-  align-items: center;
-  gap: var(--tempra-space-2);
-  color: var(--tempra-color-muted);
-  font-size: var(--tempra-text-ui);
-}
-
-.invitation-card {
-  display: flex;
-  align-items: center;
-  gap: var(--tempra-space-3);
-  padding: var(--tempra-space-3);
-  border: 1px solid var(--tempra-color-border);
-  border-radius: var(--tempra-radius-box);
-}
-
-.invitation-card .lib-tile {
-  width: 36px;
-  height: 36px;
-}
-
-.invitation-library {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-
-.invitation-library span {
-  color: var(--tempra-color-muted);
-  font-size: var(--tempra-text-meta);
-}
-
-.invitation-access {
-  display: flex;
-  justify-content: space-between;
-  gap: var(--tempra-space-3);
-  font-size: var(--tempra-text-ui);
-}
-
-.invitation-access span {
-  color: var(--tempra-color-muted);
 }
 
 /*

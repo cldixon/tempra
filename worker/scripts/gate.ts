@@ -204,10 +204,15 @@ async function uiPages(owner: string, slug: string, paths: string[]): Promise<st
     ...concepts.map((p) => `${lib}/${enc(p)}`),
   ];
   const problems: string[] = [];
-  // Needs you retired into the Inbox (TEMPRA-116): its URL lands on the Inbox for the library.
+  // Needs you is retired, and the Inbox page with it (TEMPRA-116, TEMPRA-189): its URL lands on
+  // the library's home, and `/inbox` on the library list.
   const needs = await ui(`${lib}/-/needs`);
-  if (needs.status !== 308 || needs.headers.get("Location") !== `/inbox?library=${owner}/${slug}`) {
+  if (needs.status !== 308 || needs.headers.get("Location") !== `/${owner}/${slug}/`) {
     problems.push(`-/needs: ${needs.status} ${needs.headers.get("Location")}`);
+  }
+  const inboxPage = await ui(`${base}/inbox`);
+  if (inboxPage.status !== 302 || inboxPage.headers.get("Location") !== "/") {
+    problems.push(`/inbox: ${inboxPage.status} ${inboxPage.headers.get("Location")}`);
   }
   // For agents is retired (TEMPRA-144): its URL lands on the library's home.
   const work = await ui(`${lib}/-/work`);
@@ -626,7 +631,7 @@ function greyscalePng(
  * the library's home (no sections, no housekeeping, nothing counted for the person), the workspace (the bar's
  * mark, library, switcher, search and page path, the tree, the foot's Activity and Settings, the
  * quick switcher, the hidden sidebar; at phone width the bar's mark and library, the drawer with
- * the bar's parts at its head, the tree, Activity, Settings and the Inbox, the home stacked, a
+ * the bar's parts at its head, the tree, Activity and Settings, the home stacked, a
  * settings page's drawer with its tabs), a folder's address revealing it, Not found for a moved
  * path, an attachment's page, every concept in the reader (drawn from the stored
  * tree, with no Edit, a footnote card on hover), the concept's panels (Comments, History,
@@ -635,8 +640,8 @@ function greyscalePng(
  * (Mark as checked, the Checked line, review mode), comments in the panel, a concept on a
  * phone (its top bar with Copy page under ⋯,
  * On this page, every panel as a bottom sheet), the Markdown view,
- * figures in the full-screen view, the Inbox (a reply waiting, reached by the bell, filtered to
- * the library and from Needs you's old URL; nothing for a checked page an agent edited), and
+ * figures in the full-screen view, notifications (a reply waiting in the bell's panel, opened into
+ * its thread; nothing for a checked page an agent edited), and
  * Activity with its two views (Summary and
  * Every event), all drawn from the API; links move within the app without reloading the page, and
  * nothing is refused by the CSP or throws. GATE_SCREENSHOTS=<dir> saves screenshots of them.
@@ -1388,12 +1393,20 @@ async function browserRenders(
       await page.getByText("Saved.").waitFor({ timeout: 15_000 });
       await page.goto(`${lib}/`);
       await home();
-      // The bell: a link to the Inbox, no popover (TEMPRA-173).
-      const bellHref = await page
+      // The bell is the notifications: a panel over the page, which leaves the page where it was,
+      // with no Inbox page to link to (TEMPRA-189).
+      const bellPop = page.locator(".menu-list.bell-pop");
+      await page
         .locator("header.ws-topbar")
-        .getByRole("link", { name: /^Inbox/ })
-        .getAttribute("href");
-      if (bellHref !== "/inbox") throw new Error(`the bell links to ${bellHref}`);
+        .getByRole("button", { name: /^Notifications/ })
+        .click();
+      await bellPop.getByText("Notifications", { exact: true }).waitFor({ timeout: 5000 });
+      if ((await bellPop.locator('a[href^="/inbox"]').count()) > 0) {
+        throw new Error("the bell's panel links to an Inbox page");
+      }
+      if (page.url() !== `${lib}/`) throw new Error(`the bell left the page: ${page.url()}`);
+      await page.keyboard.press("Escape");
+      await bellPop.waitFor({ state: "detached", timeout: 5000 });
       // The theme: applied at once, kept on the account across a reload, back to the system's.
       const account = page.locator(".menu-list.account");
       await page.getByRole("button", { name: "Account menu" }).click();
@@ -1431,7 +1444,7 @@ async function browserRenders(
             throw new Error("the phone's top bar has a search button");
           }
           for (const control of [
-            topbar.getByRole("link", { name: /^Inbox/ }),
+            topbar.getByRole("button", { name: /^Notifications/ }),
             topbar.getByRole("button", { name: "Account menu" }),
           ]) {
             if (!(await control.isVisible()))
@@ -1457,8 +1470,8 @@ async function browserRenders(
           );
           if (!focused) throw new Error("the drawer did not take the focus");
           // What it holds (TEMPRA-145): at its head the desktop's bar over the sidebar (the mark,
-          // the library's name, its switcher, search) and ×; then the tree; Activity, Settings
-          // and the Inbox at its foot.
+          // the library's name, its switcher, search) and ×; then the tree; Activity and Settings
+          // at its foot.
           await drawerHead(libraryName);
           const views = sidebar.getByRole("navigation", { name: "Library" });
           const searchRow = sidebar
@@ -1468,14 +1481,14 @@ async function browserRenders(
             sidebar.locator(".tree-row").first(),
             views.getByRole("link", { name: /^Activity/ }),
             views.getByRole("link", { name: "Settings", exact: true }),
-            views.getByRole("link", { name: /^Inbox/ }),
           ]) {
             if (!(await part.isVisible())) throw new Error(`the drawer lacks ${part}`);
           }
           const footRows = (await views.locator(".nav-row").allInnerTexts()).map(
             (t) => t.replace(/\s+/g, " ").trim().split(" ")[0],
           );
-          if (JSON.stringify(footRows) !== JSON.stringify(["Activity", "Settings", "Inbox"])) {
+          // Notifications are the bell's, in no drawer (TEMPRA-189).
+          if (JSON.stringify(footRows) !== JSON.stringify(["Activity", "Settings"])) {
             throw new Error(`the drawer's foot reads ${JSON.stringify(footRows)}`);
           }
           if (shots) await page.screenshot({ path: `${shots}/drawer-phone.png` });
@@ -1574,31 +1587,35 @@ async function browserRenders(
           await sidebar.waitFor({ state: "hidden" });
           await phoneNamed("Members");
           // The account's pages: the mark and "Tempra" on the bar and at the drawer's head, with
-          // search and no switcher, never the page's own name there.
-          await page.goto(`${base}/account`);
+          // search and no switcher, never the page's own name there. Email settings are one
+          // switch on Account, where /notifications lands (TEMPRA-189).
+          await page.goto(`${base}/notifications`);
+          await page.waitForURL(`${base}/account#email`);
+          await main
+            .getByRole("heading", { name: "Email", exact: true })
+            .waitFor({ timeout: 15_000 });
+          if (!(await main.getByLabel("Email me mentions and replies").isChecked())) {
+            throw new Error("the email switch is not on by default");
+          }
           await menu.click();
           await sidebar.waitFor({ state: "visible" });
           await drawerHead("Tempra", false);
           await page.keyboard.press("Escape");
           await sidebar.waitFor({ state: "hidden" });
-          // The library list's drawer: search at its head, then Libraries and the Inbox.
+          // The library list has no sidebar and no drawer (TEMPRA-189): its bar keeps the mark,
+          // Tempra and search, then the bell and the avatar.
           await page.goto(`${base}/`);
-          await menu.click();
-          await sidebar.waitFor({ state: "visible" });
-          const account = sidebar.getByRole("navigation", { name: "Account" });
-          await account.getByRole("link", { name: "Libraries", exact: true }).waitFor();
-          await sidebar
-            .locator(".drawer-head")
-            .getByRole("button", { name: "Search", exact: true })
-            .click();
+          await main.locator("h1").first().waitFor({ timeout: 15_000 });
+          if ((await menu.count()) > 0) throw new Error("the library list has a menu button");
+          if ((await page.locator("section.ws-sidebar").count()) > 0) {
+            throw new Error("the library list has a sidebar");
+          }
+          await topbar.getByRole("button", { name: "Search", exact: true }).click();
           const found = page.getByRole("dialog", { name: "Search libraries" });
           await found.waitFor({ timeout: 5000 });
           await page.keyboard.press("Escape");
           await found.waitFor({ state: "hidden", timeout: 5000 });
-          // New library floats at the screen's bottom right, not in the top bar (TEMPRA-148);
-          // under the drawer while it is open, so the drawer closes first.
-          await page.keyboard.press("Escape");
-          await sidebar.waitFor({ state: "hidden", timeout: 5000 });
+          // New library floats at the screen's bottom right, not in the top bar (TEMPRA-148).
           if (
             (await page
               .locator("header.ws-topbar")
@@ -2543,45 +2560,54 @@ async function browserRenders(
       },
     );
     // An agent edited a page the person checked: the page says so ("changed since"), and
-    // nothing reaches their Inbox (TEMPRA-173).
-    await step("Inbox: an edit to a page the person checked tells them nothing", async () => {
-      const reviewHref = `/${owner}/${slug}/${enc(concept)}?review=1`;
-      await page.goto(`${base}/inbox`);
-      await page
-        .locator("main.ws-main")
-        .getByRole("heading", { level: 1, name: "Inbox", exact: true })
-        .waitFor({ timeout: 15_000 });
-      // An account page's bar over the sidebar, as the drawer's head has it: the mark and
-      // "Tempra", search, no switcher (TEMPRA-145).
-      const accountBrand = page.locator(".topbar-brand");
-      if ((await accountBrand.locator("a.brand-name").innerText()).trim() !== "Tempra") {
-        throw new Error("an account page's bar does not read Tempra");
-      }
-      await accountBrand.getByRole("button", { name: "Search", exact: true }).waitFor();
-      if ((await accountBrand.getByRole("button", { name: "Switch library" }).count()) > 0) {
-        throw new Error("an account page's bar has a library switcher");
-      }
-      if ((await main.locator(`li.inbox-row a[href="${reviewHref}"]`).count()) > 0) {
-        throw new Error("the Inbox lists a page to check");
-      }
-      if ((await main.getByText("To check").count()) > 0)
-        throw new Error("the Inbox says To check");
-      // Checking from review mode's bar, with a note, clears "changed since" (TEMPRA-122).
-      await page.goto(`${url}?review=1`);
-      const bar = page.getByRole("region", { name: "Review" });
-      await bar.getByLabel("Note").fill("Gate: read it through.");
-      await bar.getByRole("button", { name: "Mark as checked" }).click();
-      await page.waitForURL(`${url}?done=verify`, { timeout: 10_000 });
-      await checkedLine.getByText(/^Checked by you, /).waitFor({ timeout: 10_000 });
-      await checkedLine
-        .getByText("changed since")
-        .waitFor({ state: "detached", timeout: 10_000 })
-        .catch(() => {
-          throw new Error("checking did not clear changed since");
-        });
-      await page.goto(url);
-      await byline.waitFor({ timeout: 15_000 });
-    });
+    // nothing reaches their notifications (TEMPRA-173).
+    await step(
+      "Notifications: an edit to a page the person checked tells them nothing",
+      async () => {
+        const reviewHref = `/${owner}/${slug}/${enc(concept)}?review=1`;
+        await page.goto(`${base}/`);
+        await main.locator("h1").first().waitFor({ timeout: 15_000 });
+        // An account page's bar over the sidebar, as the drawer's head has it: the mark and
+        // "Tempra", search, no switcher (TEMPRA-145).
+        const accountBrand = page.locator(".topbar-brand");
+        if ((await accountBrand.locator("a.brand-name").innerText()).trim() !== "Tempra") {
+          throw new Error("an account page's bar does not read Tempra");
+        }
+        await accountBrand.getByRole("button", { name: "Search", exact: true }).waitFor();
+        if ((await accountBrand.getByRole("button", { name: "Switch library" }).count()) > 0) {
+          throw new Error("an account page's bar has a library switcher");
+        }
+        await page
+          .locator("header.ws-topbar")
+          .getByRole("button", { name: /^Notifications/ })
+          .click();
+        const pop = page.locator(".menu-list.bell-pop");
+        await pop.getByText("Notifications", { exact: true }).waitFor({ timeout: 5000 });
+        await pop.locator(".bell-item, .bell-empty").first().waitFor({ timeout: 10_000 });
+        if ((await pop.locator(`a[href="${reviewHref}"]`).count()) > 0) {
+          throw new Error("the bell lists a page to check");
+        }
+        if ((await pop.getByText("To check").count()) > 0)
+          throw new Error("the bell says To check");
+        await page.keyboard.press("Escape");
+        await pop.waitFor({ state: "detached", timeout: 5000 });
+        // Checking from review mode's bar, with a note, clears "changed since" (TEMPRA-122).
+        await page.goto(`${url}?review=1`);
+        const bar = page.getByRole("region", { name: "Review" });
+        await bar.getByLabel("Note").fill("Gate: read it through.");
+        await bar.getByRole("button", { name: "Mark as checked" }).click();
+        await page.waitForURL(`${url}?done=verify`, { timeout: 10_000 });
+        await checkedLine.getByText(/^Checked by you, /).waitFor({ timeout: 10_000 });
+        await checkedLine
+          .getByText("changed since")
+          .waitFor({ state: "detached", timeout: 10_000 })
+          .catch(() => {
+            throw new Error("checking did not clear changed since");
+          });
+        await page.goto(url);
+        await byline.waitFor({ timeout: 15_000 });
+      },
+    );
     await step("History: a version's changes in the text, and back to the latest", async () => {
       await page.locator(".body .prose").waitFor({ timeout: 15_000 });
       await more("History");
@@ -2886,7 +2912,7 @@ async function browserRenders(
         // their inbox, its count shows on the open page's bell (take 4) without a reload, and
         // the batched mail lands in the dev outbox.
         await sheetBar
-          .getByRole("link", { name: /^Inbox, \d+ unread$/ })
+          .getByRole("button", { name: /^Notifications, \d+ waiting$/ })
           .waitFor({ timeout: 10_000 });
         const inbox = (await (await apiAs(devCookie, "/api/v1/inbox")).json()) as {
           items: { id: string; kind: string; excerpt: string; href: string }[];
@@ -2926,7 +2952,7 @@ async function browserRenders(
         if ((await threadEl.evaluate((el) => el.tagName)) === "BUTTON") await threadEl.click();
         await threadEl.getByRole("button", { name: "Reopen" }).waitFor({ timeout: 5000 });
         if (!(await stayed())) throw new Error("the page reloaded");
-        // Resolving the thread closed its item (TEMPRA-116): it is under Done, no longer open.
+        // Resolving the thread closed its item (TEMPRA-116): it is done.
         const closed = (await (await apiAs(devCookie, "/api/v1/inbox?all=1")).json()) as {
           items: { id: string; done_at: string | null }[];
         };
@@ -2935,10 +2961,10 @@ async function browserRenders(
         }
       },
     );
-    // The Inbox (TEMPRA-116, TEMPRA-173): an agent's reply on a thread the person opened waits
-    // in the Inbox, reached by the bell, filtered to the library by its select and from Needs
-    // you's old URL.
-    await step("Inbox: an agent's reply waits in the Inbox", async () => {
+    // Notifications (TEMPRA-173, TEMPRA-189): an agent's reply on a thread the person opened waits
+    // in the bell's panel, on the page the person is on; opening it lands in the thread and is
+    // seeing it.
+    await step("Notifications: an agent's reply waits in the bell's panel", async () => {
       const target = concepts.find((c) => c !== concept) ?? concept;
       const posted = await apiAs(devCookie, `/api/v1/libraries/${owner}/${slug}/comments`, "POST", {
         path: target,
@@ -2953,32 +2979,17 @@ async function browserRenders(
         body: JSON.stringify({ body: "Gate: yes, it is still current." }),
       });
       if (!answered.ok) throw new Error(`agent reply: ${answered.status}`);
-      const filtered = `${base}/inbox?library=${owner}/${slug}`;
-      const inboxHeading = main.getByRole("heading", { level: 1, name: "Inbox", exact: true });
-      const row = main
-        .locator("li.inbox-row")
-        .filter({ hasText: "Gate: yes, it is still current." });
-      // The bell, from the library's home, opens the Inbox; the select filters it to this library.
+      const threadHref = `/${owner}/${slug}/${enc(target)}#thread-${encodeURIComponent(id)}`;
+      // The bell, on the library's home, lists the reply, by the page's title, never its slug.
       await page.goto(`${lib}/`);
       await home();
       await markStay();
-      await page
-        .locator("header.ws-topbar")
-        .getByRole("link", { name: /^Inbox/ })
-        .click();
-      await page.waitForURL(`${base}/inbox`);
-      await inboxHeading.waitFor({ timeout: 15_000 });
-      await row.waitFor({ timeout: 10_000 });
-      await row.getByText("replied to your thread").waitFor({ timeout: 5000 });
-      // One library filter (TEMPRA-130, A-12): the select, set to this library.
-      const filter = main.getByRole("combobox", { name: "Library" });
-      await filter.selectOption(`${owner}/${slug}`);
-      await page.waitForURL(filtered);
-      await row.waitFor({ timeout: 10_000 });
-      if ((await filter.inputValue({ timeout: 5000 })) !== `${owner}/${slug}`) {
-        throw new Error(`the library filter: ${await filter.inputValue()}`);
-      }
-      // The reply's row names the page by its title, never its slug (A-4).
+      const bell = page.locator("header.ws-topbar").getByRole("button", { name: /^Notifications/ });
+      const bellPop = page.locator(".menu-list.bell-pop");
+      await bell.click();
+      const item = bellPop.locator(`a.bell-item[href="${threadHref}"]`);
+      await item.waitFor({ timeout: 10_000 });
+      await item.getByText("replied to your thread").waitFor({ timeout: 5000 });
       const meta = (await (
         await fetch(`${libApi}/files/${enc(target)}`, {
           headers: { ...bearer, Accept: "application/json" },
@@ -2986,41 +2997,34 @@ async function browserRenders(
       ).json()) as { frontmatter: { title?: string } };
       const title = meta.frontmatter.title;
       if (title) {
-        await row
-          .locator(".inbox-title a")
+        await item
+          .locator("strong")
           .filter({ hasText: new RegExp(`^${title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`) })
           .waitFor({ timeout: 10_000 });
       }
-      if (!(await stayed())) throw new Error("the link reloaded the page");
-      // Mark all read on the filtered list marks this library's items only (A-1).
-      const marked = page.waitForRequest(
-        (r) => r.url().endsWith("/api/v1/inbox/read") && r.method() === "POST",
-      );
-      await main.getByRole("button", { name: "Mark all read", exact: true }).click();
-      const sent = (await marked).postDataJSON() as { library?: string };
-      if (sent.library !== `${owner}/${slug}`) {
-        throw new Error(`Mark all read sent ${JSON.stringify(sent)}`);
-      }
-      await main
-        .getByRole("button", { name: "Mark all read", exact: true })
-        .waitFor({ state: "detached", timeout: 10_000 });
-      const { count } = (await (
-        await apiAs(devCookie, `/api/v1/libraries/${owner}/${slug}/needs`)
-      ).json()) as { count: number };
-      if (count < 1) throw new Error(`GET …/needs counts ${count} with a reply waiting`);
-      if (shots) await page.screenshot({ path: `${shots}/inbox.png` });
-      // Needs you's old URL lands on the same filtered Inbox.
-      await page.goto(`${lib}/-/needs`);
-      await page.waitForURL(filtered);
-      await row.waitFor({ timeout: 15_000 });
-      // Reply opens the concept with that thread open in the Comments panel.
-      await markStay();
-      await row.getByRole("link", { name: "Reply", exact: true }).click();
-      await page.waitForURL(`${lib}/${enc(target)}#thread-${encodeURIComponent(id)}`);
+      if (shots) await page.screenshot({ path: `${shots}/bell.png` });
+      // Opening it lands in the thread, in the page's Comments panel, with no reload.
+      await item.click();
+      await page.waitForURL(`${base}${threadHref}`);
       await comments
         .locator(`section.thread.open[id="panel-thread-${id}"]`)
         .waitFor({ timeout: 15_000 });
-      if (!(await stayed())) throw new Error("Reply reloaded the page");
+      if (!(await stayed())) throw new Error("the notification reloaded the page");
+      // Opening it was seeing it (one state, TEMPRA-189): done, and gone from the panel.
+      const deadline = Date.now() + 10_000;
+      for (;;) {
+        const open = (await (await apiAs(devCookie, "/api/v1/inbox")).json()) as {
+          items: { thread: string | null }[];
+        };
+        if (!open.items.some((i) => i.thread === id)) break;
+        if (Date.now() > deadline) throw new Error("opening the reply left it waiting");
+        await page.waitForTimeout(200);
+      }
+      await bell.click();
+      await bellPop.locator(".bell-item, .bell-empty").first().waitFor({ timeout: 10_000 });
+      await item.waitFor({ state: "detached", timeout: 10_000 });
+      await page.keyboard.press("Escape");
+      await bellPop.waitFor({ state: "detached", timeout: 5000 });
       const resolved = await fetch(`${libApi}/comments/${id}/resolve`, {
         method: "POST",
         headers: { ...bearer, "Content-Type": "application/json" },
@@ -3056,7 +3060,7 @@ async function browserRenders(
           }
           const moreButton = sheetBar.getByRole("button", { name: "More", exact: true });
           if (!(await moreButton.isVisible())) throw new Error("no ⋯ in the phone's top bar");
-          if (!(await sheetBar.getByRole("link", { name: /^Inbox/ }).isVisible())) {
+          if (!(await sheetBar.getByRole("button", { name: /^Notifications/ }).isVisible())) {
             throw new Error("no bell in the concept's phone bar");
           }
           for (const gone of [
@@ -3797,8 +3801,8 @@ async function browserRenders(
           ready: () => main.locator("h1").first().waitFor({ timeout: 15_000 }),
         },
         {
-          name: "Inbox",
-          url: `${base}/inbox`,
+          name: "Invitations",
+          url: `${base}/invitations`,
           ready: () => main.locator("h1").first().waitFor({ timeout: 15_000 }),
         },
         {
@@ -4405,29 +4409,28 @@ async function freshAccountConnects(): Promise<string[]> {
       await context.addCookies(cookies);
     };
     let asInvitee: typeof asOwner = [];
-    // From the Inbox (TEMPRA-130, A-2): Accept adds the library to the person's list at once
-    // (the sidebar, the switcher), and Open goes there, in place (a shared library, F-2).
-    await step("the invitee accepts from the Inbox and opens the library", async () => {
+    // From the bell (TEMPRA-130, A-2; TEMPRA-189): Accept in the invitation's row adds the
+    // library to the person's list at once (the switcher) and opens it, in place (F-2).
+    await step("the invitee accepts from the bell and opens the library", async () => {
       await context.clearCookies();
-      await b.signInAs("stranger@localhost", "/inbox", true);
+      await b.signInAs("stranger@localhost", "/agents", true);
       const href = new URL(`${lib}/`).pathname;
-      const listed = page.locator(`nav[aria-label="Shared with you"] a[href="${href}"]`);
-      if ((await listed.count()) > 0) throw new Error("listed before accepting");
-      await page
-        .locator("main.ws-main li.inbox-row")
-        .filter({ hasText: "Invitation" })
-        .getByRole("button", { name: "Accept", exact: true })
-        .click();
-      await listed.waitFor({ timeout: 15_000 });
+      await page.locator("main.ws-main h1").first().waitFor({ timeout: 15_000 });
       await page.evaluate("window.__gateStay = true");
       await page
-        .locator("main.ws-main .notice")
-        .getByRole("link", { name: "Open", exact: true })
+        .locator("header.ws-topbar")
+        .getByRole("button", { name: /^Notifications/ })
+        .click();
+      await page
+        .locator(".menu-list.bell-pop div.bell-item")
+        .filter({ hasText: "invited you to" })
+        .getByRole("button", { name: "Accept", exact: true })
         .click();
       await page.waitForURL(`${lib}/`, { timeout: 15_000 });
       if (!(await page.evaluate("window.__gateStay === true"))) {
-        throw new Error("Open reloaded the app");
+        throw new Error("Accept reloaded the app");
       }
+      await page.locator(".menu-list.bell-pop").waitFor({ state: "detached", timeout: 5000 });
       await page.getByRole("button", { name: "Switch library" }).click();
       await page.locator(`.menu-list a.menu-lib[href="${href}"]`).waitFor({ timeout: 5000 });
       await page.keyboard.press("Escape");
