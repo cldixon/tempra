@@ -77,7 +77,7 @@
 {/snippet}
 
 {#snippet blocks(nodes: Block[])}
-  {#each nodes as b (b.key)}
+  {#each nodes as b}
     {#if b.kind === "p"}
       <p data-block={b.id} data-text={b.offset}>{@render inline(b.text)}</p>
     {:else if b.kind === "figure"}

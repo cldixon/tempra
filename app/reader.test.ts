@@ -1053,3 +1053,45 @@ describe("video, audio and PDF figures (TEMPRA-164)", () => {
     });
   });
 });
+
+describe("a new version redraws only what changed (TEMPRA-177)", () => {
+  test("a block the new version leaves alone is the same DOM node, its text too", () => {
+    const v1 = stored("# Title\n\nFirst para.\n\nSecond *para*.\n\n- one\n- two");
+    const v2 = reconcile(
+      v1,
+      parseMarkdown("# Title\n\nA new para.\n\nFirst para, changed.\n\nSecond *para*.\n\n- one\n- two\n- three"),
+    );
+    const idOfText = (tree: Doc, text: string) =>
+      idOf(tree.children.find((n) => docText({ ...tree, children: [n] }).text === text) as DocNode);
+    const second = idOfText(v1, "Second para.");
+    expect(idOfText(v2, "Second para.")).toBe(second);
+    const props = new SvelteMap([["prepared", prepare(v1)]]);
+    const { host } = put(Body, {
+      get prepared() {
+        return props.get("prepared") as ReturnType<typeof prepare>;
+      },
+      diff: null,
+      hideFirst: false,
+    });
+    const before = host.querySelector(`[data-block="${second}"]`) as Element;
+    const words = before.firstChild as Node;
+    const item = host.querySelector("li") as Element;
+    const p2 = prepare(v2);
+    props.set("prepared", p2);
+    flushSync();
+    const after = host.querySelector(`[data-block="${second}"]`) as Element;
+    expect(after).toBe(before);
+    expect(after.firstChild).toBe(words);
+    expect(host.querySelector("li")).toBe(item);
+    // Moved down the text: its offset follows, and the counting holds over the whole body.
+    expect(Number(after.getAttribute("data-text"))).toBe(p2.text.text.indexOf("Second para."));
+    expect(host.querySelectorAll("li").length).toBe(3);
+    const tbs = textblocks(host);
+    expect(tbs.length).toBe(p2.text.blocks.length);
+    tbs.forEach((tb, i) => {
+      const b = p2.text.blocks[i];
+      expect(Number(tb.getAttribute("data-text"))).toBe(b?.from ?? -1);
+      expect(readText(tb)).toBe(p2.text.text.slice(b?.from, b?.to));
+    });
+  });
+});
