@@ -19,8 +19,6 @@
     align?: "start" | "end";
     /** Opens above its button (a menu at the bottom of the sidebar). */
     up?: boolean;
-    /** Told when the menu opens or closes. */
-    onOpen?(open: boolean): void;
     children: Snippet;
   } = $props();
 
@@ -32,7 +30,6 @@
   function setOpen(next: boolean) {
     if (next === open) return;
     open = next;
-    props.onOpen?.(next);
   }
 
   /** The choices in the list that take the keys: its links and enabled buttons, as shown. */

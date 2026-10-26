@@ -3,7 +3,7 @@
   import Render from "./Render.svelte";
 
   /**
-   * Draws its content into another element (React's createPortal): the top bar's slots that a
+   * Draws its content into another element, as a portal does: the top bar's slots that a
    * page fills through PageBar. Mounted straight into `target`, with no wrapper, and with this
    * place's contexts.
    */

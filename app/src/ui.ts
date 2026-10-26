@@ -48,7 +48,7 @@ export function localTime(iso: string): string {
 
 /**
  * A day as people say it: "Oct 9", with the year when it is not this one; in the reader's time
- * zone, or in `timeZone` (see calendarDay).
+ * zone, or in `timeZone`.
  */
 export function day(iso: string, timeZone?: string): string {
   const d = new Date(iso);
@@ -62,12 +62,6 @@ export function day(iso: string, timeZone?: string): string {
     ...(thisYear ? {} : { year: "numeric" }),
   });
 }
-
-/**
- * A date kept as a moment at midnight UTC (a concept's `stale_after`): its calendar day, the
- * same wherever the reader is.
- */
-export const calendarDay = (iso: string) => day(iso, "UTC");
 
 /** The first words of a text on one line, ending in "…" when cut at `max` characters. */
 export function clip(text: string, max: number): string {

@@ -1,7 +1,7 @@
 /**
- * What each page loaded last (see useLoad in api.ts), so a page seen before draws at once. Kept
- * apart from React so its rules can be tested: newer answers win, and only a prefetch spares
- * the page from asking again.
+ * What each page loaded last (see useLoad in load.svelte.ts), so a page seen before draws at
+ * once. Kept apart from the runes so its rules can be tested: newer answers win, and only a
+ * prefetch spares the page from asking again.
  */
 interface Entry {
   data: unknown;
