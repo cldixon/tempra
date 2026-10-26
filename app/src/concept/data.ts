@@ -7,7 +7,7 @@ import { baseName, dirOf, enc, type Urls } from "../urls";
 
 /**
  * What a file's page loads (tempra-dev: app/reader): the file and, for a concept, everything its
- * page shows around the body: sources, links, versions and its own work items, in one round.
+ * page shows around the body: sources, links and versions, in one request (TEMPRA-191).
  */
 
 export type Json = string | number | boolean | null | Json[] | { [k: string]: Json };
@@ -135,47 +135,30 @@ export function bodyHref(urls: Urls) {
   };
 }
 
+/** `GET …/page/{path}`: the file, the head, and for a concept what its page shows around it. */
+type PageJson =
+  | {
+      file: Concept;
+      head: number;
+      sources: Sources;
+      links: Links;
+      history: { events: HistoryEvent[] };
+    }
+  | { file: Exclude<FileJson, Concept>; head: number };
+
 /**
- * Everything a file's page shows, in one round of requests: the file and, for a concept, its
- * sources, links and history (asked for in parallel; a file that is not a
- * concept answers those with errors, which are then ignored).
+ * Everything a file's page shows, in one request (TEMPRA-191): the file and, for a concept, its
+ * sources, links and history, read by the server at one seq (and by the concept's own path,
+ * however it was asked for).
  */
 export async function loadFile(urls: Urls, path: string): Promise<FileData> {
-  const p = enc(path);
-  const extra = <T>(r: Promise<T>) =>
-    r.then(
-      (v) => ({ v }),
-      (e: unknown) => ({ e }),
-    );
-  const skip = Promise.resolve({ e: null });
-  // Only a concept has sources, links and history; the name says which files can be one.
-  const concept = isConceptPath(path);
-  const [file, stats, sources, links, history] = await Promise.all([
-    api<FileJson>(urls.api(`files/${p}`, { at: urls.at })),
-    api<{ seq: number }>(urls.api("stats")),
-    concept ? extra(api<Sources>(urls.api(`sources/${p}`, { at: urls.at }))) : skip,
-    concept ? extra(api<Links>(urls.api(`links/${p}`, { at: urls.at }))) : skip,
-    concept ? extra(api<{ events: HistoryEvent[] }>(urls.api(`history/${p}`))) : skip,
-  ]);
-  const head = stats.seq;
-  if (file.kind !== "concept") return { file, head, extra: null };
-  // A concept reached by another spelling of its path: ask again by its own.
-  if (!concept) return loadFile(urls, file.path);
-  for (const r of [sources, links, history]) if ("e" in r) throw r.e;
-  const got = <T>(r: { v: T } | { e: unknown }) => (r as { v: T }).v;
-  return {
-    file,
-    head,
-    extra: {
-      concept: file,
-      sources: got(sources),
-      links: got(links),
-      history: got(history).events,
-    },
-  };
+  const page = await api<PageJson>(urls.api(`page/${enc(path)}`, { at: urls.at }));
+  if (!("sources" in page)) return { file: page.file, head: page.head, extra: null };
+  const { file, head, sources, links, history } = page;
+  return { file, head, extra: { concept: file, sources, links, history: history.events } };
 }
 
-// What a file's page loads: prefetched from the tree and the switcher, awaited by a navigation.
+// What a file's page loads: loaded ahead from links and the switcher, awaited by a navigation.
 registerPage("file", (route, urls) => ({
   key: fileKey(urls, route.path),
   load: () => loadFile(urls, route.path),

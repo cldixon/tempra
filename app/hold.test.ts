@@ -33,14 +33,17 @@ beforeEach(() => {
     const url = new URL(String(input), base);
     asked.push(url.pathname);
     await gate;
-    const path = decodeURIComponent(url.pathname.split("/files/")[1] ?? "");
-    const body = url.pathname.endsWith("/stats")
-      ? { seq: 7 }
-      : url.pathname.includes("/files/")
-        ? { kind: "concept", path, seq: 7, hash: "h", doc: { type: "root", children: [] } }
-        : url.pathname.includes("/history/")
-          ? { events: [] }
-          : {};
+    // The file's page in one call (TEMPRA-191): a concept with its context.
+    const path = decodeURIComponent(url.pathname.split("/page/")[1] ?? "");
+    const body = url.pathname.includes("/page/")
+      ? {
+          file: { kind: "concept", path, seq: 7, hash: "h", doc: { type: "root", children: [] } },
+          head: 7,
+          sources: { sources: [], unmatched_footnotes: [] },
+          links: { inbound: [], broken: [] },
+          history: { events: [] },
+        }
+      : {};
     return new Response(JSON.stringify(body), {
       headers: { "Content-Type": "application/json" },
     });
@@ -87,7 +90,7 @@ describe("follow", () => {
     expect(here.loading).toBe(false);
     // Kept as a prefetch: the page draws from it without asking again.
     expect(cache.takeFresh(fileKey(urls, path))).toBe(true);
-    expect(asked.filter((p) => p.includes("/files/"))).toHaveLength(1);
+    expect(asked.filter((p) => p.includes("/page/"))).toHaveLength(1);
   });
 
   test("a slow page replaces the old one after the hold, and says it is loading", async () => {
@@ -121,7 +124,7 @@ describe("follow", () => {
     follow(at(`/ann/notes/${path}`));
     expect(here.address).toBe(address);
     expect(here.held).toBe(true);
-    expect(asked.filter((p) => p.includes("/files/"))).toHaveLength(1);
+    expect(asked.filter((p) => p.includes("/page/"))).toHaveLength(1);
   });
 
   test("a page that registered no load follows at once", () => {

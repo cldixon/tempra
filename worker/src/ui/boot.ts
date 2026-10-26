@@ -37,7 +37,8 @@ const isConceptPath = (path: string) =>
 /**
  * The API calls the app makes first on a page, as it builds them: the frame's (who the person
  * is, their libraries, the bell's count), a library's (the tree, its agents), and a
- * file's page (app/src/concept/data.ts `loadFile` and the Comments panel's threads). Most
+ * file's page (app/src/concept/data.ts `loadFile`, `GET …/page/{path}`, and the Comments
+ * panel's threads). Most
  * important first, since the size budget keeps what fits in order.
  */
 export function bootUrls(page: BootPage): string[] {
@@ -48,9 +49,9 @@ export function bootUrls(page: BootPage): string[] {
   if (page.kind === "library") return [...frame, ...library];
   const p = enc(page.path);
   const at = page.at === undefined ? "" : `?at=${page.at}`;
-  const file = [`${lib}/files/${p}${at}`, `${lib}/stats`];
+  // The file's page in one call (TEMPRA-191), then a concept's comment threads.
+  const file = [`${lib}/page/${p}${at}`];
   if (isConceptPath(page.path)) {
-    file.push(`${lib}/sources/${p}${at}`, `${lib}/links/${p}${at}`, `${lib}/history/${p}`);
     if (page.at === undefined) {
       file.push(
         `${lib}/comments?${new URLSearchParams({ path: page.path, status: "all", limit: "200" })}`,
