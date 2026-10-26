@@ -24,9 +24,13 @@
       }
       current = at;
     };
-    update();
+    // Measured after the first paint: reading layout while the page mounts would hold it back.
+    const first = requestAnimationFrame(update);
     scroller.addEventListener("scroll", update, { passive: true });
-    return () => scroller.removeEventListener("scroll", update);
+    return () => {
+      cancelAnimationFrame(first);
+      scroller.removeEventListener("scroll", update);
+    };
   });
 </script>
 

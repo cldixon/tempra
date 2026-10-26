@@ -143,7 +143,8 @@
     // The row may first appear when the index arrives; it must be this file's, not the last.
     if (scrolledTo === cur || !row || row.dataset.path !== cur) return;
     scrolledTo = cur;
-    row.scrollIntoView({ block: "nearest" });
+    // After the first paint: scrolling reads layout, which would hold back drawing the page.
+    requestAnimationFrame(() => row.scrollIntoView({ block: "nearest" }));
   });
   /** A revealed folder's row scrolls into view when it draws. */
   const reveal = (path: string) => (el: HTMLElement) => {

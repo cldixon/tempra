@@ -38,11 +38,14 @@ export function relativeTime(ts: string, now: number = Date.now()): string {
   return day(ts);
 }
 
+/** One formatter for every local time drawn (making one per call is slow). */
+const LOCAL_TIME = new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" });
+
 /** A moment in the reader's own time zone, as people write it: "Oct 21, 2026, 4:52 PM". */
 export function localTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+  return LOCAL_TIME.format(d);
 }
 
 /**

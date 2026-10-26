@@ -84,6 +84,21 @@ try {
   for (let i = 0; i <= runs; i++) {
     const context = await browser.newContext({ extraHTTPHeaders: { Cookie: cookie } });
     const page = await context.newPage();
+    await page.addInitScript(() => {
+      const w = window as unknown as { __drawn?: number; __lcp?: number; __fcp?: number };
+      new PerformanceObserver((l) => {
+        for (const e of l.getEntries()) w.__lcp = e.startTime;
+      }).observe({ type: "largest-contentful-paint", buffered: true });
+      new PerformanceObserver((l) => {
+        for (const e of l.getEntries()) if (e.name === "first-contentful-paint") w.__fcp = e.startTime;
+      }).observe({ type: "paint", buffered: true });
+      new MutationObserver((_, o) => {
+        if (document.querySelector(".prose [data-block]")) {
+          w.__drawn = performance.now();
+          o.disconnect();
+        }
+      }).observe(document, { childList: true, subtree: true });
+    });
     let script = 0;
     const csp: string[] = [];
     page.on("console", (m) => {
@@ -93,10 +108,49 @@ try {
     page.on("response", async (r) => {
       if (r.request().resourceType() === "script") script += (await r.body()).length;
     });
+    const cdp = process.env.PROFILE && i === 1 ? await context.newCDPSession(page) : null;
+    if (cdp) {
+      await cdp.send("Profiler.enable");
+      await cdp.send("Profiler.setSamplingInterval", { interval: 100 });
+      await cdp.send("Profiler.start");
+    }
     const start = Date.now();
     await page.goto(url);
     await page.waitForSelector(values.selector ?? ".prose [data-block]", { timeout: 20_000 });
+    if (process.env.TIMELINE) await page.waitForTimeout(1000);
     const ms = Date.now() - start;
+    const t = await page.evaluate(() => {
+      const nav = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming;
+      const res = performance.getEntriesByType("resource") as PerformanceResourceTiming[];
+      const js = res.find((r) => r.name.includes("/_app/app."));
+      const api = res.filter((r) => r.name.includes("/api/"));
+      return {
+        doc: Math.round(nav.responseEnd),
+        js: Math.round(js?.responseEnd ?? 0),
+        dcl: Math.round(nav.domContentLoadedEventEnd),
+        api: api.map((r) => `${new URL(r.name).pathname.split("/").slice(-1)[0]}@${Math.round(r.startTime)}-${Math.round(r.responseEnd)}`).join(" "),
+        drawn: Math.round((window as unknown as { __drawn?: number }).__drawn ?? -1),
+        fcp: Math.round((window as unknown as { __fcp?: number }).__fcp ?? -1),
+        lcp: Math.round((window as unknown as { __lcp?: number }).__lcp ?? -1),
+      };
+    });
+    if (process.env.TIMELINE) console.log(JSON.stringify(t));
+    if (cdp) {
+      const { profile } = (await cdp.send("Profiler.stop")) as {
+        profile: { nodes: { id: number; callFrame: { functionName: string; url: string; lineNumber: number }; hitCount: number }[]; samples: number[]; timeDeltas: number[] };
+      };
+      const self = new Map<string, number>();
+      const byId = new Map(profile.nodes.map((n) => [n.id, n]));
+      profile.samples.forEach((id, k) => {
+        const n = byId.get(id);
+        if (!n) return;
+        const f = n.callFrame;
+        const key = `${f.functionName || "(anon)"} ${f.url.split("/").pop()}:${f.lineNumber}`;
+        self.set(key, (self.get(key) ?? 0) + (profile.timeDeltas[k] ?? 0));
+      });
+      const top = [...self].sort((a, b) => b[1] - a[1]).slice(0, 30);
+      for (const [k, us] of top) console.log(`${(us / 1000).toFixed(1).padStart(7)} ms  ${k}`);
+    }
     // The first run warms cf dev (its first request compiles the Worker); it is not counted.
     if (i > 0) times.push(ms);
     if (i === 0 && values.selector) console.log(await page.content());

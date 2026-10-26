@@ -14,6 +14,9 @@ export interface OutlineFile {
   stale?: "stale" | "stale_soon";
 }
 
+/** Names in the order people read them ("Part 2" before "Part 10"); one collator for every sort. */
+const BY_NAME = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+
 /** A file as the tree names it: a concept by its title, anything else by its file name. */
 export function fileLabel(e: OutlineFile): string {
   return e.kind === "concept" && e.title ? e.title : baseName(e.path);
@@ -95,7 +98,7 @@ export function buildDirs(files: OutlineFile[]): Record<string, OutlineFile[]> {
     out[d] = [...m.values()].sort(
       (a, b) =>
         RANK[a.kind] - RANK[b.kind] ||
-        shown(a).localeCompare(shown(b), undefined, { numeric: true, sensitivity: "base" }) ||
+        BY_NAME.compare(shown(a), shown(b)) ||
         a.path.localeCompare(b.path),
     );
   }
