@@ -6,7 +6,6 @@ import { alertNotice, esc, invalid, messagePage, PAGE_HEADERS, page } from "./oa
 import { fromThisSite } from "./origin";
 import {
   clearedSessionCookie,
-  formatCode,
   LINK_MINUTES,
   newCode,
   readCookie,
@@ -203,7 +202,7 @@ function formEmail(form: FormData): { email: string; ok: boolean } {
 const devLink = (shown: string, code?: string) =>
   shown
     ? `<p>Local dev, no email sent: <a id="dev-link" href="${esc(shown)}">link</a>${
-        code ? `, code <code id="dev-code">${esc(formatCode(code))}</code>` : ""
+        code ? `, code <code id="dev-code">${esc(code)}</code>` : ""
       }</p>`
     : "";
 
@@ -213,7 +212,7 @@ const devLink = (shown: string, code?: string) =>
  * clients take only inline styles), the text part the link and the code.
  */
 export function signInMail(link: string, code: string | null, intro?: string) {
-  const shown = code ? formatCode(code) : null;
+  const shown = code;
   const lasts = `It works once, within ${LINK_MINUTES} minutes. If you did not ask for it, ignore this email.`;
   const subject = shown ? `Tempra sign-in code: ${shown}` : "Your Tempra sign-in link";
   const text = shown
@@ -230,7 +229,7 @@ export function signInMail(link: string, code: string | null, intro?: string) {
     shown
       ? `
 <p style="margin:0 0 8px;color:#555">Or enter this code on the page that asked for it:</p>
-<p style="margin:0 0 20px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:28px;font-weight:600;letter-spacing:2px">${esc(shown)}</p>`
+<p style="margin:0 0 20px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:28px;font-weight:600;letter-spacing:4px">${esc(shown)}</p>`
       : ""
   }
 <p style="margin:0;color:#555;font-size:13px">${esc(lasts)}</p>
@@ -286,7 +285,7 @@ function checkEmail(
 ${err}<form method="post" action="/sign-in/code" class="stack">
 <input type="hidden" name="email" value="${esc(email)}"><input type="hidden" name="next" value="${esc(next)}">
 <label class="field">Code
-<input id="code" name="code" type="text" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" maxlength="12" placeholder="XXXX-XXXX" required autofocus${invalid("code-error", !!opts.error)}></label>
+<input id="code" name="code" type="text" autocomplete="one-time-code" autocapitalize="characters" spellcheck="false" maxlength="12" required autofocus${invalid("code-error", !!opts.error)}></label>
 <p><button class="primary" type="submit">Continue</button></p></form>
 <p class="muted">Nothing? Check spam. ${RATE_HINT} <a href="/sign-in?next=${esc(encodeURIComponent(next))}">Back to sign in</a>.${after}</p>${devLink(opts.shown ?? "", opts.code)}`;
 }

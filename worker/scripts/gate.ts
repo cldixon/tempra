@@ -477,7 +477,7 @@ async function openBrowser() {
   };
   /**
    * Signs in the way a person does: the email form, then the (dev, on-page) link, or with
-   * `byCode` the code typed on the page that asked, loosely (lower case, no dash; TEMPRA-188).
+   * `byCode` the code typed on the page that asked, loosely (lower case; TEMPRA-188).
    */
   const signInAs = async (email: string, next: string, byCode = false) => {
     await page.goto(`${base}/sign-in?next=${encodeURIComponent(next)}`);
@@ -485,8 +485,8 @@ async function openBrowser() {
     await page.getByRole("button", { name: "Email me a link" }).click();
     if (byCode) {
       const code = (await page.locator("#dev-code").innerText()).trim();
-      if (!/^[0-9A-Z]{4}-[0-9A-Z]{4}$/.test(code)) throw new Error(`the dev code reads "${code}"`);
-      await page.getByLabel("Code").fill(code.replace("-", "").toLowerCase());
+      if (!/^[0-9A-Z]{8}$/.test(code)) throw new Error(`the dev code reads "${code}"`);
+      await page.getByLabel("Code").fill(code.toLowerCase());
       await page.getByRole("button", { name: "Continue" }).click();
       await page.waitForURL((u) => !u.pathname.startsWith("/sign-in"), { timeout: 15_000 });
       return;

@@ -83,17 +83,17 @@ const hash = (secret: string) => sha256Hex(secret);
 const CODE_ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 const CODE_LENGTH = 8;
 
-/** A sign-in code: 8 characters of Crockford's base32 (40 bits), unformatted. */
+/**
+ * A sign-in code: 8 characters of Crockford's base32 (40 bits), shown as one word with no dash,
+ * so a double-tap on a phone selects all of it.
+ */
 export function newCode(): string {
   // 32 divides 256, so a byte's low five bits are uniform.
   return [...randomBytes(CODE_LENGTH)].map((b) => CODE_ALPHABET[b & 31]).join("");
 }
 
-/** A code as people read it: two groups of four, `K7QM-X2PD`. */
-export const formatCode = (code: string) => `${code.slice(0, 4)}-${code.slice(4)}`;
-
 /**
- * A code as typed, in any case, with or without the dash or spaces; O reads as 0, I and L as 1
+ * A code as typed, in any case, with or without a dash or spaces; O reads as 0, I and L as 1
  * (Crockford). Null when it cannot be a code.
  */
 export function normalizeCode(typed: string): string | null {
