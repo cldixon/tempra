@@ -2032,9 +2032,11 @@ async function browserRenders(
         const held = new Promise<void>((r) => {
           release = r;
         });
+        // Released and unrouted together, so a held request can find its route already handled
+        // once it goes on; that is the release working, not a failure.
         const hold = async (route: Route) => {
           await held;
-          await route.continue();
+          await route.continue().catch(() => {});
         };
         await page.route("**/-/image/**", hold);
         await wide();
@@ -2152,7 +2154,7 @@ async function browserRenders(
         });
         const holdFile = async (route: Route) => {
           await heldFile;
-          await route.continue();
+          await route.continue().catch(() => {});
         };
         await page.route("**/-/image/**", holdFile);
         await page.goto(`${lib}/${imagePaths[0]}`, { waitUntil: "domcontentloaded" });
