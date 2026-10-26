@@ -1,4 +1,4 @@
-import type { Accounts, LibraryRef, Role, User } from "./accounts";
+import type { Accounts, LibraryRef, MemberRole, Role, User } from "./accounts";
 import { agentId, type ClientSignals, connectionAgent } from "./agents";
 import type { TokenInfo } from "./auth";
 import { OkfError } from "./store/errors";
@@ -21,22 +21,33 @@ export function noLibrary(owner: string, slug: string): OkfError {
   return new OkfError(404, "no_library", `There is no library ${owner}/${slug}.`);
 }
 
+/**
+ * What a session's one query already found for {owner}/{slug} (TEMPRA-192, `Sessions.access`):
+ * the library by name and the person's membership. It feeds the decision below; it never makes it.
+ */
+export interface Found {
+  library: (LibraryRef & { ownerId: string }) | null;
+  memberRole: MemberRole | null;
+}
+
 export async function authorizeLibrary(
   accounts: Accounts,
   caller: Caller,
   owner: string,
   slug: string,
+  /** For a person: the library and their membership as found already, else looked up here. */
+  found?: Found,
 ): Promise<Authorized> {
   if ("token" in caller) {
     const { library: lib, role } = caller.token;
     if (lib.owner && lib.owner === owner && lib.slug === slug) return { ...lib, role };
     throw noLibrary(owner, slug);
   }
-  const found = await accounts.library(owner, slug);
-  if (!found) throw noLibrary(owner, slug);
-  const ref = { id: found.id, slug: found.slug, do_id: found.do_id, owner: found.owner };
-  if (found.ownerId === caller.user.id) return { ...ref, role: "owner" };
-  const role = await accounts.memberRole(found.id, caller.user.id);
+  const library = found ? found.library : await accounts.library(owner, slug);
+  if (!library || library.owner !== owner || library.slug !== slug) throw noLibrary(owner, slug);
+  const ref = { id: library.id, slug: library.slug, do_id: library.do_id, owner: library.owner };
+  if (library.ownerId === caller.user.id) return { ...ref, role: "owner" };
+  const role = found ? found.memberRole : await accounts.memberRole(library.id, caller.user.id);
   if (!role) throw noLibrary(owner, slug);
   return { ...ref, role };
 }

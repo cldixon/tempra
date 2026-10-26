@@ -1,5 +1,5 @@
 import { bytesToHex, randomBytes } from "@noble/hashes/utils.js";
-import type { User } from "./accounts";
+import type { LibraryRef, MemberRole, User } from "./accounts";
 import { sha256Hex } from "./okf/hash";
 
 /**
@@ -55,6 +55,13 @@ export interface Sessions {
   create(userId: string, userAgent: string | null): Promise<string>;
   /** The signed-in user for a cookie's secret, or null. */
   user(secret: string): Promise<User | null>;
+  /**
+   * The signed-in user for a cookie's secret, with the library `owner`/`slug` and their
+   * membership in it, in one query (TEMPRA-192): what `authorizeLibrary` decides on for the app's
+   * library requests, which made two or three round trips to D1 for it. Null when the session is
+   * not live; `library` null when no library answers to that name (none, or its owner suspended).
+   */
+  access(secret: string, owner: string, slug: string): Promise<SessionAccess | null>;
   end(secret: string): Promise<void>;
   /** Signs the user out everywhere. */
   endAll(userId: string): Promise<void>;
@@ -65,6 +72,14 @@ export interface Sessions {
 }
 
 export type LinkPurpose = "sign-in" | "email-change";
+
+/** A session's person, and a library by name with their membership, as one query finds them. */
+export interface SessionAccess {
+  user: User;
+  library: (LibraryRef & { ownerId: string }) | null;
+  /** Their role as a member; null when not one (an owner is never a member). */
+  memberRole: MemberRole | null;
+}
 
 export interface SessionInfo {
   id: string;
@@ -106,6 +121,16 @@ export function normalizeCode(typed: string): string | null {
 const codeHash = (email: string, code: string) => sha256Hex(`${email}\n${code}`);
 const iso = (ms: number) => new Date(ms).toISOString();
 
+/** What `access` adds to a session's row: the library by name, and the person's membership. */
+interface LibraryColumns {
+  lib_id: string | null;
+  lib_slug: string | null;
+  lib_do_id: string | null;
+  lib_owner: string | null;
+  lib_owner_id: string | null;
+  member_role: MemberRole | null;
+}
+
 interface SessionRow {
   hash: string;
   last_seen: string;
@@ -118,6 +143,44 @@ interface SessionRow {
 }
 
 export function d1Sessions(db: D1Database, now = () => Date.now()): Sessions {
+  /**
+   * A live session's row and person, with what `columns` and `joins` add to the one query;
+   * `last_seen` (and the idle expiry) is moved on at most every TOUCH_MS.
+   */
+  async function live(
+    secret: string,
+    columns = "",
+    joins = "",
+    binds: string[] = [],
+  ): Promise<{ row: SessionRow; user: User } | null> {
+    const t = now();
+    const row = await db
+      .prepare(
+        `SELECT s.hash, s.last_seen, s.expires, u.id, u.email, u.actor, u.handle, u.theme${columns}
+         FROM sessions s JOIN users u ON u.id = s.user
+         ${joins}
+         WHERE s.hash = ?1 AND s.idle_expires > ?2 AND s.expires > ?2 AND u.suspended IS NULL`,
+      )
+      .bind(hash(secret), iso(t), ...binds)
+      .first<SessionRow>();
+    if (!row) return null;
+    if (t - Date.parse(row.last_seen) > TOUCH_MS) {
+      const idle = Math.min(t + SESSION_IDLE_DAYS * DAY_MS, Date.parse(row.expires));
+      await db
+        .prepare("UPDATE sessions SET last_seen = ?, idle_expires = ? WHERE hash = ?")
+        .bind(iso(t), iso(idle), row.hash)
+        .run();
+    }
+    const user: User = {
+      id: row.id,
+      email: row.email,
+      actor: row.actor,
+      handle: row.handle,
+      theme: row.theme === "light" || row.theme === "dark" ? row.theme : null,
+    };
+    return { row, user };
+  }
+
   return {
     async createLink(email, ip, change, code) {
       const t = now();
@@ -223,30 +286,33 @@ export function d1Sessions(db: D1Database, now = () => Date.now()): Sessions {
     },
 
     async user(secret) {
-      const t = now();
-      const row = await db
-        .prepare(
-          `SELECT s.hash, s.last_seen, s.expires, u.id, u.email, u.actor, u.handle, u.theme
-           FROM sessions s JOIN users u ON u.id = s.user
-           WHERE s.hash = ?1 AND s.idle_expires > ?2 AND s.expires > ?2 AND u.suspended IS NULL`,
-        )
-        .bind(hash(secret), iso(t))
-        .first<SessionRow>();
-      if (!row) return null;
-      if (t - Date.parse(row.last_seen) > TOUCH_MS) {
-        const idle = Math.min(t + SESSION_IDLE_DAYS * DAY_MS, Date.parse(row.expires));
-        await db
-          .prepare("UPDATE sessions SET last_seen = ?, idle_expires = ? WHERE hash = ?")
-          .bind(iso(t), iso(idle), row.hash)
-          .run();
-      }
-      return {
-        id: row.id,
-        email: row.email,
-        actor: row.actor,
-        handle: row.handle,
-        theme: row.theme === "light" || row.theme === "dark" ? row.theme : null,
-      };
+      return (await live(secret))?.user ?? null;
+    },
+
+    async access(secret, owner, slug) {
+      // The same conditions as `user`, `Accounts.library` and `Accounts.memberRole`, joined.
+      const got = await live(
+        secret,
+        `, l.id AS lib_id, l.slug AS lib_slug, l.do_id AS lib_do_id, o.handle AS lib_owner,
+           o.id AS lib_owner_id, m.role AS member_role`,
+        `LEFT JOIN users o ON o.handle = ?3 AND o.suspended IS NULL
+         LEFT JOIN libraries l ON l.owner = o.id AND l.slug = ?4
+         LEFT JOIN library_members m ON m.library = l.id AND m.user = u.id`,
+        [owner, slug],
+      );
+      if (!got) return null;
+      const r = got.row as SessionRow & LibraryColumns;
+      const library =
+        r.lib_id === null
+          ? null
+          : {
+              id: r.lib_id,
+              slug: r.lib_slug as string,
+              do_id: r.lib_do_id as string,
+              owner: r.lib_owner as string,
+              ownerId: r.lib_owner_id as string,
+            };
+      return { user: got.user, library, memberRole: r.member_role };
     },
 
     async end(secret) {

@@ -48,6 +48,7 @@ import {
   type Authorized,
   authorizeLibrary,
   createLibraryForGrant,
+  type Found,
   requireOwner,
 } from "./tenancy";
 import { registerUiRoutes } from "./ui/routes";
@@ -450,8 +451,10 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
 
   app.use(`${BASE}/*`, async (c, next) => {
     const d = deps(c.env);
-    const who = await principal(c, d);
-    const ref = await authorizeLibrary(d.accounts, who, c.req.param("owner"), c.req.param("lib"));
+    const [owner, slug] = [c.req.param("owner"), c.req.param("lib")];
+    // A session finds its person, the library and their membership in one D1 query (TEMPRA-192).
+    const who = await principal(c, d, { owner, slug });
+    const ref = await authorizeLibrary(d.accounts, who, owner, slug, who.found);
     const token = "token" in who ? who.token : sessionToken(who.user, ref);
     // A person signed in to the app is metered here but limited only per session (above), so
     // agents spending the account's write budget never lock its owner out of the UI.
@@ -1606,11 +1609,18 @@ async function fileJson(lib: LibraryClient, blobs: BlobStore, view: FileView) {
  * signed-in person's session (the app's own pages, TEMPRA-9). A session may change state only
  * from this site's pages: cookies are SameSite=Lax, and writes must also pass fromThisSite.
  */
-async function principal(c: C, d: Deps): Promise<{ token: TokenInfo } | { user: User }> {
+async function principal(
+  c: C,
+  d: Deps,
+  /** A library route's {owner}/{slug}: a session finds it with its person, in the same query. */
+  library?: { owner: string; slug: string },
+): Promise<{ token: TokenInfo; found?: undefined } | { user: User; found?: Found }> {
   if (c.req.header("Authorization") !== undefined)
     return { token: await d.authenticate(bearer(c)) };
   const secret = readCookie(c.req.raw, SESSION_COOKIE);
-  const user = secret ? await d.sessions.user(secret) : null;
+  const access =
+    secret && library ? await d.sessions.access(secret, library.owner, library.slug) : null;
+  const user = access?.user ?? (secret && !library ? await d.sessions.user(secret) : null);
   if (!user) throw new OkfError(401, "no_token", "Send Authorization: Bearer <token>, or sign in.");
   if (c.req.method !== "GET" && c.req.method !== "HEAD" && !fromThisSite(c.req.raw)) {
     throw new OkfError(
@@ -1619,7 +1629,7 @@ async function principal(c: C, d: Deps): Promise<{ token: TokenInfo } | { user: 
       "Changes must be submitted from this site's own pages.",
     );
   }
-  return { user };
+  return access ? { user, found: access } : { user };
 }
 
 /**
