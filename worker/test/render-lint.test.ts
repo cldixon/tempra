@@ -5,6 +5,8 @@
  */
 import { describe, expect, test } from "bun:test";
 import { PeleError, render as peleRender } from "pele";
+import { MAX_PELE_MESSAGE, PELE_MESSAGE_FORMAT, peleMessage } from "../render/src/message";
+import { errorOf } from "../render/src/render";
 import { fakeRenderer, type RenderResult, serviceRenderer } from "../src/render";
 import { LibraryStore, RENDERS_PER_WRITE } from "../src/store/store";
 import { writeTar } from "../src/util/tar";
@@ -18,7 +20,7 @@ const GOOD = "flowchart LR\n  A --> B";
 /** Balanced and of a known type, so the fast checker passes it; Pele refuses the arrow. */
 const SUBTLE = "flowchart LR\n  A -->> B";
 
-/** The render service as a double, answering as Pele does. */
+/** The render service as a double, answering as Pele does, its error as the service gives it. */
 const pele = (delayMs = 0) =>
   fakeRenderer(async (req): Promise<RenderResult> => {
     if (delayMs) await new Promise((r) => setTimeout(r, delayMs));
@@ -26,11 +28,69 @@ const pele = (delayMs = 0) =>
       return { svg: peleRender(req.source).svg };
     } catch (e) {
       if (!(e instanceof PeleError)) throw e;
-      return {
-        error: { message: e.message.split("\n", 1)[0] ?? "", line: e.line, column: e.column },
-      };
+      return { error: errorOf(e) };
     }
   });
+
+/** Pele's own error for a source it refuses. */
+const peleError = (source: string): PeleError => {
+  try {
+    peleRender(source);
+  } catch (e) {
+    if (e instanceof PeleError) return e;
+    throw e;
+  }
+  throw new Error(`Pele drew ${JSON.stringify(source)}`);
+};
+
+describe("peleMessage (TEMPRA-184)", () => {
+  test("a parse error keeps what Pele expected, without the source and caret lines", () => {
+    const e = peleError(SUBTLE);
+    // Pele's raw form, so the cleanup is held to what Pele really says.
+    expect(e.message.split("\n")).toEqual([
+      "Parse error on line 2:",
+      "  A -->> B",
+      "-------^",
+      "Expecting 'NODE_STRING', got 'TAGEND'",
+    ]);
+    expect(peleMessage(e.message)).toBe("Expecting 'NODE_STRING', got 'TAGEND'");
+    expect(errorOf(e)).toEqual({
+      message: "Expecting 'NODE_STRING', got 'TAGEND'",
+      line: 2,
+      column: 8,
+    });
+  });
+
+  test("other diagrams, an empty source line, a lexical error and a one-line error", () => {
+    const cases: [string, string][] = [
+      ["sequenceDiagram\n  A->>B hello", "Expecting 'TXT', got 'NEWLINE'"],
+      ["classDiagram\n  class A {\n", "Expecting 'STRUCT_STOP', 'MEMBER', got 'EOF_IN_STRUCT'"],
+      ["stateDiagram-v2\n  [*] --> --> A", "Expecting 'ID', 'EDGE_STATE', got '-->'"],
+      ['pie\n  "a" x', "Lexical error. Unrecognized text."],
+      [
+        "gantt\n  title x\n  section s\n  t :a, b, c, d, e",
+        'Task "t" has too many fields. A task takes an id, a start, and an end or duration.',
+      ],
+    ];
+    for (const [source, message] of cases) {
+      const e = peleError(source);
+      expect(peleMessage(e.message)).toBe(message);
+      expect(peleMessage(peleMessage(e.message))).toBe(message);
+    }
+  });
+
+  test("a long source line never reaches the message, and a long message is cut", () => {
+    const e = peleError(`flowchart LR\n  A --> B\n  B -->> ${"C".repeat(400)}`);
+    expect(e.message.length).toBeGreaterThan(400);
+    expect(peleMessage(e.message)).toBe("Expecting 'NODE_STRING', got 'TAGEND'");
+    const long = peleMessage(
+      `Parse error on line 1:\nx\n^\nExpecting ${"'A', ".repeat(80)}got 'B'`,
+    );
+    expect(long.length).toBe(MAX_PELE_MESSAGE);
+    expect(long).toStartWith("Expecting 'A', ");
+    expect(long).toEndWith("…");
+  });
+});
 
 type Put = { hash: string; lint: { code: string; message: string; block?: string }[] };
 const codes = (lint: { code: string }[]) => lint.map((l) => l.code);
@@ -63,7 +123,10 @@ describe("diagram_unrendered (TEMPRA-167)", () => {
     expect(rest).toEqual([]);
     expect(codes(first.lint)).not.toContain("diagram_invalid");
     expect(lint?.message).toContain("Mermaid diagram 2 (`flowchart LR`");
-    expect(lint?.message).toContain("could not be drawn by Pele at line 2, column 8 of the fence");
+    expect(lint?.message).toContain(
+      "could not be drawn by Pele at line 2, column 8 of the fence: Expecting 'NODE_STRING', got 'TAGEND'. The app shows",
+    );
+    expect(lint?.message).not.toContain("-->>");
     expect(lint?.block).toBeTruthy();
     // SVG only, light, one call per diagram.
     expect(w.render.calls.map((c) => [c.source, c.png])).toEqual([
@@ -136,7 +199,7 @@ describe("diagram_unrendered (TEMPRA-167)", () => {
       },
     ]);
     const key = job?.diagrams[0]?.key ?? "";
-    const error = { message: "Parse error on line 2:", line: 2, column: 8 };
+    const error = { message: "Expecting 'NODE_STRING', got 'TAGEND'", line: 2, column: 8 };
     expect(
       s.setDiagramRenders([
         { concept_id: job?.concept_id ?? "", hash: job?.hash ?? "", verdicts: [{ key, error }] },
@@ -176,8 +239,9 @@ describe("diagram_unrendered (TEMPRA-167)", () => {
     const old = new LibraryStore(sql, { peleVersion: "1.6.0" });
     const a = old.apply(ctx("a"), [{ op: "write", path: "d.md", content: md(fence(SUBTLE)) }]);
     const job = a.render?.[0];
-    expect(job?.diagrams[0]?.key.startsWith("1.6.0:")).toBe(true);
-    const error = { message: "Parse error on line 2:", line: 2, column: 8 };
+    // Kept per message format too (TEMPRA-184), so a verdict in an older shape is asked again.
+    expect(job?.diagrams[0]?.key.startsWith(`1.6.0:m${PELE_MESSAGE_FORMAT}:`)).toBe(true);
+    const error = { message: "Expecting 'NODE_STRING', got 'TAGEND'", line: 2, column: 8 };
     old.setDiagramRenders([
       {
         concept_id: job?.concept_id ?? "",

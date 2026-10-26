@@ -8,9 +8,10 @@
  */
 import { interLatinWoff2, peleThemeHash, peleThemes } from "@tempra/design/pele";
 import { PeleError, render as peleRender } from "pele";
+import { PELE_MESSAGE_FORMAT, peleMessage } from "./message";
 import { PELE_VERSION } from "./version";
 
-export { PELE_VERSION };
+export { PELE_MESSAGE_FORMAT, PELE_VERSION, peleMessage };
 
 /** Where renders live in the deployment's blobs bucket; the blob sweep works on blobs/ only. */
 export const RENDERS_PREFIX = "renders/";
@@ -136,9 +137,10 @@ export function pageFor(svg: string, theme: Theme): string {
   return `<!doctype html><html><head><meta charset="utf-8"><style>@font-face{font-family:"Inter";font-style:normal;font-weight:100 900;src:url(data:font/woff2;base64,${interLatinWoff2}) format("woff2")}html,body{margin:0;padding:0;background:${bg}}svg{display:block}</style></head><body>${svg}</body></html>`;
 }
 
-function errorOf(e: unknown): RenderError {
+/** What a render's error says: Pele's as one short line (message.ts), anything else as thrown. */
+export function errorOf(e: unknown): RenderError {
   if (e instanceof PeleError) {
-    return { message: e.message.split("\n", 1)[0] ?? e.message, line: e.line, column: e.column };
+    return { message: peleMessage(e.message), line: e.line, column: e.column };
   }
   return { message: e instanceof Error ? e.message : String(e), line: 0, column: 0 };
 }
@@ -185,20 +187,28 @@ export async function renderDiagram(req: RenderRequest, deps: RenderDeps): Promi
   const hash = await sha256(req.source);
   const svgKey = cacheKey(hash, req.theme, width, "svg");
 
-  // The SVG, or the error Pele gave this source (cached as JSON under the same key).
+  // The SVG, or the error Pele gave this source (cached as JSON under the same key, with its
+  // message's format: an error cached in an older shape is drawn again).
   let svg: string | undefined;
   const hit = await deps.cache.get(svgKey).catch(() => null);
-  if (hit) {
-    const text = await hit.text();
-    if (text.startsWith("<svg")) svg = text;
-    else return { error: JSON.parse(text) as RenderError };
+  const text = hit ? await hit.text() : undefined;
+  const cached =
+    text !== undefined && !text.startsWith("<svg")
+      ? (JSON.parse(text) as RenderError & { format?: number })
+      : undefined;
+  if (text !== undefined && cached === undefined) svg = text;
+  else if (cached?.format === PELE_MESSAGE_FORMAT) {
+    const { message, line, column } = cached;
+    return { error: { message, line, column } };
   } else {
     try {
       svg = themed(peleRender(req.source, peleOptions(width, idPrefixFor(hash))).svg, req.theme);
     } catch (e) {
       const error = errorOf(e);
       await deps.cache
-        .put(svgKey, JSON.stringify(error), { httpMetadata: { contentType: "application/json" } })
+        .put(svgKey, JSON.stringify({ ...error, format: PELE_MESSAGE_FORMAT }), {
+          httpMetadata: { contentType: "application/json" },
+        })
         .catch(() => {});
       return { error };
     }
