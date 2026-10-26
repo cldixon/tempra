@@ -1,26 +1,8 @@
-import * as app from "@tempra/app";
+import { href } from "@tempra/app";
 import { href as designHref } from "@tempra/design";
 
-/** The app's client bundle, at a content-hashed URL like the design stylesheet. */
-export const appHref = app.href;
-
-/** The bundle's entry at its hashed name, or a chunk it imports on demand; null for anything else. */
-export function appScript(file: string): Response | null {
-  const js =
-    `/_app/${file}` === appHref
-      ? app.js
-      : Object.hasOwn(app.chunks, file)
-        ? app.chunks[file]
-        : undefined;
-  if (js === undefined) return null;
-  return new Response(js, {
-    headers: {
-      "Content-Type": "text/javascript; charset=utf-8",
-      "Cache-Control": "public, max-age=31536000, immutable",
-      "X-Content-Type-Options": "nosniff",
-    },
-  });
-}
+/** The app's client bundle: a static asset at a content-hashed URL (TEMPRA-174). */
+export const appHref = href;
 
 /**
  * The single page every rebuilt UI route answers with (TEMPRA-9): the design stylesheet, the
@@ -57,6 +39,7 @@ export function spaShell(
         "style-src 'self'",
         "font-src 'self'",
         "img-src 'self' https:",
+        "media-src 'self'",
         `connect-src 'self' ${socket}`,
         "form-action 'self'",
         "frame-ancestors 'none'",

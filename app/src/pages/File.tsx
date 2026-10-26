@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { AgentName } from "../AgentName";
-import { actorText, useActors } from "../agents";
+import { type ActedBy, actorText, useActors } from "../agents";
 import { ApiError, api, useLoad } from "../api";
 import { Icon } from "../chrome";
 import { useThreads } from "../comments/data";
@@ -17,18 +17,29 @@ import {
   loadFile,
 } from "../concept/data";
 import { LiveNotice, useLiveFile } from "../concept/live";
-import { imageSource } from "../images";
+import { attachmentSource, imageSource, mediaKind } from "../images";
 import { Moment } from "../Moment";
 import { Reader } from "../Reader";
 import { Img } from "../reader/Figure";
+import { Player } from "../reader/Media";
 import { prepare } from "../reader/prepare";
 import { useLibraryLabel } from "../role";
 import type { Compare } from "../router";
 import { navigate } from "../router";
 import { fileLabel } from "../Tree";
-import { AtNotice, formatSize, Status, useCopy, useMe, useScrollToHash, useTitle } from "../ui";
+import { AtNotice, Status, useCopy, useMe, useScrollToHash, useTitle } from "../ui";
 import { baseName, dirOf, enc, folderName, type Urls } from "../urls";
 import { PageColumn, useFrame } from "../Workspace";
+import {
+  describedAs,
+  FileHistory,
+  figureUse,
+  SourceFact,
+  sizeText,
+  type Use,
+  UsedIn,
+  versionsOf,
+} from "./attachment";
 
 /** The attachment page's image: the screen on a phone, else most of the window (views.css). */
 const ATTACHMENT_SIZES = "(max-width: 900px) 100vw, 70vw";
@@ -126,13 +137,15 @@ export function typeName(media: string | null, path: string): string {
 export function AttachmentImage(props: {
   urls: Urls;
   file: AttachmentFile;
+  /** What it shows (its description), else its filename. */
+  alt?: string;
   onLoad?(img: HTMLImageElement): void;
   onError(): void;
 }) {
   return (
     <Img
       source={imageSource(props.urls, props.file)}
-      alt={baseName(props.file.path)}
+      alt={props.alt ?? baseName(props.file.path)}
       sizes={ATTACHMENT_SIZES}
       lazy={false}
       onLoad={props.onLoad}
@@ -150,13 +163,14 @@ export function sizeFact(
   loaded: { w: number; h: number } | null,
 ): string {
   const px = file.width && file.height ? { w: file.width, h: file.height } : loaded;
-  return `${formatSize(file.size)}${px ? ` · ${px.w} × ${px.h}` : ""}`;
+  return sizeText(file.size, px?.w, px?.h);
 }
 
 /**
- * An attachment (board 28): the image (or a file icon) large on a dark frame; beside it the
- * filename, Download and Copy link, then Type, Size, Added (who, when, from its history) and
- * Used in (the concepts that link it, from the links route).
+ * An attachment (board 28; TEMPRA-170, tempra-dev: app/media, The image's page): the image (or a
+ * file icon) large on a dark frame; beside it the filename and what it shows, Download and Copy
+ * link, then Type, Size, Added, Source, Credit, Licence and Used in (each page and the figures it
+ * appears as); under them File history, every version with its own Download.
  */
 function Attachment(props: { urls: Urls; head: number; file: AttachmentFile }) {
   const { urls, file } = props;
@@ -172,6 +186,30 @@ function Attachment(props: { urls: Urls; head: number; file: AttachmentFile }) {
     ]);
     return { links, history: history.events };
   });
+  const usedIn =
+    extra.state === "ready" ? [...new Set(extra.data.links.inbound.map((l) => l.path))] : null;
+  // The pages that use it, read for the figures it appears as and the sources citing it; a page
+  // that fails to load just says less.
+  const pages = usedIn?.filter(isConceptPath).slice(0, USES_READ).join("\n") ?? null;
+  const uses = useLoad(
+    `attachment uses ${urls.base} ${file.path} ${file.seq} ${pages}`,
+    async () => {
+      if (pages === null) return null;
+      const read = await Promise.all(
+        pages
+          .split("\n")
+          .filter(Boolean)
+          .map((p) =>
+            api<FileJson>(urls.api(`files/${enc(p)}`, { at: urls.at })).then(
+              (f) => (f.kind === "concept" ? figureUse(file.path, f, file.source) : null),
+              () => null,
+            ),
+          ),
+      );
+      return read.filter((u): u is Use => u !== null);
+    },
+  );
+  const usesShown = uses.state === "ready" ? uses.data : null;
   const titles = useMemo(() => {
     const out = new Map<string, string>();
     for (const f of frame.index ?? []) out.set(f.path, fileLabel(f));
@@ -181,18 +219,34 @@ function Attachment(props: { urls: Urls; head: number; file: AttachmentFile }) {
   const [broken, setBroken] = useState(false);
   const copied = useCopy();
   const image = file.media?.startsWith("image/") && !broken;
+  const kind = mediaKind(file.media);
+  const playable = kind === "video" || kind === "audio" ? kind : null;
   const href = urls.download(file.path);
-  const added = extra.state === "ready" ? extra.data.history[0] : undefined;
-  const usedIn =
-    extra.state === "ready" ? [...new Set(extra.data.links.inbound.map((l) => l.path))] : null;
+  const versions =
+    extra.state === "ready"
+      ? versionsOf(extra.data.history, urls.at ?? Number.MAX_SAFE_INTEGER)
+      : null;
+  const added = versions?.at(-1);
+  const current = versions?.find((v) => v.current) ?? null;
+  const name = (actor: string, by: ActedBy | null) => actors.view(actor, by);
+  const described = describedAs(file.description, usesShown);
   return (
     <div className="attachment">
       <AtNotice urls={urls} head={props.head} current={urls.pinned(undefined).file(file.path)} />
       <div className="attachment-frame">
-        {image ? (
+        {playable && !broken ? (
+          // Video and audio play in place (TEMPRA-164).
+          <Player
+            kind={playable}
+            source={attachmentSource(urls, file, file.path)}
+            name={described?.text ?? baseName(file.path)}
+            onError={() => setBroken(true)}
+          />
+        ) : image ? (
           <AttachmentImage
             urls={urls}
             file={file}
+            alt={described?.text}
             onLoad={(img) => setSize({ w: img.naturalWidth, h: img.naturalHeight })}
             onError={() => setBroken(true)}
           />
@@ -203,7 +257,15 @@ function Attachment(props: { urls: Urls; head: number; file: AttachmentFile }) {
         )}
       </div>
       <aside className="attachment-side" aria-label="About this file">
-        <h1 className="attachment-name">{baseName(file.path)}</h1>
+        <div className="attachment-head">
+          <h1 className="attachment-name">{baseName(file.path)}</h1>
+          {described && (
+            <p className="attachment-description">
+              {described.text}
+              {described.fromAlt && <span className="muted"> (the alt text where it is used)</span>}
+            </p>
+          )}
+        </div>
         <p className="attachment-actions">
           <a className="button primary" href={href} download={baseName(file.path)}>
             <Icon name="download" /> Download
@@ -235,7 +297,7 @@ function Attachment(props: { urls: Urls; head: number; file: AttachmentFile }) {
               <dt>Added</dt>
               <dd>
                 <div>
-                  <AgentName who={actors.view(added.actor, actedBy(added))} />
+                  <AgentName who={name(added.actor, added.by)} />
                 </div>
                 <div className="muted">
                   <Moment ts={added.ts} />
@@ -244,29 +306,47 @@ function Attachment(props: { urls: Urls; head: number; file: AttachmentFile }) {
             </div>
           )}
           <div>
+            <dt>Source</dt>
+            <dd>
+              <SourceFact
+                urls={urls}
+                source={file.source}
+                version={current}
+                uses={usesShown}
+                titles={titles}
+                name={name}
+              />
+            </dd>
+          </div>
+          {file.credit && (
+            <div>
+              <dt>Credit</dt>
+              <dd>{file.credit}</dd>
+            </div>
+          )}
+          {file.licence && (
+            <div>
+              <dt>Licence</dt>
+              <dd>{file.licence}</dd>
+            </div>
+          )}
+          <div>
             <dt>Used in</dt>
             <dd>
-              {usedIn === null ? (
-                "…"
-              ) : usedIn.length === 0 ? (
-                <span className="muted">No page links it</span>
-              ) : (
-                <ul className="attachment-used">
-                  {usedIn.map((p) => (
-                    <li key={p}>
-                      <a href={urls.file(p)}>{titles.get(p) ?? baseName(p)}</a>
-                      {dirOf(p) && <span className="muted"> · {folderName(dirOf(p))}</span>}
-                    </li>
-                  ))}
-                </ul>
-              )}
+              <UsedIn urls={urls} paths={usedIn} uses={usesShown} titles={titles} />
             </dd>
           </div>
         </dl>
       </aside>
+      {versions && versions.length > 0 && (
+        <FileHistory urls={urls} path={file.path} versions={versions} name={name} />
+      )}
     </div>
   );
 }
+
+/** How many using pages the page reads for their figures and sources. */
+const USES_READ = 12;
 
 /** What became of a path, from its history: moved elsewhere, deleted, or nothing known. */
 export type Fate =

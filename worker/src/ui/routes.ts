@@ -7,6 +7,7 @@ import { VARIANT_EDGES } from "../images";
 import { esc, messagePage, type Onward, PAGE_HEADERS, page } from "../oauth/pages";
 import { basename, dirname } from "../okf/paths";
 import { fromThisSite } from "../origin";
+import { byteRange } from "../range";
 import { LINK_MINUTES, readCookie, SESSION_COOKIE } from "../session";
 import { signedIn } from "../signin";
 import { OkfError } from "../store/errors";
@@ -191,6 +192,47 @@ async function imageResponse(
   }
   return new Response(obj.body as ReadableStream | Uint8Array, {
     headers: { ...headers, "Content-Type": img.media, "Content-Length": String(obj.size) },
+  });
+}
+
+/**
+ * A video or audio file of the library, for the reader (TEMPRA-164; tempra-dev: app/media, How
+ * people see): only a hash this library stored, as for images, inline and cached for good, and
+ * served in ranges, as a video's seeking asks: 206 with `Content-Range` for one range, 416 for a
+ * range past the end, the whole file otherwise.
+ */
+async function mediaResponse(p: Page, lib: LibraryClient, hash: string): Promise<Response> {
+  const blob = await lib.mediaBlob(hash);
+  if (!blob) throw new OkfError(404, "not_found", "This library has no such video or audio.");
+  const headers: Record<string, string> = {
+    "Cache-Control": "private, max-age=31536000, immutable",
+    "Content-Disposition": "inline",
+    "Content-Type": blob.media,
+    "Accept-Ranges": "bytes",
+    "X-Content-Type-Options": "nosniff",
+  };
+  const range = byteRange(p.c.req.header("Range"), blob.size);
+  if (range === "unsatisfiable") {
+    return new Response(null, {
+      status: 416,
+      headers: { ...headers, "Content-Range": `bytes */${blob.size}` },
+    });
+  }
+  const part = range ? { offset: range.start, length: range.end - range.start + 1 } : undefined;
+  const obj = await p.deps.blobs.get(hash, part);
+  if (!obj) throw new OkfError(404, "not_found", "The file's bytes are missing.");
+  if (!range) {
+    return new Response(obj.body as ReadableStream | Uint8Array, {
+      headers: { ...headers, "Content-Length": String(blob.size) },
+    });
+  }
+  return new Response(obj.body as ReadableStream | Uint8Array, {
+    status: 206,
+    headers: {
+      ...headers,
+      "Content-Range": `bytes ${range.start}-${range.end}/${blob.size}`,
+      "Content-Length": String(range.end - range.start + 1),
+    },
   });
 }
 
@@ -411,6 +453,12 @@ export function registerUiRoutes<E extends AppEnv>(
   get("/:owner/:lib/-/image/:hash", async (p) => {
     const { lib } = await openLibrary(p);
     return imageResponse(p, lib, p.c.req.param("hash") ?? "", p.c.req.query("w"));
+  });
+
+  // The reader's video and audio by hash, in ranges (TEMPRA-164).
+  get("/:owner/:lib/-/media/:hash", async (p) => {
+    const { lib } = await openLibrary(p);
+    return mediaResponse(p, lib, p.c.req.param("hash") ?? "");
   });
 
   // Export: a redirect to a signed download, like the API's and MCP's export links.

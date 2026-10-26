@@ -1,11 +1,20 @@
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { imagesService, MODEL_BYTES, MODEL_EDGE, variantKeysFor } from "../src/images";
+import {
+  IMAGE_BYTES_PER_CALL,
+  imagesService,
+  MODEL_BYTES,
+  MODEL_EDGE,
+  variantKeysFor,
+} from "../src/images";
+import { INSTRUCTIONS, PDF_RESOURCE_BYTES } from "../src/mcp/server";
 import { fakeRenderer } from "../src/render";
+import { BASE64_MAX_BYTES } from "../src/uploads";
 import { readTar } from "../src/util/tar";
 import { setup } from "./harness";
-import { base64, makePng } from "./images";
+import { base64, makePng, sample } from "./images";
 import { approve, connectApp } from "./oauth-flow";
 
 type Text = { type: "text"; text: string };
@@ -22,6 +31,24 @@ async function connect(app: ReturnType<typeof setup>["app"], token = "writer") {
     return { text: (r.content as Text[]).map((c) => c.text).join("\n"), isError: !!r.isError };
   };
   return { client, call };
+}
+
+type Call = (
+  name: string,
+  args?: Record<string, unknown>,
+) => Promise<{ text: string; isError: boolean }>;
+
+/** A file over the base64 cap goes in as an agent with a shell sends it: prepare_upload, then the PUT. */
+async function upload(
+  app: ReturnType<typeof setup>["app"],
+  call: Call,
+  path: string,
+  bytes: Uint8Array,
+) {
+  const r = await call("prepare_upload", { path });
+  const url = /'(http\S+\/ul\/\S+)'$/m.exec(r.text)?.[1] ?? "";
+  const put = await app.request(url, { method: "PUT", body: bytes });
+  expect(put.status).toBe(200);
 }
 
 const hashOf = (text: string) => /hash: ([0-9a-f]{64})/.exec(text)?.[1] ?? "";
@@ -81,6 +108,32 @@ describe("MCP server", () => {
     const tier2Tool = (await full.listTools()).tools.find((t) => t.name === "search");
     expect(tier2Tool?.description?.startsWith("Beyond files:")).toBe(true);
     expect(full.getInstructions()).toContain("Call `start` first");
+  });
+
+  test("INSTRUCTIONS and SKILL.md tell agents the same media story (TEMPRA-160)", () => {
+    const skill = readFileSync(`${import.meta.dir}/../../skills/okf/SKILL.md`, "utf8");
+    for (const term of [
+      "Mermaid",
+      "`render`",
+      "`source_url`",
+      "never hotlink",
+      "`prepare_upload`",
+      "`sha256`",
+      "small files only",
+      "beside the concept that uses it",
+      "`dir/x.md` uses `dir/x-architecture.png`",
+      "the title is the caption",
+      ":::figure",
+      "`sources`",
+      "`images: true`",
+      "`diagrams: true`",
+      "`diagram_invalid`",
+      "`diagram_unrendered`",
+      "`figure_invalid`",
+    ]) {
+      expect(INSTRUCTIONS.toLowerCase()).toContain(term.toLowerCase());
+      expect(skill.toLowerCase()).toContain(term.toLowerCase());
+    }
   });
 
   test("the file-equivalent workflow", async () => {
@@ -244,16 +297,17 @@ describe("MCP server", () => {
     expect((await app.request(url.replace("/dl/lib-1/", "/dl/other/"))).status).toBe(403);
   });
 
-  test("attach round-trips a few-hundred-KB image byte for byte (TEMPRA-105)", async () => {
+  test("attach round-trips a quarter-megabyte image byte for byte (TEMPRA-105)", async () => {
     const { app } = setup();
     const { call } = await connect(app);
-    const png = makePng(320, 320, { noise: true });
+    const png = makePng(290, 290, { noise: true });
     expect(png.length).toBeGreaterThan(250_000);
+    expect(png.length).toBeLessThanOrEqual(BASE64_MAX_BYTES);
     const r = await call("attach", { path: "assets/attach-test.png", content_base64: base64(png) });
     expect(r.isError).toBe(false);
     const read = (await call("read", { path: "assets/attach-test.png" })).text;
     expect(read).toContain(`size: ${png.length} bytes · media: image/png`);
-    expect(read).toContain("dimensions: 320×320 px");
+    expect(read).toContain("dimensions: 290×290 px");
     const url = /download \(15 minutes\): (\S+)/.exec(read)?.[1] ?? "";
     const got = new Uint8Array(await (await app.request(url)).arrayBuffer());
     expect(got.length).toBe(png.length);
@@ -353,6 +407,35 @@ describe("MCP server", () => {
       expect((await call("attach", { path: "a.png", content_base64: wrapped })).isError).toBe(
         false,
       );
+    });
+
+    test("attach: base64 is capped at 256 KB decoded, and nothing over it is stored", async () => {
+      const { app, store } = setup();
+      const { call } = await connect(app);
+      expect(BASE64_MAX_BYTES).toBe(256 * 1024);
+      // Exactly at the cap (padded, so the length check counts the padding) is stored.
+      const at = new Uint8Array(BASE64_MAX_BYTES).fill(7);
+      expect(BASE64_MAX_BYTES % 3).not.toBe(0);
+      const ok = await call("attach", {
+        path: "at.bin",
+        content_base64: base64(at),
+        size: at.length,
+      });
+      expect(ok.isError).toBe(false);
+      expect((await call("read", { path: "at.bin" })).isError).toBe(false);
+      // One byte over is refused before anything is stored, naming the other ways in.
+      const head = store().headSeq();
+      const over = await call("attach", {
+        path: "over.bin",
+        content_base64: base64(new Uint8Array(BASE64_MAX_BYTES + 1).fill(7)),
+      });
+      expect(over.isError).toBe(true);
+      expect(over.text).toContain("base64_too_large");
+      expect(over.text).toContain(`decodes to ${BASE64_MAX_BYTES + 1} bytes`);
+      expect(over.text).toContain("source_url");
+      expect(over.text).toContain("prepare_upload");
+      expect(store().headSeq()).toBe(head);
+      expect((await call("read", { path: "over.bin" })).isError).toBe(true);
     });
   });
 
@@ -474,7 +557,7 @@ describe("MCP server", () => {
       const { client, call } = await connect(s.app);
       const jpeg = bigJpeg();
       expect(jpeg.byteLength).toBeGreaterThan(MODEL_BYTES);
-      await call("attach", { path: "img/big.jpg", content_base64: b64(jpeg) });
+      await upload(s.app, call, "img/big.jpg", jpeg);
       for (let i = 0; i < 2; i++) {
         const c = await content(client, { path: "img/big.jpg" });
         const img = c[1] as { type: string; data: string; mimeType: string };
@@ -494,7 +577,7 @@ describe("MCP server", () => {
     test("without the binding, a large image says it is too large", async () => {
       const s = setup();
       const { client, call } = await connect(s.app);
-      await call("attach", { path: "img/big.jpg", content_base64: b64(bigJpeg()) });
+      await upload(s.app, call, "img/big.jpg", bigJpeg());
       const c = await content(client, { path: "img/big.jpg" });
       expect(c.map((x) => x.type)).toEqual(["text", "text"]);
       expect((c[1] as Text).text).toContain("too large to show");
@@ -514,11 +597,66 @@ describe("MCP server", () => {
       expect(bin.map((x) => x.type)).toEqual(["text"]);
     });
 
+    test("a PDF comes as an embedded resource up to a cap; video and audio are facts (TEMPRA-164)", async () => {
+      const s = setup();
+      const { client, call } = await connect(s.app);
+      const pdf = new TextEncoder().encode("%PDF-1.4\n1 0 obj << >> endobj\n%%EOF\n");
+      await call("attach", { path: "docs/paper.pdf", content_base64: b64(pdf) });
+      const c = (await client.callTool({ name: "read", arguments: { path: "docs/paper.pdf" } }))
+        .content as ({ type: "text"; text: string } | { type: "resource"; resource: unknown })[];
+      expect(c[0]?.type).toBe("text");
+      expect((c[0] as Text).text).toContain("media: application/pdf");
+      expect((c[0] as Text).text).toContain("download (15 minutes): http");
+      expect(c[1]).toEqual({
+        type: "resource",
+        resource: {
+          uri: "okf://owner/demo/docs/paper.pdf",
+          mimeType: "application/pdf",
+          blob: b64(pdf),
+        },
+      });
+      expect(s.usage.filter((e) => e.kind === "read_pdf").map((e) => e.bytes)).toEqual([
+        pdf.byteLength,
+      ]);
+      // Over the cap: the facts and the link, saying why.
+      const big = new Uint8Array(PDF_RESOURCE_BYTES + 1).fill(0x20);
+      big.set(new TextEncoder().encode("%PDF-1.4\n"));
+      const put = await s.req("/files/docs/big.pdf", {
+        method: "PUT",
+        headers: { "Content-Type": "application/pdf" },
+        body: big,
+      });
+      expect(put.status).toBeLessThan(300);
+      const over = await content(client, { path: "docs/big.pdf" });
+      expect(over.map((x) => x.type)).toEqual(["text", "text"]);
+      expect((over[1] as Text).text).toContain("not attached here");
+      expect(PDF_RESOURCE_BYTES).toBeLessThanOrEqual(IMAGE_BYTES_PER_CALL);
+      // A video: its facts, its frame size and the link; no bytes.
+      await call("attach", { path: "clips/demo.webm", content_base64: b64(sample("clip.webm")) });
+      const video = await content(client, { path: "clips/demo.webm" });
+      expect(video.map((x) => x.type)).toEqual(["text"]);
+      expect((video[0] as Text).text).toContain("media: video/webm");
+      expect((video[0] as Text).text).toContain("dimensions: 64×36 px");
+      // A concept's figure lines name what a media figure is.
+      await call("write", {
+        path: "notes/m.md",
+        content:
+          "---\ntype: Note\ntitle: M\ndescription: Media.\n---\n![Demo](/clips/demo.webm)\n\n![Paper](/docs/paper.pdf)\n",
+      });
+      const page = await content(client, { path: "notes/m.md", figures: [1, 2] });
+      const head = (page[0] as Text).text;
+      expect(head).toContain("Figure 1 · /clips/demo.webm");
+      expect(head).toContain("video/webm");
+      expect(head).toContain("application/pdf");
+      expect(page.map((x) => x.type)).toEqual(["text", "text"]);
+      expect((page[1] as Text).text).toContain("a PDF; `read` /docs/paper.pdf");
+    });
+
     test("resources carry an attachment's bytes, up to a cap", async () => {
       const s = setup();
       fakeImages(s);
       const { client, call } = await connect(s.app);
-      await call("attach", { path: "img/big.jpg", content_base64: b64(bigJpeg()) });
+      await upload(s.app, call, "img/big.jpg", bigJpeg());
       await call("attach", { path: "refs/data.csv", content_base64: btoa("a,b\n1,2\n") });
       const big = new Uint8Array(3 * 1024 * 1024).fill(7);
       // Over MCP's request cap, so it goes up over REST.

@@ -135,6 +135,8 @@ export function imageTargetLint(
       });
       continue;
     }
+    // Video, audio and PDFs are not images: their size is theirs (TEMPRA-164).
+    if (a.media && !a.media.toLowerCase().startsWith("image/")) continue;
     const edge = Math.max(a.width ?? 0, a.height ?? 0);
     if (a.size > IMAGE_MAX_BYTES || edge > IMAGE_MAX_EDGE) {
       const dims = a.width && a.height ? `, ${a.width} × ${a.height} px` : "";

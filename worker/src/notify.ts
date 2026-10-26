@@ -2,8 +2,10 @@ import { bytesToHex, randomBytes } from "@noble/hashes/utils.js";
 import type { Accounts, LibraryRef } from "./accounts";
 import type { TokenInfo } from "./auth";
 import type { LibraryClient } from "./client";
+import { lintRenders, mergeImportLint, mergeOpLint, type RenderLintDeps } from "./render-lint";
 import type { CommentAction, CommentResult, Mention } from "./store/comments";
-import type { RequestContext, WriteNotice } from "./store/store";
+import type { ImportResult, OpResult, RenderJob, RequestContext, WriteNotice } from "./store/store";
+import { tokenAdmission } from "./usage";
 
 /**
  * Notifications (TEMPRA-58 design, TEMPRA-72, TEMPRA-73): items addressed to one person are
@@ -663,15 +665,31 @@ const NOTICED = ["apply", "import", "revert", "verify"] as const;
  * goes through `afterWrite` (open items follow a moved page), and its notice is stripped from
  * what the caller sees. A failure there is logged, never an error on the write.
  */
-export function notifying(d: NotifyDeps, token: TokenInfo, lib: LibraryClient): LibraryClient {
+export function notifying(
+  d: NotifyDeps & RenderLintDeps,
+  token: TokenInfo,
+  lib: LibraryClient,
+  waitUntil?: (p: Promise<unknown>) => void,
+): LibraryClient {
   const out = { ...lib };
   for (const m of NOTICED) {
     const call = lib[m] as unknown as (
       ctx: RequestContext,
       ...rest: unknown[]
-    ) => Promise<{ seq: number; notify?: WriteNotice }>;
+    ) => Promise<{
+      seq: number;
+      notify?: WriteNotice;
+      render?: RenderJob[];
+      results?: OpResult[];
+      warnings?: ImportResult["warnings"];
+    }>;
     (out as Record<string, unknown>)[m] = async (ctx: RequestContext, ...rest: unknown[]) => {
-      const { notify, ...res } = await call(ctx, ...rest);
+      const { notify, render, ...res } = await call(ctx, ...rest);
+      // The diagrams it added or changed go to the render service (TEMPRA-167); what answers
+      // within the budget is in this result, the rest lands in the library later.
+      const rendered = render
+        ? lintRenders(d, lib, render, renderContext(token), waitUntil)
+        : Promise.resolve(null);
       if (notify) {
         try {
           await afterWrite(d, token, notify);
@@ -679,11 +697,20 @@ export function notifying(d: NotifyDeps, token: TokenInfo, lib: LibraryClient): 
           console.error(JSON.stringify({ notify_failed: ctx.request_id, error: String(e) }));
         }
       }
+      const lint = await rendered;
+      if (lint && res.results) res.results = mergeOpLint(res.results, lint);
+      if (lint && res.warnings) res.warnings = mergeImportLint(res.warnings, lint);
       return res;
     };
   }
   return out;
 }
+
+/** Whom a write's renders are metered against: the account it counts against, its library. */
+const renderContext = (token: TokenInfo) => {
+  const { account, library } = tokenAdmission(token);
+  return { account, library };
+};
 
 /**
  * After a content write commits: open items on a moved page follow it. Content writes tell no

@@ -100,7 +100,8 @@ describe("figure lint (TEMPRA-159)", () => {
     expect(w?.message).toContain('`source_url: "https://example.com/logo.png"`');
     expect(w?.message).toContain("the server fetches it");
     expect(w?.message).toContain("`sources`");
-    expect(work(s, "a/page.md")).toContain("hotlinked");
+    expect(work(s, "a/page.md")).toBe("");
+    expect(s.work({ kind: "external_image" }).items[0]?.detail).toContain("hotlinked");
     // A link to another site is not an image.
     expect(figure(write(s, "a/page.md", "[A logo](https://example.com/logo.png)"))).toEqual([]);
     attach(s, "a/logo.png", blob("b"));
@@ -137,6 +138,10 @@ describe("figure lint (TEMPRA-159)", () => {
     expect(lint.find((l) => l.code === "image_not_image")?.message).toContain("text/csv");
     expect(figure(write(s, "a/page.md", "[Data](/a/data.csv)"))).toEqual([]);
     expect(stored(s, "a/page.md")).toEqual([]);
+    // A video, audio file or PDF is not an image: its size is never image_large (TEMPRA-164).
+    attach(s, "a/long.webm", blob("e", IMAGE_MAX_BYTES * 3, "video/webm", 5000, 3000));
+    attach(s, "a/book.pdf", blob("f", IMAGE_MAX_BYTES * 3, "application/pdf", 0, 0));
+    expect(figure(write(s, "a/page.md", "![Long](/a/long.webm) ![Book](/a/book.pdf)"))).toEqual([]);
   });
 
   test("recomputed when an attachment is replaced, retyped or deleted", () => {
@@ -211,5 +216,72 @@ describe("figure lint (TEMPRA-159)", () => {
       { op: "write", path: "a/page.md", content: md("![](https://x.io/a.png) ![](/a/data.csv)") },
     ]);
     expect(res.results[0]?.hash).not.toBeNull();
+  });
+});
+
+describe("external_image work (TEMPRA-163)", () => {
+  test("one item per page with its count, never under lint too; gone once brought home", () => {
+    const s = store();
+    write(
+      s,
+      "a/page.md",
+      "![A](https://a.io/1.png) ![B](https://b.io/2.png) ![A again](https://a.io/1.png) ![](/a/x.png)",
+    );
+    write(s, "a/other.md", "![C](//c.io/3.png)");
+    const w = s.work({ kind: "external_image" });
+    expect(w.items.map((i) => i.path).sort()).toEqual(["a/other.md", "a/page.md"]);
+    expect(w.counts).toEqual({ external_image: 2 });
+    const page = w.items.find((i) => i.path === "a/page.md");
+    expect(page?.kind).toBe("external_image");
+    expect(page?.detail).toBe(
+      "2 images hotlinked from another site: https://a.io/1.png, https://b.io/2.png",
+    );
+    for (const word of ["`attach`", "`source_url`", "`edit`", "`sources`"]) {
+      expect(page?.suggested_action).toContain(word);
+    }
+    expect(w.items.find((i) => i.path === "a/other.md")?.detail).toBe(
+      "1 image hotlinked from another site: //c.io/3.png",
+    );
+    // The page's other lint stays a lint item, without the hotlinks.
+    const lint = s.work({ kind: "lint" }).items.find((i) => i.path === "a/page.md");
+    expect(lint?.detail).toContain("no alt text");
+    expect(lint?.detail).not.toContain("hotlinked");
+    // The stored lint keeps the code (read and the write result report it).
+    expect(stored(s, "a/page.md")).toContain("image_external");
+    // Counted in the whole queue and the health summary.
+    expect(s.work().counts.external_image).toBe(2);
+    expect(s.health().counts.external_image).toBe(2);
+    attach(s, "a/c.png", blob("c"));
+    write(s, "a/other.md", "![C](/a/c.png)");
+    expect(s.work({ kind: "external_image" }).items.map((i) => i.path)).toEqual(["a/page.md"]);
+    expect(s.work({ path: "a/other.md" }).items.map((i) => i.kind)).not.toContain("external_image");
+  });
+
+  test("a library linted before moves its hotlinks out of lint once", () => {
+    const sql = bunSqlHandle();
+    let t = Date.parse("2026-10-25T12:00:00Z");
+    const now = () => {
+      t += 1000;
+      return new Date(t);
+    };
+    const s = new LibraryStore(sql, { now });
+    write(s, "a/page.md", "![](https://a.io/1.png)");
+    // As TEMPRA-159 left it: every lint but broken links in the lint flag.
+    const stored = sql.all<{ concept_id: string; lint: string }>(
+      "SELECT concept_id, lint FROM concepts",
+    )[0];
+    sql.run("DELETE FROM flags WHERE kind = 'external_image'");
+    sql.run(
+      "UPDATE flags SET detail = ? WHERE kind = 'lint' AND concept_id = ?",
+      stored?.lint ?? "[]",
+      stored?.concept_id ?? "",
+    );
+    sql.run("DELETE FROM meta WHERE key = 'external_image_flags'");
+    expect(s.work({ kind: "lint" }).items[0]?.detail).toContain("hotlinked");
+    const again = new LibraryStore(sql, { now });
+    expect(again.work({ kind: "external_image" }).items.map((i) => i.path)).toEqual(["a/page.md"]);
+    const left = again.work({ kind: "lint" }).items[0]?.detail ?? "";
+    expect(left).toContain("no alt text");
+    expect(left).not.toContain("hotlinked");
   });
 });

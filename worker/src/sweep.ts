@@ -357,7 +357,7 @@ export function libraryProblems(
 
 /** Open work in a health summary; stale soon looks ahead and is not counted. */
 const openWork = (c: LibraryHealth["counts"]) =>
-  c.stale + c.broken_link + c.lint + c.structure + c.comment;
+  c.stale + c.broken_link + c.lint + (c.external_image ?? 0) + c.structure + c.comment;
 
 /** How many libraries' health the digest lists. */
 export const DIGEST_HEALTH_LIBRARIES = 20;
@@ -369,6 +369,7 @@ export function healthLine(path: string, c: LibraryHealth["counts"]): string {
     ["stale soon", c.stale_soon],
     ["broken links", c.broken_link],
     ["lint", c.lint],
+    ["hotlinked images", c.external_image ?? 0],
     ["structure", c.structure],
     ["open comments", c.comment],
   ];

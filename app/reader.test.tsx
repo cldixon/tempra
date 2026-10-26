@@ -19,7 +19,7 @@ import { Window } from "happy-dom";
 import { act, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
-import { type ImageRef, imageSource } from "./src/images";
+import { attachmentSource, type ImageRef, imageSource } from "./src/images";
 import { Reader } from "./src/Reader";
 import { Body, Note } from "./src/reader/Body";
 import { offsetAt, pointAt, rangeOf, readText, textblocks } from "./src/reader/dom";
@@ -360,7 +360,7 @@ describe("figures (tempra-dev: app/reader, Figures)", () => {
     const captions = figures.map((f) => f.querySelector("figcaption")?.textContent);
     expect(captions).toEqual([
       "Figure 1. The tower at dusk",
-      "Figure 2. Only alt",
+      "Figure 2. Only altFrom e.com",
       "Figure 3.",
       "Figure 4. A write goes through the ledger",
       "Figure 5. In a list",
@@ -492,6 +492,65 @@ describe("figures (tempra-dev: app/reader, Figures)", () => {
         const b = text.blocks.find((x) => x.from === at);
         expect(readText(tb)).toBe(text.text.slice(b?.from, b?.to));
       }
+      await act(async () => root.unmount());
+    });
+  });
+
+  test("an external image names its site under the caption, outside the text", () => {
+    const md = [
+      "![Only alt](https://www.e.com/photo.jpg)",
+      "![Ours](assets/ours.png)",
+      'Text with ![a badge](//badges.io/b.svg "Build") and ![mine](assets/m.png).',
+      ':::figure\n![One](https://a.org/1.png "First")\n![Two](https://b.org/2.png "Second")\n:::',
+    ].join("\n\n");
+    const { p, root } = draw(stored(md), { href: hrefs, path: "c.md" });
+    expect(p.figures.map((f) => (f.kind === "image" ? f.host : null))).toEqual([
+      "e.com",
+      null,
+      "a.org",
+      "b.org",
+    ]);
+    const captions = [...root.querySelectorAll("figcaption")].map((c) => c.textContent);
+    expect(captions).toEqual([
+      "Figure 1. Only altFrom e.com",
+      "Figure 2. Ours",
+      "Figures 3 and 4.From a.org, b.org",
+    ]);
+    const source = root.querySelector("figcaption .figure-source") as Element;
+    expect(source.closest("[data-skip]")).not.toBeNull();
+    expect(source.querySelector("a")).toBeNull();
+    expect(p.text.text).not.toContain("e.com");
+    // Inline: a tooltip only, no line.
+    expect(root.querySelector('img[alt="a badge"]')?.getAttribute("title")).toBe(
+      "Build (from badges.io)",
+    );
+    expect(root.querySelector('img[alt="mine"]')?.hasAttribute("title")).toBe(false);
+  });
+
+  test("an external image that fails says it is external, and from where", async () => {
+    await live(async (window) => {
+      const md = "![A chart](https://charts.example.com/c.png)\n\nSee ![dot](https://x.io/d.png).";
+      const p = prepare(stored(md), { href: hrefs, path: "c.md" });
+      const { host, root } = await mount(
+        window,
+        <Body prepared={p} diff={null} hideFirst={false} />,
+      );
+      for (const alt of ["A chart", "dot"]) {
+        const img = host.querySelector(`img[alt="${alt}"]`) as HTMLImageElement;
+        await act(async () => {
+          img.dispatchEvent(new window.Event("error") as unknown as Event);
+        });
+      }
+      const box = host.querySelector(".figure-broken") as HTMLElement;
+      expect(box.textContent).toContain("This image can't be shown");
+      expect(box.textContent).toContain("An external image from charts.example.com");
+      expect(box.getAttribute("aria-label")).toBe(
+        "This external image from charts.example.com can't be shown: A chart",
+      );
+      const inline = host.querySelector(".image-broken") as HTMLElement;
+      expect(inline.getAttribute("title")).toBe("This external image from x.io can't be shown");
+      const para = host.querySelector("figure p[data-text]") as unknown as Element;
+      expect(readText(para)).toBe(ATOM);
       await act(async () => root.unmount());
     });
   });
@@ -655,7 +714,7 @@ describe("figure markup (TEMPRA-161)", () => {
       "Figure 3. The whole frame",
       "Figure 4. A labelled one",
       "Figures 5 and 6. The top bar before and after[src]",
-      "Figures 7–10. Four",
+      "Figures 7–10. FourFrom e.com",
       "Figure 11. Broken markup",
       "Figure 12. Listed",
       "Figure 13. Plain",
@@ -875,6 +934,144 @@ describe("right-sized images (TEMPRA-162)", () => {
         a.textContent?.includes("Download"),
       );
       expect(download?.getAttribute("href")).toBe("/o/l/-/download/assets/signin.png");
+    });
+  });
+});
+
+describe("video, audio and PDF figures (TEMPRA-164)", () => {
+  const urls = new Urls("o", "l");
+  const H = (c: string) => c.repeat(64);
+  const known: Record<string, ImageRef> = {
+    "clips/demo.webm": {
+      hash: H("a"),
+      media: "video/webm",
+      size: 2542,
+      width: 640,
+      height: 360,
+      poster: { hash: H("b"), media: "image/png", size: 90, width: 640, height: 360 },
+    },
+    "clips/raw.mp4": { hash: H("c"), media: "video/mp4", size: 1269 },
+    "clips/tone.ogg": { hash: H("d"), media: "audio/ogg", size: 4138 },
+    "docs/paper.pdf": { hash: H("e"), media: "application/pdf", size: 1_288_490 },
+    "assets/tower.png": { hash: H("f"), media: "image/png", width: 40, height: 20 },
+  };
+  const options: BodyOptions = {
+    href: hrefs,
+    path: "c.md",
+    image: (path) => (known[path] ? attachmentSource(urls, known[path], path) : null),
+  };
+  const MEDIA = [
+    "# Media",
+    '![A tower](assets/tower.png "The tower")',
+    '![A 20-second walkthrough](clips/demo.webm "The walkthrough")',
+    "![No poster](clips/raw.mp4)",
+    "![A tone](clips/tone.ogg)",
+    '![The paper](docs/paper.pdf "The paper")',
+    "Inline ![a clip](clips/demo.webm) in text.",
+    ":::figure{width=480}\n![Grouped](clips/demo.webm)\n:::",
+    "![Missing](clips/gone.webm)",
+  ].join("\n\n");
+
+  test("each type is drawn by the registry, one atom each, numbered with the images", () => {
+    const { p, root } = draw(stored(MEDIA), options);
+    // The counting holds: every media figure is one atom in docText.
+    counts("media", stored(MEDIA), options);
+    expect(p.figures.map((f) => f.n)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(root.querySelectorAll("figcaption .figure-number").length).toBe(7);
+    const video = root.querySelector('video[aria-label="A 20-second walkthrough"]') as Element;
+    expect(video.getAttribute("src")).toBe(`/o/l/-/media/${H("a")}`);
+    expect(video.getAttribute("preload")).toBe("metadata");
+    expect(video.hasAttribute("controls")).toBe(true);
+    expect(video.hasAttribute("autoplay")).toBe(false);
+    expect(video.getAttribute("poster")).toBe(`/o/l/-/image/${H("b")}`);
+    expect(video.getAttribute("width")).toBe("640");
+    expect(video.getAttribute("height")).toBe("360");
+    expect(video.closest("[data-atom]")?.className).toBe("figure-media figure-video");
+    // No poster and no size known: none drawn.
+    const raw = root.querySelector('video[aria-label="No poster"]') as Element;
+    expect(raw.hasAttribute("poster")).toBe(false);
+    expect(raw.hasAttribute("width")).toBe(false);
+    const audio = root.querySelector("audio") as Element;
+    expect(audio.getAttribute("src")).toBe(`/o/l/-/media/${H("d")}`);
+    expect(audio.hasAttribute("controls")).toBe(true);
+    expect(audio.getAttribute("aria-label")).toBe("A tone");
+    // A PDF: a card with its name, type and size, Open (its page) and Download; no viewer.
+    const card = root.querySelector(".figure-pdf") as Element;
+    expect(card.closest("[data-atom]")).not.toBeNull();
+    expect(card.querySelector(".figure-pdf-name")?.textContent).toBe("paper.pdf");
+    expect(card.querySelector(".figure-pdf-meta")?.textContent).toBe("PDF document · 1.2 MB");
+    const links = [...card.querySelectorAll("a")].map((a) => [
+      a.textContent?.trim(),
+      a.getAttribute("href"),
+    ]);
+    expect(links).toEqual([
+      ["Open", "/o/l/docs/paper.pdf"],
+      ["Download", "/o/l/-/download/docs/paper.pdf"],
+    ]);
+    expect(root.querySelector("embed, iframe, object")).toBeNull();
+    // In running text: a link to its page, still one atom.
+    const inline = root.querySelector('a[data-atom][href="/o/l/clips/demo.webm"]');
+    expect(inline?.textContent).toBe("a clip");
+    // In figure markup, and missing (not in `images`): a video and an image, as before.
+    expect(root.querySelectorAll('video[aria-label="Grouped"]').length).toBe(1);
+    expect(root.querySelector('img[alt="Missing"]')).not.toBeNull();
+  });
+
+  test("a video that fails says so; the full-screen view plays it and opens a PDF's page", async () => {
+    await live(async (window) => {
+      const p = prepare(stored(MEDIA), options);
+      const opened: number[] = [];
+      const { host } = await mount(
+        window,
+        <OpenFigure.Provider value={(n) => opened.push(n)}>
+          <Body prepared={p} diff={null} hideFirst={false} />
+        </OpenFigure.Provider>,
+      );
+      const enlarge = host.querySelector(
+        'button[aria-label="Enlarge video: A 20-second walkthrough"]',
+      ) as HTMLButtonElement;
+      await act(async () => enlarge.click());
+      expect(opened).toEqual([2]);
+      // Audio has no Enlarge (its controls are all there is); the PDF card has none either.
+      expect(host.querySelectorAll("button[aria-label^='Enlarge video']").length).toBe(3);
+      const raw = host.querySelector('video[aria-label="No poster"]') as HTMLVideoElement;
+      await act(async () => {
+        raw.dispatchEvent(new window.Event("error") as unknown as Event);
+      });
+      const broken = host.querySelector('[aria-label="This video can\'t be played: No poster"]');
+      expect(broken?.hasAttribute("data-atom")).toBe(true);
+
+      const { host: box } = await mount(
+        window,
+        <Lightbox
+          figures={p.figures}
+          at={2}
+          view={{
+            fileHref: (path) => `/o/l/${path}`,
+            downloadHref: (path) => `/o/l/-/download/${path}`,
+          }}
+          onMove={() => {}}
+          onClose={() => {}}
+        />,
+      );
+      const played = box.querySelector(".lightbox-figure > video") as HTMLVideoElement;
+      expect(played.getAttribute("src")).toBe(`/o/l/-/media/${H("a")}`);
+      expect(played.hasAttribute("controls")).toBe(true);
+      expect(box.textContent).toContain("fig. 2 of 7");
+      const { host: pdfBox } = await mount(
+        window,
+        <Lightbox
+          figures={p.figures}
+          at={5}
+          view={{ fileHref: (path) => `/o/l/${path}` }}
+          onMove={() => {}}
+          onClose={() => {}}
+        />,
+      );
+      const card = pdfBox.querySelector(".lightbox-figure > .figure-pdf") as HTMLElement;
+      expect(card.querySelector("a")?.getAttribute("href")).toBe("/o/l/docs/paper.pdf");
+      const open = [...pdfBox.querySelectorAll("a")].find((a) => a.textContent === "Open file");
+      expect(open?.getAttribute("href")).toBe("/o/l/docs/paper.pdf");
     });
   });
 });

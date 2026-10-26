@@ -5,7 +5,9 @@
   "exports": {
     ".": "./dist/tempra.ts",
     "./tempra.css": "./dist/tempra.css",
-    "./pele": "./dist/pele.ts"
+    "./pele": "./dist/pele.ts",
+    "./fonts/*": "./fonts/*",
+    "./favicon.svg": "./favicon.svg"
   },
   "scripts": {
     "build": "bun build.ts",

@@ -8,9 +8,9 @@
  */
 import { interLatinWoff2, peleThemeHash, peleThemes } from "@tempra/design/pele";
 import { PeleError, render as peleRender } from "pele";
+import { PELE_VERSION } from "./version";
 
-/** Pele, pinned exactly (worker/package.json and app/package.json; a test holds them together). */
-export const PELE_VERSION = "1.6.0";
+export { PELE_VERSION };
 
 /** Where renders live in the deployment's blobs bucket; the blob sweep works on blobs/ only. */
 export const RENDERS_PREFIX = "renders/";

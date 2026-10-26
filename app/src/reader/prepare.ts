@@ -90,6 +90,8 @@ export interface ImageFigure extends FigureBase {
   source: ImageSource | null;
   /** The library path it resolves to, when it is internal. */
   path: string | null;
+  /** The site it is hotlinked from (`externalHost`), when it is external (TEMPRA-163). */
+  host: string | null;
   /** The figure markup it is drawn by (`:::figure`), when it has some that parses. */
   markup?: FigureMarkup;
 }
@@ -227,6 +229,7 @@ export function prepare(tree: Doc, options: BodyOptions = {}): Prepared {
         src: null,
         source: imageSource(options, image.url),
         path: target?.kind === "internal" ? target.path : null,
+        host: externalHost(image.url),
       };
       f.src = f.source?.src ?? null;
       figures.push(f);
@@ -297,6 +300,21 @@ export function linkInfo(options: BodyOptions, url: string): LinkInfo {
       ? target.href
       : null;
   return { href, path, broken };
+}
+
+/**
+ * The site an image written in the body is hotlinked from (an http(s) or scheme-relative URL), as
+ * its host ("example.com", a `www.` dropped); null for the library's own files (TEMPRA-163).
+ */
+export function externalHost(url: string): string | null {
+  const t = url.trim();
+  if (!/^(https?:)?\/\//i.test(t)) return null;
+  try {
+    const host = new URL(t, "https://x.invalid").hostname;
+    return host ? host.replace(/^www\./i, "") : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Where an image written in the body loads from, or null to show its alt text instead. */

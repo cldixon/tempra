@@ -1,4 +1,3 @@
-import * as design from "@tempra/design";
 import { type Doc, parseMarkdown } from "@tempra/editor/doc";
 import { type Context, Hono } from "hono";
 import { registerAccountApi } from "./account-api";
@@ -35,8 +34,9 @@ import { readCookie, SESSION_COOKIE, type Sessions } from "./session";
 import { type Mailer, registerSignInRoutes } from "./signin";
 import { OkfError } from "./store/errors";
 import {
+  type AttachFacts,
   type ConceptContent,
-  checkDescription,
+  checkFacts,
   type RequestContext,
   type WriteOp,
   type WriteResult,
@@ -48,9 +48,7 @@ import {
   createLibraryForGrant,
   requireOwner,
 } from "./tenancy";
-import { faviconResponse } from "./ui/favicon";
 import { registerUiRoutes } from "./ui/routes";
-import { appScript } from "./ui/spa";
 import { STARTER } from "./ui/starter";
 import {
   checkBytes,
@@ -114,6 +112,11 @@ export interface Deps extends UsageDeps {
    * absent, or with no RENDER binding, it answers "render unavailable".
    */
   renderDiagram?: RenderDiagram;
+  /**
+   * How long a write's answer waits for its diagrams' verdicts from the render service
+   * (render-lint.ts, TEMPRA-167); RENDER_LINT_BUDGET_MS unless set.
+   */
+  renderBudgetMs?: number;
 }
 
 export interface RecoveryDeps {
@@ -138,6 +141,15 @@ type Env = {
   Variables: { token: TokenInfo; lib: LibraryClient; deps: Deps };
 };
 type C = Context<Env>;
+
+/** Keeps work going after the response (ctx.waitUntil); without an execution context, it runs on. */
+const afterResponse =
+  (c: C) =>
+  (p: Promise<unknown>): void => {
+    try {
+      c.executionCtx.waitUntil(p);
+    } catch {}
+  };
 
 /** A library's routes: {owner} is its owner's handle (v2 spec: Tenancy and authorization). */
 const BASE = "/api/v1/libraries/:owner/:lib";
@@ -299,7 +311,13 @@ async function attachFromUrl(c: C, path: string): Promise<Response> {
   requireWrite(c, path);
   const type = (c.req.header("Content-Type") ?? "").toLowerCase();
   const body = type.startsWith("application/json")
-    ? await json<{ source_url?: unknown; description?: unknown; note?: unknown }>(c)
+    ? await json<{
+        source_url?: unknown;
+        description?: unknown;
+        credit?: unknown;
+        licence?: unknown;
+        note?: unknown;
+      }>(c)
     : {};
   const from = c.req.query("from") ?? body.source_url;
   if (typeof from !== "string" || from === "") {
@@ -313,7 +331,7 @@ async function attachFromUrl(c: C, path: string): Promise<Response> {
   if (!clean || clean.endsWith(".md")) {
     throw new OkfError(400, "bad_attachment", "Markdown files are concepts, not attachments.");
   }
-  const description = checkDescription(c.req.query("description") ?? body.description);
+  const facts = queryFacts(c, body);
   const d = c.var.deps;
   const got = await fetchBlob(
     {
@@ -340,10 +358,25 @@ async function attachFromUrl(c: C, path: string): Promise<Response> {
       if_match: ifMatch,
       if_none_match: ifNoneMatch,
       source: got.source,
-      ...(description !== undefined ? { description } : {}),
+      ...facts,
     },
   ]);
   return writeResponse(c, res);
+}
+
+/**
+ * An attachment's description, credit and licence (TEMPRA-170) from the query string, else a
+ * JSON body: how REST writes them beside the bytes.
+ */
+function queryFacts(
+  c: C,
+  body: { description?: unknown; credit?: unknown; licence?: unknown } = {},
+): AttachFacts {
+  return checkFacts({
+    description: c.req.query("description") ?? body.description,
+    credit: c.req.query("credit") ?? body.credit,
+    licence: c.req.query("licence") ?? body.licence,
+  });
 }
 
 export function createApp(deps: (env: Cloudflare.Env) => Deps) {
@@ -395,31 +428,17 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     return c.json({ ok, checks }, ok ? 200 : 503);
   });
 
-  // The shared design stylesheet (@tempra/design, TEMPRA-8) and its fonts (Inter), each at a
-  // content-hashed URL: a new file gets a new URL, so the old one can be cached for good.
-  app.get("/_design/:file", (c) => {
-    const file = c.req.param("file");
-    const immutable = {
-      "Cache-Control": "public, max-age=31536000, immutable",
-      "X-Content-Type-Options": "nosniff",
-    };
-    if (file === `tempra.${design.hash}.css`) {
-      return c.body(design.css, 200, { "Content-Type": "text/css; charset=utf-8", ...immutable });
-    }
-    const font = designFont(file);
-    if (!font) return c.notFound();
-    return c.body(font, 200, { "Content-Type": "font/woff2", ...immutable });
-  });
-
-  // The app's client bundle (TEMPRA-9), at a content-hashed URL like the stylesheet.
-  app.get("/_app/:file", (c) => appScript(c.req.param("file")) ?? c.notFound());
-
-  // The tab's icon, linked from every page's head.
-  app.get("/favicon.svg", () => faviconResponse());
+  // The static assets' prefixes (TEMPRA-174): a file there is served before the Worker runs, so
+  // what reaches it is a name no build wrote (an old hash, a typo). A plain 404, never a page or a
+  // handle's redirect, and before the session's limit.
+  app.get("/_app/*", (c) => c.notFound());
+  app.get("/_design/*", (c) => c.notFound());
 
   // Everything below (pages, the API, downloads, feed upgrades) counts against a browser
-  // session's limit when it carries the session cookie and no bearer token (TEMPRA-80); the
-  // static files above do not. A request with a token is limited per token instead.
+  // session's limit when it carries the session cookie and no bearer token (TEMPRA-80). The
+  // static files (/_app/, /_design/, /favicon.svg) are Workers static assets served before the
+  // Worker runs (TEMPRA-174), so they never get here. A request with a token is limited per token
+  // instead.
   app.use("*", async (c, next) => {
     const secret =
       c.req.header("Authorization") === undefined ? readCookie(c.req.raw, SESSION_COOKIE) : null;
@@ -438,7 +457,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     await admit(d, tokenAdmission(token), write, "token" in who);
     c.set("deps", d);
     c.set("token", token);
-    c.set("lib", notifying(d, token, d.library(token)));
+    c.set("lib", notifying(d, token, d.library(token), afterResponse(c)));
     await next();
   });
 
@@ -456,8 +475,8 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     c.header("X-Seq", String(view.seq));
     if (view.kind === "attachment" && wantsJson) {
       // A description, not the bytes: what the app shows on an attachment's page.
-      const { kind, path, seq, hash, size, media, width, height, source, description } =
-        await withDimensions(c.var.lib, c.var.deps.blobs, view);
+      const v = await withDimensions(c.var.lib, c.var.deps.blobs, view);
+      const { kind, path, seq, hash, size, media, width, height, source, description } = v;
       c.header("ETag", `"${hash}"`);
       return c.json({
         kind,
@@ -471,6 +490,8 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
         // Where the bytes were fetched from, and what the file shows (TEMPRA-157, TEMPRA-170).
         source: source ?? null,
         description: description ?? null,
+        credit: v.credit ?? null,
+        licence: v.licence ?? null,
       });
     }
     if (view.kind === "attachment") {
@@ -523,6 +544,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
         ),
         if_match: ifMatch,
         if_none_match: ifNoneMatch,
+        ...queryFacts(c),
       };
     } else if (isMarkdownRequest(c, path)) {
       const type = (c.req.header("Content-Type") ?? "").toLowerCase();
@@ -538,7 +560,14 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
         mediaFor(path, c.req.header("Content-Type")),
         path,
       );
-      op = { op: "attach", path, blob, if_match: ifMatch, if_none_match: ifNoneMatch };
+      op = {
+        op: "attach",
+        path,
+        blob,
+        if_match: ifMatch,
+        if_none_match: ifNoneMatch,
+        ...queryFacts(c),
+      };
     }
     const res = await c.var.lib.apply(requestContext(c), [op]);
     return writeResponse(c, res);
@@ -586,6 +615,8 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
       sha256?: unknown;
       if_match?: unknown;
       description?: unknown;
+      credit?: unknown;
+      licence?: unknown;
       note?: unknown;
     }>(c);
     const path = typeof body.path === "string" && body.path !== "" ? body.path : null;
@@ -596,14 +627,14 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
       sha256: typeof body.sha256 === "string" ? body.sha256 : undefined,
     });
     const media = typeof body.media === "string" && body.media ? body.media : null;
-    const description = path ? checkDescription(body.description) : undefined;
+    const facts = path ? checkFacts(body) : {};
     const ctx = requestContext(c, body.note);
     const prepared = await prepareUpload(c.var.lib, new URL(c.req.url).origin, {
       path,
       media: media ?? (path ? mediaFor(path) : null),
       ...declared,
       if_match: typeof body.if_match === "string" ? body.if_match : undefined,
-      ...(description !== undefined ? { description } : {}),
+      ...facts,
       note: ctx.note ?? null,
       actor: ctx.actor,
       by: ctx.by,
@@ -1207,7 +1238,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     const blob = await putBlob(d.blobs, bytes, media, grant.path ?? undefined);
     await lib.openUpload(raw, { claim: true });
     if (grant.path === null) return c.json(blob, 201);
-    const res = await notifying(d, token, d.library(token)).apply(
+    const res = await notifying(d, token, d.library(token), afterResponse(c)).apply(
       { actor: grant.actor, request_id: crypto.randomUUID(), note: grant.note, by: grant.by },
       [
         {
@@ -1215,7 +1246,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
           path: grant.path,
           blob,
           if_match: grant.if_match,
-          ...(grant.description ? { description: grant.description } : {}),
+          ...checkFacts(grant),
         },
       ],
     );
@@ -1712,16 +1743,4 @@ function writeResponse(c: C, res: WriteResult) {
         }
       : {}),
   });
-}
-
-/** A design font's bytes by its served name, decoded once per isolate. */
-const decodedFonts = new Map<string, Uint8Array<ArrayBuffer>>();
-function designFont(file: string): Uint8Array<ArrayBuffer> | null {
-  const cached = decodedFonts.get(file);
-  if (cached) return cached;
-  const base64 = Object.hasOwn(design.fonts, file) ? design.fonts[file] : undefined;
-  if (base64 === undefined) return null;
-  const bytes = Uint8Array.from(atob(base64), (ch) => ch.charCodeAt(0));
-  decodedFonts.set(file, bytes);
-  return bytes;
 }

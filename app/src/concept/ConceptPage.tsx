@@ -3,7 +3,7 @@ import { useActors } from "../agents";
 import { Icon } from "../chrome";
 import { CommentsList } from "../comments/CommentsPanel";
 import { highlightsOf, placeThreads, type Thread, useDraft } from "../comments/data";
-import { imageSource } from "../images";
+import { attachmentSource } from "../images";
 import { Reader } from "../Reader";
 import { type BodyOptions, prepare } from "../reader/prepare";
 import { pushRecent } from "../recent";
@@ -90,7 +90,7 @@ export function ConceptPage(props: {
       href: bodyHref(urls),
       image: (path) => {
         const ref = c.images?.[path];
-        return ref ? imageSource(urls, ref) : null;
+        return ref ? attachmentSource(urls, ref, path) : null;
       },
       exists: (path) => !broken.has(path),
       footnote: (label, defined) => {
