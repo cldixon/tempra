@@ -51,9 +51,14 @@ const GLOBALS = [
 export function installDom(url = "http://localhost/") {
   const window = new Window({ url });
   const g = globalThis as Record<string, unknown>;
+  const w = window as unknown as Record<string, unknown>;
   for (const name of GLOBALS) {
-    const v = (window as unknown as Record<string, unknown>)[name];
+    const v = w[name];
     g[name] = typeof v === "function" && /^[a-z]/.test(name) ? v.bind(window) : v;
+  }
+  // Every DOM class the window has (HTMLMediaElement, SVGSVGElement, …), for Svelte's checks.
+  for (const name of Object.getOwnPropertyNames(window)) {
+    if (/^(HTML|SVG)\w*Element$/.test(name) && !(name in g)) g[name] = w[name];
   }
   g.window = window;
   return window;

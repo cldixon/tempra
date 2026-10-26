@@ -1,0 +1,172 @@
+<script lang="ts">
+  import { ApiError, api } from "../api";
+  import ComposeDialog from "../ComposeDialog.svelte";
+  import Icon from "../Icon.svelte";
+  import { useLoad } from "../load.svelte.ts";
+  import PageBar from "../PageBar.svelte";
+  import { libraryLabel } from "../role";
+  import { navigate } from "../router";
+  import Status from "../Status.svelte";
+  import { useMe, useTitle } from "../ui.svelte.ts";
+  import { Urls } from "../urls";
+  import { cardFacts, type Library, slugFrom } from "./libraries";
+
+  /**
+   * The account's libraries (take 4, board 01): cards under Yours and Shared with you, each with
+   * its title, what is for the person there, its description and one line of facts; New library
+   * in the top bar, and on a phone a button floating at the screen's bottom right instead
+   * (TEMPRA-148); the switcher's menu lands here with ?new=1.
+   */
+  let { create }: { create: boolean } = $props();
+  useTitle(() => "Libraries");
+  const loaded = useLoad(
+    () => "libraries",
+    () => api<{ libraries: Library[] }>("/api/v1/libraries").then((r) => r.libraries),
+  );
+  let creating = $state(create);
+  const invited = useLoad(
+    () => "invitations",
+    () => api<{ invitations: unknown[] }>("/api/v1/invitations"),
+  );
+  const waiting = $derived(invited.data?.invitations.length ?? 0);
+
+  /**
+   * New library, as a compose dialog over the list: its name, a description, and its address
+   * (filled in from the name until the person edits it). Creating opens the new library.
+   */
+  const me = useMe();
+  let title = $state("");
+  let slug = $state<string | null>(null);
+  let error = $state<string | null>(null);
+  let busy = $state(false);
+  const address = $derived(slug ?? slugFrom(title));
+  function close() {
+    title = "";
+    slug = null;
+    error = null;
+    creating = false;
+  }
+  async function submit(e: SubmitEvent & { currentTarget: HTMLFormElement }) {
+    e.preventDefault();
+    const description = String(new FormData(e.currentTarget).get("description") ?? "")
+      .replace(/\s+/g, " ")
+      .trim();
+    busy = true;
+    error = null;
+    try {
+      const lib = await api<Library>("/api/v1/libraries", {
+        method: "POST",
+        body: JSON.stringify({
+          slug: address,
+          title: title.trim() || undefined,
+          description: description || undefined,
+        }),
+      });
+      navigate(new Urls(lib.owner, lib.slug).tree(""));
+    } catch (err) {
+      error = err instanceof ApiError ? err.message : String(err);
+      busy = false;
+    }
+  }
+</script>
+
+{#snippet newLibrary(className: string)}
+  <button type="button" class={className} aria-haspopup="dialog" onclick={() => (creating = true)}
+    ><Icon name="plus" />New library</button
+  >
+{/snippet}
+
+{#snippet barNew()}{@render newLibrary("tool-pill primary bar-new")}{/snippet}
+
+<!-- A library's tile (Sidebar's LibraryTile): its initial on a dark square, round when shared. -->
+{#snippet tile(name: string, shared: boolean)}
+  <span class={shared ? "lib-tile shared" : "lib-tile"} aria-hidden="true">{(name.trim()[0] ?? "?").toUpperCase()}</span>
+{/snippet}
+
+<!-- One section of cards; a library as a card: a quiet cover with its tile, then its name, description and facts. -->
+{#snippet cards(heading: string, libraries: Library[])}
+  <section aria-label={heading}>
+    <h2 class="lib-section-title">{heading}</h2>
+    <ul class="lib-cards">
+      {#each libraries as l (l.id)}
+        {@const facts = cardFacts(l)}
+        <li>
+          <a class="lib-card" href={new Urls(l.owner, l.slug).tree("")}
+            ><span class="lib-card-cover">{@render tile(l.title || l.slug, (l.role ?? "owner") !== "owner")}</span
+            ><span class="lib-card-body"
+              ><span class="lib-card-name"><span>{libraryLabel(l)}</span></span
+              >{#if l.description}<span class="lib-card-desc">{l.description}</span>{/if}{#if facts.length > 0}<span
+                  class="lib-card-meta">{facts.join(" · ")}</span
+                >{/if}</span
+            ></a
+          >
+        </li>
+      {/each}
+    </ul>
+  </section>
+{/snippet}
+
+<PageBar actions={barNew} />
+{@render newLibrary("primary fab")}
+<h1>Libraries</h1>
+<ComposeDialog
+  open={creating}
+  onClose={close}
+  title="New library"
+  action="Create library"
+  {busy}
+  {error}
+  onSubmit={submit}
+>
+  {#snippet context()}{me.current ? `@${me.current.handle}` : "You"}{/snippet}
+  {#snippet fields()}
+    <label class="compose-field">
+      <span class={me.current ? "compose-prefix" : undefined}>{me.current ? `${me.current.handle}/` : "Address"}</span>
+      <input
+        name="slug"
+        type="text"
+        aria-label="Address"
+        placeholder="team-notes"
+        required
+        pattern={"[a-z0-9][a-z0-9\\-]{0,62}"}
+        title="Lowercase letters, digits and dashes"
+        value={address}
+        oninput={(e) => (slug = e.currentTarget.value)}
+      />
+    </label>
+  {/snippet}
+  <input
+    class="compose-title"
+    name="title"
+    type="text"
+    aria-label="Name"
+    placeholder="Library name"
+    maxlength={120}
+    autocomplete="off"
+    data-autofocus="true"
+    bind:value={title}
+  />
+  <textarea
+    class="compose-text"
+    name="description"
+    aria-label="Description"
+    placeholder="Add a description…"
+    maxlength={300}
+    rows={3}
+  ></textarea>
+</ComposeDialog>
+{#if waiting > 0}
+  <p>
+    <a href="/inbox">{waiting === 1 ? "An invitation" : `${waiting} invitations`} to a library</a>
+    {waiting === 1 ? "is" : "are"} waiting for you.
+  </p>
+{/if}
+<Status loaded={loaded.current}>
+  {#snippet children(libs)}
+    {@const yours = libs.filter((l) => (l.role ?? "owner") === "owner")}
+    {@const shared = libs.filter((l) => (l.role ?? "owner") !== "owner")}
+    {#if libs.length === 0}<p class="muted">No libraries yet.</p>{/if}
+    {#if yours.length > 0}{@render cards("Yours", yours)}{/if}
+    {#if shared.length > 0}{@render cards("Shared with you", shared)}{/if}
+  {/snippet}
+</Status>

@@ -513,3 +513,12 @@ export async function loadTitles(urls: Urls): Promise<Titles> {
   }
   return { seq: r.seq, titles, folders: [...folders].sort() };
 }
+
+/** Requests per page of Activity, as the ledger pages them. */
+export const REQUESTS_PAGE = 30;
+
+/** A page of `GET …/requests`: newest first, and where the next (older) page starts. */
+export interface RequestPage {
+  requests: LedgerRequest[];
+  next: number | null;
+}

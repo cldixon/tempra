@@ -1,6 +1,6 @@
 ///<reference types="svelte" />
 ;
-import { tick, type Snippet } from "svelte";
+import { type Snippet, tick } from "svelte";
 
 ;type $$ComponentProps =  {
     /** The button's content. */
@@ -44,9 +44,9 @@ import { tick, type Snippet } from "svelte";
   function choices(): HTMLElement[] {
     const list = document.getElementById(id);
     if (!list) return [];
-    return Array.from(
-      list.querySelectorAll<HTMLElement>("a[href], button:not([disabled])"),
-    ).filter((el) => el.getClientRects().length > 0);
+    return Array.from(list.querySelectorAll<HTMLElement>("a[href], button:not([disabled])")).filter(
+      (el) => el.getClientRects().length > 0,
+    );
   }
 
   function focusChoice(which: "first" | "last") {
