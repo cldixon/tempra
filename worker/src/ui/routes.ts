@@ -10,9 +10,15 @@ import { basename, dirname } from "../okf/paths";
 import { fromThisSite } from "../origin";
 import { byteRange } from "../range";
 import { LINK_MINUTES, readCookie, SESSION_COOKIE } from "../session";
-import { signedIn } from "../signin";
+import { signedIn, signedInTo } from "../signin";
 import { OkfError } from "../store/errors";
-import { type Authorized, authorizeLibrary, requireOwner } from "../tenancy";
+import {
+  type Authorized,
+  authorizeLibrary,
+  type Found,
+  requireOwner,
+  sessionToken,
+} from "../tenancy";
 import { checkMedia, type UploadGrant } from "../uploads";
 import { type BootPage, bootData, bootScript, bootUrls } from "./boot";
 import { spaShell } from "./spa";
@@ -26,6 +32,8 @@ interface Page {
   c: C;
   user: User;
   deps: Deps;
+  /** On a library's route, the library and the person's membership as their session found them. */
+  found?: Found;
 }
 
 /** The part of the request path after `marker`, URL-decoded per segment. */
@@ -106,10 +114,17 @@ function ui(deps: (env: Cloudflare.Env) => Deps, handler: (p: Page) => Promise<R
     const owner = c.req.param("owner");
     if (owner !== undefined && isRouteName(owner)) return c.notFound();
     const d = deps(c.env);
-    const user = await signedIn(c.req.raw, d);
-    if (user instanceof Response) return user;
+    // A library's route finds the person, the library and their membership in one D1 query
+    // (TEMPRA-201): its page, its images and media, its downloads.
+    const slug = c.req.param("lib");
+    const who =
+      owner !== undefined && slug !== undefined
+        ? await signedInTo(c.req.raw, d, owner, slug)
+        : await signedIn(c.req.raw, d);
+    if (who instanceof Response) return who;
+    const [user, found] = "found" in who ? [who.user, who.found] : [who, undefined];
     try {
-      return await handler({ c, user, deps: d });
+      return await handler({ c, user, found, deps: d });
     } catch (e) {
       if (e instanceof OkfError) {
         if (e.status === 404 && owner !== undefined && c.req.method === "GET") {
@@ -149,9 +164,10 @@ export function legacyUrl(path: string): string {
 async function openLibrary(p: Page): Promise<{ urls: Urls; lib: LibraryClient; ref: Authorized }> {
   const owner = p.c.req.param("owner") ?? "";
   const slug = p.c.req.param("lib") ?? "";
-  const ref = await authorizeLibrary(p.deps.accounts, { user: p.user }, owner, slug);
-  const lib = await p.deps.libraryByDoId(ref.do_id);
-  if (!lib) throw new OkfError(404, "no_library", `There is no library ${owner}/${slug}.`);
+  const ref = await authorizeLibrary(p.deps.accounts, { user: p.user }, owner, slug, p.found);
+  // The library's row was just read from D1 to authorize it: its object is real, so no second
+  // lookup by its DO id (TEMPRA-201).
+  const lib = p.deps.library(sessionToken(p.user, ref));
   return { urls: new Urls(ref.owner, ref.slug, atParam(p.c)), lib, ref };
 }
 

@@ -52,6 +52,24 @@ export async function authorizeLibrary(
   return { ...ref, role };
 }
 
+/**
+ * The signed-in person acting on a library they may reach, as the token the routes act with:
+ * attributed to their human: actor, with their role there (a `read` member reads and comments).
+ */
+export function sessionToken(user: User, { role, ...library }: Authorized): TokenInfo {
+  return {
+    id: `session:${user.id}`,
+    actor: user.actor,
+    scope: role === "read" ? "read" : "write",
+    prefix: null,
+    mcp_tiers: "all",
+    library,
+    created_by: user.id,
+    role,
+    person: user.handle,
+  };
+}
+
 /** Refuses anything but the library's owner (or a token acting for them). */
 export function requireOwner(role: Role, what: string): void {
   if (role !== "owner") {
