@@ -22,7 +22,7 @@ Every write is attributed to your token's actor and recorded in a ledger. Nothin
 1. `start` once per session: the root index, counts by type, open work, the daily health check (open work by kind, the newest changes nobody has verified), and house rules. If your connection reaches several libraries, `start` lists them; open one with `start` and `library` (`owner/slug`), then pass the same `library` on every call.
    - When the person asks for a new library, `create_library` (`slug`, optional one-line `title` and `description`) makes one they own, exactly as if they made it in the app, and opens it as `start` does. It works only on a read-and-write app connection the person allowed to create libraries at consent, and counts against their library limit. Inviting people, sharing, transferring and deleting stay with the person, in the app.
 2. `browse` a directory to see its concepts' titles and descriptions before opening any.
-3. `read` the concept you need. Look at the header first: trust tier, `stale`, `status`, lint, inbound links, and its figures (one line each, numbered as the app numbers them: path or URL, alt, caption, dimensions, size, and `ok`, `missing` or `external`; diagrams by type). Then read the frontmatter, then the body. When you review the page, change a figure or its caption, or answer a comment on one, `read` it with `images: true` to see the images, `diagrams: true` to see its Mermaid diagrams drawn as people see them, or `figures: [n]` for some figures of either kind: at most 6 and 2 MB a call in all, the rest listed with the reason (for a diagram that does not draw, Pele's error); external images are not fetched.
+3. `read` the concept you need. Look at the header first: trust tier, `stale`, `status`, lint, inbound links, and its figures (one line each, numbered as the app numbers them). Then read the frontmatter, then the body. To see the figures themselves, see [Figures and media](#figures-and-media).
 4. Follow links to related concepts rather than guessing paths. Use `search` (ranked) or `grep` (exact text) when you do not know where something is.
 
 Treat a `stale`, `deprecated` or unverified concept as a lead to confirm, not a fact.
@@ -54,9 +54,7 @@ Gross margin equals recognized [revenue](/metrics/revenue.md) minus full COGS.[^
 - A `description` of one sentence: it is what `browse` and indexes show.
 - Absolute links (`/dir/file.md`). A link to a concept that does not exist yet is allowed; it shows up in `work` as a broken link until someone writes it.
 - Every footnote label matches a `sources[].id`, and every `[^id]` in the text has a `[^id]: …` definition line at the end of the body (without one, renderers show it as literal text).
-- Images: `![what it shows](/dir/image.png "Caption")`, the file attached beside the concept that uses it. Lint, never a refusal, and in `work` until fixed: `image_no_alt` (empty alt text; say what the image shows), `image_external` (hotlinked from another site; bring it in with `attach` and `source_url`, point the image at the attached path, and cite the original in `sources`; `work` lists them as one `external_image` item per page), `image_large` (an attachment over 2 MB or 4000 px on its long edge; attach a smaller version), `image_not_image` (`![…](x)` where x is not an image, video, audio or PDF; link it instead). The last two are rechecked when the attachment is replaced or deleted.
-- Diagrams are Mermaid in a `mermaid` fence: the app draws them. One with an unknown type, nothing after its header, or a bracket or quote left open comes back as `diagram_invalid` lint with the line and column inside the fence; it is saved anyway and the app shows its source (and a quiet notice for anything subtler the app cannot draw). Fix the fence. `diagram_unrendered` lint means Pele, the renderer, could not draw the fence (its message, line and column inside the fence); it may come in the write result or only in `work` and the next `read`. Fix it the same way. Before writing a non-trivial diagram, preview it with `render` (`source`: the fence's body; or `path` and `figure` for one already written): it returns the drawing as an image, so you can check the layout and that labels fit, or Pele's error with line and column. It writes nothing; at most 60 renders a minute per account.
-- Figures: a plain image is `![alt](/path "caption")` (alt says what it shows; the title is its caption) and needs nothing more. For a width, a placement or a group, wrap one to four images in a `:::figure` block: `:::figure[group caption]{width=480 layout=wide frame}`, the images one to a line, then `:::`. `width` is pixels (`480`) or a share of the column (`60%`), never wider than the image itself; `layout` is `column` (the default), `wide` (past the text) or `full` (the page's width); `frame` draws a hairline round screenshots. Several images are one group, side by side (stacked on a phone), each image's title a small label and the `[…]` label the group's caption. Markup that does not parse comes back as `figure_invalid` lint; it is saved anyway and its images are shown plainly. Other `:::name` blocks are kept as written.
+- Images and diagrams: see [Figures and media](#figures-and-media).
 - Timestamps (`stale_after`, `sources[].last_modified`) are ISO 8601 datetimes with an offset (`2026-06-30T14:00:00Z`). A plain date such as `2026-12-31` is flagged.
 - Set `status` and `stale_after` honestly: `draft` when unsure; a `stale_after` when the content depends on something that changes.
 - Only a new `stale_after` resets a concept's clock: an edit that leaves it alone leaves the concept stale (or stale soon, within 14 days of it). Move it forward when you have re-checked the content, not because you touched the file.
@@ -69,12 +67,41 @@ Gross margin equals recognized [revenue](/metrics/revenue.md) minus full COGS.[^
 - Bodies are stored in a canonical form: `-` bullets, `*` emphasis, ATX headings, fenced code, padded tables; in the frontmatter, a list of mappings such as `sources` one key per line, and a list of scalars such as `tags` on one line (`[a, b]`). What you write reads back normalized, and is byte-stable after that; when it differs from what you sent, the write result says so and shows the diff. Quote `old` from what `read` shows, not from what you sent.
 - `write` for a new concept or a full rewrite. Replacing needs `if_match`.
 - `batch` for related changes (a new concept plus the links to it; a rename plus fixes) so they land as one request.
-- `attach` stores a non-markdown file. Images (PNG, JPEG, GIF, WebP, AVIF, SVG) are checked on write: a broken or truncated one is refused with `bad_image` saying what is wrong, and an image's type is taken from its bytes, not from `media` or the extension.
+- `attach` and `prepare_upload` store a non-markdown file: see [Figures and media](#figures-and-media).
 - `move` renames a file or a whole directory. Links keep working; do not fix them by hand.
-- An image on the public web (a vendor's diagram, a chart in a paper): `attach` with `source_url` and the server fetches it (https only, no credentials in the URL, at most 3 redirects, 10 s, up to 10 MB; images, video, audio and PDF, judged by the bytes; a refusal is `fetch_refused` naming the rule). It records the URL and fetch time as the file's source, which `read` shows; that is not a citation, so cite the original in the concept's `sources` too. Never hotlink a web image in a concept. Give any attachment a one-line `description` of what it shows (up to 500 characters), and an image you did not make its `credit` and `licence` (free text, up to 200 characters each); the file's page in the app shows them with its source and every version.
-- Adding a file you made (a screenshot, a chart, a PDF): with a shell, call `prepare_upload` and run the `curl -T <file> '<url>'` line it returns (one PUT within 15 minutes, up to 10 MB; curl prints the write result). Without one, `attach` takes base64, for small files only (under about 200 KB); pass `sha256` (or `size`) so damaged bytes are refused, not stored.
 - Put a one-line `note` on every write, saying why. Humans read the ledger.
 - Read the `lint` in every write result and fix it in the same session. The result's notes say what else to know: ignored fields, the stored form, the concept's open comment threads and any your edit left outdated, and after a delete, the concepts whose links it broke.
+
+## Figures and media
+
+**When a figure helps.** A screenshot of what the page describes; a chart of data the page discusses. For an architecture or a flow, prefer a Mermaid diagram: it is text, diffs like text, and the app draws it. Leave out pictures that only decorate.
+
+**Diagrams** are Mermaid in a `mermaid` fence. Before writing a non-trivial one, preview it with `render` (`source`: the fence's body; or `path` and `figure` for one already written): it returns the drawing as an image, or Pele's error with line and column, writes nothing, and allows 60 renders a minute per account. On a write, `diagram_invalid` lint (an unknown type, nothing after the header, a bracket or quote left open) and `diagram_unrendered` lint (Pele, the renderer, could not draw it; in the write result, or only in `work` and the next `read`) both mean: fix the fence. Either is saved anyway, and the app shows its source.
+
+**Adding a file**, by what you have:
+
+- An image on the public web: `attach` with `source_url`. The server fetches it (https only, no credentials in the URL, at most 3 redirects, 10 s, up to 10 MB; images, video, audio and PDF, judged by the bytes; a refusal is `fetch_refused` naming the rule) and records the URL and fetch time as the file's source. That is not a citation: cite the original in the concept's `sources` too. Never hotlink.
+- A file you made, with a shell that reaches the server: `prepare_upload`, then run the `curl -T <file> '<url>'` line it returns (one PUT within 15 minutes, up to 10 MB; curl prints the write result).
+- Without one: `attach` with `content_base64`, for small files only (advised under about 50 KB; over 256 KB decoded is refused as `base64_too_large`), with `sha256` (or `size`) so damaged bytes are refused, not stored.
+
+Images (PNG, JPEG, GIF, WebP, AVIF, SVG) are checked on write: a broken one is refused with `bad_image`, and the type comes from the bytes. Give an attachment a one-line `description` (up to 500 characters), and an image you did not make its `credit` and `licence` (up to 200 characters each); the file's page shows them.
+
+**Where it lives.** Beside the concept that uses it, named for what it shows: `dir/x.md` uses `dir/x-architecture.png`. Link it by absolute path.
+
+**How to write it.** `![what it shows](/dir/x-architecture.png "Caption")`: the alt says what the image shows (what a screen reader says, and what an agent reads when it does not ask for the image); the title is the caption. For a width, a placement or a group, wrap one to four images, one to a line, in a `:::figure` block:
+
+```markdown
+:::figure[The top bar before and after]{width=480 layout=wide frame}
+![The top bar with crumbs](/app/bar-before.png "Before")
+![The top bar with the path](/app/bar-after.png "After")
+:::
+```
+
+`width` is pixels or a share of the column (`60%`), never wider than the image; `layout` is `column` (the default), `wide` or `full`; `frame` draws a hairline round screenshots. In a group the `[…]` label is the caption and each title a small label. Video, audio and PDF use the image spelling (`![A walkthrough](/dir/x-demo.mp4 "Caption")`), with a video's poster attached beside it as `x-demo.poster.png`. Cite an image you did not make in `sources`.
+
+**Lint**, never a refusal, and in `work` until fixed: `image_no_alt` (say what it shows), `image_external` (hotlinked: `attach` it with `source_url`, point the image at the attached path, cite the original; `work` lists them as one `external_image` item per page), `image_large` (over 2 MB or 4000 px on its long edge; attach a smaller one), `image_not_image` (`![…](x)` on a file that is not an image, video, audio or PDF; link it instead), `figure_invalid` (the markup does not parse; its images show plainly).
+
+**Seeing it.** `read` lists a concept's figures in its header (path or URL, alt, caption, dimensions, size, and `ok`, `missing` or `external`; diagrams by type). Before changing a figure or its caption, or answering a comment on one, `read` with `images: true` to see the images, `diagrams: true` to see the diagrams drawn as people see them, or `figures: [n]` for some of either: at most 6 and 2 MB a call, the rest listed with the reason; external images are not fetched. `read` on an image attachment returns it scaled for you (an SVG as its text; `image: false` for its facts only); a PDF up to 2 MB comes as an embedded resource; video and audio are facts only.
 
 ## Conflicts
 
