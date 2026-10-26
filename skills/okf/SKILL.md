@@ -81,8 +81,9 @@ Gross margin equals recognized [revenue](/metrics/revenue.md) minus full COGS.[^
 **Adding a file**, by what you have:
 
 - An image on the public web: `attach` with `source_url`. The server fetches it (https only, no credentials in the URL, at most 3 redirects, 10 s, up to 10 MB; images, video, audio and PDF, judged by the bytes; a refusal is `fetch_refused` naming the rule) and records the URL and fetch time as the file's source. That is not a citation: cite the original in the concept's `sources` too. Never hotlink.
-- A file you made, with a shell that reaches the server: `prepare_upload`, then run the `curl -T <file> '<url>'` line it returns (one PUT within 15 minutes, up to 10 MB; curl prints the write result).
-- Without one: `attach` with `content_base64`, for small files only (advised under about 50 KB; over 256 KB decoded is refused as `base64_too_large`), with `sha256` (or `size`) so damaged bytes are refused, not stored.
+- A file you made, with a shell that reaches the server: `prepare_upload`, then run the `curl -T <file> '<url>'` line it returns (one PUT within an hour, up to 10 MB; curl prints the write result).
+- A file the person has (a photo they attached in the chat: you cannot pass on a chat's attachment), or one you made in a sandbox that cannot reach the server (curl fails to connect, or a proxy refuses it): `prepare_upload`, then give the person its upload link. Signed in, they choose the file in their browser, and it is attached as your write, with your note, description, credit and licence, recorded as supplied by them. `read` the path to see when it has arrived.
+- Otherwise: `attach` with `content_base64`, for small files only (advised under about 50 KB; over 256 KB decoded is refused as `base64_too_large`), with `sha256` (or `size`) so damaged bytes are refused, not stored.
 
 Images (PNG, JPEG, GIF, WebP, AVIF, SVG) are checked on write: a broken one is refused with `bad_image`, and the type comes from the bytes. Give an attachment a one-line `description` (up to 500 characters), and give it its `credit` and `licence` (up to 200 characters each); the file's page shows them. A file the person gave you or you made carries its own `credit` and `licence` and needs no `sources` entry: say who supplied it (`Photo supplied by @ann`) and the licence if known.
 

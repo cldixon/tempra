@@ -392,6 +392,18 @@ describe("the image's page (TEMPRA-170)", () => {
       name: view,
     });
     expect(uploaded).toContain("Uploaded by <span");
+    expect(uploaded).not.toContain("supplied by");
+    // A person's file from the agent's upload link (TEMPRA-196).
+    const supplied = markup(SourceFact, {
+      urls,
+      source: null,
+      suppliedBy: "ann",
+      version: v ?? null,
+      uses: [],
+      titles,
+      name: view,
+    });
+    expect(supplied).toContain("</span>, file supplied by @ann</div>");
     expect(uploaded).toContain("<b>Claude Code</b>");
     expect(uploaded).not.toContain("Cited");
   });

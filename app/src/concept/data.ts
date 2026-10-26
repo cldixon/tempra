@@ -55,6 +55,8 @@ export type FileJson =
       description?: string | null;
       credit?: string | null;
       licence?: string | null;
+      /** The person who sent the bytes from an agent's upload link, by handle (TEMPRA-196). */
+      supplied_by?: string | null;
     };
 
 /** An attachment fetched from a URL: the URL, where it ended after redirects, and when. */
