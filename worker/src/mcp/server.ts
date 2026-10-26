@@ -37,7 +37,7 @@ import {
 import type { CommentAction, CommentResult } from "../store/comments";
 import { OkfError } from "../store/errors";
 import {
-  checkDescription,
+  checkFacts,
   type LibraryHealth,
   type RequestContext,
   type WriteOp,
@@ -789,6 +789,10 @@ export function buildServer(ctx: McpContext): McpServer {
             hash: view.hash,
             media: view.media,
           });
+          // How many versions the file has had, as its page's File history lists them.
+          const versions = (await picked.lib.history(view.path)).events.filter(
+            (e) => (e.op === "put" || e.op === "import" || e.op === "revert") && e.hash !== null,
+          ).length;
           const facts = text(
             [
               `path: ${view.path}`,
@@ -802,6 +806,9 @@ export function buildServer(ctx: McpContext): McpServer {
                   ]
                 : []),
               ...(view.description ? [`description: ${view.description}`] : []),
+              ...(view.credit ? [`credit: ${view.credit}`] : []),
+              ...(view.licence ? [`licence: ${view.licence}`] : []),
+              `versions: ${versions}`,
               `download (15 minutes): ${url}`,
             ].join("\n"),
           );
@@ -1002,7 +1009,7 @@ export function buildServer(ctx: McpContext): McpServer {
     {
       title: "Add an attachment",
       description:
-        "Store a non-markdown file (an image, a script, a PDF) at a path, e.g. `figures/latency.png`, from exactly one of `source_url` or `content_base64`. An image on the public web goes in with `source_url`: the server fetches it (https only, no credentials in the URL, at most 3 redirects, 10 s, up to 10 MB; images, video, audio and PDF only, judged by the bytes), so nothing passes through you, and records the URL and fetch time as the file's source; a refused fetch is `fetch_refused` naming the rule. That source is not a citation: cite the original in the concept's `sources` too. Never hotlink a web image in a concept; bring it in this way. `content_base64` is for small files you made (under about 200 KB): every character is typed out, and a long run gets cut short or garbled. If you can run a shell, use `prepare_upload` instead and PUT the real file; it takes up to 10 MB. Pass `sha256` (hex; `sha256sum file`, or `hashlib.sha256(data).hexdigest()`) or at least `size` in bytes, so bytes that arrive damaged are refused (`checksum_mismatch`, with what arrived) instead of stored. Images (PNG, JPEG, GIF, WebP, AVIF, SVG) are checked on write: a broken or truncated one is refused with `bad_image`, and an image's type is taken from its bytes, not from `media` or the extension. `description` says in a line what the file shows (up to 500 characters). Replacing needs `if_match`. Reading it back with `read` returns its facts (source and description included) and a short-lived download URL.",
+        "Store a non-markdown file (an image, a script, a PDF) at a path, e.g. `figures/latency.png`, from exactly one of `source_url` or `content_base64`. An image on the public web goes in with `source_url`: the server fetches it (https only, no credentials in the URL, at most 3 redirects, 10 s, up to 10 MB; images, video, audio and PDF only, judged by the bytes), so nothing passes through you, and records the URL and fetch time as the file's source; a refused fetch is `fetch_refused` naming the rule. That source is not a citation: cite the original in the concept's `sources` too. Never hotlink a web image in a concept; bring it in this way. `content_base64` is for small files you made (under about 200 KB): every character is typed out, and a long run gets cut short or garbled. If you can run a shell, use `prepare_upload` instead and PUT the real file; it takes up to 10 MB. Pass `sha256` (hex; `sha256sum file`, or `hashlib.sha256(data).hexdigest()`) or at least `size` in bytes, so bytes that arrive damaged are refused (`checksum_mismatch`, with what arrived) instead of stored. Images (PNG, JPEG, GIF, WebP, AVIF, SVG) are checked on write: a broken or truncated one is refused with `bad_image`, and an image's type is taken from its bytes, not from `media` or the extension. `description` says in a line what the file shows (up to 500 characters); `credit` (who made it) and `licence` (free text) a line each, up to 200 characters, for an image you did not make. They show on the file's page. Replacing needs `if_match`; the same bytes with a new description, credit or licence is a write too. Reading it back with `read` returns its facts (source, description, credit, licence and how many versions) and a short-lived download URL.",
       inputSchema: {
         path: z.string(),
         source_url: z
@@ -1019,6 +1026,14 @@ export function buildServer(ctx: McpContext): McpServer {
           .string()
           .optional()
           .describe("What the file shows, in a line (at most 500 characters)."),
+        credit: z
+          .string()
+          .optional()
+          .describe("Who made it, as they should be credited (at most 200 characters)."),
+        licence: z
+          .string()
+          .optional()
+          .describe("Its licence, as free text, e.g. `CC BY-SA 4.0` (at most 200 characters)."),
         media: z.string().optional().describe("MIME type; guessed from the extension if omitted."),
         sha256: z
           .string()
@@ -1037,6 +1052,8 @@ export function buildServer(ctx: McpContext): McpServer {
         source_url,
         content_base64,
         description,
+        credit,
+        licence,
         media,
         sha256,
         size,
@@ -1054,7 +1071,7 @@ export function buildServer(ctx: McpContext): McpServer {
           );
         }
         const declared = checkDeclared({ size, sha256 });
-        const desc = checkDescription(description);
+        const facts = checkFacts({ description, credit, licence });
         const clean = normalizePath(path) ?? path;
         if (source_url !== undefined) {
           if (!clean || clean.endsWith(".md")) {
@@ -1082,7 +1099,7 @@ export function buildServer(ctx: McpContext): McpServer {
               blob: got.blob,
               if_match,
               source: got.source,
-              ...(desc !== undefined ? { description: desc } : {}),
+              ...facts,
             },
           ]);
           return text(
@@ -1101,7 +1118,7 @@ export function buildServer(ctx: McpContext): McpServer {
             path,
             blob,
             if_match,
-            ...(desc !== undefined ? { description: desc } : {}),
+            ...facts,
           },
         ]);
         return text(writeText("Stored", res));
@@ -1125,47 +1142,68 @@ export function buildServer(ctx: McpContext): McpServer {
           .string()
           .optional()
           .describe("What the file shows, in a line (at most 500 characters)."),
+        credit: z
+          .string()
+          .optional()
+          .describe("Who made it, as they should be credited (at most 200 characters)."),
+        licence: z
+          .string()
+          .optional()
+          .describe("Its licence, as free text, e.g. `CC BY-SA 4.0` (at most 200 characters)."),
         note: z.string().optional().describe("One line for the ledger."),
         ...libArg,
       },
       annotations: writes,
     },
-    guarded(async ({ path, media, size, sha256, if_match, description, note, library }) => {
-      const picked = pick(library);
-      checkWrite(picked.token, path);
-      const clean = normalizePath(path);
-      if (!clean || clean.endsWith(".md")) {
-        throw new OkfError(
-          400,
-          "bad_path",
-          "prepare_upload is for attachments: a file path that is not markdown (use `write` for concepts).",
-        );
-      }
-      const req = request(note);
-      const desc = checkDescription(description);
-      const up = await prepareUpload(picked.lib, ctx.origin, {
-        path: clean,
-        media: media ?? mediaFor(clean),
-        ...checkDeclared({ size, sha256 }),
+    guarded(
+      async ({
+        path,
+        media,
+        size,
+        sha256,
         if_match,
-        ...(desc !== undefined ? { description: desc } : {}),
-        note: req.note ?? null,
-        actor: req.actor,
-        by: req.by,
-        token: picked.token,
-      });
-      return text(
-        [
-          `Upload URL for ${clean} (one PUT, until ${up.expires}):`,
-          up.url,
-          "",
-          "Run, from the directory holding the file (rename it to the file's real name if it differs):",
-          up.curl,
-          "",
-          "curl prints the write result as JSON; read its lint. An error comes back as JSON with a code (checksum_mismatch, media_mismatch, upload_used); prepare again and resend.",
-        ].join("\n"),
-      );
-    }),
+        description,
+        credit,
+        licence,
+        note,
+        library,
+      }) => {
+        const picked = pick(library);
+        checkWrite(picked.token, path);
+        const clean = normalizePath(path);
+        if (!clean || clean.endsWith(".md")) {
+          throw new OkfError(
+            400,
+            "bad_path",
+            "prepare_upload is for attachments: a file path that is not markdown (use `write` for concepts).",
+          );
+        }
+        const req = request(note);
+        const facts = checkFacts({ description, credit, licence });
+        const up = await prepareUpload(picked.lib, ctx.origin, {
+          path: clean,
+          media: media ?? mediaFor(clean),
+          ...checkDeclared({ size, sha256 }),
+          if_match,
+          ...facts,
+          note: req.note ?? null,
+          actor: req.actor,
+          by: req.by,
+          token: picked.token,
+        });
+        return text(
+          [
+            `Upload URL for ${clean} (one PUT, until ${up.expires}):`,
+            up.url,
+            "",
+            "Run, from the directory holding the file (rename it to the file's real name if it differs):",
+            up.curl,
+            "",
+            "curl prints the write result as JSON; read its lint. An error comes back as JSON with a code (checksum_mismatch, media_mismatch, upload_used); prepare again and resend.",
+          ].join("\n"),
+        );
+      },
+    ),
   );
 
   // ------------------------------------------------------------------ tier 2: beyond files

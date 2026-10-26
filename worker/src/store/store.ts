@@ -123,22 +123,55 @@ export interface AttachSource {
 
 /** An attachment's description is short: a line or two for its page (TEMPRA-170). */
 export const DESCRIPTION_MAX = 500;
+/** Credit and licence are a line each, free text (TEMPRA-170; no licence picker). */
+export const CREDIT_MAX = 200;
 
-/** A description as given: trimmed, at most DESCRIPTION_MAX characters; empty is none. */
-export function checkDescription(d: unknown): string | undefined {
+/** What a writer may say about an attachment version, kept in its attach op's ledger meta. */
+export interface AttachFacts {
+  /** What the file shows. */
+  description?: string;
+  /** Who made it, as it should be credited. */
+  credit?: string;
+  /** Its licence, as free text ("CC BY-SA 4.0"). */
+  licence?: string;
+}
+
+/** A short text as given: trimmed, at most `max` characters; empty is none. */
+function checkText(name: string, d: unknown, max: number): string | undefined {
   if (d === undefined || d === null) return undefined;
   if (typeof d !== "string") {
-    throw new OkfError(400, "bad_description", "`description` is a short text.");
+    throw new OkfError(400, `bad_${name}`, `\`${name}\` is a short text.`);
   }
   const t = d.trim();
-  if (t.length > DESCRIPTION_MAX) {
+  if (t.length > max) {
     throw new OkfError(
       400,
-      "bad_description",
-      `\`description\` is at most ${DESCRIPTION_MAX} characters; this one is ${t.length}.`,
+      `bad_${name}`,
+      `\`${name}\` is at most ${max} characters; this one is ${t.length}.`,
     );
   }
   return t === "" ? undefined : t;
+}
+
+/** A description as given: trimmed, at most DESCRIPTION_MAX characters; empty is none. */
+export function checkDescription(d: unknown): string | undefined {
+  return checkText("description", d, DESCRIPTION_MAX);
+}
+
+/** An attachment's description, credit and licence as given, checked; only those set. */
+export function checkFacts(input: {
+  description?: unknown;
+  credit?: unknown;
+  licence?: unknown;
+}): AttachFacts {
+  const out: AttachFacts = {};
+  const description = checkDescription(input.description);
+  const credit = checkText("credit", input.credit, CREDIT_MAX);
+  const licence = checkText("licence", input.licence, CREDIT_MAX);
+  if (description !== undefined) out.description = description;
+  if (credit !== undefined) out.credit = credit;
+  if (licence !== undefined) out.licence = licence;
+  return out;
 }
 
 function checkSource(s: AttachSource): void {
@@ -188,6 +221,9 @@ export type WriteOp =
       source?: AttachSource;
       /** What the file shows, in the writer's words (at most DESCRIPTION_MAX characters). */
       description?: string;
+      /** Who made it and its licence, free text (at most CREDIT_MAX characters each). */
+      credit?: string;
+      licence?: string;
     }
   | { op: "edit"; path: string; edits: { old: string; new: string }[]; if_match?: string | null }
   | { op: "move"; path: string; to: string }
@@ -460,6 +496,9 @@ export type FileView =
       source: AttachSource | null;
       /** What the file shows, in its writer's words (TEMPRA-170). */
       description: string | null;
+      /** Who made it and under what licence, when its writer said (TEMPRA-170). */
+      credit: string | null;
+      licence: string | null;
     }
   | { kind: "derived"; path: string; seq: number; markdown: string };
 
@@ -1820,7 +1859,12 @@ export class LibraryStore {
     conceptId: string,
     hash: string,
     seq: number,
-  ): { source: AttachSource | null; description: string | null } {
+  ): {
+    source: AttachSource | null;
+    description: string | null;
+    credit: string | null;
+    licence: string | null;
+  } {
     const rows = this.sql.all<{ meta: string | null }>(
       `SELECT meta FROM events WHERE concept_id = ? AND hash = ? AND seq <= ?
          AND op IN ('put', 'import') AND meta IS NOT NULL ORDER BY seq DESC LIMIT 50`,
@@ -1829,7 +1873,11 @@ export class LibraryStore {
       seq,
     );
     let source: AttachSource | null = null;
-    let description: string | null = null;
+    const text: Record<"description" | "credit" | "licence", string | null> = {
+      description: null,
+      credit: null,
+      licence: null,
+    };
     for (const r of rows) {
       const m = JSON.parse(r.meta as string) as JsonObject;
       const s = m.source as Partial<AttachSource> | string | undefined;
@@ -1841,15 +1889,20 @@ export class LibraryStore {
           fetched_at: String(s.fetched_at ?? ""),
         };
       }
-      if (description === null && typeof m.description === "string") description = m.description;
-      if (source && description !== null) break;
+      for (const k of ["description", "credit", "licence"] as const) {
+        const v = m[k];
+        if (text[k] === null && typeof v === "string") text[k] = v;
+      }
+      if (source && text.description !== null && text.credit !== null && text.licence !== null) {
+        break;
+      }
     }
-    return { source, description };
+    return { source, ...text };
   }
 
   private writeAttachment(w: WriteState, op: Extract<WriteOp, { op: "attach" }>): OpResult {
     const { path: input, blob, if_match: ifMatch, if_none_match: ifNoneMatch } = op;
-    const description = checkDescription(op.description);
+    const facts = checkFacts(op);
     if (op.source !== undefined) checkSource(op.source);
     const path = normalizePath(input);
     if (!path) throw new OkfError(400, "bad_path", `Invalid path ${JSON.stringify(input)}.`);
@@ -1900,18 +1953,21 @@ export class LibraryStore {
     const conceptId = cur?.concept_id ?? w.pending.get(path) ?? crypto.randomUUID();
     let seq = cur?.seq ?? 0;
     const sameBytes = cur?.hash === blob.hash;
-    // A new source or description for the same bytes is a write of its own, as a new type is.
+    // A new source, description, credit or licence for the same bytes is a write of its own, as
+    // a new type is.
     const had = cur && sameBytes ? this.provenance(cur.concept_id, cur.hash, cur.seq) : null;
     const described =
       !!had &&
       ((op.source !== undefined &&
         (had.source?.url !== op.source.url || had.source?.final_url !== op.source.final_url)) ||
-        (description !== undefined && had.description !== description));
+        (["description", "credit", "licence"] as const).some(
+          (k) => facts[k] !== undefined && had[k] !== facts[k],
+        ));
     if (!cur || !sameBytes || retyped || described) {
       const meta: JsonObject = {};
       if (w.source) meta.source = w.source;
       else if (op.source) meta.source = { ...op.source } as unknown as JsonObject;
-      if (description !== undefined) meta.description = description;
+      for (const [k, v] of Object.entries(facts)) meta[k] = v;
       if (retyped) meta.media = { from: before?.media ?? null, to: blob.media };
       seq = this.appendEvent(w.ctx, w.now, {
         op: w.mode === "import" ? "import" : "put",
@@ -3545,9 +3601,46 @@ export class LibraryStore {
       "SELECT * FROM events WHERE concept_id = ? ORDER BY seq",
       id,
     );
+    // An attachment's versions carry their bytes' size, type and dimensions, for its page's
+    // File history (TEMPRA-170).
+    const files = new Map<string, JsonObject | null>();
+    const fileOf = (hash: string | null): JsonObject | null => {
+      if (hash === null) return null;
+      if (!files.has(hash)) {
+        const row = this.sql.all<{
+          size: number;
+          media: string | null;
+          width: number | null;
+          height: number | null;
+        }>(
+          "SELECT size, media, width, height FROM blobs WHERE hash = ? AND location = 'r2'",
+          hash,
+        )[0];
+        files.set(
+          hash,
+          row
+            ? {
+                size: row.size,
+                media: row.media,
+                width: row.width && row.width > 0 ? row.width : null,
+                height: row.height && row.height > 0 ? row.height : null,
+              }
+            : null,
+        );
+      }
+      return files.get(hash) ?? null;
+    };
     return {
       path: this.pathOf(id) ?? p,
-      events: rows.map((e) => ({ ...e, meta: e.meta ? (JSON.parse(e.meta) as JsonObject) : null })),
+      events: rows.map((e) => {
+        const file =
+          e.op === "put" || e.op === "import" || e.op === "revert" ? fileOf(e.hash) : null;
+        return {
+          ...e,
+          meta: e.meta ? (JSON.parse(e.meta) as JsonObject) : null,
+          ...(file ? { file } : {}),
+        };
+      }),
     };
   }
 

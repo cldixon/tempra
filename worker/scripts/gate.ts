@@ -1595,6 +1595,29 @@ async function browserRenders(
         });
         if (!put.ok) throw new Error(`upload ${path}: ${put.status} ${await put.text()}`);
       }
+      // The second image is replaced once, with what it shows, its credit and its licence, so
+      // its page has two versions in File history (TEMPRA-170).
+      const facts2 = new URLSearchParams({
+        description: "A lighter block, drawn by the gate.",
+        credit: "The gate",
+        licence: "CC0 1.0",
+      });
+      const first2 = (await (
+        await fetch(`${libApi}/files/gate-figure-2.png`, {
+          headers: { ...bearer, Accept: "application/json" },
+        })
+      ).json()) as { hash: string };
+      const replaced = await fetch(`${libApi}/files/gate-figure-2.png?${facts2}`, {
+        method: "PUT",
+        headers: {
+          ...bearer,
+          "Content-Type": "image/png",
+          "If-Match": `"${first2.hash}"`,
+          "X-Note": "gate: a bigger figure",
+        },
+        body: greyPng(300, 200, 0xcc),
+      });
+      if (!replaced.ok) throw new Error(`replace: ${replaced.status} ${await replaced.text()}`);
       const put = await fetch(`${libApi}/files/gate-figures.md`, {
         method: "PUT",
         headers: { ...bearer, "Content-Type": "text/markdown", "X-Note": "gate: figures" },
@@ -1620,6 +1643,10 @@ async function browserRenders(
       await view.getByText("fig. 1 of 2", { exact: true }).waitFor({ timeout: 5000 });
       await view.getByRole("button", { name: "Next figure" }).click();
       await view.getByText("fig. 2 of 2", { exact: true }).waitFor({ timeout: 5000 });
+      // Its quiet line says what it shows (TEMPRA-170).
+      await view
+        .locator(".lightbox-facts", { hasText: "A lighter block, drawn by the gate." })
+        .waitFor({ timeout: 5000 });
       if (!(await view.getByRole("link", { name: "Download" }).count())) {
         throw new Error("no Download");
       }
@@ -1651,16 +1678,67 @@ async function browserRenders(
           headers: { ...bearer, Accept: "application/json" },
         })
       ).json()) as { width?: number; height?: number };
-      if (described.width !== 240 || described.height !== 160) {
+      if (described.width !== 300 || described.height !== 200) {
         throw new Error(`attachment dimensions: ${JSON.stringify(described)}`);
       }
-      await facts.locator("dd", { hasText: "240 × 160" }).waitFor({ timeout: 5000 });
+      await facts.locator("dd", { hasText: "300 × 200" }).waitFor({ timeout: 5000 });
       await facts.locator("div", { has: page.locator("dt", { hasText: "Added" }) }).waitFor();
       await facts
         .locator("dd")
         .getByRole("link", { name: "Gate figures", exact: true })
         .waitFor({ timeout: 10_000 });
-      if (shots) await page.screenshot({ path: `${shots}/attachment.png` });
+      // The image's page (TEMPRA-170): what it shows under its name, its source, credit and
+      // licence, the figure it appears as, and File history with both versions.
+      await side
+        .locator(".attachment-description", { hasText: "A lighter block, drawn by the gate." })
+        .waitFor({ timeout: 5000 });
+      const fact = (label: string) =>
+        facts.locator("div", { has: page.locator("dt", { hasText: label }) }).locator("dd");
+      await fact("Source").getByText("Uploaded by").waitFor({ timeout: 5000 });
+      if ((await fact("Credit").innerText()).trim() !== "The gate") throw new Error("no credit");
+      if ((await fact("Licence").innerText()).trim() !== "CC0 1.0") throw new Error("no licence");
+      await fact("Used in")
+        .getByText(/^Figure 2\. A lighter block$/)
+        .waitFor({ timeout: 10_000 });
+      const history = main.locator(".attachment-history");
+      await history
+        .getByRole("heading", { level: 2, name: "File history" })
+        .waitFor({ timeout: 10_000 });
+      const versions = history.locator("li");
+      if ((await versions.count()) !== 2) {
+        throw new Error(`File history: ${await versions.count()} versions`);
+      }
+      if ((await history.getByText("Current", { exact: true }).count()) !== 1) {
+        throw new Error("File history: not one current version");
+      }
+      await versions.first().getByText("Replaced by").waitFor();
+      await versions.first().getByText("300 × 200").waitFor();
+      await versions.nth(1).getByText("Added by").waitFor();
+      await versions.nth(1).getByText("240 × 160").waitFor();
+      const old = await versions
+        .nth(1)
+        .getByRole("link", { name: /^Download/ })
+        .getAttribute("href");
+      if (!old?.startsWith(`/${owner}/${slug}/-/download/gate-figure-2.png?at=`)) {
+        throw new Error(`a version's Download: ${old}`);
+      }
+      const page2 = await main.innerText();
+      if (/claude-code\/|human:|[0-9a-f]{64}/.test(page2)) {
+        throw new Error("the image's page shows a raw actor id or a hash");
+      }
+      if (shots) await page.screenshot({ path: `${shots}/attachment.png`, fullPage: true });
+      // A phone: the facts and File history stacked under the image, nothing sideways.
+      await page.setViewportSize({ width: 390, height: 844 });
+      await history.waitFor();
+      const frameBox = await main.locator(".attachment-frame").boundingBox();
+      const sideBox = await side.boundingBox();
+      if (!frameBox || !sideBox || sideBox.y < frameBox.y + frameBox.height - 1) {
+        throw new Error("the image's facts do not stack under it on a phone");
+      }
+      const sideways = await page.locator("html").evaluate((el) => el.scrollWidth > el.clientWidth);
+      if (sideways) throw new Error("the image's page scrolls sideways on a phone");
+      if (shots) await page.screenshot({ path: `${shots}/attachment-phone.png`, fullPage: true });
+      await usual();
       for (const path of ["gate-figures.md", "gate-figure-1.png", "gate-figure-2.png"]) {
         await agentDeletes(path);
       }
