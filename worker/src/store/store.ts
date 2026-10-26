@@ -15,6 +15,7 @@ import {
   walk as walkDoc,
 } from "@tempra/editor/doc";
 import { stringify as yamlStringify } from "yaml";
+import { PELE_MESSAGE_FORMAT } from "../../render/src/message";
 import { PELE_VERSION } from "../../render/src/version";
 import {
   buildRecord,
@@ -2725,7 +2726,8 @@ export class LibraryStore {
     const out: LintWarning[] = [];
     const unknown: { key: string; source: string }[] = [];
     for (const f of fences) {
-      const key = `${this.peleVersion}:${sha256Hex(f.source)}`;
+      // The message's format too (TEMPRA-184): a verdict kept in an older shape is asked again.
+      const key = `${this.peleVersion}:m${PELE_MESSAGE_FORMAT}:${sha256Hex(f.source)}`;
       const row = this.sql.all<{ error: string | null }>(
         "SELECT error FROM diagram_renders WHERE key = ?",
         key,

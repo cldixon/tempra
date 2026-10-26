@@ -330,7 +330,7 @@ export function unrenderedWarning(f: CheckedFence, e: RenderFailure): LintWarnin
     e.line > 0
       ? ` at line ${e.line}${e.column > 0 ? `, column ${e.column}` : ""} of the fence`
       : "";
-  const message = e.message.trim().replace(/\.?$/, ".");
+  const message = e.message.trim().replace(/[.…]?$/, (end) => end || ".");
   return {
     code: "diagram_unrendered",
     message: `${diagramName(f.code, f.n)} could not be drawn by Pele${at}: ${message} The app shows its source until it draws; fix the fence.`,

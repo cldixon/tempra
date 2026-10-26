@@ -3,6 +3,7 @@ import { peleThemeHash, peleThemes } from "@tempra/design/pele";
 import {
   cacheKey,
   MAX_SOURCE,
+  PELE_MESSAGE_FORMAT,
   PELE_VERSION,
   type Rasterizer,
   RENDERS_PREFIX,
@@ -121,6 +122,26 @@ describe("the render Worker's logic (TEMPRA-165)", () => {
     const again = await renderDiagram({ source: broken, theme: "light" }, deps);
     expect(again).toEqual({ error: r.error });
     expect(b.calls.put).toBe(1);
+  });
+
+  test("an error cached in an older shape is drawn again (TEMPRA-184)", async () => {
+    const b = bucket();
+    const { rasterizer } = raster();
+    const key = cacheKey(await sha256(broken), "light", 0, "svg");
+    const old = { message: "Parse error on line 3:", line: 3, column: 1 };
+    b.objects.set(key, { value: JSON.stringify(old), type: "application/json" });
+    const r = await renderDiagram(
+      { source: broken, theme: "light" },
+      { cache: b.cache, rasterizer },
+    );
+    expect(r.error?.message).not.toBe(old.message);
+    expect(r.error?.message).toStartWith("Expecting ");
+    expect(r.error?.line).toBeGreaterThan(0);
+    expect(b.calls.put).toBe(1);
+    expect(JSON.parse(String(b.objects.get(key)?.value))).toEqual({
+      ...r.error,
+      format: PELE_MESSAGE_FORMAT,
+    });
   });
 
   test("a PNG at 2x of a page holding the SVG and Inter, cached", async () => {
