@@ -19,8 +19,8 @@ import {
 } from "@tempra/editor";
 import type { PhrasingContent, RootContent, TableCell } from "mdast";
 import type { ReactNode } from "react";
-import { Caption, FigureBox, FigureImage, figureNumber, InlineImage } from "./Figure";
-import { type FigureMarkup, imageSource, linkInfo, type Prepared } from "./prepare";
+import { Caption, FigureBox, FigureImage, FromHosts, figureNumber, InlineImage } from "./Figure";
+import { externalHost, type FigureMarkup, imageSource, linkInfo, type Prepared } from "./prepare";
 import { type BlockProps, CodeBlock, code as codeBlocks, node as nodeBlocks } from "./registry";
 
 /** What draws one body: the prepared tree, the diff over it, whether text offsets are drawn. */
@@ -188,7 +188,13 @@ function inline(ctx: Ctx, r: Run, nodes: readonly PhrasingContent[]): ReactNode[
               {n.alt ?? ""}
             </span>
           ) : (
-            <InlineImage key={k} source={source} alt={n.alt ?? ""} title={n.title ?? null} />
+            <InlineImage
+              key={k}
+              source={source}
+              alt={n.alt ?? ""}
+              title={n.title ?? null}
+              host={externalHost(n.url)}
+            />
           ),
         );
         break;
@@ -307,6 +313,7 @@ function markupFigure(ctx: Ctx, n: ContainerDirective, m: FigureMarkup, key: str
       <figcaption data-skip="" data-block={label ? idOf(label) : undefined}>
         <span className="figure-number">{figureNumber(first?.n ?? 1, m.figures.length)}</span>
         {caption && <> {caption}</>}
+        <FromHosts figures={m.figures} />
       </figcaption>
     </FigureBox>
   );

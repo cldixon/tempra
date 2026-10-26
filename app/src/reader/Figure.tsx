@@ -11,6 +11,10 @@
  * Figure markup (`:::figure`, tempra-dev: app/media) draws one to four images in one figure
  * (FigureBox): each image still one atom and one figure in the numbering, a group's images side by
  * side with their titles as small labels (`data-skip`), and one caption, the directive's label.
+ *
+ * An external image (hotlinked from another site, TEMPRA-163; tempra-dev: app/media) is drawn as
+ * any other, with a quiet line under its caption naming the site ("From example.com"); its broken
+ * box says it is external, and an inline one names the site in its tooltip.
  */
 import type { FigureSpec } from "@tempra/editor";
 import {
@@ -34,8 +38,16 @@ export function Caption({ figure, id }: { figure: Figure; id?: string }) {
     <figcaption data-skip="" id={id}>
       <span className="figure-number">Figure {figure.n}.</span>
       {figure.caption && ` ${figure.caption}`}
+      {figure.kind === "image" && <FromHosts figures={[figure]} />}
     </figcaption>
   );
+}
+
+/** The quiet line under a caption naming where external images load from: "From example.com". */
+export function FromHosts({ figures }: { figures: ImageFigure[] }) {
+  const hosts = [...new Set(figures.map((f) => f.host).filter((h) => h !== null))];
+  if (hosts.length === 0) return null;
+  return <span className="figure-source">From {hosts.join(", ")}</span>;
 }
 
 /** "Figure 3.", or for a group "Figures 3 and 4." and "Figures 3–5.": each image counts one. */
@@ -82,15 +94,17 @@ export function FigureBox(props: {
 /** What an image can't show: the box that keeps its place, saying why, its path and alt text. */
 export function BrokenImage({ figure, atom }: { figure: ImageFigure; atom?: boolean }) {
   const where = figure.path ?? figure.url;
+  const what = figure.host ? `This external image from ${figure.host}` : "This image";
   return (
     <span
       className="figure-broken"
       data-atom={atom ? "" : undefined}
       role="img"
-      aria-label={`This image can't be shown: ${figure.alt || where}`}
+      aria-label={`${what} can't be shown: ${figure.alt || where}`}
     >
       <Icon name="broken" size={20} />
       <span className="figure-broken-title">This image can't be shown</span>
+      {figure.host && <span>An external image from {figure.host}</span>}
       <span>{where}</span>
       {figure.alt && <span>Alt text: “{figure.alt}”</span>}
     </span>
@@ -178,21 +192,36 @@ export function FigureImage({ figure }: { figure: ImageFigure }) {
 }
 
 /** An image in running text: stays inline, with no caption; its alt text if it fails to load. */
-export function InlineImage(props: { source: ImageSource; alt: string; title: string | null }) {
+export function InlineImage(props: {
+  source: ImageSource;
+  alt: string;
+  title: string | null;
+  host?: string | null;
+}) {
   const [failed, setFailed] = useState<string | null>(null);
+  const from = props.host ? `From ${props.host}` : null;
   if (failed === props.source.src) {
     return (
-      <span className="image-broken" data-atom="" title="This image can't be shown">
+      <span
+        className="image-broken"
+        data-atom=""
+        title={
+          props.host
+            ? `This external image from ${props.host} can't be shown`
+            : "This image can't be shown"
+        }
+      >
         {props.alt || "image"}
       </span>
     );
   }
+  const title = props.title?.trim() || null;
   return (
     <Img
       atom
       source={props.source}
       alt={props.alt}
-      title={props.title ?? undefined}
+      title={title && from ? `${title} (${from.toLowerCase()})` : (title ?? from ?? undefined)}
       sizes={figureSizes(null)}
       onError={() => setFailed(props.source.src)}
     />
