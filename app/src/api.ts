@@ -1,4 +1,3 @@
-import { useCallback, useEffect, useState } from "react";
 import { takeBoot } from "./boot";
 import { PageCache, share } from "./cache";
 
@@ -61,27 +60,6 @@ export async function api<T>(url: string, init: RequestInit = {}): Promise<T> {
   return (await res.json()) as T;
 }
 
-/**
- * A form's action: `run` calls it, `busy` is set meanwhile, and its error (an API answer, or a
- * check the page made itself) shows as `error` until the next run.
- */
-export function useAction() {
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const run = useCallback(async (fn: () => Promise<void>) => {
-    setBusy(true);
-    setError(null);
-    try {
-      await fn();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  }, []);
-  return { busy, error, run, setError };
-}
-
 /** The value of a form field, trimmed. */
 export const field = (form: HTMLFormElement, name: string) =>
   String(new FormData(form).get(name) ?? "").trim();
@@ -91,11 +69,12 @@ export type Loaded<T> =
   | { state: "error"; error: ApiError }
   | { state: "ready"; data: T };
 
-const cache = new PageCache();
+/** What each page loaded last (useLoad, load.svelte.ts), so a page seen before draws at once. */
+export const cache = new PageCache();
 /** Loads under way, so a prefetch and the page that follows share one request. */
 const inflight = new Map<string, { started: number; promise: Promise<unknown> }>();
 
-function fetchOnce<T>(
+export function fetchOnce<T>(
   key: string,
   load: () => Promise<T>,
 ): { started: number; promise: Promise<T> } {
@@ -120,61 +99,4 @@ export function prefetch<T>(key: string, load: () => Promise<T>) {
     (data) => cache.put(key, data, started, true),
     () => {},
   );
-}
-
-/**
- * Loads data for a page and reloads it when `key` changes; `reload` fetches again in place. A
- * page seen before draws at once from what it loaded last time and is checked again in the
- * background (unless a prefetch has just loaded it); the new answer reuses every unchanged part
- * of what is shown, so the page's memos and the reader built on them survive. A response that
- * arrives after the page moved on is dropped.
- */
-export function useLoad<T>(key: string, load: () => Promise<T>): Loaded<T> & { reload(): void } {
-  const initial = (k: string): Loaded<T> =>
-    cache.has(k) ? { state: "ready", data: cache.get(k) as T } : { state: "loading" };
-  const [result, setResult] = useState<{ key: string; value: Loaded<T> }>(() => ({
-    key,
-    value: initial(key),
-  }));
-  const [tick, setTick] = useState(0);
-  // biome-ignore lint/correctness/useExhaustiveDependencies: `key` names everything `load` reads.
-  useEffect(() => {
-    let live = true;
-    // What the page drew from the cache before this answer, if anything.
-    const drawn = cache.get(key);
-    // Just prefetched (a hover a moment ago): drawn from the cache, no need to ask again.
-    if (tick === 0 && cache.takeFresh(key)) return;
-    // An explicit reload (after an action, or a write on the feed) always asks afresh.
-    const { started, promise } =
-      tick === 0 ? fetchOnce(key, load) : { started: performance.now(), promise: load() };
-    promise.then(
-      (data) => {
-        cache.put(key, data, started);
-        if (!live) return;
-        // Compared with what this page shows, not with the cache (a prefetch may have
-        // refreshed the cache without the page).
-        setResult((r) => {
-          const shown = r.key === key && r.value.state === "ready" ? r.value.data : drawn;
-          const next = share(shown, data);
-          if (r.key === key && next === shown) return r;
-          return { key, value: { state: "ready", data: next as T } };
-        });
-      },
-      (e: unknown) => {
-        if (!live) return;
-        const error = e instanceof ApiError ? e : new ApiError(0, "network", String(e));
-        // Offline, or still over the session's limit: what was shown stays. An answer (gone,
-        // not allowed) replaces it.
-        if ((error.status === 0 || error.status === 429) && cache.has(key)) return;
-        cache.drop(key);
-        setResult({ key, value: { state: "error", error } });
-      },
-    );
-    return () => {
-      live = false;
-    };
-  }, [key, tick]);
-  const reload = useCallback(() => setTick((t) => t + 1), []);
-  const value: Loaded<T> = result.key === key ? result.value : initial(key);
-  return { ...value, reload };
 }

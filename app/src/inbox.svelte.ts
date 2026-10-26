@@ -1,7 +1,7 @@
-import { useEffect } from "react";
-import { actorAgentName, agentLabel, type Contributor, readableName } from "./agents";
-import { api, useLoad } from "./api";
-import { libraryLabel } from "./role";
+import { actorAgentName, agentLabel, type Contributor, readableName } from "./agents.svelte.ts";
+import { api } from "./api";
+import { useLoad } from "./load.svelte.ts";
+import { libraryLabel } from "./role.svelte.ts";
 import { Urls } from "./urls";
 
 /*
@@ -75,19 +75,27 @@ export function markReadBody(
 }
 
 /** The unread count, for the bell and the sidebar's Inbox row: reloads when told it changed. */
-export function useUnread(): number {
-  const loaded = useLoad("inbox-count", () => api<{ unread: number }>("/api/v1/inbox/count"));
-  const { reload } = loaded;
-  useEffect(() => {
+export function useUnread() {
+  const loaded = useLoad(
+    () => "inbox-count",
+    () => api<{ unread: number }>("/api/v1/inbox/count"),
+  );
+  $effect(() => {
+    const reload = () => loaded.reload();
     window.addEventListener(INBOX_EVENT, reload);
     window.addEventListener("focus", reload);
     return () => {
       window.removeEventListener(INBOX_EVENT, reload);
       window.removeEventListener("focus", reload);
     };
-  }, [reload]);
-  return loaded.state === "ready" ? loaded.data.unread : 0;
+  });
+  return {
+    get current(): number {
+      return loaded.data?.unread ?? 0;
+    },
+  };
 }
+
 
 /** A path's last part without .md: what names a page that has no title. */
 const pageName = (path: string) => path.replace(/\.md$/, "").split("/").pop() ?? path;
@@ -142,9 +150,13 @@ export const withNames = (items: InboxItem[], labels: AgentLabels): InboxItem[] 
  * actor two people's agents share ("claude-ai/connector") cannot tell them apart, so it keeps
  * the agent's plain name.
  */
-export function useAgentLabels(items: InboxItem[] | null): AgentLabels {
-  const want = [...new Set((items ?? []).filter((i) => i.agent).map((i) => i.library))].sort();
-  const loaded = useLoad(`inbox agents ${want.join(" ")}`, async () => {
+export function useAgentLabels(items: () => InboxItem[] | null) {
+  const want = $derived(
+    [...new Set((items() ?? []).filter((i) => i.agent).map((i) => i.library))].sort(),
+  );
+  const loaded = useLoad(
+    () => `inbox agents ${want.join(" ")}`,
+    async () => {
     const out: AgentLabels = {};
     const shared = new Set<string>();
     await Promise.all(
@@ -166,8 +178,13 @@ export function useAgentLabels(items: InboxItem[] | null): AgentLabels {
     );
     for (const key of shared) delete out[key];
     return out;
-  });
-  return loaded.state === "ready" ? loaded.data : {};
+    },
+  );
+  return {
+    get current(): AgentLabels {
+      return loaded.data ?? {};
+    },
+  };
 }
 
 /** Pages' titles by "owner/slug path", for items the server names by path only (replies). */
@@ -178,11 +195,13 @@ export type PageTitles = Record<string, string>;
  * mention carries only the path): read from each such library's outline, the index the tree
  * loads (`GET …/outline`), so a row always names a page by its title.
  */
-export function usePageTitles(items: InboxItem[] | null): PageTitles {
-  const want = [
-    ...new Set((items ?? []).filter((i) => i.path && !i.title).map((i) => i.library)),
-  ].sort();
-  const loaded = useLoad(`inbox titles ${want.join(" ")}`, async () => {
+export function usePageTitles(items: () => InboxItem[] | null) {
+  const want = $derived(
+    [...new Set((items() ?? []).filter((i) => i.path && !i.title).map((i) => i.library))].sort(),
+  );
+  const loaded = useLoad(
+    () => `inbox titles ${want.join(" ")}`,
+    async () => {
     const out: PageTitles = {};
     await Promise.all(
       want.map(async (library) => {
@@ -198,8 +217,13 @@ export function usePageTitles(items: InboxItem[] | null): PageTitles {
       }),
     );
     return out;
-  });
-  return loaded.state === "ready" ? loaded.data : {};
+    },
+  );
+  return {
+    get current(): PageTitles {
+      return loaded.data ?? {};
+    },
+  };
 }
 
 /** The kind, as the row's meta line says it. */

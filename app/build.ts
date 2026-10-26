@@ -1,5 +1,5 @@
 /**
- * `bun run build` in app/ (also run by `bun install`): bundles src/main.tsx with Vite into an ES
+ * `bun run build` in app/ (also run by `bun install`): bundles src/main.ts (Svelte 5, TEMPRA-176) with Vite into an ES
  * module entry and the chunks it imports on demand (Pele, for pages with a diagram), and writes
  * the Worker's static assets (TEMPRA-174) to dist/public/: the bundle under /_app/, the design
  * stylesheet and its fonts under /_design/ (from @tempra/design), /favicon.svg, and a `_headers`
@@ -12,6 +12,7 @@
 import { mkdirSync, readFileSync, rmSync, watch as watchFiles, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { css as designCss, fonts as designFonts, href as designHref } from "@tempra/design";
+import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { build, type Rollup } from "vite";
 
 const ROOT = import.meta.dir;
@@ -95,6 +96,8 @@ export async function buildApp(): Promise<void> {
     logLevel: "warn",
     mode: "production",
     define: { "process.env.NODE_ENV": JSON.stringify("production") },
+    // Components carry no <style> (every look is @tempra/design's), so no CSS is emitted.
+    plugins: [svelte({ configFile: false, emitCss: false, compilerOptions: { css: "external" } })],
     build: {
       write: false,
       target: "es2022",
@@ -102,7 +105,7 @@ export async function buildApp(): Promise<void> {
       sourcemap: false,
       modulePreload: false,
       rollupOptions: {
-        input: join(ROOT, "src/main.tsx"),
+        input: join(ROOT, "src/main.ts"),
         output: {
           format: "es",
           entryFileNames: "app.[hash].js",

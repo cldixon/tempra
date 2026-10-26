@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef } from "react";
-import { api, useLoad } from "./api";
+import { api } from "./api";
+import { useLoad } from "./load.svelte.ts";
 import { who } from "./ui";
 import type { Urls } from "./urls";
 
@@ -132,61 +132,68 @@ export function actorView(
  * that names people and agents. An agent seen on screen that the list does not know yet (its
  * first write, arriving live) loads it again, once per agent.
  */
-function useContributors(urls: Urls) {
-  const loaded = useLoad(`contributors ${urls.base}`, () =>
-    api<{ contributors: Contributor[] }>(urls.api("agents")).then((r) => r.contributors),
+function useContributors(urls: () => Urls) {
+  const loaded = useLoad(
+    () => `contributors ${urls().base}`,
+    () =>
+      api<{ contributors: Contributor[] }>(urls().api("agents")).then((r) => r.contributors),
   );
-  const list = loaded.state === "ready" ? loaded.data : null;
-  const byId = useMemo(() => agentsById(list ?? []), [list]);
+  const list = $derived(loaded.data ?? null);
+  const byId = $derived(agentsById(list ?? []));
   // Ids met while drawing that the list lacks; asked for after the render, each once.
-  const missing = useRef(new Set<string>());
-  const asked = useRef(new Set<string>());
-  const note = useCallback(
-    (id: string | undefined) => {
-      if (id && list && !(id in byId) && !asked.current.has(id)) missing.current.add(id);
+  const asked = new Set<string>();
+  let pending = false;
+  const note = (id: string | undefined) => {
+    if (!id || !list || id in byId || asked.has(id)) return;
+    asked.add(id);
+    if (pending) return;
+    pending = true;
+    queueMicrotask(() => {
+      pending = false;
+      loaded.reload();
+    });
+  };
+  return {
+    get list() {
+      return list;
     },
-    [list, byId],
-  );
-  useEffect(() => {
-    if (missing.current.size === 0) return;
-    for (const id of missing.current) asked.current.add(id);
-    missing.current.clear();
-    loaded.reload();
-  });
-  return { list, byId, note };
+    get byId() {
+      return byId;
+    },
+    note,
+  };
 }
 
 /**
  * Who acted, as an ActorView, for pages that draw people and agents apart (the byline, home,
  * Activity, the Inbox). `me` is the signed-in person's actor (`human:handle`).
  */
-export function useActors(urls: Urls, me: string | null) {
-  const { list, byId, note } = useContributors(urls);
-  return useMemo(
-    () => ({
-      view: (actor: string, by?: ActedBy | null) => {
-        note(by?.agent);
-        return actorView(actor, by, byId, me);
-      },
-      /** Everyone who has worked here: people and agents. */
-      contributors: list ?? [],
-    }),
-    [list, byId, note, me],
-  );
+export function useActors(urls: () => Urls, me: () => string | null) {
+  const c = useContributors(urls);
+  return {
+    view: (actor: string, by?: ActedBy | null) => {
+      c.note(by?.agent);
+      return actorView(actor, by, c.byId, me());
+    },
+    /** Everyone who has worked here: people and agents. */
+    get contributors() {
+      return c.list ?? [];
+    },
+  };
 }
 
 /**
- * The library's agent names as one string each ("Claude for @ann"), for the tree's marks, the
- * new-version notice and the ledger.
+ * The library's agent names as one string each ("Claude for @ann"), for the new-version notice
+ * and the ledger. A rune: read `.label` inside a template or $derived so it follows the list.
  */
-export function useAgentNames(urls: Urls, seen: readonly (string | undefined)[] = []) {
-  const { list, note } = useContributors(urls);
-  for (const id of seen) note(id);
-  return useMemo(() => {
-    const known = agentNames(list ?? []);
-    return (actor: string, by?: ActedBy | null) => {
-      note(by?.agent);
+export function useAgentNames(urls: () => Urls) {
+  const c = useContributors(urls);
+  const known = $derived(agentNames(c.list ?? []));
+  return {
+    label: (actor: string, by?: ActedBy | null) => {
+      c.note(by?.agent);
       return actorLabel(actor, by, known);
-    };
-  }, [list, note]);
+    },
+    note: c.note,
+  };
 }

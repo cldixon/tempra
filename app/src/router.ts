@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import { type ActivityFilters, type ActivityView, inboxUrl } from "./urls";
 
 /** The pages the app draws itself; every other URL is a server page, loaded in full. */
@@ -231,26 +230,12 @@ export function navigate(href: string, opts: { replace?: boolean } = {}) {
   if (!url.hash) window.scrollTo(0, 0);
 }
 
-/** The current URL, updated on navigation and on back and forward. */
-export function useLocation(): URL {
-  const [url, setUrl] = useState(() => new URL(location.href));
-  useEffect(() => {
-    const update = () => setUrl(new URL(location.href));
-    const back = () => {
-      lastMove = "pop";
-      update();
-    };
-    window.addEventListener(NAVIGATE, update);
-    window.addEventListener("popstate", back);
-    // A page's effect may navigate before this one listens (a redirect on a full load: children's
-    // effects run first), so catch up with where the address is now.
-    setUrl((u) => (u.href === location.href ? u : new URL(location.href)));
-    return () => {
-      window.removeEventListener(NAVIGATE, update);
-      window.removeEventListener("popstate", back);
-    };
-  }, []);
-  return url;
+/** Event said on window when `navigate` moves (location.svelte.ts follows it). */
+export const NAVIGATED = NAVIGATE;
+
+/** Records a move back or forward through history (location.svelte.ts, on popstate). */
+export function poppedBack() {
+  lastMove = "pop";
 }
 
 /**

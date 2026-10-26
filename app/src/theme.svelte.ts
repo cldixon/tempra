@@ -1,6 +1,5 @@
-import { useEffect, useState } from "react";
 import { api } from "./api";
-import { useMe } from "./ui";
+import { useMe } from "./ui.svelte.ts";
 
 /*
  * The account's theme (take 4, TEMPRA-113; tempra-dev: app/workspace, Theme): System, Light or
@@ -32,28 +31,35 @@ export function applyTheme(theme: Theme) {
 const THEME_EVENT = "tempra:theme";
 
 /** The theme as chosen, and a way to choose: applied at once, then saved on the account. */
-export function useTheme(): [Theme, (theme: Theme) => void] {
+export function useTheme() {
   const me = useMe();
-  const [theme, setTheme] = useState<Theme>(currentTheme);
+  let theme = $state<Theme>(currentTheme());
   // The account's choice arrives with /me (a page the server drew before it was changed
   // elsewhere, or a theme set on another device).
-  useEffect(() => {
-    if (me && me.theme !== undefined) {
-      const t: Theme = me.theme ?? "system";
+  $effect(() => {
+    const m = me.current;
+    if (m && m.theme !== undefined) {
+      const t: Theme = m.theme ?? "system";
       if (t !== currentTheme()) applyTheme(t);
     }
-  }, [me]);
-  useEffect(() => {
-    const update = () => setTheme(currentTheme());
+  });
+  $effect(() => {
+    const update = () => {
+      theme = currentTheme();
+    };
     window.addEventListener(THEME_EVENT, update);
     return () => window.removeEventListener(THEME_EVENT, update);
-  }, []);
-  const choose = (t: Theme) => {
-    applyTheme(t);
-    void api("/api/v1/account", {
-      method: "PATCH",
-      body: JSON.stringify({ theme: t === "system" ? null : t }),
-    }).catch(() => {});
+  });
+  return {
+    get current() {
+      return theme;
+    },
+    choose(t: Theme) {
+      applyTheme(t);
+      void api("/api/v1/account", {
+        method: "PATCH",
+        body: JSON.stringify({ theme: t === "system" ? null : t }),
+      }).catch(() => {});
+    },
   };
-  return [theme, choose];
 }
