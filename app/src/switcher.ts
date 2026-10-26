@@ -49,8 +49,11 @@ export function fileOptions(
             a.path.localeCompare(b.path),
         )
     : [];
+  // A recent file no longer in the index (deleted or moved since) is not offered, nor loaded ahead.
+  const here = new Set(index.map((f) => f.path));
+  const kept = index.length > 0 ? recent.filter((r) => here.has(r.path)) : recent;
   const out: Option[] = [];
-  for (const h of [...recent.filter(matches), ...named, ...found]) {
+  for (const h of [...kept.filter(matches), ...named, ...found]) {
     if (out.length === MAX) break;
     if (!out.some((o) => o.key === h.path)) {
       out.push({ key: h.path, title: h.title || h.path, detail: h.path, href: urls.file(h.path) });

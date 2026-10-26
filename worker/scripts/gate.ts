@@ -1145,6 +1145,57 @@ async function browserRenders(
       if (!(await stayed())) throw new Error("moving between home and Activity reloaded the page");
       await agentDeletes(path);
     });
+    // Any link pointed at loads its page ahead (TEMPRA-193), not only the tree's rows: here a
+    // Recently changed row. The page then opens from what the hover loaded, asking nothing again.
+    await step("home: a link pointed at loads its page ahead", async () => {
+      const path = folder ? `${folder}/gate-ahead.md` : "gate-ahead.md";
+      const wrote = await fetch(`${libApi}/files/${enc(path)}`, {
+        method: "PUT",
+        headers: { ...bearer, "Content-Type": "text/markdown", "X-Note": "gate: ahead" },
+        body: "---\ntype: Note\ntitle: Gate ahead\ndescription: Loaded on hover.\n---\nAhead.\n",
+      });
+      if (!wrote.ok) throw new Error(`write: ${wrote.status}`);
+      await page.goto(`${lib}/`);
+      await home();
+      const row = main
+        .getByRole("region", { name: "Recently changed" })
+        .getByRole("link", { name: "Gate ahead", exact: true });
+      await row.waitFor({ timeout: 10_000 });
+      const fileApi = `/api/v1/libraries/${owner}/${slug}/files/${enc(path)}`;
+      const asked: string[] = [];
+      const onRequest = (r: { url(): string }) => {
+        if (new URL(r.url()).pathname === fileApi) asked.push(r.url());
+      };
+      page.on("request", onRequest);
+      try {
+        const loaded = page.waitForResponse((r) => new URL(r.url()).pathname === fileApi, {
+          timeout: 5000,
+        });
+        await row.hover();
+        await loaded;
+        await page.waitForTimeout(300); // the rest of the page's load lands in the cache
+        const before = asked.length;
+        await row.click();
+        await page.waitForURL(`${lib}/${enc(path)}`);
+        await main.locator("h1.doc-title", { hasText: "Gate ahead" }).waitFor({ timeout: 5000 });
+        if ((await main.getByText("Loading…").count()) > 0) {
+          throw new Error("a page loaded on hover still showed Loading…");
+        }
+        if (asked.length !== before) throw new Error("the page asked for its file again");
+        if (before !== 1) throw new Error(`the hover asked for the file ${before} times`);
+      } finally {
+        page.off("request", onRequest);
+      }
+      // Back home, as the step before left it, before the page goes.
+      await page.goBack();
+      await page.waitForURL(`${lib}/`);
+      await home();
+      await agentDeletes(path);
+      // The frame's index has caught up (the switcher next offers what the index holds).
+      await sidebar
+        .locator(`a[data-path="${path}"]`)
+        .waitFor({ state: "detached", timeout: 10_000 });
+    });
     await step("workspace: the quick switcher opens a concept", async () => {
       const first = concepts[0] ?? "";
       const meta = (await (

@@ -25,9 +25,6 @@ export function fileLabel(e: OutlineFile): string {
 /** The least time between two refreshes of the index while writes keep coming. */
 export const REFRESH_MS = 3000;
 
-/** How long a pointer rests on a file before its page is loaded ahead. */
-export const HOVER_MS = 120;
-
 /** A path's folders, outermost first (not the root). */
 export const ancestors = (path: string) => {
   const out: string[] = [];

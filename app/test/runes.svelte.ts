@@ -3,6 +3,7 @@
  * as it would while a component initialises, with `box` as a piece of reactive state to steer it.
  */
 
+import { usePrefetchLinks } from "../src/links.svelte.ts";
 import { useFeed } from "../src/live.svelte.ts";
 import { useLoad } from "../src/load.svelte.ts";
 import type { Urls } from "../src/urls";
@@ -41,4 +42,11 @@ export function rootFeed(urls: () => Urls, from: () => number | null) {
     );
   });
   return { heard, stop };
+}
+
+/** usePrefetchLinks in an effect root, for a library's frame or (null) the account's. */
+export function rootPrefetchLinks(library: { owner: string; slug: string } | null) {
+  return $effect.root(() => {
+    usePrefetchLinks(() => library);
+  });
 }
