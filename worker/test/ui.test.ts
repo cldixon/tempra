@@ -74,6 +74,7 @@ describe("the app's pages (TEMPRA-9)", () => {
       expect(csp).toContain("style-src 'self';");
       expect(csp).not.toContain("nonce");
       expect(csp).toContain("connect-src 'self'");
+      expect(csp).toContain("media-src 'self'");
       expect(r.headers.get("Cache-Control")).toBe("no-store");
     }
     // No inline scripts or styles.

@@ -1,11 +1,18 @@
 import { describe, expect, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { imagesService, MODEL_BYTES, MODEL_EDGE, variantKeysFor } from "../src/images";
+import {
+  IMAGE_BYTES_PER_CALL,
+  imagesService,
+  MODEL_BYTES,
+  MODEL_EDGE,
+  variantKeysFor,
+} from "../src/images";
+import { PDF_RESOURCE_BYTES } from "../src/mcp/server";
 import { fakeRenderer } from "../src/render";
 import { readTar } from "../src/util/tar";
 import { setup } from "./harness";
-import { base64, makePng } from "./images";
+import { base64, makePng, sample } from "./images";
 import { approve, connectApp } from "./oauth-flow";
 
 type Text = { type: "text"; text: string };
@@ -512,6 +519,61 @@ describe("MCP server", () => {
       await call("attach", { path: "refs/data.bin", content_base64: btoa("\u0001\u0002") });
       const bin = await content(client, { path: "refs/data.bin" });
       expect(bin.map((x) => x.type)).toEqual(["text"]);
+    });
+
+    test("a PDF comes as an embedded resource up to a cap; video and audio are facts (TEMPRA-164)", async () => {
+      const s = setup();
+      const { client, call } = await connect(s.app);
+      const pdf = new TextEncoder().encode("%PDF-1.4\n1 0 obj << >> endobj\n%%EOF\n");
+      await call("attach", { path: "docs/paper.pdf", content_base64: b64(pdf) });
+      const c = (await client.callTool({ name: "read", arguments: { path: "docs/paper.pdf" } }))
+        .content as ({ type: "text"; text: string } | { type: "resource"; resource: unknown })[];
+      expect(c[0]?.type).toBe("text");
+      expect((c[0] as Text).text).toContain("media: application/pdf");
+      expect((c[0] as Text).text).toContain("download (15 minutes): http");
+      expect(c[1]).toEqual({
+        type: "resource",
+        resource: {
+          uri: "okf://owner/demo/docs/paper.pdf",
+          mimeType: "application/pdf",
+          blob: b64(pdf),
+        },
+      });
+      expect(s.usage.filter((e) => e.kind === "read_pdf").map((e) => e.bytes)).toEqual([
+        pdf.byteLength,
+      ]);
+      // Over the cap: the facts and the link, saying why.
+      const big = new Uint8Array(PDF_RESOURCE_BYTES + 1).fill(0x20);
+      big.set(new TextEncoder().encode("%PDF-1.4\n"));
+      const put = await s.req("/files/docs/big.pdf", {
+        method: "PUT",
+        headers: { "Content-Type": "application/pdf" },
+        body: big,
+      });
+      expect(put.status).toBeLessThan(300);
+      const over = await content(client, { path: "docs/big.pdf" });
+      expect(over.map((x) => x.type)).toEqual(["text", "text"]);
+      expect((over[1] as Text).text).toContain("not attached here");
+      expect(PDF_RESOURCE_BYTES).toBeLessThanOrEqual(IMAGE_BYTES_PER_CALL);
+      // A video: its facts, its frame size and the link; no bytes.
+      await call("attach", { path: "clips/demo.webm", content_base64: b64(sample("clip.webm")) });
+      const video = await content(client, { path: "clips/demo.webm" });
+      expect(video.map((x) => x.type)).toEqual(["text"]);
+      expect((video[0] as Text).text).toContain("media: video/webm");
+      expect((video[0] as Text).text).toContain("dimensions: 64×36 px");
+      // A concept's figure lines name what a media figure is.
+      await call("write", {
+        path: "notes/m.md",
+        content:
+          "---\ntype: Note\ntitle: M\ndescription: Media.\n---\n![Demo](/clips/demo.webm)\n\n![Paper](/docs/paper.pdf)\n",
+      });
+      const page = await content(client, { path: "notes/m.md", figures: [1, 2] });
+      const head = (page[0] as Text).text;
+      expect(head).toContain("Figure 1 · /clips/demo.webm");
+      expect(head).toContain("video/webm");
+      expect(head).toContain("application/pdf");
+      expect(page.map((x) => x.type)).toEqual(["text", "text"]);
+      expect((page[1] as Text).text).toContain("a PDF; `read` /docs/paper.pdf");
     });
 
     test("resources carry an attachment's bytes, up to a cap", async () => {

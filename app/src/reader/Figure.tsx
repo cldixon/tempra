@@ -94,16 +94,26 @@ export function FigureBox(props: {
 /** What an image can't show: the box that keeps its place, saying why, its path and alt text. */
 export function BrokenImage({ figure, atom }: { figure: ImageFigure; atom?: boolean }) {
   const where = figure.path ?? figure.url;
-  const what = figure.host ? `This external image from ${figure.host}` : "This image";
+  const kind = figure.source?.kind;
+  // A video or audio file that does not play says so (TEMPRA-164); anything else is an image.
+  const playable = kind === "video" || kind === "audio";
+  const what = playable
+    ? `This ${kind}`
+    : figure.host
+      ? `This external image from ${figure.host}`
+      : "This image";
+  const verb = playable ? "can't be played" : "can't be shown";
   return (
     <span
       className="figure-broken"
       data-atom={atom ? "" : undefined}
       role="img"
-      aria-label={`${what} can't be shown: ${figure.alt || where}`}
+      aria-label={`${what} ${verb}: ${figure.alt || where}`}
     >
-      <Icon name="broken" size={20} />
-      <span className="figure-broken-title">This image can't be shown</span>
+      <Icon name={playable ? (kind as "video" | "audio") : "broken"} size={20} />
+      <span className="figure-broken-title">
+        {playable ? `This ${kind} ${verb}` : "This image can't be shown"}
+      </span>
       {figure.host && <span>An external image from {figure.host}</span>}
       <span>{where}</span>
       {figure.alt && <span>Alt text: “{figure.alt}”</span>}

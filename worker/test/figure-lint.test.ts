@@ -138,6 +138,10 @@ describe("figure lint (TEMPRA-159)", () => {
     expect(lint.find((l) => l.code === "image_not_image")?.message).toContain("text/csv");
     expect(figure(write(s, "a/page.md", "[Data](/a/data.csv)"))).toEqual([]);
     expect(stored(s, "a/page.md")).toEqual([]);
+    // A video, audio file or PDF is not an image: its size is never image_large (TEMPRA-164).
+    attach(s, "a/long.webm", blob("e", IMAGE_MAX_BYTES * 3, "video/webm", 5000, 3000));
+    attach(s, "a/book.pdf", blob("f", IMAGE_MAX_BYTES * 3, "application/pdf", 0, 0));
+    expect(figure(write(s, "a/page.md", "![Long](/a/long.webm) ![Book](/a/book.pdf)"))).toEqual([]);
   });
 
   test("recomputed when an attachment is replaced, retyped or deleted", () => {

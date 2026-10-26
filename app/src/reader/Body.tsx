@@ -20,8 +20,27 @@ import {
 import type { PhrasingContent, RootContent, TableCell } from "mdast";
 import type { ReactNode } from "react";
 import { Caption, FigureBox, FigureImage, FromHosts, figureNumber, InlineImage } from "./Figure";
-import { externalHost, type FigureMarkup, imageSource, linkInfo, type Prepared } from "./prepare";
-import { type BlockProps, CodeBlock, code as codeBlocks, node as nodeBlocks } from "./registry";
+import {
+  externalHost,
+  type FigureMarkup,
+  type ImageFigure,
+  imageSource,
+  linkInfo,
+  type Prepared,
+} from "./prepare";
+import {
+  type BlockProps,
+  CodeBlock,
+  code as codeBlocks,
+  media as mediaBlocks,
+  node as nodeBlocks,
+} from "./registry";
+
+/** A figure's image, or its video, audio or PDF through the registry (TEMPRA-164). */
+function FigureOf({ figure }: { figure: ImageFigure }) {
+  const Media = figure.source?.kind ? mediaBlocks[figure.source.kind] : undefined;
+  return Media ? <Media figure={figure} /> : <FigureImage figure={figure} />;
+}
 
 /** What draws one body: the prepared tree, the diff over it, whether text offsets are drawn. */
 interface Ctx {
@@ -182,11 +201,16 @@ function inline(ctx: Ctx, r: Run, nodes: readonly PhrasingContent[]): ReactNode[
         r.atom(
           out,
           figure?.kind === "image" ? (
-            <FigureImage key={k} figure={figure} />
+            <FigureOf key={k} figure={figure} />
           ) : source === null ? (
             <span key={k} className="image-dropped" data-atom="">
               {n.alt ?? ""}
             </span>
+          ) : source.kind && source.kind !== "image" ? (
+            // Video, audio or a PDF in running text: a link to its page, named by its alt text.
+            <a key={k} href={source.page ?? source.src} data-atom="">
+              {n.alt || n.url}
+            </a>
           ) : (
             <InlineImage
               key={k}
@@ -273,7 +297,7 @@ function markupFigure(ctx: Ctx, n: ContainerDirective, m: FigureMarkup, key: str
         out,
         group ? (
           <span key={k} className="figure-cell">
-            <FigureImage figure={f} />
+            <FigureOf figure={f} />
             {f.image.title?.trim() && (
               <span className="figure-label" data-skip="">
                 {f.image.title.trim()}
@@ -281,7 +305,7 @@ function markupFigure(ctx: Ctx, n: ContainerDirective, m: FigureMarkup, key: str
             )}
           </span>
         ) : (
-          <FigureImage key={k} figure={f} />
+          <FigureOf key={k} figure={f} />
         ),
       );
     }

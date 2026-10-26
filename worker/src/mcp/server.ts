@@ -85,7 +85,7 @@ export interface McpContext {
    * Meters what a call costs beyond a request: an image sent (`read_image`), a file fetched from
    * a URL (`fetch`, TEMPRA-157).
    */
-  meter?(e: { kind: "read_image" | "fetch"; library: string; bytes: number }): void;
+  meter?(e: { kind: "read_image" | "read_pdf" | "fetch"; library: string; bytes: number }): void;
   /** Outbound fetch for `attach` with `source_url` (fetch-source.ts); tests pass a double. */
   fetch?: FetchFn;
   /**
@@ -126,6 +126,11 @@ const line = (t: string) => ({ type: "text" as const, text: t });
 const SVG_TEXT_BYTES = 100 * 1024;
 /** Files an `okf://` resource carries as bytes (TEMPRA-155); above it, the download link. */
 const RESOURCE_BYTES = 2 * 1024 * 1024;
+/**
+ * A PDF `read` returns as an embedded resource (TEMPRA-164), as much as a call's images may be
+ * (IMAGE_BYTES_PER_CALL) and no more than a resource carries; above it, the facts and the link.
+ */
+export const PDF_RESOURCE_BYTES = Math.min(RESOURCE_BYTES, IMAGE_BYTES_PER_CALL);
 
 export { RENDER_WIDTH };
 /**
@@ -364,11 +369,37 @@ export function buildServer(ctx: McpContext): McpServer {
 
   const images = ctx.images ?? imagesService({ blobs: ctx.blobs });
 
-  /** What `read` adds for an image attachment (TEMPRA-153): the image itself, or why not. */
+  /**
+   * What `read` adds for an image attachment (TEMPRA-153): the image itself, or why not; for a
+   * PDF within PDF_RESOURCE_BYTES, the PDF as an embedded resource (TEMPRA-164). Video and audio
+   * stay facts.
+   */
   const shown = async (
     token: TokenInfo,
-    blob: { hash: string; size: number; media: string | null },
+    blob: { path: string; hash: string; size: number; media: string | null },
   ): Promise<CallToolResult["content"]> => {
+    if (blob.media === "application/pdf") {
+      if (blob.size > PDF_RESOURCE_BYTES) {
+        return [
+          line(
+            `PDF over ${sizeText(PDF_RESOURCE_BYTES)}, not attached here; download it from the URL above.`,
+          ),
+        ];
+      }
+      const obj = await ctx.blobs.get(blob.hash);
+      if (!obj) return [];
+      ctx.meter?.({ kind: "read_pdf", library: token.library.id, bytes: blob.size });
+      return [
+        {
+          type: "resource",
+          resource: {
+            uri: `${URI_SCHEME}://${token.library.owner}/${token.library.slug}/${blob.path}`,
+            mimeType: "application/pdf",
+            blob: toBase64(await readBytes(obj.body)),
+          },
+        },
+      ];
+    }
     if (blob.media === "image/svg+xml") {
       if (blob.size > SVG_TEXT_BYTES) {
         return [
@@ -634,7 +665,13 @@ export function buildServer(ctx: McpContext): McpServer {
       } else if (f.blob.media === "image/svg+xml") {
         left.set(f.n, `SVG is not sent as an image yet; \`read\` /${f.path} for its source`);
       } else if (!f.blob.media || !RASTER_MEDIA.has(f.blob.media)) {
-        left.set(f.n, `not an image (${f.blob.media ?? "unknown type"})`);
+        const media = f.blob.media ?? "unknown type";
+        left.set(
+          f.n,
+          media === "application/pdf"
+            ? `a PDF; \`read\` /${f.path} for it`
+            : `not an image (${media})`,
+        );
       } else candidates.push(f);
     }
     for (const f of candidates.slice(IMAGES_PER_CALL)) {
@@ -762,7 +799,7 @@ export function buildServer(ctx: McpContext): McpServer {
     "read",
     {
       title: "Read a file",
-      description: `Read a concept as OKF markdown (frontmatter and body), with its hash, sequence, trust tier, staleness, lint, inbound link count and its figures above it (one line each, numbered as the app numbers them: path or URL, alt, caption, dimensions, size, and ok, missing or external; diagrams by type). Pass the hash as \`if_match\` when you edit, replace or delete. Check trust tier and \`stale\` before relying on the content. Ask for the figures' images with \`images: true\`, for the Mermaid diagrams drawn as people see them with \`diagrams: true\`, or for some figures of either kind with \`figures: [n]\`, when you review the page, change a figure or its caption, or answer a comment on one; they come after the markdown, each after a line naming it, at most ${IMAGES_PER_CALL} and ${IMAGE_BYTES_PER_CALL / 1048576} MB a call in all, what was left out listed with the reason (for a diagram that does not draw, Pele's error); external images are not fetched. Also reads index.md and log.md (the latest 200 requests; \`log\` pages back further); for an attachment returns its size and a short-lived download URL, and for an image (PNG, JPEG, GIF, WebP) the image itself, scaled to at most 1568 px (SVG as its text).`,
+      description: `Read a concept as OKF markdown (frontmatter and body), with its hash, sequence, trust tier, staleness, lint, inbound link count and its figures above it (one line each, numbered as the app numbers them: path or URL, alt, caption, dimensions, size, and ok, missing or external; diagrams by type). Pass the hash as \`if_match\` when you edit, replace or delete. Check trust tier and \`stale\` before relying on the content. Ask for the figures' images with \`images: true\`, for the Mermaid diagrams drawn as people see them with \`diagrams: true\`, or for some figures of either kind with \`figures: [n]\`, when you review the page, change a figure or its caption, or answer a comment on one; they come after the markdown, each after a line naming it, at most ${IMAGES_PER_CALL} and ${IMAGE_BYTES_PER_CALL / 1048576} MB a call in all, what was left out listed with the reason (for a diagram that does not draw, Pele's error); external images are not fetched. Also reads index.md and log.md (the latest 200 requests; \`log\` pages back further); for an attachment returns its size and a short-lived download URL, and for an image (PNG, JPEG, GIF, WebP) the image itself, scaled to at most 1568 px (SVG as its text); for a PDF up to ${sizeText(PDF_RESOURCE_BYTES)}, the PDF as an embedded resource.`,
       inputSchema: readSchema,
       annotations: readOnly,
     },

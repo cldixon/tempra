@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { mediaFor } from "../src/client";
-import { checkAttachment, formatOf, imageInfo, sniffImage } from "../src/media";
+import { checkAttachment, formatOf, imageInfo, sniffImage, videoSize } from "../src/media";
 import { OkfError } from "../src/store/errors";
 import { makePng, SAMPLES, SVG, sample, truncatedIdatPng } from "./images";
 
@@ -144,5 +144,45 @@ describe("image checks (TEMPRA-152)", () => {
     const t = performance.now();
     expect(checkAttachment(big, "image/png")).toMatchObject({ width: 320, height: 320 });
     expect(performance.now() - t).toBeLessThan(200);
+  });
+});
+
+describe("video, audio and PDF (TEMPRA-164)", () => {
+  const PDF = new TextEncoder().encode("%PDF-1.4\n1 0 obj << /Type /Catalog >> endobj\n%%EOF\n");
+  const WAV = new TextEncoder().encode("RIFF\x24\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0");
+
+  test("their type comes from their bytes, with a video's frame size", () => {
+    expect(checkAttachment(sample("clip.webm"), "video/webm")).toEqual({
+      media: "video/webm",
+      width: 64,
+      height: 36,
+    });
+    expect(checkAttachment(sample("clip.mp4"), null)).toEqual({
+      media: "video/mp4",
+      width: 48,
+      height: 32,
+    });
+    expect(checkAttachment(sample("tone.ogg"), "application/octet-stream")).toEqual({
+      media: "audio/ogg",
+    });
+    expect(checkAttachment(PDF, "application/pdf")).toEqual({ media: "application/pdf" });
+    expect(checkAttachment(WAV, "audio/x-wav")).toEqual({ media: "audio/wav" });
+  });
+
+  test("a declared type that disagrees is ignored, with a note; audio in a video container stays", () => {
+    const pdf = checkAttachment(PDF, "image/png");
+    expect(pdf.media).toBe("application/pdf");
+    expect(pdf.note).toContain("declared image/png was ignored");
+    expect(checkAttachment(sample("clip.webm"), "text/plain").note).toContain("WebM");
+    expect(checkAttachment(sample("clip.mp4"), "audio/mp4").media).toBe("audio/mp4");
+    expect(checkAttachment(sample("clip.webm"), "audio/webm").media).toBe("audio/webm");
+  });
+
+  test("bytes with no signature keep the declared type; a broken header has no size", () => {
+    const bin = new Uint8Array([1, 2, 3, 4]);
+    expect(checkAttachment(bin, "video/mp4")).toEqual({ media: "video/mp4" });
+    const cut = sample("clip.webm").subarray(0, 40);
+    expect(checkAttachment(cut, "video/webm")).toEqual({ media: "video/webm" });
+    expect(videoSize(sample("clip.mp4").subarray(0, 30), "video/mp4")).toBeNull();
   });
 });

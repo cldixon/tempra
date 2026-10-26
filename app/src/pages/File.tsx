@@ -17,10 +17,11 @@ import {
   loadFile,
 } from "../concept/data";
 import { LiveNotice, useLiveFile } from "../concept/live";
-import { imageSource } from "../images";
+import { attachmentSource, imageSource, mediaKind } from "../images";
 import { Moment } from "../Moment";
 import { Reader } from "../Reader";
 import { Img } from "../reader/Figure";
+import { Player } from "../reader/Media";
 import { prepare } from "../reader/prepare";
 import { useLibraryLabel } from "../role";
 import type { Compare } from "../router";
@@ -218,6 +219,8 @@ function Attachment(props: { urls: Urls; head: number; file: AttachmentFile }) {
   const [broken, setBroken] = useState(false);
   const copied = useCopy();
   const image = file.media?.startsWith("image/") && !broken;
+  const kind = mediaKind(file.media);
+  const playable = kind === "video" || kind === "audio" ? kind : null;
   const href = urls.download(file.path);
   const versions =
     extra.state === "ready"
@@ -231,7 +234,15 @@ function Attachment(props: { urls: Urls; head: number; file: AttachmentFile }) {
     <div className="attachment">
       <AtNotice urls={urls} head={props.head} current={urls.pinned(undefined).file(file.path)} />
       <div className="attachment-frame">
-        {image ? (
+        {playable && !broken ? (
+          // Video and audio play in place (TEMPRA-164).
+          <Player
+            kind={playable}
+            source={attachmentSource(urls, file, file.path)}
+            name={described?.text ?? baseName(file.path)}
+            onError={() => setBroken(true)}
+          />
+        ) : image ? (
           <AttachmentImage
             urls={urls}
             file={file}
