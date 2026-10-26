@@ -1,7 +1,8 @@
 import type { Context, Hono } from "hono";
 import type { User } from "../accounts";
-import type { Deps } from "../app";
-import type { LibraryClient } from "../client";
+import { agentName } from "../agents";
+import type { Deps, openUploadGrant, receiveUpload } from "../app";
+import { type LibraryClient, WORKER_ATTACHMENT_CAP } from "../client";
 import { isRouteName } from "../handles";
 import { VARIANT_EDGES } from "../images";
 import { esc, messagePage, type Onward, PAGE_HEADERS, page } from "../oauth/pages";
@@ -12,8 +13,10 @@ import { LINK_MINUTES, readCookie, SESSION_COOKIE } from "../session";
 import { signedIn } from "../signin";
 import { OkfError } from "../store/errors";
 import { type Authorized, authorizeLibrary, requireOwner } from "../tenancy";
+import { checkMedia, type UploadGrant } from "../uploads";
 import { type BootPage, bootData, bootScript, bootUrls } from "./boot";
 import { spaShell } from "./spa";
+import { type UploadView, uploadedPage, uploadPage } from "./upload";
 import { Urls } from "./urls";
 
 type AppEnv = { Bindings: Cloudflare.Env };
@@ -55,6 +58,25 @@ function atParam(c: C): number | undefined {
     throw new OkfError(400, "bad_param", "`at` must be a sequence number.");
   }
   return n;
+}
+
+/**
+ * An upload refused, in a person's words where the server's are written for agents (TEMPRA-196):
+ * the type and the declared size or hash are what the agent prepared.
+ */
+function forPeople(e: OkfError, grant: UploadGrant, sent: string): string {
+  const again = "Choose the right file, or ask the agent for a new link.";
+  switch (e.code) {
+    case "media_mismatch":
+      return `The agent asked for a file of type ${grant.media}, and this one is ${sent}. ${again}`;
+    case "checksum_mismatch":
+      return `This is not the file the agent described${grant.size !== undefined ? ` (${grant.size} bytes)` : ""}. ${again}`;
+    case "exists":
+    case "precondition_failed":
+      return "There is already a file at this path, and this link does not replace it. Ask the agent for a new link.";
+    default:
+      return e.message;
+  }
 }
 
 /** Session cookies are SameSite=Lax; writes also insist on a same-origin request. */
@@ -303,6 +325,7 @@ function serverPage(title: string, body: string, status = 200): Response {
 export function registerUiRoutes<E extends AppEnv>(
   app: Hono<E>,
   deps: (env: Cloudflare.Env) => Deps,
+  uploads: { open: typeof openUploadGrant; receive: typeof receiveUpload },
 ) {
   const get = (path: string, handler: (p: Page) => Promise<Response>) =>
     app.get(path, ui(deps, handler) as never);
@@ -572,6 +595,108 @@ export function registerUiRoutes<E extends AppEnv>(
           console.error(JSON.stringify({ mail_failed: "email change notice", error: String(e) })),
         );
       return p.c.redirect("/account?done=email", 303);
+    }) as never,
+  );
+
+  // The upload link's page (TEMPRA-196; tempra-dev: app/media, Upload link): a signed-in owner or
+  // write member chooses the file an agent prepared an upload for, and their browser sends it to
+  // the page's own URL; the write stays the agent's, with the person as who supplied the file.
+  const prepared = async (p: Page) => {
+    const { lib, ref } = await openLibrary(p);
+    const urls = new Urls(ref.owner, ref.slug);
+    const home: Onward = { href: urls.tree(""), label: "Go to the library" };
+    if (ref.role !== "owner" && ref.role !== "write") {
+      return messagePage(
+        "Not allowed",
+        "You can read this library but not add files to it. Ask its owner for write access.",
+        403,
+        home,
+      );
+    }
+    const raw = p.c.req.param("token") ?? "";
+    const gone = () =>
+      messagePage(
+        "Link expired",
+        "This upload link has expired or was already used. Ask the agent for a new one.",
+        410,
+        home,
+      );
+    let grant: UploadGrant;
+    try {
+      grant = await uploads.open(lib, raw, ref.do_id);
+    } catch (e) {
+      if (e instanceof OkfError && e.status === 403) return gone();
+      throw e;
+    }
+    // A blob-first link (REST) has no path for a person to fill.
+    if (grant.path === null) return gone();
+    const path = grant.path;
+    const about = await p.deps.accounts.about(ref.id);
+    const by = grant.by;
+    const [agent] = by?.agent ? await p.deps.accounts.agents([by.agent]) : [];
+    const person = by?.person ? (await p.deps.accounts.account(by.person))?.handle : undefined;
+    const view: UploadView = {
+      library: about?.title?.trim() || ref.slug,
+      libraryHref: home.href,
+      path,
+      agent: agent ? agentName(agent) : person ? `@${person}` : grant.actor,
+      ...(grant.description ? { description: grant.description } : {}),
+      media: grant.media,
+      ...(grant.size !== undefined ? { size: grant.size } : {}),
+      exp: (grant as UploadGrant & { exp: number }).exp,
+      now: Math.floor(Date.now() / 1000),
+    };
+    return { lib, raw, grant, path, urls, view, gone };
+  };
+
+  get("/:owner/:lib/-/upload/:token", async (p) => {
+    const up = await prepared(p);
+    return up instanceof Response ? up : uploadPage(up.view);
+  });
+
+  app.post(
+    "/:owner/:lib/-/upload/:token",
+    ui(deps, async (p) => {
+      requireSameOrigin(p.c);
+      const up = await prepared(p);
+      if (up instanceof Response) return up;
+      const refuse = (status: number, message: string) =>
+        uploadPage({ ...up.view, now: Math.floor(Date.now() / 1000) }, { status, message });
+      // The form's other parts are a few hundred bytes; the file is held to the attachment cap.
+      const length = Number(p.c.req.header("Content-Length") ?? Number.NaN);
+      if (length > WORKER_ATTACHMENT_CAP + 64 * 1024) {
+        return refuse(413, `Files are capped at ${WORKER_ATTACHMENT_CAP / 1048576} MB.`);
+      }
+      const file = (await p.c.req.formData()).get("file");
+      if (!(file instanceof File) || file.size === 0)
+        return refuse(400, "Choose a file to upload.");
+      if (file.size > WORKER_ATTACHMENT_CAP) {
+        return refuse(413, `Files are capped at ${WORKER_ATTACHMENT_CAP / 1048576} MB.`);
+      }
+      let waitUntil: ((w: Promise<unknown>) => void) | undefined;
+      try {
+        const ctx = p.c.executionCtx;
+        waitUntil = (w) => ctx.waitUntil(w);
+      } catch {}
+      try {
+        checkMedia(up.grant.media, file.type || undefined);
+        await uploads.receive(p.deps, up.lib, up.raw, up.grant, {
+          bytes: new Uint8Array(await file.arrayBuffer()),
+          type: file.type || undefined,
+          supplied_by: p.user.handle,
+          ...(waitUntil ? { waitUntil } : {}),
+        });
+      } catch (e) {
+        if (!(e instanceof OkfError)) throw e;
+        if (e.code === "bad_upload" || e.code === "upload_used") return up.gone();
+        return refuse(e.status, forPeople(e, up.grant, file.type));
+      }
+      return uploadedPage({
+        path: up.path,
+        size: file.size,
+        fileHref: up.urls.file(up.path),
+        agent: up.view.agent,
+      });
     }) as never,
   );
 
