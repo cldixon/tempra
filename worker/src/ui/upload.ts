@@ -1,0 +1,73 @@
+/**
+ * The upload link's page (TEMPRA-196; tempra-dev: app/media, Upload link): a signed-in person
+ * chooses the file an agent prepared an upload for, and their browser sends it. A server page
+ * like sign-in and consent: no script, the strict headers, one form posting to its own URL.
+ */
+import { alertNotice, esc, invalid, PAGE_HEADERS, page } from "../oauth/pages";
+
+const ERROR_ID = "upload-error";
+
+/** What the page shows about the prepared upload. */
+export interface UploadView {
+  /** The library as people read it: its title, else its slug. */
+  library: string;
+  libraryHref: string;
+  path: string;
+  /** Who prepared it: "Claude for @ann". */
+  agent: string;
+  description?: string;
+  media: string | null;
+  size?: number;
+  /** When the link stops working, in seconds since the epoch. */
+  exp: number;
+  /** The time now, in seconds since the epoch. */
+  now: number;
+}
+
+/** A size as people read it: "349 KB". */
+export function readableSize(bytes: number): string {
+  if (bytes < 1024) return `${bytes} bytes`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+const fact = (term: string, value: string) => `<div><dt>${term}</dt><dd>${value}</dd></div>`;
+
+/** The page with its form, and the refusal of the last try when there was one. */
+export function uploadPage(v: UploadView, error?: { message: string; status: number }): Response {
+  const minutes = Math.max(1, Math.ceil((v.exp - v.now) / 60));
+  const facts = [
+    fact("Library", `<a href="${esc(v.libraryHref)}">${esc(v.library)}</a>`),
+    fact("Saved as", `<code>${esc(v.path)}</code>`),
+    v.description ? fact("Shows", esc(v.description)) : "",
+    v.media ? fact("Type", esc(v.media)) : "",
+    v.size !== undefined ? fact("Size", esc(readableSize(v.size))) : "",
+  ].join("");
+  const accept = v.media ? ` accept="${esc(v.media)}"` : "";
+  const body = `<h1>Upload a file</h1>
+<p>${esc(v.agent)} asked for this file.</p>
+<dl class="facts">${facts}</dl>
+${error ? alertNotice(ERROR_ID, error.message) : ""}<form method="post" enctype="multipart/form-data" class="stack">
+<label class="field">File
+<input name="file" type="file" required${accept}${invalid(ERROR_ID, !!error)}>
+<span class="field-hint">If it came from a chat, choose it again here.</span></label>
+<p><button class="primary" type="submit">Upload</button></p></form>
+<p class="muted">This link works once, for ${minutes} more ${minutes === 1 ? "minute" : "minutes"}.</p>`;
+  return new Response(page("Upload a file", body), {
+    status: error?.status ?? 200,
+    headers: { ...PAGE_HEADERS },
+  });
+}
+
+/** After the upload: what was stored, and where to see it. */
+export function uploadedPage(o: {
+  path: string;
+  size: number;
+  fileHref: string;
+  agent: string;
+}): Response {
+  const body = `<h1>Uploaded</h1>
+<p><code>${esc(o.path)}</code> (${esc(readableSize(o.size))}) is in the library. ${esc(o.agent)} can place it now; you can go back to the chat.</p>
+<p><a href="${esc(o.fileHref)}">Open the file</a></p>`;
+  return new Response(page("Uploaded", body), { headers: { ...PAGE_HEADERS } });
+}

@@ -134,6 +134,7 @@ describe("MCP server", () => {
       ":::figure",
       "`sources`",
       "taken from elsewhere",
+      "upload link",
       "carries its own `credit` and `licence`",
       "`images: true`",
       "`diagrams: true`",
@@ -359,6 +360,26 @@ describe("MCP server", () => {
       const last = store().requests({ limit: 1 }).requests[0];
       expect(last).toMatchObject({ actor: "claude-code/test", note: "Plot from the run." });
       expect((await app.request(url, { method: "PUT", body: bytes })).status).toBe(403);
+    });
+
+    test("prepare_upload: the person's upload link, and read naming who supplied the file", async () => {
+      const s = setup();
+      const { call } = await connect(s.app);
+      const r = await call("prepare_upload", { path: "figures/photo.png", note: "Their photo." });
+      const link = /^(http:\/\/localhost\/owner\/demo\/-\/upload\/\S+)$/m.exec(r.text)?.[1];
+      expect(link).toBeDefined();
+      expect(r.text).toContain("give them this link");
+      const form = new FormData();
+      form.set("file", new File([bytes], "photo.png"));
+      const sent = await s.app.request(link ?? "", {
+        method: "POST",
+        body: form,
+        headers: { Origin: "http://localhost" },
+      });
+      expect(sent.status).toBe(200);
+      expect((await call("read", { path: "figures/photo.png" })).text).toContain(
+        "supplied by: @owner, from the upload link",
+      );
     });
 
     test("prepare_upload: read access is refused, and markdown goes through write", async () => {

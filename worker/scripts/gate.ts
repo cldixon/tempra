@@ -3883,6 +3883,79 @@ async function axePages(page: import("playwright-core").Page, pages: AxePage[]) 
   return found;
 }
 
+/**
+ * The upload link (TEMPRA-196): an agent prepares an upload, the person opens its page signed in,
+ * chooses the file in Chromium and sends it; the file is the agent's write, supplied by them, the
+ * link works once, and the page passes axe in light and dark.
+ */
+async function uploadLink(owner: string, slug: string, token: string): Promise<string[]> {
+  const lib = `${base}/api/v1/libraries/${owner}/${slug}`;
+  const path = "gate-upload/photo.png";
+  const png = greyPng(40, 30, 120);
+  const prep = await fetch(`${lib}/uploads`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      path,
+      size: png.length,
+      description: "A grey photo for the gate.",
+      note: "Gate: the upload link",
+    }),
+  });
+  if (prep.status !== 201) return [`prepare: ${prep.status} ${await prep.text()}`];
+  const { upload_page: link } = (await prep.json()) as { upload_page?: string };
+  if (!link) return ["prepare returned no upload_page"];
+  const b = await openBrowser();
+  if (typeof b === "string") return [b];
+  const { page, step, problems } = b;
+  const heading = (name: string) =>
+    page.getByRole("heading", { level: 1, name }).waitFor({ timeout: 15_000 });
+  try {
+    await step("signed out, the link signs in and comes back to the page", async () => {
+      await b.signInAs("dev@localhost", new URL(link).pathname);
+      await heading("Upload a file");
+      await page.getByText("gate-upload/photo.png").waitFor({ timeout: 5000 });
+    });
+    await step("the page passes axe, light and dark", async () => {
+      const ready = () => heading("Upload a file");
+      const found = await axePages(page, [
+        { name: "upload page", url: link, ready },
+        { name: "upload page (dark)", url: link, ready, dark: true },
+      ]);
+      if (found.length > 0) throw new Error(found.join("; "));
+    });
+    await step("the person chooses the file and uploads it", async () => {
+      await page.getByLabel("File").setInputFiles({
+        name: "photo.png",
+        mimeType: "image/png",
+        buffer: Buffer.from(png),
+      });
+      await page.getByRole("button", { name: "Upload" }).click();
+      await heading("Uploaded");
+    });
+    await step("the file is the agent's write, supplied by the person", async () => {
+      const r = await fetch(`${lib}/files/${path}`, {
+        headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+      });
+      const f = (await r.json()) as { size?: number; supplied_by?: string };
+      if (f.size !== png.length || f.supplied_by !== "dev") {
+        throw new Error(`the file reads ${JSON.stringify(f)}`);
+      }
+    });
+    // Beside the browser, whose watcher counts every 4xx as a problem.
+    await step("the link works once", async () => {
+      const r = await fetch(link, { headers: { Cookie: await b.cookie() }, redirect: "manual" });
+      const html = await r.text();
+      if (r.status !== 410 || !html.includes("Link expired")) {
+        throw new Error(`a spent link answers ${r.status}`);
+      }
+    });
+  } finally {
+    await b.close();
+  }
+  return problems;
+}
+
 /** Runs the daily maintainers as the app's Export now does, and reads the export from R2. */
 async function nightlyExport(owner: string, slug: string, originals: number): Promise<string[]> {
   const lib = `${base}/${owner}/${slug}`;
@@ -4581,6 +4654,14 @@ try {
   );
   for (const p of tenancy) console.log(`  - ${p}`);
   if (tenancy.length > 0) failed = true;
+  const uploads = first
+    ? await uploadLink(first.owner, first.slug, first.token).catch((e) => [String(e)])
+    : ["no library"];
+  console.log(
+    `${uploads.length === 0 ? "PASS" : "FAIL"} the upload link: a person sends the file an agent prepared for`,
+  );
+  for (const p of uploads) console.log(`  - ${p}`);
+  if (uploads.length > 0) failed = true;
   // A failure outside a step (signing up, the OAuth connection) is the flow's failure, not the
   // gate's: the checks after it still run.
   const fresh = await freshAccountConnects().catch((e) => [String(e)]);
