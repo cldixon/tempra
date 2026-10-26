@@ -108,6 +108,14 @@ describe("MCP server", () => {
     const tier2Tool = (await full.listTools()).tools.find((t) => t.name === "search");
     expect(tier2Tool?.description?.startsWith("Beyond files:")).toBe(true);
     expect(full.getInstructions()).toContain("Call `start` first");
+    // Every description is filled in: no `$NAME` a template literal never interpolated.
+    const { client: all } = await connect(app, "process");
+    for (const t of (await all.listTools()).tools) {
+      expect({ tool: t.name, left: t.description?.match(/\$\{?[A-Z_]{3,}/g) ?? [] }).toEqual({
+        tool: t.name,
+        left: [],
+      });
+    }
   });
 
   test("INSTRUCTIONS and SKILL.md tell agents the same media story (TEMPRA-160)", () => {
