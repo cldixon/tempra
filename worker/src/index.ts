@@ -24,6 +24,7 @@ import {
   type SweepQueue,
   sweep,
 } from "./sweep";
+import { rpcLine } from "./timing";
 import { createWorker } from "./worker";
 
 export { AccountFeeds } from "./account-feeds";
@@ -86,7 +87,14 @@ const depsFor = (env: Env): Deps => {
   authenticate ??= d1Authenticate(env.DB);
   const client = (doId: string) => {
     const stub = libraryStub(env, doId);
-    return makeClient((method, args) => stub.call(method, args));
+    return makeClient(async (method, args) => {
+      // A slow round trip is logged beside the object's own line (TEMPRA-190, timing.ts).
+      const t = Date.now();
+      const result = await stub.call(method, args);
+      const line = rpcLine(method, doId, Date.now() - t);
+      if (line) console.log(line);
+      return result;
+    });
   };
   const meter: Deps["meter"] = (e) => {
     try {

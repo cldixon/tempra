@@ -21,6 +21,7 @@ import {
 import { prepareRestore, type RestoreOutcome, type RestoreTarget } from "./recovery";
 import { doSqlHandle } from "./store/sql";
 import { type LibraryHealth, LibraryStore } from "./store/store";
+import { callLine, worthLogging } from "./timing";
 
 /** How long reads counted in memory wait before they are written to `access_log`. */
 const READ_FLUSH_MS = 5000;
@@ -44,6 +45,9 @@ export class Library extends DurableObject<Env> {
   );
   /** Set once a restore is armed: the object refuses work until it restarts into the restore. */
   private restarting = false;
+  /** When the object started, and how many calls it has served: the first is the cold one. */
+  private readonly started = Date.now();
+  private calls = 0;
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -65,7 +69,35 @@ export class Library extends DurableObject<Env> {
   /** The single RPC entry point: runs a store method and returns its result or error as data. */
   async call(method: LibraryMethod, args: unknown[]): Promise<CallResult> {
     if (this.restarting) return RESTARTING;
+    // Where the time goes (TEMPRA-190): the first call after a start, and any slow one, is logged.
+    const t0 = Date.now();
+    const cold = this.calls++ === 0;
     if (!this.alarmChecked) await this.ensureAlarm();
+    const t1 = Date.now();
+    const result = await this.run(method, args);
+    const t2 = Date.now();
+    if (worthLogging(cold, t2 - t0)) {
+      try {
+        const timing = {
+          library: this.libraryId(),
+          method,
+          cold,
+          sinceStartMs: t0 - this.started,
+          alarmMs: t1 - t0,
+          callMs: t2 - t1,
+          totalMs: t2 - t0,
+        };
+        const size = { files: this.store.fileCount(), dbBytes: this.ctx.storage.sql.databaseSize };
+        console.log(callLine(timing, size));
+      } catch (e) {
+        console.error("call timing not logged", e);
+      }
+    }
+    return result;
+  }
+
+  /** Runs a store method for `call`: the write's feed and maintenance, the reads' counting. */
+  private async run(method: LibraryMethod, args: unknown[]): Promise<CallResult> {
     const mb = Number(this.env.LIBRARY_STORAGE_MB) || DEFAULT_STORAGE_MB;
     const writes = WRITE_METHODS.has(method);
     const before = writes ? this.store.headSeq() : 0;

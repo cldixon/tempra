@@ -928,6 +928,11 @@ export class LibraryStore {
 
   // ---------------------------------------------------------------- ledger primitives
 
+  /** How many files the library holds now (concepts and attachments), for the DO's timing line. */
+  fileCount(): number {
+    return this.sql.all<{ n: number }>("SELECT COUNT(*) AS n FROM paths")[0]?.n ?? 0;
+  }
+
   headSeq(): number {
     return this.sql.all<{ s: number }>("SELECT COALESCE(MAX(seq), 0) AS s FROM events")[0]?.s ?? 0;
   }
