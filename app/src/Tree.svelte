@@ -1,13 +1,11 @@
 <script lang="ts">
   import { untrack } from "svelte";
   import Icon from "./Icon.svelte";
-  import { prefetchFile } from "./prefetch";
   import {
     ancestors,
     buildDirs,
     countConcepts,
     fileLabel,
-    HOVER_MS,
     insideDirs,
     loadClosed,
     type OutlineFile,
@@ -102,17 +100,6 @@
     }
   };
 
-  // A file's page is loaded ahead when the pointer rests on it, or the keyboard reaches it; not
-  // the file already open (a click rests the pointer on the row it opened, whose page has just
-  // loaded it).
-  let hoverTimer: ReturnType<typeof setTimeout> | undefined;
-  $effect(() => () => clearTimeout(hoverTimer));
-  function enter(path: string) {
-    clearTimeout(hoverTimer);
-    hoverTimer = setTimeout(() => {
-      if (path !== props.file) prefetchFile(props.urls, path);
-    }, HOVER_MS);
-  }
   const s = (n: number) => (n === 1 ? "" : "s");
 </script>
 
@@ -169,11 +156,6 @@
               href={props.urls.file(e.path)}
               title={fileLabel(e)}
               data-path={e.path}
-              onmouseenter={() => enter(e.path)}
-              onmouseleave={() => clearTimeout(hoverTimer)}
-              onfocus={(ev) => {
-                if (ev.currentTarget.matches(":focus-visible")) prefetchFile(props.urls, e.path);
-              }}
               aria-current={props.file === e.path ? "page" : undefined}
               {@attach props.file === e.path ? markCurrent : undefined}>{fileLabel(e)}</a
             >{@render mark(e.comments, e.stale)}</div

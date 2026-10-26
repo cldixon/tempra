@@ -21,6 +21,7 @@
   import { NARROW } from "./frame";
   import { provideFrame, useMedia } from "./frame.svelte.ts";
   import Icon from "./Icon.svelte";
+  import { usePrefetchLinks } from "./links.svelte.ts";
   import { here } from "./location.svelte.ts";
   import { lastNavigation } from "./router";
   import type { OutlineFile } from "./tree";
@@ -58,6 +59,9 @@
     nextPath?: Snippet;
     children: Snippet;
   } = $props();
+
+  // A page starts loading when a link to it is pointed at (TEMPRA-193): in a library, its own.
+  usePrefetchLinks(() => props.library?.urls ?? null);
 
   let drawer = $state(false);
   const narrow = useMedia(() => NARROW);
