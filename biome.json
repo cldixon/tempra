@@ -33,7 +33,9 @@
   },
   "overrides": [
     {
-      "includes": ["**/*.astro"],
+      "includes": [
+        "**/*.astro"
+      ],
       "linter": {
         "rules": {
           "correctness": {
@@ -44,7 +46,26 @@
       }
     },
     {
-      "includes": ["design/src/**/*.css"],
+      "includes": [
+        "**/*.svelte"
+      ],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "noUnusedVariables": "off",
+            "noUnusedImports": "off"
+          },
+          "style": {
+            "useConst": "off",
+            "useImportType": "off"
+          }
+        }
+      }
+    },
+    {
+      "includes": [
+        "design/src/**/*.css"
+      ],
       "linter": {
         "rules": {
           "style": {
@@ -53,5 +74,10 @@
         }
       }
     }
-  ]
+  ],
+  "html": {
+    "formatter": {
+      "indentScriptAndStyle": true
+    }
+  }
 }

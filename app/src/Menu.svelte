@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { tick, type Snippet } from "svelte";
+  import { type Snippet, tick } from "svelte";
 
   /**
    * A button that opens a list of links under it. It closes on a choice, a click elsewhere,
@@ -39,9 +39,9 @@
   function choices(): HTMLElement[] {
     const list = document.getElementById(id);
     if (!list) return [];
-    return Array.from(
-      list.querySelectorAll<HTMLElement>("a[href], button:not([disabled])"),
-    ).filter((el) => el.getClientRects().length > 0);
+    return Array.from(list.querySelectorAll<HTMLElement>("a[href], button:not([disabled])")).filter(
+      (el) => el.getClientRects().length > 0,
+    );
   }
 
   function focusChoice(which: "first" | "last") {
