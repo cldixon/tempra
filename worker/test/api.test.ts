@@ -312,6 +312,7 @@ describe("GET /api/v1/libraries (TEMPRA-23)", () => {
     unavailable?: boolean;
     seq?: number;
     health?: unknown;
+    last_activity?: string | null;
   };
   const list = async (s: ReturnType<typeof setup>) => {
     const r = await s.app.request("/api/v1/libraries");
@@ -348,6 +349,8 @@ describe("GET /api/v1/libraries (TEMPRA-23)", () => {
       owner: "owner",
       slug: "broken",
       role: "owner",
+      // An unavailable library is placed by when it was made.
+      last_activity: broken.created,
       unavailable: true,
     });
     expect(good?.unavailable).toBeUndefined();
@@ -358,9 +361,47 @@ describe("GET /api/v1/libraries (TEMPRA-23)", () => {
   test("a library with no object still lists", async () => {
     const s = setup();
     s.deps.libraryByDoId = async () => null;
-    expect(await list(s)).toEqual([
-      { id: "lib-1", owner: "owner", slug: "demo", role: "owner", unavailable: true },
-    ]);
+    const [lib] = await list(s);
+    expect(lib).toEqual({
+      id: "lib-1",
+      owner: "owner",
+      slug: "demo",
+      role: "owner",
+      last_activity: expect.any(String),
+      unavailable: true,
+    });
+  });
+
+  test("newest activity first: the last event, else when it was made (TEMPRA-202)", async () => {
+    const s = setup();
+    for (const slug of ["alpha", "beta", "gamma"]) {
+      const r = await s.app.request("/api/v1/libraries", {
+        method: "POST",
+        headers: { Origin: "http://localhost", "Content-Type": "application/json" },
+        body: JSON.stringify({ slug }),
+      });
+      expect(r.status).toBe(201);
+    }
+    // Made a day apart, alpha first; none has an event yet but demo, which gets one now.
+    const made = (slug: string, iso: string) =>
+      s.db.run("UPDATE libraries SET created = ? WHERE slug = ?", [iso, slug]);
+    made("demo", "2026-01-01T00:00:00.000Z");
+    made("alpha", "2026-01-02T00:00:00.000Z");
+    made("beta", "2026-01-03T00:00:00.000Z");
+    made("gamma", "2026-01-04T00:00:00.000Z");
+    expect((await list(s)).map((l) => l.slug)).toEqual(["gamma", "beta", "alpha", "demo"]);
+    const put = await s.req("/files/a.md", {
+      method: "PUT",
+      body: doc("x"),
+      headers: { "Content-Type": "text/markdown" },
+    });
+    expect(put.status).toBe(200);
+    const libs = await list(s);
+    expect(libs.map((l) => l.slug)).toEqual(["demo", "gamma", "beta", "alpha"]);
+    const last = s.store().summary().last_activity;
+    expect(last).toMatch(/^\d{4}-\d\d-\d\dT/);
+    expect(libs[0]?.last_activity).toBe(last);
+    expect(libs[1]?.last_activity).toBe("2026-01-04T00:00:00.000Z");
   });
 });
 
