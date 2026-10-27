@@ -71,6 +71,7 @@ describe("MCP server", () => {
       "prepare_upload",
       "read",
       "start",
+      "transform",
       "write",
     ];
     const tier2 = [
@@ -149,6 +150,7 @@ describe("MCP server", () => {
       "`vega-lite` fence",
       "`chart_invalid`",
       "`data.url`",
+      "`transform`",
     ]) {
       expect(INSTRUCTIONS.toLowerCase()).toContain(term.toLowerCase());
       expect(skill.toLowerCase()).toContain(term.toLowerCase());
@@ -522,7 +524,7 @@ describe("MCP server", () => {
             transform: (t) => ({
               output: async (o) => {
                 await new Response(stream).arrayBuffer();
-                calls.push({ width: t.width, format: o.format });
+                calls.push({ width: t.width ?? 0, format: o.format });
                 return {
                   image: () => new Response(SCALED).body as ReadableStream<Uint8Array>,
                   contentType: () => o.format,

@@ -122,6 +122,17 @@ export interface RequestContext {
  * Provenance of an attachment fetched from a URL (TEMPRA-157): kept in the attach op's ledger
  * meta as `source`, and read back for the version on screen (`read`); never a citation.
  */
+/**
+ * An attachment made on the server from another one (TEMPRA-208, MCP `transform`): the file it was
+ * made from at the hash it had, and what was done (`resize 1092`, `crop 10,20 300x200`,
+ * `convert webp`, `thumbnail 320`, `poster 2.5s`). Kept in the attach op's meta as `made_from`.
+ */
+export interface MadeFrom {
+  path: string;
+  hash: string;
+  op: string;
+}
+
 export interface AttachSource {
   via: "url";
   url: string;
@@ -243,6 +254,8 @@ export type WriteOp =
        * handed it to the person to send. Kept in the event's meta; does not make a write.
        */
       origin?: "person" | "agent";
+      /** What it was made from on the server (TEMPRA-208). */
+      made_from?: MadeFrom;
     }
   | { op: "edit"; path: string; edits: { old: string; new: string }[]; if_match?: string | null }
   | { op: "move"; path: string; to: string }
@@ -539,6 +552,8 @@ export type FileView =
       supplied_by: string | null;
       /** For an upload, who had the file: the person, or the agent that made it (TEMPRA-205). */
       origin: "person" | "agent" | null;
+      /** What this version was made from on the server (TEMPRA-208). */
+      made_from: MadeFrom | null;
     }
   | { kind: "derived"; path: string; seq: number; markdown: string };
 
@@ -1932,6 +1947,7 @@ export class LibraryStore {
     licence: string | null;
     supplied_by: string | null;
     origin: "person" | "agent" | null;
+    made_from: MadeFrom | null;
   } {
     const rows = this.sql.all<{ meta: string | null }>(
       `SELECT meta FROM events WHERE concept_id = ? AND hash = ? AND seq <= ?
@@ -1949,6 +1965,7 @@ export class LibraryStore {
     // Who supplied these bytes is the version's own fact: from the event that wrote them.
     let supplied: string | null | undefined;
     let origin: "person" | "agent" | null | undefined;
+    let madeFrom: MadeFrom | null = null;
     for (const r of rows) {
       const m = JSON.parse(r.meta as string) as JsonObject;
       const s = m.source as Partial<AttachSource> | string | undefined;
@@ -1967,12 +1984,23 @@ export class LibraryStore {
       if (supplied === undefined) {
         supplied = typeof m.supplied_by === "string" ? m.supplied_by : null;
         origin = m.origin === "person" || m.origin === "agent" ? m.origin : null;
+        const f = m.made_from as Partial<MadeFrom> | undefined;
+        madeFrom =
+          f && typeof f.path === "string" && typeof f.hash === "string" && typeof f.op === "string"
+            ? { path: f.path, hash: f.hash, op: f.op }
+            : null;
       }
       if (source && text.description !== null && text.credit !== null && text.licence !== null) {
         break;
       }
     }
-    return { source, ...text, supplied_by: supplied ?? null, origin: origin ?? null };
+    return {
+      source,
+      ...text,
+      supplied_by: supplied ?? null,
+      origin: origin ?? null,
+      made_from: madeFrom,
+    };
   }
 
   private writeAttachment(w: WriteState, op: Extract<WriteOp, { op: "attach" }>): OpResult {
@@ -2046,6 +2074,7 @@ export class LibraryStore {
       for (const [k, v] of Object.entries(facts)) meta[k] = v;
       if (op.supplied_by) meta.supplied_by = op.supplied_by;
       if (op.origin) meta.origin = op.origin;
+      if (op.made_from) meta.made_from = { ...op.made_from };
       if (retyped) meta.media = { from: before?.media ?? null, to: blob.media };
       seq = this.appendEvent(w.ctx, w.now, {
         op: w.mode === "import" ? "import" : "put",

@@ -152,6 +152,10 @@ export function createWorker(deps: (env: Cloudflare.Env) => Deps): {
               d.renderDiagram
                 ? d.renderDiagram(req, { account: who.account, library })
                 : Promise.resolve({ error: { message: RENDER_UNAVAILABLE, line: 0, column: 0 } }),
+            poster: (req, library) =>
+              d.posterFrame
+                ? d.posterFrame(req, { account: who.account, library })
+                : Promise.resolve({ error: RENDER_UNAVAILABLE }),
             allowRender: async () =>
               (await d.rateLimit?.("render", `render:${who.account}`)) ?? true,
             origin,

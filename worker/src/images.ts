@@ -67,10 +67,21 @@ export function variantKeysFor(blobKeys: string[]): string[] {
   return out;
 }
 
+/**
+ * What one transform asks of Images: a box to fit within (never enlarged with `scale-down`), or
+ * a crop (`trim`, in pixels of the original), or nothing but a new format.
+ */
+export interface ImageTransform {
+  width?: number;
+  height?: number;
+  fit?: "scale-down" | "cover";
+  trim?: { top: number; left: number; width: number; height: number };
+}
+
 /** The part of Cloudflare's ImagesBinding used here; tests pass a double. */
 export interface ImageTransformerLike {
   input(stream: ReadableStream<Uint8Array>): {
-    transform(t: { width: number; height: number; fit: "scale-down" }): {
+    transform(t: ImageTransform): {
       output(o: {
         format: VariantMedia;
         quality?: number;
@@ -117,6 +128,15 @@ export interface Images {
    * PNG); without the binding, as they are when within MODEL_BYTES, else `tooLarge`.
    */
   fitForModel(bytes: Uint8Array, media: string): Promise<ModelImage>;
+  /**
+   * Bytes transformed for a new attachment (TEMPRA-208, MCP `transform`), not cached: what was
+   * asked, in `format`. Null with no binding; throws Images' own error.
+   */
+  transform(
+    bytes: Uint8Array,
+    t: ImageTransform,
+    format: VariantFormat,
+  ): Promise<ScaledImage | null>;
 }
 
 export function imagesService(d: {
@@ -166,6 +186,14 @@ export function imagesService(d: {
 
   return {
     scaled,
+    async transform(bytes, t, format) {
+      if (!d.transformer) return null;
+      const out = await d.transformer
+        .input(toStream(bytes))
+        .transform(t)
+        .output({ format: MEDIA[format], quality: QUALITY[format] });
+      return { bytes: await readBytes(out.image()), media: out.contentType() || MEDIA[format] };
+    },
     async fitForModel(bytes, media) {
       const info = imageInfo(bytes);
       const edge = info?.ok ? Math.max(info.width, info.height) : Number.POSITIVE_INFINITY;

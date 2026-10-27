@@ -607,7 +607,7 @@ describe("the reader's image route (TEMPRA-162)", () => {
           transform: (t) => ({
             output: async (o) => {
               await new Response(stream).arrayBuffer();
-              calls.push({ width: t.width, format: o.format });
+              calls.push({ width: t.width ?? 0, format: o.format });
               if (opts.fail) throw new Error("ERROR 9422: not enabled");
               return {
                 image: () => new Response(WEBP).body as ReadableStream<Uint8Array>,

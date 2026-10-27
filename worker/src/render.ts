@@ -65,6 +65,59 @@ export const RENDER_WIDTH = 680;
 /** The Renderer entrypoint's RPC, as the RENDER binding exposes it. */
 export interface RenderService {
   render(req: RenderRequest): Promise<RenderResult>;
+  /** A video's frame at `time` seconds from a signed URL, as a PNG (TEMPRA-208). */
+  poster?(req: { url: string; time: number }): Promise<PosterResult>;
+}
+
+/** A poster frame, or why there is none. */
+export type PosterResult = { png: Uint8Array; width: number; height: number } | { error: string };
+
+export type PosterFrame = (
+  req: { url: string; time: number },
+  ctx: RenderContext,
+) => Promise<PosterResult>;
+
+/** How long a caller waits for a poster frame (loading the video and seeking in a browser). */
+export const POSTER_TIMEOUT_MS = 45_000;
+
+/**
+ * The poster client over the RENDER binding (TEMPRA-208), metered as `render`; without the
+ * binding (local dev) it says so, and it never throws.
+ */
+export function servicePoster(
+  service: RenderService | undefined,
+  meter?: (e: UsageEvent) => void,
+  timeoutMs = POSTER_TIMEOUT_MS,
+): PosterFrame {
+  return async (req, ctx) => {
+    if (!service?.poster) return { error: RENDER_UNAVAILABLE };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const r = await Promise.race([
+        service.poster(req),
+        new Promise<PosterResult>((resolve) => {
+          timer = setTimeout(
+            () => resolve({ error: `${RENDER_UNAVAILABLE}: no frame in ${timeoutMs / 1000} s` }),
+            timeoutMs,
+          );
+        }),
+      ]);
+      if ("png" in r) {
+        meter?.({
+          kind: "render",
+          account: ctx.account,
+          library: ctx.library,
+          bytes: r.png.byteLength,
+        });
+      }
+      return r;
+    } catch (e) {
+      console.error(JSON.stringify({ poster_failed: String(e) }));
+      return { error: RENDER_UNAVAILABLE };
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
+    }
+  };
 }
 
 /** Who a render counts against, for metering. */

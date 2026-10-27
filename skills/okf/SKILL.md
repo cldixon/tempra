@@ -96,6 +96,8 @@ Gross margin equals recognized [revenue](/metrics/revenue.md) minus full COGS.[^
 
 Images (PNG, JPEG, GIF, WebP, AVIF, SVG) are checked on write: a broken one is refused with `bad_image`, and the type comes from the bytes. Give an attachment a one-line `description` (up to 500 characters), and give it its `credit` and `licence` (up to 200 characters each); the file's page shows them. A file the person gave you or you made carries its own `credit` and `licence` and needs no `sources` entry: say who supplied it (`Photo supplied by @ann`) and the licence if known.
 
+**Changing a stored file.** You cannot fetch an attachment to change it, so `transform` does it on the server: `resize` to a long `edge` (never enlarged; the fix for `image_large`), `crop` to a `box`, `convert` to WebP, PNG or JPEG, a `thumbnail`, or a video's `poster` (its frame at `time` seconds, written as `x.poster.png` beside the video, which the reader shows before it plays; WebM only for now, as the server cannot decode MP4's H.264). Resize and crop replace the image in place with `if_match`, or write to `to`; the others write beside it. The result is your write, recorded as made from the original; its description, credit and licence carry over.
+
 **Where it lives.** Beside the concept that uses it, named for what it shows: `dir/x.md` uses `dir/x-architecture.png`. Link it by absolute path.
 
 **How to write it.** `![what it shows](/dir/x-architecture.png "Caption")`: the alt says what the image shows (what a screen reader says, and what an agent reads when it does not ask for the image); the title is the caption. For a width, a placement or a group, wrap one to four images, one to a line, in a `:::figure` block:

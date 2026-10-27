@@ -404,6 +404,19 @@ describe("the image's page (TEMPRA-170)", () => {
       name: view,
     });
     expect(supplied).toContain("</span>, file supplied by @ann</div>");
+    // Made on the server from another file by an agent's transform (TEMPRA-208).
+    const made = markup(SourceFact, {
+      urls,
+      source: null,
+      madeFrom: { path: "app/photo.png", hash: "h", op: "resize 1092" },
+      version: v ?? null,
+      uses: [],
+      titles,
+      name: view,
+    });
+    expect(made).toContain("Made by <span");
+    expect(made).toContain(' from <a href="/cl_dixon/tempra-dev/app/photo.png">photo.png</a>');
+    expect(made).not.toContain("Uploaded by");
     expect(uploaded).toContain("<b>Claude Code</b>");
     expect(uploaded).not.toContain("Cited");
   });

@@ -29,7 +29,7 @@ import { normalizePath, underPrefix } from "./okf/paths";
 import type { JsonObject } from "./okf/types";
 import { fromThisSite } from "./origin";
 import type { RestoreOutcome, RestoreRecord } from "./recovery";
-import type { RenderContext, RenderDiagram } from "./render";
+import type { PosterFrame, RenderContext, RenderDiagram } from "./render";
 import { readCookie, SESSION_COOKIE, type Sessions } from "./session";
 import { type Mailer, registerSignInRoutes } from "./signin";
 import { OkfError } from "./store/errors";
@@ -115,6 +115,8 @@ export interface Deps extends UsageDeps {
    * absent, or with no RENDER binding, it answers "render unavailable".
    */
   renderDiagram?: RenderDiagram;
+  /** A video's frame for a poster through the render Worker (TEMPRA-208); absent, unavailable. */
+  posterFrame?: PosterFrame;
   /**
    * How long a write's answer waits for its diagrams' verdicts from the render service
    * (render-lint.ts, TEMPRA-167); RENDER_LINT_BUDGET_MS unless set.
@@ -1557,6 +1559,8 @@ async function fileJson(lib: LibraryClient, blobs: BlobStore, view: FileView) {
       supplied_by: v.supplied_by ?? null,
       // Who had the file for an upload: the person, or the agent that made it (TEMPRA-205).
       origin: v.origin ?? null,
+      // What it was made from on the server (TEMPRA-208).
+      made_from: v.made_from ?? null,
     };
   }
   if (view.kind === "derived") {
