@@ -458,8 +458,9 @@ export async function bundleFiles(
 
 /**
  * A library's bundle as tar bytes, attachments read from blob storage (spec: Reads and export).
- * With `diagrams`, each concept's Mermaid fences are drawn beside it as SVG (TEMPRA-168): on for
- * downloads, off for the nightly export so it stays small (TEMPRA-83).
+ * With `diagrams`, each concept's Mermaid, SVG and Vega-Lite fences are drawn beside it as SVG
+ * (TEMPRA-168, TEMPRA-206, TEMPRA-207): on for downloads, off for the nightly export so it stays
+ * small (TEMPRA-83).
  */
 export async function bundleTar(
   lib: { exportBundle(at?: number): unknown },
@@ -482,7 +483,13 @@ export async function bundleTar(
     }
   }
   if (opts.diagrams) {
-    for (const d of await drawnDiagrams(bundle.files, opts.diagrams)) {
+    // A chart's data files are in the bundle already (TEMPRA-207).
+    const byPath = new Map(files.map((f) => [f.path, f.bytes]));
+    const read = async (path: string) => {
+      const bytes = byPath.get(path);
+      return bytes ? new TextDecoder().decode(bytes) : null;
+    };
+    for (const d of await drawnDiagrams(bundle.files, { read, ...opts.diagrams })) {
       files.push({ path: d.path, bytes: enc.encode(d.svg) });
     }
   }

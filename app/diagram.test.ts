@@ -214,3 +214,49 @@ describe("SVG fences (TEMPRA-206)", () => {
     );
   });
 });
+
+describe("Vega-Lite fences (TEMPRA-207)", () => {
+  const spec = {
+    data: { url: "/data/sales.csv" },
+    mark: "bar",
+    encoding: { x: { field: "month", type: "ordinal" }, y: { field: "v", type: "quantitative" } },
+  };
+  const chartBody = (s: unknown, meta = 'alt="Sales by month" title="Sales"') =>
+    `Before.\n\n\`\`\`vega-lite ${meta}\n${JSON.stringify(s)}\n\`\`\`\n\nAfter.`;
+  const drawn = async (md: string, files: Record<string, string>) => {
+    const read: string[] = [];
+    const p = prepare(stored(md), {
+      path: "notes/q.md",
+      fileText: async (path) => {
+        read.push(path);
+        return files[path] ?? null;
+      },
+    });
+    const out = drawBody(p, () => {});
+    for (let i = 0; i < 300 && !out.host.querySelector(".diagram-svg svg, .diagram-notice"); i++) {
+      await tick();
+    }
+    return { ...out, read };
+  };
+
+  test("drawn by Vega with its data from the library, named by its alt, in the numbering", async () => {
+    const { host, read } = await drawn(chartBody(spec), {
+      "data/sales.csv": "month,v\nJan,3\nFeb,5\n",
+    });
+    expect(read).toEqual(["data/sales.csv"]);
+    const svg = host.querySelector("figure.diagram .diagram-svg svg");
+    expect(svg).not.toBeNull();
+    expect(svg?.querySelectorAll("path").length).toBeGreaterThan(0);
+    expect(svg?.outerHTML).not.toContain("data-pele-style");
+    expect(host.querySelector(".diagram-svg")?.getAttribute("aria-label")).toBe("Sales by month");
+    expect(host.querySelector("figure.diagram figcaption")?.textContent).toBe("Figure 1. Sales");
+  });
+
+  test("data it cannot read shows its source with why", async () => {
+    const { host } = await drawn(chartBody({ ...spec, description: "Sales" }, ""), {});
+    const figure = host.querySelector("figure.diagram.failed");
+    expect(figure?.querySelector(".diagram-notice")?.textContent).toBe(
+      "Chart not drawn: no file at /data/sales.csv for the chart's data",
+    );
+  });
+});

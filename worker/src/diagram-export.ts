@@ -9,6 +9,7 @@
  * budget and a few renders at a time. Free of Worker APIs.
  */
 import { FIGURE_FENCES, findFigures, parseMarkdown, sanitizeSvg } from "@tempra/editor/doc";
+import { chartForRender } from "./chart-data";
 import { splitFrontmatter } from "./okf/concept";
 import { RENDER_WIDTH, type RenderContext, type RenderDiagram } from "./render";
 
@@ -20,8 +21,10 @@ export const EXPORT_DIAGRAMS_MS = 60_000;
 export const EXPORT_RENDER_CONCURRENCY = 4;
 
 export interface DiagramExport {
-  /** Draws Mermaid; without it only SVG fences are exported. */
+  /** Draws Mermaid and charts; without it only SVG fences are exported. */
   render?: RenderDiagram;
+  /** A bundle file's text, for a chart's data (TEMPRA-207); without it, charts with data files are left out. */
+  read?: (path: string) => Promise<string | null>;
   /** Whose renders these are, for metering. */
   ctx: RenderContext;
   max?: number;
@@ -30,7 +33,7 @@ export interface DiagramExport {
 }
 
 const DERIVED = /^(.*)\.diagrams\/\d+\.svg$/;
-const HAS_FENCE = /(?:`{3,}|~{3,})[ \t]*(?:mermaid|svg)/i;
+const HAS_FENCE = /(?:`{3,}|~{3,})[ \t]*(?:mermaid|svg|vega-lite)/i;
 
 /** Where a concept's drawn diagrams go: `a/b.md` → `a/b.diagrams/`. */
 export function diagramsDir(conceptPath: string): string {
@@ -48,6 +51,8 @@ export interface DiagramJob {
   path: string;
   source: string;
   lang: string;
+  /** The concept it is in, where a chart's data paths resolve from. */
+  concept: string;
 }
 
 /** The drawn fences of a bundle's concepts, as export paths and sources, in bundle order. */
@@ -64,7 +69,12 @@ export function diagramJobs(files: { path: string; text?: string }[]): DiagramJo
       const path = `${dir}${fig.n}.svg`;
       // A real file at that path is the library's own; keep it and draw nothing over it.
       if (!taken.has(path) && fig.node.value.trim()) {
-        jobs.push({ path, source: fig.node.value, lang: (fig.node.lang ?? "").toLowerCase() });
+        jobs.push({
+          path,
+          source: fig.node.value,
+          lang: (fig.node.lang ?? "").toLowerCase(),
+          concept: f.path,
+        });
       }
     }
   }
@@ -86,14 +96,23 @@ export async function drawnDiagrams(
     if (r.ok) drawn[i] = r.svg;
   }
   const render = opts.render;
-  const queue = render ? [...jobs.keys()].filter((i) => jobs[i]?.lang === "mermaid") : [];
+  const queue = render
+    ? [...jobs.keys()].filter((i) => jobs[i]?.lang === "mermaid" || jobs[i]?.lang === "vega-lite")
+    : [];
   let next = 0;
   let over = false;
   const worker = async () => {
     while (!over && next < queue.length && render) {
       const i = queue[next++] as number;
       const job = jobs[i] as DiagramJob;
-      const r = await render({ source: job.source, width: RENDER_WIDTH, theme: "light" }, opts.ctx);
+      let source = job.source;
+      if (job.lang === "vega-lite") {
+        const chart = await chartForRender(source, job.concept, opts.read ?? (async () => null));
+        if (!chart.ok) continue;
+        source = chart.source;
+      }
+      const lang = job.lang === "vega-lite" ? ({ lang: "vega-lite" } as const) : {};
+      const r = await render({ source, ...lang, width: RENDER_WIDTH, theme: "light" }, opts.ctx);
       if (!over && r.svg && !r.error) drawn[i] = r.svg;
     }
   };

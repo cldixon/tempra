@@ -1835,6 +1835,56 @@ async function browserRenders(
       await agentDeletes("gate-svg.md");
     });
 
+    // Charts (TEMPRA-207): a Vega-Lite fence drawn by Vega in the page with its data from a CSV in
+    // the library, within the CSP (no 'unsafe-eval': Vega runs its interpreter; a violation is a
+    // console error, which fails the gate), named by its alt.
+    await step("charts: a Vega-Lite fence drawn from a library CSV", async () => {
+      const csv = await fetch(`${libApi}/files/gate-chart.csv`, {
+        method: "PUT",
+        headers: { ...bearer, "Content-Type": "text/csv", "X-Note": "gate: chart data" },
+        body: "month,orders\nJan,120\nFeb,95\nMar,140\n",
+      });
+      if (!csv.ok) throw new Error(`csv: ${csv.status} ${await csv.text()}`);
+      const spec = {
+        data: { url: "/gate-chart.csv" },
+        mark: "bar",
+        encoding: {
+          x: { field: "month", type: "ordinal", sort: null },
+          y: { field: "orders", type: "quantitative" },
+        },
+      };
+      const put = await fetch(`${libApi}/files/gate-chart.md`, {
+        method: "PUT",
+        headers: { ...bearer, "Content-Type": "text/markdown", "X-Note": "gate: chart" },
+        body: [
+          "---\ntype: Note\ntitle: Gate chart\ndescription: A chart.\n---",
+          "Before.\n",
+          '```vega-lite alt="Orders by month" title="Orders"',
+          JSON.stringify(spec, null, 2),
+          "```\n",
+          "After.\n",
+        ].join("\n"),
+      });
+      if (!put.ok) throw new Error(`write: ${put.status} ${await put.text()}`);
+      const lint = ((await put.json()) as { lint?: { code: string }[] }).lint ?? [];
+      if (lint.some((l) => l.code === "chart_invalid" || l.code === "image_no_alt")) {
+        throw new Error(`chart lint: ${JSON.stringify(lint)}`);
+      }
+      await page.goto(`${base}/${owner}/${slug}/gate-chart.md`);
+      const figure = page.locator(".body figure.diagram[data-opaque]");
+      const svg = figure.locator(".diagram-svg svg");
+      await svg.waitFor({ timeout: 20_000 });
+      if (!(await svg.locator("text", { hasText: "Feb" }).count())) {
+        throw new Error("the chart's labels are missing");
+      }
+      if ((await figure.locator(".diagram-svg").getAttribute("aria-label")) !== "Orders by month") {
+        throw new Error("the chart is not named by its alt");
+      }
+      if (shots) await page.screenshot({ path: `${shots}/chart.png` });
+      await agentDeletes("gate-chart.md");
+      await agentDeletes("gate-chart.csv");
+    });
+
     // Figures (tempra-dev: app/reader, Figures): an image alone in its paragraph is a numbered
     // figure that opens the full-screen view, which steps through the concept's figures.
     await step("figures: an image opens the full-screen view, and Escape closes it", async () => {

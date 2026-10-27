@@ -7,7 +7,8 @@
  * budget, the write's own result. "render unavailable" (no RENDER binding, the service down or
  * slow) is no verdict: no lint, and never a failed write.
  */
-import type { LibraryClient } from "./client";
+import { chartForRender, libraryText } from "./chart-data";
+import type { BlobStore, LibraryClient } from "./client";
 import type { LintWarning } from "./okf/types";
 import { RENDER_UNAVAILABLE, type RenderContext, type RenderDiagram } from "./render";
 import type { ImportResult, OpResult, RenderJob, RenderVerdict } from "./store/store";
@@ -17,6 +18,8 @@ export const RENDER_LINT_BUDGET_MS = 300;
 
 export interface RenderLintDeps {
   renderDiagram?: RenderDiagram;
+  /** Where a chart's data files are read from (TEMPRA-207). */
+  blobs?: BlobStore;
   /** RENDER_LINT_BUDGET_MS unless set (tests). */
   renderBudgetMs?: number;
 }
@@ -31,15 +34,29 @@ export type RenderedLint = { path: string; hash: string; lint: LintWarning[] }[]
  */
 export async function lintRenders(
   d: RenderLintDeps,
-  lib: Pick<LibraryClient, "setDiagramRenders">,
+  lib: Pick<LibraryClient, "setDiagramRenders" | "read">,
   jobs: RenderJob[],
   ctx: RenderContext,
   waitUntil?: (p: Promise<unknown>) => void,
 ): Promise<RenderedLint | null> {
   const render = d.renderDiagram;
   if (!render || jobs.length === 0) return null;
-  const verdict = async (g: RenderJob["diagrams"][number]): Promise<RenderVerdict | null> => {
-    const r = await render({ source: g.source, theme: "light", png: false }, ctx);
+  const verdict = async (
+    g: RenderJob["diagrams"][number],
+    path: string,
+  ): Promise<RenderVerdict | null> => {
+    let source = g.source;
+    if (g.lang === "vega-lite") {
+      // Its data inline first; data that cannot be read is no verdict on the chart.
+      if (!d.blobs) return null;
+      const chart = await chartForRender(source, path, libraryText(lib, d.blobs));
+      if (!chart.ok) return null;
+      source = chart.source;
+    }
+    const r = await render(
+      { source, ...(g.lang ? { lang: g.lang } : {}), theme: "light", png: false },
+      ctx,
+    );
     if (r.svg) return { key: g.key, error: null };
     if (!r.error || r.error.message.startsWith(RENDER_UNAVAILABLE)) return null;
     const { message, line, column } = r.error;
@@ -50,7 +67,7 @@ export async function lintRenders(
       jobs.map(async (j) => ({
         concept_id: j.concept_id,
         hash: j.hash,
-        verdicts: (await Promise.all(j.diagrams.map(verdict))).filter(
+        verdicts: (await Promise.all(j.diagrams.map((g) => verdict(g, j.path)))).filter(
           (v): v is RenderVerdict => v !== null,
         ),
       })),
@@ -74,7 +91,7 @@ export async function lintRenders(
 }
 
 const withUnrendered = (lint: LintWarning[], unrendered: LintWarning[]) => [
-  ...lint.filter((l) => l.code !== "diagram_unrendered"),
+  ...lint.filter((l) => l.code !== "diagram_unrendered" && !l.rendered),
   ...unrendered,
 ];
 

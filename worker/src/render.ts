@@ -8,6 +8,7 @@
  */
 import { sanitizeSvg } from "@tempra/editor/doc";
 import type { RenderLang, RenderRequest, RenderResult } from "../render/src/render";
+import { MAX_CHART_SOURCE } from "../render/src/version";
 import type { UsageEvent } from "./usage";
 
 export type { RenderError, RenderLang, RenderRequest, RenderResult } from "../render/src/render";
@@ -33,8 +34,8 @@ export function forRenderer(
   return { ok: true, req: { ...req, source: r.svg } };
 }
 
-/** The fence languages the server draws (TEMPRA-166, TEMPRA-206). */
-export const RENDER_LANGS = ["mermaid", "svg"] as const;
+/** The fence languages the server draws (TEMPRA-166, TEMPRA-206, TEMPRA-207). */
+export const RENDER_LANGS = ["mermaid", "svg", "vega-lite"] as const;
 
 export function isRenderLang(lang: string): lang is RenderLang {
   return (RENDER_LANGS as readonly string[]).includes(lang);
@@ -42,7 +43,7 @@ export function isRenderLang(lang: string): lang is RenderLang {
 
 /** Who refuses a source of a language, as an agent is told: "Pele could not draw it". */
 export function drawerOf(lang: string): string {
-  return lang === "mermaid" ? "Pele" : "Tempra";
+  return lang === "mermaid" ? "Pele" : lang === "vega-lite" ? "Vega" : "Tempra";
 }
 
 /** The message of a render that could not reach the render Worker. */
@@ -87,7 +88,8 @@ export function serviceRenderer(
 ): RenderDiagram {
   return async (req, ctx) => {
     if (!service) return failed(RENDER_UNAVAILABLE);
-    if (req.source.length > MAX_RENDER_SOURCE) {
+    // A chart arrives with its data inline (chart-data.ts), so it may be larger.
+    if (req.source.length > (req.lang === "vega-lite" ? MAX_CHART_SOURCE : MAX_RENDER_SOURCE)) {
       return failed(`The diagram is longer than the limit of ${MAX_RENDER_SOURCE} characters.`);
     }
     const sent = forRenderer(req);

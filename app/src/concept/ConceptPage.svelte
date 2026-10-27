@@ -113,6 +113,13 @@
         return ref ? attachmentSource(urls, ref, path) : null;
       },
       exists: (path) => !broken.has(path),
+      // A chart's data file, as the file's own route answers it (TEMPRA-207).
+      fileText: async (path) => {
+        const res = await fetch(urls.api(`files/${path.split("/").map(encodeURIComponent).join("/")}`), {
+          credentials: "same-origin",
+        }).catch(() => null);
+        return res?.ok ? res.text() : null;
+      },
       footnote: (label, defined) => {
         if (!sourceIds.has(label) && !defined) return null;
         if (!numbers.has(label)) numbers.set(label, numbers.size + 1);

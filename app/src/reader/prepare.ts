@@ -22,6 +22,7 @@ import {
 } from "@tempra/editor";
 import type { Code, FootnoteDefinition, Image, Nodes, Paragraph } from "mdast";
 import type { ImageSource } from "../images";
+import type { ChartSource } from "./diagram";
 
 /** How links, images and footnote references in a body point. All optional. */
 export interface BodyOptions {
@@ -45,6 +46,8 @@ export interface BodyOptions {
    * and its size (TEMPRA-162). Null or absent: the `href` for the image, with no size.
    */
   image?(path: string): ImageSource | null;
+  /** A library file's text, for a chart's data (TEMPRA-207); null when there is none. */
+  fileText?(path: string): Promise<string | null>;
 }
 
 export interface Heading {
@@ -112,6 +115,8 @@ export interface DiagramFigure extends FigureBase {
   node: Code;
   /** The fence's source. */
   source: string;
+  /** For a chart, where its data comes from (TEMPRA-207). */
+  chart?: ChartSource;
 }
 
 export interface Prepared {
@@ -251,6 +256,9 @@ export function prepare(tree: Doc, options: BodyOptions = {}): Prepared {
         caption: fenceTitle(found.node.meta),
         node: found.node,
         source: found.node.value,
+        ...(found.node.lang?.toLowerCase() === "vega-lite" && options.fileText
+          ? { chart: { path: options.path ?? "", read: options.fileText } }
+          : {}),
       };
       figures.push(f);
       figureOf.set(found.node, f);

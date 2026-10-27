@@ -8,10 +8,11 @@
  */
 import { interLatinWoff2, peleThemeHash, peleThemes } from "@tempra/design/pele";
 import { PeleError, render as peleRender } from "pele";
+import { chartSvg } from "./chart";
 import { PELE_MESSAGE_FORMAT, peleMessage } from "./message";
-import { PELE_VERSION } from "./version";
+import { MAX_CHART_SOURCE, PELE_VERSION, VEGA_LITE_VERSION } from "./version";
 
-export { PELE_MESSAGE_FORMAT, PELE_VERSION, peleMessage };
+export { MAX_CHART_SOURCE, PELE_MESSAGE_FORMAT, PELE_VERSION, peleMessage };
 
 /** Where renders live in the deployment's blobs bucket; the blob sweep works on blobs/ only. */
 export const RENDERS_PREFIX = "renders/";
@@ -28,11 +29,12 @@ export const RASTER_TIMEOUT_MS = 20_000;
 export type Theme = "light" | "dark";
 
 /**
- * What a source is: a Mermaid diagram (the default, drawn by Pele), or an SVG fence (TEMPRA-206),
+ * What a source is: a Mermaid diagram (the default, drawn by Pele); an SVG fence (TEMPRA-206),
  * which the caller has already sanitized (@tempra/editor `sanitizeSvg`) and which is only themed
- * and rasterized here.
+ * and rasterized here; or a Vega-Lite spec (TEMPRA-207) with its data already inline, drawn by
+ * Vega (./chart.ts).
  */
-export type RenderLang = "mermaid" | "svg";
+export type RenderLang = "mermaid" | "svg" | "vega-lite";
 
 export interface RenderRequest {
   source: string;
@@ -119,7 +121,12 @@ export function cacheKey(
   format: "svg" | "png",
   lang: RenderLang = "mermaid",
 ): string {
-  const by = lang === "svg" ? "svg-1" : `pele-${PELE_VERSION}`;
+  const by =
+    lang === "svg"
+      ? "svg-1"
+      : lang === "vega-lite"
+        ? `vl-${VEGA_LITE_VERSION}`
+        : `pele-${PELE_VERSION}`;
   return `${RENDERS_PREFIX}${sourceHash}/${by}/${theme}-${peleThemeHash}/w${width}.${format}`;
 }
 
@@ -200,14 +207,14 @@ function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
 /** Checks a request; null when it may be drawn. */
 export function refusal(req: RenderRequest): RenderError | null {
   if (typeof req?.source !== "string") return { message: "No source.", line: 0, column: 0 };
-  if (req.source.length > MAX_SOURCE)
+  if (req.source.length > (req.lang === "vega-lite" ? MAX_CHART_SOURCE : MAX_SOURCE))
     return {
       message: `The diagram is longer than the limit of ${MAX_SOURCE} characters.`,
       line: 0,
       column: 0,
     };
-  if (req.lang !== undefined && req.lang !== "mermaid" && req.lang !== "svg")
-    return { message: 'lang must be "mermaid" or "svg".', line: 0, column: 0 };
+  if (req.lang !== undefined && !["mermaid", "svg", "vega-lite"].includes(req.lang))
+    return { message: 'lang must be "mermaid", "svg" or "vega-lite".', line: 0, column: 0 };
   if (req.theme !== "light" && req.theme !== "dark")
     return { message: 'theme must be "light" or "dark".', line: 0, column: 0 };
   const w = req.width ?? 0;
@@ -243,7 +250,9 @@ export async function renderDiagram(req: RenderRequest, deps: RenderDeps): Promi
       svg =
         lang === "svg"
           ? svgFigure(req.source, req.theme, width)
-          : themed(peleRender(req.source, peleOptions(width, idPrefixFor(hash))).svg, req.theme);
+          : lang === "vega-lite"
+            ? await chartSvg(req.source, req.theme, width)
+            : themed(peleRender(req.source, peleOptions(width, idPrefixFor(hash))).svg, req.theme);
     } catch (e) {
       const error = errorOf(e);
       await deps.cache

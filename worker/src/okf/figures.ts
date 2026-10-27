@@ -9,6 +9,7 @@ import {
   fenceTitle,
   findFigures,
   linkTarget,
+  parseChart,
   sanitizeSvg,
 } from "@tempra/editor/doc";
 import { diagramTypeOf } from "./diagrams";
@@ -68,15 +69,20 @@ export function figureFacts(
       const lang = (f.node.lang ?? "").toLowerCase();
       const svg = lang === "svg";
       const checked = svg && !fenceAttr(f.node.meta, "alt") ? sanitizeSvg(f.node.value) : null;
+      // A chart says what it shows by its alt, else its spec's description (TEMPRA-207).
+      const chart = lang === "vega-lite" ? parseChart(f.node.value) : null;
+      const described =
+        chart?.ok && typeof chart.spec.description === "string" ? chart.spec.description : null;
       return {
         n: f.n,
         kind: "diagram",
         lang,
-        type: svg ? null : diagramTypeOf(f.node.value),
+        type: lang === "mermaid" ? diagramTypeOf(f.node.value) : null,
         title: fenceTitle(f.node.meta),
         ...(svg
           ? { alt: fenceAttr(f.node.meta, "alt") ?? (checked?.ok ? checked.title : null) }
           : {}),
+        ...(chart ? { alt: fenceAttr(f.node.meta, "alt") ?? described } : {}),
         source: f.node.value,
       };
     }
