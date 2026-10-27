@@ -13,7 +13,7 @@ import { type ContainerDirective, checkFigure, type FigureSpec, isFigure } from 
 import { type DocNode, walk } from "./tree";
 
 /** Fence languages drawn as figures (the app's registry draws them: app/src/reader/registry.ts). */
-export const FIGURE_FENCES: ReadonlySet<string> = new Set(["mermaid", "svg"]);
+export const FIGURE_FENCES: ReadonlySet<string> = new Set(["mermaid", "svg", "vega-lite"]);
 
 /** A fence's caption: `title="…"` (or `'…'`, or one word) in what follows its language. */
 export function fenceTitle(meta: string | null | undefined): string | null {

@@ -146,6 +146,9 @@ describe("MCP server", () => {
       "`currentColor`",
       "`svg_invalid`",
       "`svg_unsafe`",
+      "`vega-lite` fence",
+      "`chart_invalid`",
+      "`data.url`",
     ]) {
       expect(INSTRUCTIONS.toLowerCase()).toContain(term.toLowerCase());
       expect(skill.toLowerCase()).toContain(term.toLowerCase());

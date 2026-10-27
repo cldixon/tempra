@@ -11,11 +11,10 @@
    * text (`data-skip`). A diagram that fails shows its source as the default code block would,
    * where comments can anchor, with a quiet notice under it.
    */
-  import { fenceAttr } from "@tempra/editor/doc";
   import type { Code } from "mdast";
   import Icon from "../Icon.svelte";
   import Caption from "./Caption.svelte";
-  import { drawDiagram, type FigureLang, svgTitle } from "./diagram";
+  import { drawDiagram, fenceAlt, figureLang } from "./diagram";
   import { useOpenFigure } from "./open-figure";
   import type { BlockProps } from "./registry";
 
@@ -25,12 +24,10 @@
   let failed = $state.raw<{ source: string; message: string } | null>(null);
   const failure = $derived(failed?.source === node.value ? failed.message : null);
   const captionId = $props.id();
-  const lang = $derived<FigureLang>(node.lang?.toLowerCase() === "svg" ? "svg" : "mermaid");
-  // An SVG says what it shows (its alt); a Mermaid diagram is named by its caption (C-28).
-  const alt = $derived(
-    lang === "svg" ? (fenceAttr(node.meta, "alt") ?? svgTitle(node.value)) : null,
-  );
-  const kind = $derived(lang === "svg" ? "SVG" : "Diagram");
+  const lang = $derived(figureLang(node.lang));
+  // An SVG or a chart says what it shows (its alt); a Mermaid diagram is named by its caption (C-28).
+  const alt = $derived(fenceAlt(lang, node.meta, node.value));
+  const kind = $derived(lang === "svg" ? "SVG" : lang === "vega-lite" ? "Chart" : "Diagram");
   const fail = (source: string, message: string) => {
     failed = { source, message };
   };
@@ -52,7 +49,7 @@
             role="img"
             aria-labelledby={figure && !alt ? captionId : undefined}
             aria-label={alt ?? (figure ? undefined : kind)}
-            {@attach drawDiagram(node.value, `d${id ?? ""}-`, fail, lang)}
+            {@attach drawDiagram(node.value, `d${id ?? ""}-`, fail, lang, figure?.kind === "diagram" ? figure.chart : undefined)}
           ></div
         >{/if}<span class="figure-tools" data-skip=""
         ><button
@@ -65,7 +62,7 @@
         >{#if open && figure}<button
             type="button"
             class="figure-enlarge"
-            aria-label={`Enlarge ${lang === "svg" ? "figure" : "diagram"}${figure.caption ? `: ${figure.caption}` : ""}`}
+            aria-label={`Enlarge ${lang === "mermaid" ? "diagram" : lang === "svg" ? "figure" : "chart"}${figure.caption ? `: ${figure.caption}` : ""}`}
             onclick={(e) => {
               e.stopPropagation();
               open(figure.n);

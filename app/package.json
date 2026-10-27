@@ -20,6 +20,9 @@
     "@tempra/editor": "workspace:*",
     "pele": "1.6.0",
     "svelte": "^5.57.2",
+    "vega": "6.4.0",
+    "vega-interpreter": "2.3.2",
+    "vega-lite": "6.5.0",
     "zod": "^4.6.5"
   },
   "devDependencies": {

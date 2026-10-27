@@ -16,7 +16,7 @@ import {
 } from "@tempra/editor/doc";
 import { stringify as yamlStringify } from "yaml";
 import { PELE_MESSAGE_FORMAT } from "../../render/src/message";
-import { PELE_VERSION } from "../../render/src/version";
+import { PELE_VERSION, VEGA_LITE_VERSION } from "../../render/src/version";
 import {
   buildRecord,
   deserializeRecord,
@@ -30,7 +30,14 @@ import {
   unaliasSourceUrls,
 } from "../okf/concept";
 import { type LogRequest, renderIndex, renderLog } from "../okf/derived";
-import { checkedFences, diagramLint, type RenderFailure, unrenderedWarning } from "../okf/diagrams";
+import {
+  chartRenderWarning,
+  checkedCharts,
+  checkedFences,
+  diagramLint,
+  type RenderFailure,
+  unrenderedWarning,
+} from "../okf/diagrams";
 import { unifiedDiff, unifiedDiffExcept } from "../okf/diff";
 import { figureLint } from "../okf/figure-lint";
 import { type FigureFact, figureFacts } from "../okf/figures";
@@ -276,7 +283,8 @@ export interface RenderJob {
   concept_id: string;
   path: string;
   hash: string;
-  diagrams: { key: string; source: string }[];
+  /** Each with its language when it is not Mermaid (a chart, TEMPRA-207). */
+  diagrams: { key: string; source: string; lang?: "vega-lite" }[];
 }
 
 /** Pele's verdict on a diagram's source: null when it draws, else where and why it failed. */
@@ -2767,21 +2775,31 @@ export class LibraryStore {
     hash: string,
     doc: Doc,
   ): LintWarning[] {
-    const fences = checkedFences(doc);
+    // Mermaid by Pele, and charts by Vega (TEMPRA-207), each verdict kept by its renderer's
+    // version and the source's hash.
+    const fences = [
+      ...checkedFences(doc).map((f) => ({ f, lang: undefined })),
+      ...checkedCharts(doc).map((f) => ({ f, lang: "vega-lite" as const })),
+    ];
     if (fences.length === 0) return [];
     const out: LintWarning[] = [];
-    const unknown: { key: string; source: string }[] = [];
-    for (const f of fences) {
+    const unknown: RenderJob["diagrams"] = [];
+    for (const { f, lang } of fences) {
       // The message's format too (TEMPRA-184): a verdict kept in an older shape is asked again.
-      const key = `${this.peleVersion}:m${PELE_MESSAGE_FORMAT}:${sha256Hex(f.source)}`;
+      const key = lang
+        ? `vl-${VEGA_LITE_VERSION}:${sha256Hex(f.source)}`
+        : `${this.peleVersion}:m${PELE_MESSAGE_FORMAT}:${sha256Hex(f.source)}`;
       const row = this.sql.all<{ error: string | null }>(
         "SELECT error FROM diagram_renders WHERE key = ?",
         key,
       )[0];
       if (!row) {
-        if (!unknown.some((u) => u.key === key)) unknown.push({ key, source: f.source });
+        if (!unknown.some((u) => u.key === key)) {
+          unknown.push({ key, source: f.source, ...(lang ? { lang } : {}) });
+        }
       } else if (row.error) {
-        out.push(unrenderedWarning(f, JSON.parse(row.error) as RenderFailure));
+        const e = JSON.parse(row.error) as RenderFailure;
+        out.push(lang ? chartRenderWarning(f, e) : unrenderedWarning(f, e));
       }
     }
     if (w && unknown.length > 0) {
@@ -2832,7 +2850,7 @@ export class LibraryStore {
         );
         const lint = [
           ...(JSON.parse(stored.lint ?? "[]") as LintWarning[]).filter(
-            (l) => l.code !== "diagram_unrendered",
+            (l) => l.code !== "diagram_unrendered" && !l.rendered,
           ),
           ...unrendered,
         ];

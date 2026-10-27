@@ -405,13 +405,18 @@ function place(src: string, at: number): { line: number; column: number } {
 
 /**
  * Reads an SVG fence's source and sanitizes it. `idPrefix` is put before every id and every
- * reference to one (the reader passes one per figure; exports and renders none).
+ * reference to one (the reader passes one per figure; exports and renders none). `maxLength`
+ * raises the size limit for SVG Tempra drew itself (a chart's, TEMPRA-207).
  */
-export function sanitizeSvg(source: string, opts: { idPrefix?: string } = {}): SvgCheck {
-  if (source.length > SVG_MAX_SOURCE) {
+export function sanitizeSvg(
+  source: string,
+  opts: { idPrefix?: string; maxLength?: number } = {},
+): SvgCheck {
+  const max = opts.maxLength ?? SVG_MAX_SOURCE;
+  if (source.length > max) {
     return {
       ok: false,
-      message: `it is longer than the limit of ${SVG_MAX_SOURCE} characters`,
+      message: `it is longer than the limit of ${max} characters`,
       line: 0,
       column: 0,
     };

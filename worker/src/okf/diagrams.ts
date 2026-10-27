@@ -8,7 +8,15 @@
  * and brackets that open and close. It reports only what Pele refuses too (tested against Pele,
  * which reads some types leniently); anything subtler is left to the reader's notice.
  */
-import { type Doc, fenceAttr, idOf, sanitizeSvg, walk } from "@tempra/editor/doc";
+import {
+  chartDataPaths,
+  type Doc,
+  fenceAttr,
+  idOf,
+  parseChart,
+  sanitizeSvg,
+  walk,
+} from "@tempra/editor/doc";
 import type { Code } from "mdast";
 import type { LintWarning } from "./types";
 
@@ -296,14 +304,92 @@ export function svgLint(code: Code, n: number): LintWarning[] {
   return out;
 }
 
-/** Lint for each diagram in a body that is plainly broken, and for each SVG fence. */
+/** The fences drawn as charts (TEMPRA-207): a code block whose language is `vega-lite`. */
+export function isChartFence(n: { type: string; lang?: string | null }): boolean {
+  return n.type === "code" && n.lang?.toLowerCase() === "vega-lite";
+}
+
+const chartName = (code: Code, n: number) => {
+  const block = idOf(code);
+  return `Vega-Lite chart ${n}${block ? ` (block ${block})` : ""}`;
+};
+
+/** What the write can tell of a chart without Vega: JSON, data only from the library. */
+function chartProblems(code: Code): { message: string; line: number; column: number }[] {
+  const r = parseChart(code.value);
+  if (!r.ok) {
+    return [{ message: `is not a Vega-Lite spec: ${r.message}`, line: r.line, column: r.column }];
+  }
+  return chartDataPaths(r.spec, "").problems.map((p) => ({ message: p, line: 0, column: 0 }));
+}
+
+/**
+ * Lint for a Vega-Lite fence on write (TEMPRA-207): `chart_invalid` when it is not a JSON object
+ * or names data outside the library (never fetched), `image_no_alt` when neither the fence's
+ * `alt="…"` nor the spec's `description` says what it shows. Vega-Lite's own compile errors come
+ * from the render service after the write (`chartRenderWarning`).
+ */
+export function chartLint(code: Code, n: number): LintWarning[] {
+  const block = idOf(code);
+  const out: LintWarning[] = chartProblems(code).map((p) => ({
+    code: "chart_invalid",
+    message: `${chartName(code, n)}${p.message.startsWith("is ") ? " " : ": "}${p.message}${
+      p.line > 0 ? ` (line ${p.line}, column ${p.column} of the fence)` : ""
+    }. The app shows its source until it draws; fix the fence.`,
+    block,
+  }));
+  const r = parseChart(code.value);
+  const described = r.ok && typeof r.spec.description === "string" && r.spec.description.trim();
+  if (r.ok && !fenceAttr(code.meta, "alt") && !described) {
+    out.push({
+      code: "image_no_alt",
+      message: `${chartName(code, n)} has no alt text: say what it shows with \`alt="…"\` after \`vega-lite\` on the fence (or a \`description\` in the spec).`,
+      block,
+    });
+  }
+  return out;
+}
+
+/** A chart the write's checks passed, for the render service to compile and draw (TEMPRA-207). */
+export function checkedCharts(doc: Doc): CheckedFence[] {
+  const out: CheckedFence[] = [];
+  let n = 0;
+  walk(doc, (node) => {
+    if (!isChartFence(node)) return undefined;
+    n++;
+    const code = node as Code;
+    if (chartProblems(code).length === 0) {
+      out.push({ n, code, block: idOf(code), source: code.value });
+    }
+    return false;
+  });
+  return out;
+}
+
+/** Vega's verdict on a chart the write's checks passed: `chart_invalid`, with its message. */
+export function chartRenderWarning(f: CheckedFence, e: RenderFailure): LintWarning {
+  const message = e.message.trim().replace(/[.…]?$/, (end) => end || ".");
+  return {
+    code: "chart_invalid",
+    message: `${chartName(f.code, f.n)} could not be drawn by Vega: ${message} The app shows its source until it draws; fix the fence (\`render\` previews it).`,
+    block: f.block,
+    rendered: true,
+  };
+}
+
+/** Lint for each diagram in a body that is plainly broken, and for each SVG and chart fence. */
 export function diagramLint(doc: Doc): LintWarning[] {
   const out: LintWarning[] = [];
   let n = 0;
   let svgs = 0;
+  let charts = 0;
   walk(doc, (node) => {
     if (isSvgFence(node)) {
       out.push(...svgLint(node as Code, ++svgs));
+      return false;
+    }
+    if (isChartFence(node)) {
+      out.push(...chartLint(node as Code, ++charts));
       return false;
     }
     if (!isDiagram(node)) return undefined;
@@ -382,5 +468,6 @@ export function unrenderedWarning(f: CheckedFence, e: RenderFailure): LintWarnin
     code: "diagram_unrendered",
     message: `${diagramName(f.code, f.n)} could not be drawn by Pele${at}: ${message} The app shows its source until it draws; fix the fence.`,
     block: f.block,
+    rendered: true,
   };
 }

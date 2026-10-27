@@ -9,7 +9,11 @@
   "dependencies": {
     "@cloudflare/puppeteer": "1.4.0",
     "@tempra/design": "workspace:*",
-    "pele": "1.6.0"
+    "@tempra/editor": "workspace:*",
+    "pele": "1.6.0",
+    "vega": "6.4.0",
+    "vega-interpreter": "2.3.2",
+    "vega-lite": "6.5.0"
   },
   "devDependencies": {
     "cf": "1.0.0-beta.9",

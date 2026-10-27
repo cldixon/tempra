@@ -10,6 +10,11 @@ export interface LintWarning {
   target?: string;
   /** The body block the warning is about (e.g. a diagram that does not parse). */
   block?: string;
+  /**
+   * Found by the render service after the write (TEMPRA-167, TEMPRA-207): replaced, not added to,
+   * when its next verdicts come.
+   */
+  rendered?: true;
 }
 
 /**
