@@ -9,7 +9,6 @@ import {
   figuresWithDimensions,
   type LibraryClient,
   mediaFor,
-  putBlob,
   withDimensions,
 } from "../client";
 import { type FetchFn, fetchBlob, selfHosts } from "../fetch-source";
