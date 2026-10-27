@@ -4947,6 +4947,11 @@ export class LibraryStore {
     const work = this.workCounts();
     return {
       seq: this.headSeq(),
+      // The newest event's time, the library list's last activity (TEMPRA-202).
+      last_activity:
+        this.sql.all<{ ts: string }>(
+          "SELECT ts FROM events WHERE seq = (SELECT MAX(seq) FROM events)",
+        )[0]?.ts ?? null,
       concepts,
       attachments,
       types,

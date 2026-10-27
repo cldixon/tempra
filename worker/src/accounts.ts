@@ -29,6 +29,8 @@ export type ReachableLibrary = LibraryRef & {
   role: Role;
   title?: string | null;
   description?: string | null;
+  /** When it was made (ISO), the library list's last activity before its first event. */
+  created?: string | null;
 };
 
 /** A member of a library, as its owner sees the list. */
@@ -523,11 +525,11 @@ export function d1Accounts(db: D1Database): Accounts {
       const r = await db
         .prepare(
           `SELECT l.id, l.slug, l.do_id, u.handle AS owner, 'owner' AS role, 0 AS shared,
-                  l.title, l.description
+                  l.title, l.description, l.created
            FROM libraries l JOIN users u ON u.id = l.owner WHERE l.owner = ?1
            UNION ALL
            SELECT l.id, l.slug, l.do_id, u.handle AS owner, m.role, 1 AS shared,
-                  l.title, l.description
+                  l.title, l.description, l.created
            FROM library_members m JOIN libraries l ON l.id = m.library
            JOIN users u ON u.id = l.owner
            WHERE m.user = ?1 AND u.suspended IS NULL

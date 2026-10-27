@@ -1230,7 +1230,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     const refs = await d.accounts.reachable(user.id);
     // Each library's summary fails on its own (TEMPRA-23): without it the list still names it.
     const libraries = await Promise.all(
-      refs.map(async ({ id, slug, owner, do_id, role, title, description }) => {
+      refs.map(async ({ id, slug, owner, do_id, role, title, description, created }) => {
         const row = {
           id,
           owner,
@@ -1238,6 +1238,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
           role,
           ...(title ? { title } : {}),
           ...(description ? { description } : {}),
+          last_activity: created ?? null,
         };
         let s: Awaited<ReturnType<LibraryClient["summary"]>>;
         try {
@@ -1254,6 +1255,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
         }
         return {
           ...row,
+          last_activity: s.last_activity ?? row.last_activity,
           seq: s.seq,
           concepts: s.concepts,
           attachments: s.attachments,
@@ -1262,6 +1264,10 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
         };
       }),
     );
+    // Newest activity first (TEMPRA-202): the last event, else when it was made; ties keep
+    // reachable's order (yours, then shared, by owner and name).
+    const at = (l: { last_activity: string | null }) => Date.parse(l.last_activity ?? "") || 0;
+    libraries.sort((a, b) => at(b) - at(a));
     return c.json({ libraries });
   });
 
