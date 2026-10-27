@@ -74,15 +74,21 @@ Gross margin equals recognized [revenue](/metrics/revenue.md) minus full COGS.[^
 
 ## Figures and media
 
-**When a figure helps.** A screenshot of what the page describes; a chart of data the page discusses. For an architecture or a flow, prefer a Mermaid diagram: it is text, diffs like text, and the app draws it. Leave out pictures that only decorate.
+**When a figure helps.** A screenshot of what the page describes; a chart of data the page discusses; a diagram of an architecture or a flow. Leave out pictures that only decorate.
+
+**Two kinds of media.** *Rendered media* is code in the concept that the app draws: a Mermaid diagram today. *Files* are images (PNG, JPEG, GIF, WebP, AVIF, SVG), video, audio and PDF, stored beside the concept. For a chart or a flow, prefer rendered media to a picture: it is a few hundred tokens of text, diffs like text, and needs no upload.
 
 **Diagrams** are Mermaid in a `mermaid` fence. Before writing a non-trivial one, preview it with `render` (`source`: the fence's body; or `path` and `figure` for one already written): it returns the drawing as an image, or Pele's error with line and column, writes nothing, and allows 60 renders a minute per account. On a write, `diagram_invalid` lint (an unknown type, nothing after the header, a bracket or quote left open) and `diagram_unrendered` lint (Pele, the renderer, could not draw it; in the write result, or only in `work` and the next `read`) both mean: fix the fence. Either is saved anyway, and the app shows its source.
 
-**Adding a file**, by what you have:
+**Adding a file.** A file comes in only two ways, and never as bytes you type into a call:
 
-- An image on the public web: `attach` with `source_url`. The server fetches it (https only, no credentials in the URL, at most 3 redirects, 10 s, up to 10 MB; images, video, audio and PDF, judged by the bytes; a refusal is `fetch_refused` naming the rule) and records the URL and fetch time as the file's source. That is not a citation: cite the original in the concept's `sources` too. Never hotlink.
-- A file you made, with a shell that reaches the server: `prepare_upload`, then run the `curl -T <file> '<url>'` line it returns (one PUT within an hour, up to 10 MB; curl prints the write result).
-- A file the person has (a photo they attached in the chat: you cannot pass on a chat's attachment), or one you made in a sandbox that cannot reach the server (curl fails to connect, or a proxy refuses it): `prepare_upload`. In a chat that shows apps, an upload panel appears with the call: the person chooses the file there, and the chat is told when it has arrived. Give them its upload link too, in case the panel does not show: signed in, they choose the file in their browser. Either way it is attached as your write, with your note, description, credit and licence, recorded as supplied by them. `read` the path to see when it has arrived.
+- **On the public web:** `attach` with `source_url`. The server fetches it (https only, no credentials in the URL, at most 3 redirects, 10 s, up to 10 MB; images, video, audio and PDF, judged by the bytes; a refusal is `fetch_refused` naming the rule) and records the URL and fetch time as the file's source. That is not a citation: cite the original in the concept's `sources` too. Never hotlink.
+- **Not on the web:** `prepare_upload` (up to 10 MB). It returns a `curl -T <file> '<url>'` line (one PUT within an hour) and an upload link for the person; in a chat that shows apps, an upload panel appears with the call. Then, by where the file is:
+  - Your shell reaches the server: run the curl line. curl prints the write result.
+  - The person has it (a photo they attached in the chat: you cannot pass on a chat's attachment): ask them to choose it in the upload panel, and give them the upload link in case the panel does not show.
+  - You made it where you cannot reach the server (curl fails to connect, or a proxy refuses it, as in a chat's sandbox): give the file to the person in the chat, call `prepare_upload` with `origin: "agent"`, and tell them in a sentence or two why they are asked: you cannot send files to Tempra yourself, so they upload the one you gave them. The panel and the link say the same.
+
+  From their browser it is attached as your write, with your note, description, credit and licence, recorded as supplied by them; `read` the path to see when it has arrived. Whatever file arrives is the file; a transfer cut short is refused (`incomplete_upload`).
 
 Images (PNG, JPEG, GIF, WebP, AVIF, SVG) are checked on write: a broken one is refused with `bad_image`, and the type comes from the bytes. Give an attachment a one-line `description` (up to 500 characters), and give it its `credit` and `licence` (up to 200 characters each); the file's page shows them. A file the person gave you or you made carries its own `credit` and `licence` and needs no `sources` entry: say who supplied it (`Photo supplied by @ann`) and the licence if known.
 
