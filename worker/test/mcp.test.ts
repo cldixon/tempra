@@ -142,6 +142,10 @@ describe("MCP server", () => {
       "never as bytes you type",
       '`origin: "agent"`',
       "you cannot send files to Tempra yourself",
+      "`svg` fence",
+      "`currentColor`",
+      "`svg_invalid`",
+      "`svg_unsafe`",
     ]) {
       expect(INSTRUCTIONS.toLowerCase()).toContain(term.toLowerCase());
       expect(skill.toLowerCase()).toContain(term.toLowerCase());

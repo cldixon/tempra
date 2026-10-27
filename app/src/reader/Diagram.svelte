@@ -1,6 +1,8 @@
 <script lang="ts">
   /**
-   * A `mermaid` fence drawn as a diagram (tempra-dev: app/diagrams), the registry's first entry.
+   * A fence drawn as a figure (tempra-dev: app/diagrams): a `mermaid` fence as a diagram, the
+   * registry's first entry, and an `svg` fence as its sanitized SVG (TEMPRA-206), named by its
+   * `alt="…"` or its own <title>.
    * Pele loads on demand (./pele.ts, through diagram.ts); the figure is drawn at its width and
    * again when that changes. It sits in a quiet frame with its caption below ("Figure n." and the
    * fence's `title="…"`) and two small controls in its corner: Source (the Mermaid source in
@@ -9,10 +11,11 @@
    * text (`data-skip`). A diagram that fails shows its source as the default code block would,
    * where comments can anchor, with a quiet notice under it.
    */
+  import { fenceAttr } from "@tempra/editor/doc";
   import type { Code } from "mdast";
   import Icon from "../Icon.svelte";
   import Caption from "./Caption.svelte";
-  import { drawDiagram } from "./diagram";
+  import { drawDiagram, type FigureLang, svgTitle } from "./diagram";
   import { useOpenFigure } from "./open-figure";
   import type { BlockProps } from "./registry";
 
@@ -22,6 +25,12 @@
   let failed = $state.raw<{ source: string; message: string } | null>(null);
   const failure = $derived(failed?.source === node.value ? failed.message : null);
   const captionId = $props.id();
+  const lang = $derived<FigureLang>(node.lang?.toLowerCase() === "svg" ? "svg" : "mermaid");
+  // An SVG says what it shows (its alt); a Mermaid diagram is named by its caption (C-28).
+  const alt = $derived(
+    lang === "svg" ? (fenceAttr(node.meta, "alt") ?? svgTitle(node.value)) : null,
+  );
+  const kind = $derived(lang === "svg" ? "SVG" : "Diagram");
   const fail = (source: string, message: string) => {
     failed = { source, message };
   };
@@ -29,21 +38,21 @@
 
 {#if failure !== null}
   <figure class="diagram failed" data-block={id}
-    ><pre data-text={offset} data-lang="mermaid"><code>{@render text?.()}</code></pre><p
+    ><pre data-text={offset} data-lang={lang}><code>{@render text?.()}</code></pre><p
       class="diagram-notice"
-      data-skip="">Diagram not drawn: {failure}</p
+      data-skip="">{kind} not drawn: {failure}</p
     >{#if figure}<Caption {figure} id={captionId} />{/if}</figure
   >
 {:else}
   <figure class="diagram" data-block={id} data-opaque=""
     ><div class="diagram-frame"
-      >{#if showSource}<pre class="diagram-source" data-lang="mermaid"><code>{node.value}</code></pre
+      >{#if showSource}<pre class="diagram-source" data-lang={lang}><code>{node.value}</code></pre
         >{:else}<!-- One image to a screen reader, named by its caption ("Figure 2. The flow"; C-28). --><div
             class="diagram-svg"
             role="img"
-            aria-labelledby={figure ? captionId : undefined}
-            aria-label={figure ? undefined : "Diagram"}
-            {@attach drawDiagram(node.value, `d${id ?? ""}-`, fail)}
+            aria-labelledby={figure && !alt ? captionId : undefined}
+            aria-label={alt ?? (figure ? undefined : kind)}
+            {@attach drawDiagram(node.value, `d${id ?? ""}-`, fail, lang)}
           ></div
         >{/if}<span class="figure-tools" data-skip=""
         ><button
@@ -56,7 +65,7 @@
         >{#if open && figure}<button
             type="button"
             class="figure-enlarge"
-            aria-label={`Enlarge diagram${figure.caption ? `: ${figure.caption}` : ""}`}
+            aria-label={`Enlarge ${lang === "svg" ? "figure" : "diagram"}${figure.caption ? `: ${figure.caption}` : ""}`}
             onclick={(e) => {
               e.stopPropagation();
               open(figure.n);

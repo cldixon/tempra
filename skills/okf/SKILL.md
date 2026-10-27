@@ -76,9 +76,11 @@ Gross margin equals recognized [revenue](/metrics/revenue.md) minus full COGS.[^
 
 **When a figure helps.** A screenshot of what the page describes; a chart of data the page discusses; a diagram of an architecture or a flow. Leave out pictures that only decorate.
 
-**Two kinds of media.** *Rendered media* is code in the concept that the app draws: a Mermaid diagram today. *Files* are images (PNG, JPEG, GIF, WebP, AVIF, SVG), video, audio and PDF, stored beside the concept. For a chart or a flow, prefer rendered media to a picture: it is a few hundred tokens of text, diffs like text, and needs no upload.
+**Two kinds of media.** *Rendered media* is code in the concept that the app draws: a Mermaid diagram, or a drawing in an `svg` fence. *Files* are images (PNG, JPEG, GIF, WebP, AVIF, SVG), video, audio and PDF, stored beside the concept. For a chart or a flow, prefer rendered media to a picture: it is a few hundred tokens of text, diffs like text, and needs no upload.
 
 **Diagrams** are Mermaid in a `mermaid` fence. Before writing a non-trivial one, preview it with `render` (`source`: the fence's body; or `path` and `figure` for one already written): it returns the drawing as an image, or Pele's error with line and column, writes nothing, and allows 60 renders a minute per account. On a write, `diagram_invalid` lint (an unknown type, nothing after the header, a bracket or quote left open) and `diagram_unrendered` lint (Pele, the renderer, could not draw it; in the write result, or only in `work` and the next `read`) both mean: fix the fence. Either is saved anyway, and the app shows its source.
+
+**SVG fences** are drawings written as SVG in an `svg` fence: `` ```svg alt="what it shows" title="Caption" ``. Use plain shapes and text, and `currentColor` for ink, which follows the reader's light and dark themes; up to 50 KB. The app draws it sanitized: scripts, event handlers, `<style>` elements (use attributes), images, links, animation and references outside the SVG are taken out and named as `svg_unsafe` lint; one that does not parse is `svg_invalid` lint with its line and column; no `alt="…"` and no `<title>` is `image_no_alt`. `render` with `lang: "svg"` previews one.
 
 **Adding a file.** A file comes in only two ways, and never as bytes you type into a call:
 

@@ -1,9 +1,30 @@
 /**
- * Drawing a `mermaid` fence (tempra-dev: app/diagrams; Diagram.svelte and the full-screen view):
- * Pele loads on demand (./pele.ts), and the diagram is drawn at its host's width and again when
- * that changes, as an attachment on the host element.
+ * Drawing a fence that is rendered media (tempra-dev: app/diagrams; Diagram.svelte and the
+ * full-screen view): a `mermaid` fence with Pele, loaded on demand (./pele.ts), drawn at its host's
+ * width and again when that changes; an `svg` fence sanitized (./svg-fence.ts, TEMPRA-206), which
+ * scales by its viewBox. Each is an attachment on the host element.
  */
 import type { Attachment } from "svelte/attachments";
+
+/** The fence languages drawn as figures, as the registry maps them. */
+export type FigureLang = "mermaid" | "svg";
+
+/**
+ * An SVG's own <title>, read without parsing (the fence's alt when it has no `alt="…"`); the
+ * sanitizer keeps the same element, so what is named is what is drawn.
+ */
+export function svgTitle(source: string): string | null {
+  const m = /<title\b[^>]*>([^<]*)<\/title>/.exec(source);
+  const t = (m?.[1] ?? "")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+  return t || null;
+}
 
 /** Pele's error, in a line. */
 export function reason(e: unknown): string {
@@ -19,6 +40,7 @@ export function drawDiagram(
   source: string,
   idPrefix: string,
   failed: (source: string, message: string) => void,
+  lang: FigureLang = "mermaid",
 ): Attachment<HTMLElement> {
   return (el) => {
     const view = el.ownerDocument.defaultView;
@@ -32,16 +54,19 @@ export function drawDiagram(
       drawnAt = width;
       const turn = ++latest;
       const font = view?.getComputedStyle(el).fontFamily;
-      import("./pele")
-        .then((pele) => pele.diagram(el.ownerDocument, source, { width, font, idPrefix }))
-        .then(
-          (svg) => {
-            if (live && turn === latest) el.replaceChildren(svg);
-          },
-          (e) => {
-            if (live) failed(source, reason(e));
-          },
-        );
+      (lang === "svg"
+        ? import("./svg-fence").then((m) => m.svgFigure(el.ownerDocument, source, idPrefix))
+        : import("./pele").then((pele) =>
+            pele.diagram(el.ownerDocument, source, { width, font, idPrefix }),
+          )
+      ).then(
+        (svg) => {
+          if (live && turn === latest) el.replaceChildren(svg);
+        },
+        (e) => {
+          if (live) failed(source, reason(e));
+        },
+      );
     };
     redraw();
     const resized =

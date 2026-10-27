@@ -163,3 +163,54 @@ describe("diagrams (tempra-dev: app/diagrams)", () => {
     expect(await svg()).not.toBeNull();
   });
 });
+
+describe("SVG fences (TEMPRA-206)", () => {
+  const svgBody = (src: string, meta = "") =>
+    `Before.\n\n\`\`\`svg${meta ? ` ${meta}` : ""}\n${src}\n\`\`\`\n\nAfter.`;
+  const drawn = async (md: string) => {
+    const out = drawBody(prepare(stored(md)), () => {});
+    for (let i = 0; i < 100 && !out.host.querySelector(".diagram-svg svg, .diagram-notice"); i++)
+      await tick();
+    return out;
+  };
+
+  test("drawn sanitized, styles through the CSSOM, named by its alt, a figure in the numbering", async () => {
+    const src =
+      '<svg viewBox="0 0 20 10" onload="x()"><script>x()</script><rect id="r" width="5" height="5" style="fill:currentColor;opacity:0.5"/><use href="#r" x="10"/></svg>';
+    const { host } = await drawn(svgBody(src, 'alt="Two squares" title="Squares"'));
+    const svg = host.querySelector("figure.diagram .diagram-svg svg");
+    expect(svg).not.toBeNull();
+    expect(host.querySelector("script")).toBeNull();
+    expect(svg?.getAttribute("onload")).toBeNull();
+    const rect = svg?.querySelector("rect") as SVGElement;
+    // Its id prefixed for this figure, and the reference with it.
+    expect(rect.getAttribute("id")).toMatch(/^d.+-r$/);
+    expect(svg?.querySelector("use")?.getAttribute("href")).toBe(`#${rect.getAttribute("id")}`);
+    // No style attribute parsed from markup; the declarations set through the CSSOM.
+    expect(svg?.outerHTML).not.toContain("data-pele-style");
+    expect(rect.style.getPropertyValue("opacity")).toBe("0.5");
+    const image = host.querySelector(".diagram-svg");
+    expect(image?.getAttribute("aria-label")).toBe("Two squares");
+    expect(host.querySelector("figure.diagram figcaption")?.textContent).toBe("Figure 1. Squares");
+    expect(host.querySelector(".figure-enlarge")?.getAttribute("aria-label")).toBe(
+      "Enlarge figure: Squares",
+    );
+  });
+
+  test("its <title> names it when the fence has no alt", async () => {
+    const { host } = await drawn(
+      svgBody('<svg><title>A dot &amp; a line</title><circle r="1"/></svg>'),
+    );
+    expect(host.querySelector(".diagram-svg")?.getAttribute("aria-label")).toBe("A dot & a line");
+  });
+
+  test("one that does not parse shows its source, with where", async () => {
+    const src = "<svg><rect></svg>";
+    const { host } = await drawn(svgBody(src));
+    const figure = host.querySelector("figure.diagram.failed");
+    expect(figure?.querySelector("pre[data-text]")?.textContent).toBe(src);
+    expect(figure?.querySelector(".diagram-notice")?.textContent).toBe(
+      "SVG not drawn: </svg> closes <rect> (line 1, column 12)",
+    );
+  });
+});

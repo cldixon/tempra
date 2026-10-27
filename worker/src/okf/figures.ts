@@ -3,7 +3,14 @@
  * see): each figure, numbered as the reader numbers it (`findFigures`), with what the library
  * knows of it from the stored blob rows alone, so listing figures fetches no bytes.
  */
-import { type Doc, fenceTitle, findFigures, linkTarget } from "@tempra/editor/doc";
+import {
+  type Doc,
+  fenceAttr,
+  fenceTitle,
+  findFigures,
+  linkTarget,
+  sanitizeSvg,
+} from "@tempra/editor/doc";
 import { diagramTypeOf } from "./diagrams";
 
 /** An attachment as its blob row records it. */
@@ -44,6 +51,8 @@ export type FigureFact =
       /** The diagram type its header names (flowchart, sequence, …), or null. */
       type: string | null;
       title: string | null;
+      /** An SVG fence's alt text: its `alt="…"`, else the SVG's own <title> (TEMPRA-206). */
+      alt?: string | null;
       /** The fence's body, what the render Worker draws (TEMPRA-166). */
       source: string;
     };
@@ -56,12 +65,18 @@ export function figureFacts(
 ): FigureFact[] {
   return findFigures(doc).map((f): FigureFact => {
     if (f.kind === "diagram") {
+      const lang = (f.node.lang ?? "").toLowerCase();
+      const svg = lang === "svg";
+      const checked = svg && !fenceAttr(f.node.meta, "alt") ? sanitizeSvg(f.node.value) : null;
       return {
         n: f.n,
         kind: "diagram",
-        lang: (f.node.lang ?? "").toLowerCase(),
-        type: diagramTypeOf(f.node.value),
+        lang,
+        type: svg ? null : diagramTypeOf(f.node.value),
         title: fenceTitle(f.node.meta),
+        ...(svg
+          ? { alt: fenceAttr(f.node.meta, "alt") ?? (checked?.ok ? checked.title : null) }
+          : {}),
         source: f.node.value,
       };
     }
@@ -99,6 +114,7 @@ export function figureLine(f: FigureFact): string {
   if (f.kind === "diagram") {
     return [
       `Figure ${f.n} · diagram (${f.lang}${f.type ? `, ${f.type}` : ""})`,
+      ...(f.alt !== undefined ? [`alt ${JSON.stringify(f.alt ?? "")}`] : []),
       ...(f.title ? [`caption ${JSON.stringify(f.title)}`] : []),
     ].join(" · ");
   }

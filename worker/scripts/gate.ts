@@ -1789,6 +1789,52 @@ async function browserRenders(
       await agentDeletes("gate-diagram.md");
     });
 
+    // SVG fences (TEMPRA-206): drawn sanitized within the CSP (its style attribute through the
+    // CSSOM; a violation fails the gate), with nothing of what it should not run left in the page,
+    // named by its alt; its lint in the write result.
+    await step("SVG fences: drawn sanitized and named by their alt", async () => {
+      const put = await fetch(`${libApi}/files/gate-svg.md`, {
+        method: "PUT",
+        headers: { ...bearer, "Content-Type": "text/markdown", "X-Note": "gate: svg fence" },
+        body: [
+          "---\ntype: Note\ntitle: Gate SVG\ndescription: An SVG fence.\n---",
+          "Before.\n",
+          '```svg alt="A box and a dot" title="Drawn from source"',
+          '<svg viewBox="0 0 120 40" onload="window.__svgRan=1"><script>window.__svgRan=1</script><rect x="2" y="2" width="50" height="36" fill="none" stroke="currentColor" style="stroke-width:2"/><circle cx="90" cy="20" r="10" fill="currentColor"/><text x="60" y="38">Gate</text></svg>',
+          "```\n",
+          "After.\n",
+        ].join("\n"),
+      });
+      if (!put.ok) throw new Error(`write: ${put.status} ${await put.text()}`);
+      const lint = ((await put.json()) as { lint?: { code: string }[] }).lint ?? [];
+      if (!lint.some((l) => l.code === "svg_unsafe")) {
+        throw new Error(`svg lint: ${JSON.stringify(lint)}`);
+      }
+      await page.goto(`${base}/${owner}/${slug}/gate-svg.md`);
+      const figure = page.locator(".body figure.diagram[data-opaque]");
+      const svg = figure.locator(".diagram-svg svg");
+      await svg.waitFor({ timeout: 15_000 });
+      if ((await figure.locator(".diagram-svg").getAttribute("aria-label")) !== "A box and a dot") {
+        throw new Error("the SVG is not named by its alt");
+      }
+      const width = await svg
+        .locator("rect")
+        .evaluate(
+          (el) =>
+            el.ownerDocument.defaultView?.getComputedStyle(el).getPropertyValue("stroke-width") ??
+            "",
+        );
+      if (width !== "2px" && width !== "2") throw new Error(`the SVG's style: ${width}`);
+      if (await page.locator(".body script").count()) throw new Error("a script reached the page");
+      if (await page.evaluate(() => (globalThis as { __svgRan?: number }).__svgRan)) {
+        throw new Error("the SVG's script ran");
+      }
+      const caption = await figure.locator("figcaption").innerText();
+      if (!caption.includes("Drawn from source")) throw new Error(`svg caption: ${caption}`);
+      if (shots) await page.screenshot({ path: `${shots}/svg-fence.png` });
+      await agentDeletes("gate-svg.md");
+    });
+
     // Figures (tempra-dev: app/reader, Figures): an image alone in its paragraph is a numbered
     // figure that opens the full-screen view, which steps through the concept's figures.
     await step("figures: an image opens the full-screen view, and Escape closes it", async () => {

@@ -27,8 +27,17 @@ export const RASTER_TIMEOUT_MS = 20_000;
 
 export type Theme = "light" | "dark";
 
+/**
+ * What a source is: a Mermaid diagram (the default, drawn by Pele), or an SVG fence (TEMPRA-206),
+ * which the caller has already sanitized (@tempra/editor `sanitizeSvg`) and which is only themed
+ * and rasterized here.
+ */
+export type RenderLang = "mermaid" | "svg";
+
 export interface RenderRequest {
   source: string;
+  /** Mermaid unless said. */
+  lang?: RenderLang;
   /** CSS pixels the diagram may take (Pele's maxWidth); absent or 0, its natural width. */
   width?: number;
   theme: Theme;
@@ -108,8 +117,34 @@ export function cacheKey(
   theme: Theme,
   width: number,
   format: "svg" | "png",
+  lang: RenderLang = "mermaid",
 ): string {
-  return `${RENDERS_PREFIX}${sourceHash}/pele-${PELE_VERSION}/${theme}-${peleThemeHash}/w${width}.${format}`;
+  const by = lang === "svg" ? "svg-1" : `pele-${PELE_VERSION}`;
+  return `${RENDERS_PREFIX}${sourceHash}/${by}/${theme}-${peleThemeHash}/w${width}.${format}`;
+}
+
+/**
+ * An SVG fence's sanitized SVG as it is drawn on its own: scaled down to `width` when wider, with
+ * the theme's text colour as `color`, so `currentColor` reads as it does in the reader.
+ */
+export function svgFigure(svg: string, theme: Theme, width: number): string {
+  const open = /^<svg\b[^>]*>/.exec(svg);
+  if (!open || /<script|<foreignObject|\son\w+=/i.test(svg)) {
+    throw new Error("The SVG was not sanitized.");
+  }
+  const tag = open[0];
+  const num = (name: string) =>
+    Number.parseFloat(new RegExp(` ${name}="([^"]*)"`).exec(tag)?.[1] ?? "");
+  const box = (/ viewBox="([^"]*)"/.exec(tag)?.[1] ?? "").split(/[\s,]+/).map(Number);
+  let w = num("width") || (box[2] as number) || 300;
+  let h = num("height") || (box[3] as number) || 150;
+  if (width > 0 && w > width) {
+    h = (h * width) / w;
+    w = width;
+  }
+  const fg = peleThemes[theme]["--pele-fg"] ?? "#000000";
+  const bare = tag.replace(/ (width|height|color)="[^"]*"/g, "");
+  return `${bare.replace(/^<svg\b/, `<svg width="${Math.round(w)}" height="${Math.round(h)}" color="${attr(fg)}"`)}${svg.slice(tag.length)}`;
 }
 
 const attr = (s: string) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
@@ -171,6 +206,8 @@ export function refusal(req: RenderRequest): RenderError | null {
       line: 0,
       column: 0,
     };
+  if (req.lang !== undefined && req.lang !== "mermaid" && req.lang !== "svg")
+    return { message: 'lang must be "mermaid" or "svg".', line: 0, column: 0 };
   if (req.theme !== "light" && req.theme !== "dark")
     return { message: 'theme must be "light" or "dark".', line: 0, column: 0 };
   const w = req.width ?? 0;
@@ -184,8 +221,9 @@ export async function renderDiagram(req: RenderRequest, deps: RenderDeps): Promi
   const refused = refusal(req);
   if (refused) return { error: refused };
   const width = Math.floor(req.width ?? 0);
+  const lang = req.lang ?? "mermaid";
   const hash = await sha256(req.source);
-  const svgKey = cacheKey(hash, req.theme, width, "svg");
+  const svgKey = cacheKey(hash, req.theme, width, "svg", lang);
 
   // The SVG, or the error Pele gave this source (cached as JSON under the same key, with its
   // message's format: an error cached in an older shape is drawn again).
@@ -202,7 +240,10 @@ export async function renderDiagram(req: RenderRequest, deps: RenderDeps): Promi
     return { error: { message, line, column } };
   } else {
     try {
-      svg = themed(peleRender(req.source, peleOptions(width, idPrefixFor(hash))).svg, req.theme);
+      svg =
+        lang === "svg"
+          ? svgFigure(req.source, req.theme, width)
+          : themed(peleRender(req.source, peleOptions(width, idPrefixFor(hash))).svg, req.theme);
     } catch (e) {
       const error = errorOf(e);
       await deps.cache
@@ -218,7 +259,7 @@ export async function renderDiagram(req: RenderRequest, deps: RenderDeps): Promi
   }
   if (!req.png) return { svg };
 
-  const pngKey = cacheKey(hash, req.theme, width, "png");
+  const pngKey = cacheKey(hash, req.theme, width, "png", lang);
   const pngHit = await deps.cache.get(pngKey).catch(() => null);
   if (pngHit) return { svg, png: new Uint8Array(await pngHit.arrayBuffer()) };
   try {

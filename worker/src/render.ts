@@ -6,10 +6,44 @@
  * call answers RENDER_UNAVAILABLE; a call that fails or takes too long answers an error too, never
  * a throw.
  */
-import type { RenderRequest, RenderResult } from "../render/src/render";
+import { sanitizeSvg } from "@tempra/editor/doc";
+import type { RenderLang, RenderRequest, RenderResult } from "../render/src/render";
 import type { UsageEvent } from "./usage";
 
-export type { RenderError, RenderRequest, RenderResult } from "../render/src/render";
+export type { RenderError, RenderLang, RenderRequest, RenderResult } from "../render/src/render";
+
+/**
+ * What the render Worker is sent for a request: an SVG fence is sanitized here, in this Worker
+ * (TEMPRA-206), so the render Worker only themes and rasterizes; a fence that does not parse is
+ * answered with where, as Pele's errors are.
+ */
+export function forRenderer(
+  req: RenderRequest,
+): { ok: true; req: RenderRequest } | { ok: false; result: RenderResult } {
+  if (req.lang !== "svg") return { ok: true, req };
+  const r = sanitizeSvg(req.source);
+  if (!r.ok) {
+    return {
+      ok: false,
+      result: {
+        error: { message: `The SVG does not parse: ${r.message}.`, line: r.line, column: r.column },
+      },
+    };
+  }
+  return { ok: true, req: { ...req, source: r.svg } };
+}
+
+/** The fence languages the server draws (TEMPRA-166, TEMPRA-206). */
+export const RENDER_LANGS = ["mermaid", "svg"] as const;
+
+export function isRenderLang(lang: string): lang is RenderLang {
+  return (RENDER_LANGS as readonly string[]).includes(lang);
+}
+
+/** Who refuses a source of a language, as an agent is told: "Pele could not draw it". */
+export function drawerOf(lang: string): string {
+  return lang === "mermaid" ? "Pele" : "Tempra";
+}
 
 /** The message of a render that could not reach the render Worker. */
 export const RENDER_UNAVAILABLE = "render unavailable";
@@ -56,11 +90,14 @@ export function serviceRenderer(
     if (req.source.length > MAX_RENDER_SOURCE) {
       return failed(`The diagram is longer than the limit of ${MAX_RENDER_SOURCE} characters.`);
     }
+    const sent = forRenderer(req);
+    if (!sent.ok) return sent.result;
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const result = await Promise.race([
         service.render({
-          source: req.source,
+          source: sent.req.source,
+          ...(req.lang && req.lang !== "mermaid" ? { lang: req.lang } : {}),
           width: req.width,
           theme: req.theme,
           png: req.png === true,
