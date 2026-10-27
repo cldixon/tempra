@@ -116,7 +116,7 @@ describe("MCP server", () => {
     }
   });
 
-  test("INSTRUCTIONS and SKILL.md tell agents the same media story (TEMPRA-160)", () => {
+  test("INSTRUCTIONS and SKILL.md tell agents the same media story (TEMPRA-160, TEMPRA-211)", () => {
     const skill = readFileSync(`${import.meta.dir}/../../skills/okf/SKILL.md`, "utf8");
     for (const term of [
       "Mermaid",
@@ -138,10 +138,15 @@ describe("MCP server", () => {
       "`diagram_invalid`",
       "`diagram_unrendered`",
       "`figure_invalid`",
+      "rendered media",
+      "never as bytes you type",
+      '`origin: "agent"`',
+      "you cannot send files to Tempra yourself",
     ]) {
       expect(INSTRUCTIONS.toLowerCase()).toContain(term.toLowerCase());
       expect(skill.toLowerCase()).toContain(term.toLowerCase());
     }
+    expect(skill).not.toMatch(/base64|sha256|checksum/i);
   });
 
   test("the file-equivalent workflow", async () => {
