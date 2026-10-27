@@ -22,6 +22,8 @@ export interface UploadGrant {
   /** Null for a blob-first upload (REST): the PUT stores the bytes and answers with their hash. */
   path: string | null;
   media: string | null;
+  /** Who has the file: the person, or the agent that made it and handed it over (TEMPRA-205). */
+  origin?: UploadOrigin;
   if_match?: string;
   /** What the file shows, kept with the attach op (TEMPRA-157, for the file's page). */
   description?: string;
@@ -33,6 +35,21 @@ export interface UploadGrant {
   by: RequestContext["by"];
   /** The caller as it was when it asked; checked again when the bytes arrive. */
   token: TokenInfo;
+}
+
+/**
+ * Who has the file to upload (TEMPRA-205): the person (a photo they attached in the chat), or the
+ * agent, which made it where it cannot reach Tempra and has handed it to the person to send.
+ */
+export type UploadOrigin = "person" | "agent";
+
+export const UPLOAD_ORIGINS = ["person", "agent"] as const;
+
+/** An origin as given, or a refusal; none is the person's. */
+export function checkOrigin(v: unknown): UploadOrigin {
+  if (v === undefined || v === null || v === "") return "person";
+  if (v === "person" || v === "agent") return v;
+  throw new OkfError(400, "bad_origin", "`origin` is `person` or `agent`.");
 }
 
 /**

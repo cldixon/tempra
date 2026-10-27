@@ -66,6 +66,18 @@ describe("the upload panel", () => {
     expect(input.closest("label")?.className).toBe("drop");
   });
 
+  test("a file the agent made says why the person is asked (TEMPRA-205)", () => {
+    const root = document.createElement("main");
+    mountUploadPanel(root, host().h).show(
+      preparedFrom({ structuredContent: { upload: { ...UPLOAD, origin: "agent" } } }),
+    );
+    expect(root.textContent).toContain(
+      "The agent made this file and gave it to you in the chat. Agents can't send files to Tempra themselves yet, so choose it here.",
+    );
+    expect(root.textContent).toContain("Save it from the chat first, then choose it here.");
+    expect(root.textContent).not.toContain("If it came from the chat");
+  });
+
   test("a chosen file goes to the /ul/ URL from the chat, and the chat is told", async () => {
     const root = document.createElement("main");
     const { h, said } = host();

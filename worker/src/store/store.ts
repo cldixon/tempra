@@ -231,6 +231,11 @@ export type WriteOp =
        * (TEMPRA-196, the upload link); the write stays the agent's.
        */
       supplied_by?: string;
+      /**
+       * Who had the file for an upload (TEMPRA-205): the person, or the agent that made it and
+       * handed it to the person to send. Kept in the event's meta; does not make a write.
+       */
+      origin?: "person" | "agent";
     }
   | { op: "edit"; path: string; edits: { old: string; new: string }[]; if_match?: string | null }
   | { op: "move"; path: string; to: string }
@@ -524,6 +529,8 @@ export type FileView =
       licence: string | null;
       /** The person who supplied the bytes through an upload link (TEMPRA-196). */
       supplied_by: string | null;
+      /** For an upload, who had the file: the person, or the agent that made it (TEMPRA-205). */
+      origin: "person" | "agent" | null;
     }
   | { kind: "derived"; path: string; seq: number; markdown: string };
 
@@ -1916,6 +1923,7 @@ export class LibraryStore {
     credit: string | null;
     licence: string | null;
     supplied_by: string | null;
+    origin: "person" | "agent" | null;
   } {
     const rows = this.sql.all<{ meta: string | null }>(
       `SELECT meta FROM events WHERE concept_id = ? AND hash = ? AND seq <= ?
@@ -1932,6 +1940,7 @@ export class LibraryStore {
     };
     // Who supplied these bytes is the version's own fact: from the event that wrote them.
     let supplied: string | null | undefined;
+    let origin: "person" | "agent" | null | undefined;
     for (const r of rows) {
       const m = JSON.parse(r.meta as string) as JsonObject;
       const s = m.source as Partial<AttachSource> | string | undefined;
@@ -1949,12 +1958,13 @@ export class LibraryStore {
       }
       if (supplied === undefined) {
         supplied = typeof m.supplied_by === "string" ? m.supplied_by : null;
+        origin = m.origin === "person" || m.origin === "agent" ? m.origin : null;
       }
       if (source && text.description !== null && text.credit !== null && text.licence !== null) {
         break;
       }
     }
-    return { source, ...text, supplied_by: supplied ?? null };
+    return { source, ...text, supplied_by: supplied ?? null, origin: origin ?? null };
   }
 
   private writeAttachment(w: WriteState, op: Extract<WriteOp, { op: "attach" }>): OpResult {
@@ -2027,6 +2037,7 @@ export class LibraryStore {
       else if (op.source) meta.source = { ...op.source } as unknown as JsonObject;
       for (const [k, v] of Object.entries(facts)) meta[k] = v;
       if (op.supplied_by) meta.supplied_by = op.supplied_by;
+      if (op.origin) meta.origin = op.origin;
       if (retyped) meta.media = { from: before?.media ?? null, to: blob.media };
       seq = this.appendEvent(w.ctx, w.now, {
         op: w.mode === "import" ? "import" : "put",
