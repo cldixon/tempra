@@ -18,6 +18,7 @@
   import { type OutlineFile, REFRESH_MS } from "./tree";
   import type { Me } from "./ui";
   import { baseName, type Urls } from "./urls";
+  import { useWake } from "./wake.svelte.ts";
 
   /**
    * A library's frame, keyed by the library so it stays mounted while the person moves within it:
@@ -34,6 +35,9 @@
   let hidden = $state(loadHidden(untrack(() => urls)));
   let switching = $state(false);
   const library = useLibrary(() => urls);
+  // A library's object may have gone to sleep while the person read: the first sign they are
+  // back wakes it, so the page they open next does not wait for it (TEMPRA-195).
+  useWake(() => urls);
   const name = $derived(libraryLabel(library.current ?? urls));
 
   // The library's index (`GET …/outline`: every file's path, kind, title and seq, no bodies),

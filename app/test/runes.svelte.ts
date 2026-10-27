@@ -7,6 +7,7 @@ import { usePrefetchLinks } from "../src/links.svelte.ts";
 import { useFeed } from "../src/live.svelte.ts";
 import { useLoad } from "../src/load.svelte.ts";
 import type { Urls } from "../src/urls";
+import { useWake } from "../src/wake.svelte.ts";
 
 /** A reactive value the tests set, as a page's props or state would change. */
 export function box<T>(value: T) {
@@ -48,5 +49,12 @@ export function rootFeed(urls: () => Urls, from: () => number | null) {
 export function rootPrefetchLinks(library: { owner: string; slug: string } | null) {
   return $effect.root(() => {
     usePrefetchLinks(() => library);
+  });
+}
+
+/** useWake in an effect root, for one library's frame. */
+export function rootWake(urls: Urls) {
+  return $effect.root(() => {
+    useWake(() => urls);
   });
 }
