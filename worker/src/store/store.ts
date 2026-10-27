@@ -5172,16 +5172,29 @@ export class LibraryStore {
 
   /**
    * A short-lived token for an upload URL (TEMPRA-158): what the Worker writes when the bytes
-   * arrive, and as whom. Its MAC covers another domain than a download's, so neither kind of
-   * link opens as the other; each carries a nonce, so it can be spent once.
+   * arrive, and as whom. Opaque (TEMPRA-210): 18 random bytes; the prepared write is kept here,
+   * not in the link, so a link pasted elsewhere tells no one its path, note, people or grant.
+   * Kept until it would have expired; each can be spent once.
    */
   signUpload(payload: Record<string, unknown>, ttlSeconds = 900): string {
-    return this.sign(UPLOAD_DOMAIN, { ...payload, n: bytesToHex(randomBytes(12)) }, ttlSeconds);
+    const now = Math.floor(this.clock().getTime() / 1000);
+    const exp = now + ttlSeconds;
+    const token = b64url(randomBytes(18));
+    this.sql.run(
+      "DELETE FROM meta WHERE key LIKE 'ulgrant:%' AND CAST(json_extract(value, '$.exp') AS INTEGER) < ?",
+      now,
+    );
+    this.sql.run(
+      "INSERT INTO meta (key, value) VALUES (?, ?)",
+      `ulgrant:${token}`,
+      JSON.stringify({ payload: { ...payload, exp }, exp, spent: false }),
+    );
+    return token;
   }
 
   /**
-   * Checks an upload token's signature, expiry and that it is unspent. With `claim` it is spent
-   * in this one synchronous call, so two uploads on one link cannot both pass.
+   * An upload token's prepared write, when it is known, unexpired and unspent. With `claim` it is
+   * spent in this one synchronous call, so two uploads on one link cannot both pass.
    */
   openUpload(token: string, opts: { claim?: boolean } = {}): Record<string, unknown> {
     const bad = new OkfError(
@@ -5189,14 +5202,17 @@ export class LibraryStore {
       "bad_upload",
       "This upload link is invalid or has expired. Ask for a new one with prepare_upload.",
     );
-    const payload = this.unsign<Record<string, unknown> & { n?: unknown }>(
-      UPLOAD_DOMAIN,
-      token,
-      bad,
-    );
-    if (typeof payload.n !== "string") throw bad;
-    const key = `upload:${payload.n}`;
-    if (this.sql.all("SELECT 1 FROM meta WHERE key = ?", key).length > 0) {
+    if (!/^[A-Za-z0-9_-]{24}$/.test(token)) throw bad;
+    const key = `ulgrant:${token}`;
+    const row = this.sql.all<{ value: string }>("SELECT value FROM meta WHERE key = ?", key)[0];
+    if (!row) throw bad;
+    const held = JSON.parse(row.value) as {
+      payload: Record<string, unknown>;
+      exp: number;
+      spent: boolean;
+    };
+    if (held.exp * 1000 < this.clock().getTime()) throw bad;
+    if (held.spent) {
       throw new OkfError(
         403,
         "upload_used",
@@ -5204,15 +5220,13 @@ export class LibraryStore {
       );
     }
     if (opts.claim) {
-      // A spent link is remembered until it would have expired anyway.
-      const now = Math.floor(this.clock().getTime() / 1000);
       this.sql.run(
-        "DELETE FROM meta WHERE key LIKE 'upload:%' AND CAST(value AS INTEGER) < ?",
-        now,
+        "UPDATE meta SET value = ? WHERE key = ?",
+        JSON.stringify({ ...held, spent: true }),
+        key,
       );
-      this.sql.run("INSERT INTO meta (key, value) VALUES (?, ?)", key, String(payload.exp));
     }
-    return payload;
+    return held.payload;
   }
 
   private sign(domain: string, payload: object, ttlSeconds: number): string {
@@ -5238,9 +5252,6 @@ export class LibraryStore {
     return payload;
   }
 }
-
-/** What an upload token's MAC covers before its body; a download's covers the body alone. */
-const UPLOAD_DOMAIN = "upload.";
 
 export type DownloadPayload =
   | { k: "file"; path: string; hash: string; media: string | null }
