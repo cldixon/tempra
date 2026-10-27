@@ -1,5 +1,6 @@
 import { takeBoot } from "./boot";
 import { PageCache } from "./cache";
+import { touched } from "./wake";
 
 /** An error answer from the API: `{ error, code }` with its HTTP status. */
 export class ApiError extends Error {
@@ -36,6 +37,9 @@ export async function api<T>(url: string, init: RequestInit = {}): Promise<T> {
     headers.set("Content-Type", "application/json");
   }
   const read = (init.method ?? "GET") === "GET";
+  // A call to a library wakes its object, so a wake is not needed for a while (TEMPRA-195); a
+  // booted answer too: the shell's own call to it has just been made.
+  touched(url);
   // The first page's answers came with the shell (TEMPRA-175): the first call to each is free.
   const booted = read ? takeBoot(url) : null;
   if (booted) return booted.data as T;
