@@ -1135,8 +1135,30 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   // ------------------------------------------------------------------ signed uploads
 
   /**
+   * Upload URLs answer any origin, without credentials (TEMPRA-200): the upload panel PUTs from a
+   * host's sandboxed iframe, and the token in the URL is the only credential; no cookie is read.
+   */
+  app.use("/ul/*", async (c, next) => {
+    if (c.req.method === "OPTIONS") {
+      return new Response(null, {
+        status: 204,
+        headers: {
+          "Access-Control-Allow-Origin": "*",
+          "Access-Control-Allow-Methods": "PUT",
+          "Access-Control-Allow-Headers": "Content-Type",
+          "Access-Control-Max-Age": "3600",
+        },
+      });
+    }
+    await next();
+    c.res.headers.set("Access-Control-Allow-Origin", "*");
+  });
+
+  /**
    * An upload URL's PUT (TEMPRA-158): the signature is the credential, as for downloads. Never a
-   * cookie: a person's upload page posts to its own URL (TEMPRA-196). See receiveUpload.
+   * cookie: a person's upload page posts to its own URL (TEMPRA-196). See receiveUpload. From the
+   * upload panel (`?via=chat`, TEMPRA-200) the file is the person's: the one the connection acts
+   * for, whose chat the panel is in.
    */
   app.put("/ul/:lib/:token", async (c) => {
     const d = deps(c.env);
@@ -1155,10 +1177,12 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     }
     checkMedia(grant.media, c.req.header("Content-Type"));
     const bytes = await readCapped(c.req.raw.body);
+    const person = grant.token.person || grant.token.library.owner;
     const done = await receiveUpload(d, lib, raw, grant, {
       bytes,
       type: c.req.header("Content-Type"),
       waitUntil: afterResponse(c),
+      ...(c.req.query("via") === "chat" && person ? { supplied_by: person } : {}),
     });
     if ("blob" in done) return c.json(done.blob, 201);
     return writeResponse(c, done.res);

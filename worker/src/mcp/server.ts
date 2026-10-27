@@ -1,6 +1,7 @@
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
+import { uploadPanel } from "@tempra/app/panels";
 import { z } from "zod";
 import type { TokenInfo } from "../auth";
 import {
@@ -118,7 +119,7 @@ export const INSTRUCTIONS = `This server holds OKF (Open Knowledge Format) libra
 How to work:
 1. Call \`start\` first. It opens your library, or lists the libraries you can reach when there are several; then pass \`library\` (owner/slug) on every call. When the person asks for a new library, \`create_library\` makes one they own and opens it (only on a connection they allowed to). Then \`browse\` a directory before reading, follow links, and \`read\` what you need. Check frontmatter (type, status, trust tier, stale) before relying on a body.
 2. Write conformant concepts: a non-empty \`type\` naming what kind of thing it is (Metric, Protocol, Decision; never a generic word like concept, page or note, and reuse the types \`start\` lists), a \`title\` and one-line \`description\`, absolute links like [x](/dir/x.md), footnotes [^id] keyed to \`sources[].id\` (an entry is \`id\`, \`title\` and \`resource\`: a URL or a path in this library), one idea per concept.
-3. Figures, where one helps: a screenshot of what the page describes, a chart of data it discusses; for an architecture or a flow, a Mermaid diagram in a \`mermaid\` fence (text, diffable, drawn by the app; preview a non-trivial one with \`render\`). Put a file beside the concept that uses it, named for what it shows (\`dir/x.md\` uses \`dir/x-architecture.png\`): a web image by \`attach\` with \`source_url\` (never hotlink); a file you made or the person gave you by \`prepare_upload\`: run its curl line when your shell reaches this server, else give the person its upload link to choose the file in their browser; \`attach\` base64 with \`sha256\` for small files only. Write \`![what it shows](/dir/x-architecture.png "Caption")\` (alt says what it shows, the title is the caption), in a \`:::figure\` block for size, placement or a group (\`write\` says how), and cite a work taken from elsewhere (a web image) in \`sources\`; a file the person gave you or you made carries its own \`credit\` and \`licence\` instead, with no \`sources\` entry. Before changing a figure or answering a comment on one, \`read\` with \`images: true\` (\`diagrams: true\` for diagrams).
+3. Figures, where one helps: a screenshot of what the page describes, a chart of data it discusses; for an architecture or a flow, a Mermaid diagram in a \`mermaid\` fence (text, diffable, drawn by the app; preview a non-trivial one with \`render\`). Put a file beside the concept that uses it, named for what it shows (\`dir/x.md\` uses \`dir/x-architecture.png\`): a web image by \`attach\` with \`source_url\` (never hotlink); a file you made or the person gave you by \`prepare_upload\`: run its curl line when your shell reaches this server, else the person sends it from their browser: in a chat that shows apps, an upload panel appears with the call, and give them its upload link too; \`attach\` base64 with \`sha256\` for small files only. Write \`![what it shows](/dir/x-architecture.png "Caption")\` (alt says what it shows, the title is the caption), in a \`:::figure\` block for size, placement or a group (\`write\` says how), and cite a work taken from elsewhere (a web image) in \`sources\`; a file the person gave you or you made carries its own \`credit\` and \`licence\` instead, with no \`sources\` entry. Before changing a figure or answering a comment on one, \`read\` with \`images: true\` (\`diagrams: true\` for diagrams).
 4. Prefer \`edit\` for small changes, \`write\` for new concepts or rewrites, \`batch\` for related changes so they land as one request. Pass \`if_match\` (the hash from your last read); on a conflict, re-read and reapply. Bodies are stored in a canonical form (\`-\` bullets, \`*\` emphasis, padded tables): what you write reads back normalized, so \`edit\` the text as \`read\` shows it.
 5. Put a one-line \`note\` on every write. Read the \`lint\` in every write result and fix what it reports (figure and diagram lint too: \`image_*\`, \`figure_invalid\`, \`diagram_invalid\`, \`diagram_unrendered\` mean fix the image or the fence); the result's notes say what else to know (ignored fields, the stored form, open comments). A concept with no frontmatter, invalid YAML or no \`type\` is refused. Keep concepts under 100 KB; split big ones into linked concepts.
 6. Never write index.md or log.md (the server synthesizes them). Never set \`generated\` (the server stamps it) or \`verified\` (not yours to claim). Set \`status\` and \`stale_after\` honestly. Timestamps are full ISO 8601 datetimes with an offset (\`stale_after: 2026-12-31T00:00:00Z\`); a plain date is flagged.
@@ -126,6 +127,20 @@ How to work:
 8. Comments are how people ask you for changes. Before editing a concept, read its open threads with \`comments\`; make the change a comment asks for, then answer it with \`comment\` (reply, and resolve what you fixed). Ask with a reply when unsure; never resolve a thread you did not address. A concept with open threads cannot be deleted until they are resolved.`;
 
 const text = (t: string): CallToolResult => ({ content: [{ type: "text", text: t }] });
+
+/**
+ * The upload panel (TEMPRA-200; tempra-dev app/media, Upload panel): an MCP App (SEP-1865) that
+ * a host with `io.modelcontextprotocol/ui` draws in the chat beside a `prepare_upload` call. The
+ * server is stateless, so it cannot tell on each call whether the client takes apps: the tool
+ * always names the panel, and a host without the extension ignores `_meta.ui`.
+ */
+export const UPLOAD_PANEL_URI = "ui://tempra/upload";
+export const MCP_APP_MIME = "text/html;profile=mcp-app";
+
+/** The panel's `_meta.ui`: it talks to this deployment and nothing else. */
+const panelMeta = (origin: string) => ({
+  ui: { csp: { connectDomains: [origin] }, prefersBorder: true },
+});
 const line = (t: string) => ({ type: "text" as const, text: t });
 
 /** SVG text `read` returns as is (models read it well enough until TEMPRA-165 rasterizes it). */
@@ -853,7 +868,7 @@ export function buildServer(ctx: McpContext): McpServer {
               ...(view.credit ? [`credit: ${view.credit}`] : []),
               ...(view.licence ? [`licence: ${view.licence}`] : []),
               ...(view.supplied_by
-                ? [`supplied by: @${view.supplied_by}, from the upload link`]
+                ? [`supplied by: @${view.supplied_by} (the person sent the file)`]
                 : []),
               `versions: ${versions}`,
               `download (15 minutes): ${url}`,
@@ -1180,6 +1195,7 @@ export function buildServer(ctx: McpContext): McpServer {
       title: "Upload a file",
       description:
         "The way to add a file up to 10 MB that is not on the web: one you made (a screenshot, a chart, a PDF), or one the person has, such as a photo they attached in the chat. Put it beside the concept that uses it, named for what it shows (`dir/x-architecture.png`). Returns a URL good for one PUT within an hour, a ready `curl -T <file> '<url>'` line, and an upload link for the person. With a shell that reaches this server, run the curl line: the server stores the bytes and attaches them at `path` as you, with your `note`, and curl prints the write result as JSON (path, hash, seq, lint). From a sandbox that cannot reach this server (curl fails to connect, or a proxy refuses it), or for a file the person has (you cannot pass on a chat's attachment), give the person the upload link instead: signed in, they choose the file in their browser, and it is attached as your write with your note, description, credit and licence, recorded as supplied by them. Then `read` the path to see when it has arrived. Pass `sha256` (`sha256sum file`) or `size` only when you have the exact file, so damaged bytes are refused. The URL needs no token, so keep it to yourself; the link needs the person signed in with write access.",
+      _meta: { ui: { resourceUri: UPLOAD_PANEL_URI } },
       inputSchema: {
         path: z
           .string()
@@ -1243,7 +1259,7 @@ export function buildServer(ctx: McpContext): McpServer {
           by: req.by,
           token: picked.token,
         });
-        return text(
+        const result = text(
           [
             `Upload URL for ${clean} (one PUT, until ${up.expires}):`,
             up.url,
@@ -1259,8 +1275,25 @@ export function buildServer(ctx: McpContext): McpServer {
                   up.upload_page,
                 ]
               : []),
+            "",
+            "In a chat that shows apps, an upload panel appears with this call: the person can choose the file there instead, and the chat is told when it has arrived. Say so, and give the link too in case the panel does not show.",
           ].join("\n"),
         );
+        // For the upload panel (TEMPRA-200): the host hands it the result, and keeps
+        // structuredContent out of the model's context.
+        result.structuredContent = {
+          upload: {
+            url: up.url,
+            ...(up.upload_page ? { page: up.upload_page } : {}),
+            path: clean,
+            library: picked.token.library.slug,
+            media: media ?? mediaFor(clean),
+            ...(size !== undefined ? { size } : {}),
+            ...(facts.description ? { description: facts.description } : {}),
+            expires: up.expires,
+          },
+        };
+        return result;
       },
     ),
   );
@@ -1757,6 +1790,28 @@ export function buildServer(ctx: McpContext): McpServer {
   }
 
   // ------------------------------------------------------------------ resources
+
+  server.registerResource(
+    "upload_panel",
+    UPLOAD_PANEL_URI,
+    {
+      title: "Upload a file",
+      description:
+        "The panel prepare_upload shows in the chat: the person chooses the file and their browser sends it.",
+      mimeType: MCP_APP_MIME,
+      _meta: panelMeta(ctx.origin),
+    },
+    async (uri) => ({
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: MCP_APP_MIME,
+          text: uploadPanel,
+          _meta: panelMeta(ctx.origin),
+        },
+      ],
+    }),
+  );
 
   server.registerResource(
     "concept",

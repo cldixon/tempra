@@ -30,6 +30,8 @@ import {
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { deflateSync } from "node:zlib";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { type Browser, chromium, type Route } from "playwright-core";
 import { SESSION_REQUESTS_PER_MINUTE } from "../cloudflare.config";
 import { FEED_FULL, FEED_SOCKETS_PER_ACCOUNT, FEED_SOCKETS_PER_LIBRARY } from "../src/feed";
@@ -3971,6 +3973,104 @@ async function uploadLink(owner: string, slug: string, token: string): Promise<s
   return problems;
 }
 
+/**
+ * The upload panel (TEMPRA-200): reads the panel and calls prepare_upload over MCP as an agent's
+ * host does, then drives the panel in Chromium from a host made of ext-apps' AppBridge
+ * (scripts/panel-host.ts), in a sandboxed iframe under the CSP its `_meta.ui` declares: the
+ * panel shows the upload, sends the chosen file across origins to /ul/, and tells the chat; the
+ * file is the agent's write, supplied by the person.
+ */
+async function uploadPanel(token: string): Promise<string[]> {
+  const client = new Client({ name: "gate", version: "1.0.0" });
+  await client.connect(
+    new StreamableHTTPClientTransport(new URL(`${base}/mcp`), {
+      requestInit: { headers: { Authorization: `Bearer ${token}` } },
+    }),
+  );
+  const path = "gate-upload/panel.png";
+  const png = greyPng(30, 20, 90);
+  let html: string;
+  let csp: { connectDomains?: string[] };
+  let result: Record<string, unknown>;
+  const args = { path, size: png.length, description: "A grey photo, from the panel." };
+  try {
+    const read = await client.readResource({ uri: "ui://tempra/upload" });
+    const content = read.contents[0] as {
+      text?: string;
+      _meta?: { ui?: { csp?: { connectDomains?: string[] } } };
+    };
+    html = content.text ?? "";
+    csp = content._meta?.ui?.csp ?? {};
+    if (!csp.connectDomains?.includes(base)) {
+      return [`the panel declares connect domains ${JSON.stringify(csp.connectDomains)}`];
+    }
+    result = (await client.callTool({ name: "prepare_upload", arguments: args })) as Record<
+      string,
+      unknown
+    >;
+  } finally {
+    await client.close();
+  }
+  const hostJs = await Bun.build({
+    entrypoints: [join(import.meta.dir, "panel-host.ts")],
+    target: "browser",
+    minify: true,
+  });
+  if (!hostJs.success || !hostJs.outputs[0]) return [`panel host: ${hostJs.logs.join("; ")}`];
+  const hostCode = await hostJs.outputs[0].text();
+  const b = await openBrowser();
+  if (typeof b === "string") return [b];
+  const { page, step, problems } = b;
+  const panel = page.frameLocator('iframe[title="Upload panel"]');
+  const shots = process.env.GATE_SCREENSHOTS;
+  const shoot = (name: string) =>
+    shots ? page.screenshot({ path: `${shots}/${name}.png` }) : Promise.resolve();
+  try {
+    await step("the host draws the panel with the prepared upload", async () => {
+      await page.setContent(`<!doctype html><html><body></body></html>`);
+      await page.addScriptTag({ content: hostCode, type: "module" });
+      await page.waitForFunction('typeof window.startPanel === "function"');
+      const call = [html, csp, args, result].map((v) => JSON.stringify(v)).join(", ");
+      await page.evaluate(`window.startPanel(${call})`);
+      await panel.getByRole("heading", { name: "Upload a file" }).waitFor({ timeout: 15_000 });
+      await panel.getByText(path).waitFor({ timeout: 5000 });
+      await shoot("upload-panel");
+    });
+    await step("the person chooses the file; it crosses origins to /ul/", async () => {
+      await panel.locator("input[type=file]").setInputFiles({
+        name: "panel.png",
+        mimeType: "image/png",
+        buffer: Buffer.from(png),
+      });
+      await panel
+        .locator(".status", { hasText: "Uploaded panel.png" })
+        .waitFor({ timeout: 15_000 });
+      // Done: the drop area goes, so nothing invites a second upload on a spent link.
+      await panel.locator(".drop").waitFor({ state: "hidden", timeout: 5000 });
+      await shoot("upload-panel-done");
+    });
+    await step(
+      "the chat is told, and the file is the agent's write supplied by the person",
+      async () => {
+        const said = await page.evaluate<string[]>("window.panelMessages");
+        if (!said.some((m) => m.startsWith("I uploaded panel.png") && m.includes(path))) {
+          throw new Error(`the chat heard ${JSON.stringify(said)}`);
+        }
+        const r = await fetch(`${base}/api/v1/libraries/dev/mcp/files/${path}`, {
+          headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+        });
+        const f = (await r.json()) as { size?: number; supplied_by?: string };
+        if (f.size !== png.length || f.supplied_by !== "dev") {
+          throw new Error(`the file reads ${JSON.stringify(f)}`);
+        }
+      },
+    );
+  } finally {
+    await b.close();
+  }
+  return problems;
+}
+
 /** Runs the daily maintainers as the app's Export now does, and reads the export from R2. */
 async function nightlyExport(owner: string, slug: string, originals: number): Promise<string[]> {
   const lib = `${base}/${owner}/${slug}`;
@@ -4694,6 +4794,14 @@ try {
   if (sweepProblems.length > 0) failed = true;
   const mcpOk = await mcpSmoke({ url: base, token: mcpToken });
   console.log(`${mcpOk ? "PASS" : "FAIL"} MCP smoke on an empty library`);
+
+  // After the smoke, which wants the library empty.
+  const panel = await uploadPanel(mcpToken).catch((e) => [String(e)]);
+  console.log(
+    `${panel.length === 0 ? "PASS" : "FAIL"} the upload panel: an MCP host draws it, the person's file crosses to /ul/, the chat is told`,
+  );
+  for (const p of panel) console.log(`  - ${p}`);
+  if (panel.length > 0) failed = true;
   if (!mcpOk) failed = true;
   // Several agents at once over MCP: a stale edit refused, turns on one concept, parallel
   // writes; every write must reach the change feed. Patient, since the gate's earlier steps

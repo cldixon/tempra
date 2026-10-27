@@ -6,6 +6,7 @@
     ".": "./dist/tempra.ts",
     "./tempra.css": "./dist/tempra.css",
     "./pele": "./dist/pele.ts",
+    "./panel": "./dist/panel.ts",
     "./fonts/*": "./fonts/*",
     "./favicon.svg": "./favicon.svg"
   },
