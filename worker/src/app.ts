@@ -1629,8 +1629,8 @@ function bearer(c: C): string {
 }
 
 /**
- * A conformant bundle as a tar, attachments read from blob storage, with each Mermaid fence drawn
- * beside its concept as SVG when a renderer is there (TEMPRA-168).
+ * A conformant bundle as a tar, attachments read from blob storage, with each SVG fence beside its
+ * concept as SVG, and each Mermaid fence drawn there when a renderer is there (TEMPRA-168).
  */
 async function exportTar(
   lib: LibraryClient,
@@ -1640,7 +1640,8 @@ async function exportTar(
   ctx: RenderContext,
 ) {
   const bundle = await bundleTar(lib, d.blobs, at, {
-    diagrams: d.renderDiagram ? { render: d.renderDiagram, ctx } : undefined,
+    // SVG fences are exported without a renderer; Mermaid needs one (TEMPRA-168, TEMPRA-206).
+    diagrams: { ...(d.renderDiagram ? { render: d.renderDiagram } : {}), ctx },
   });
   return new Response(bundle.bytes as unknown as ArrayBuffer, {
     headers: {

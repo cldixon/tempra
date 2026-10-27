@@ -8,5 +8,6 @@ export * from "./figure";
 export * from "./figures";
 export * from "./links";
 export * from "./reconcile";
+export * from "./svg";
 export * from "./text";
 export * from "./tree";

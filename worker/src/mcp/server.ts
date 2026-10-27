@@ -27,10 +27,14 @@ import { type FigureFact, figureLine, sizeText } from "../okf/figures";
 import { normalizePath, underPrefix } from "../okf/paths";
 import type { LintWarning } from "../okf/types";
 import {
+  drawerOf,
+  isRenderLang,
   MAX_RENDER_SOURCE,
+  RENDER_LANGS,
   RENDER_UNAVAILABLE,
   RENDER_WIDTH,
   type RenderError,
+  type RenderLang,
   type RenderRequest,
   type RenderResult,
 } from "../render";
@@ -112,9 +116,9 @@ export const INSTRUCTIONS = `This server holds OKF (Open Knowledge Format) libra
 How to work:
 1. Call \`start\` first. It opens your library, or lists the libraries you can reach when there are several; then pass \`library\` (owner/slug) on every call. When the person asks for a new library, \`create_library\` makes one they own and opens it (only on a connection they allowed to). Then \`browse\` a directory before reading, follow links, and \`read\` what you need. Check frontmatter (type, status, trust tier, stale) before relying on a body.
 2. Write conformant concepts: a non-empty \`type\` naming what kind of thing it is (Metric, Protocol, Decision; never a generic word like concept, page or note, and reuse the types \`start\` lists), a \`title\` and one-line \`description\`, absolute links like [x](/dir/x.md), footnotes [^id] keyed to \`sources[].id\` (an entry is \`id\`, \`title\` and \`resource\`: a URL or a path in this library), one idea per concept.
-3. Media, where a figure helps: a screenshot of what the page describes, a chart of data it discusses, a diagram of an architecture or a flow. Prefer rendered media, code in the concept that the app draws: a Mermaid diagram in a \`mermaid\` fence is text, diffs like text and needs no upload (preview a non-trivial one with \`render\`). A file (an image, video, audio or PDF) comes in only two ways, and never as bytes you type into a call: on the public web, \`attach\` with \`source_url\` (the server fetches it; never hotlink); one you made or the person has, \`prepare_upload\`: run its curl line when your shell reaches this server, else the person sends it from their browser (in a chat that shows apps an upload panel appears with the call; give them its upload link too). A file you made where you cannot reach this server (a chart in a chat's sandbox): give it to the person in the chat, call \`prepare_upload\` with \`origin: "agent"\`, and tell them in a sentence why: you cannot send files to Tempra yourself, so they upload the one you gave them. Put a file beside the concept that uses it, named for what it shows (\`dir/x.md\` uses \`dir/x-architecture.png\`). Write \`![what it shows](/dir/x-architecture.png "Caption")\` (alt says what it shows, the title is the caption), in a \`:::figure\` block for size, placement or a group (\`write\` says how), and cite a work taken from elsewhere (a web image) in \`sources\`; a file the person gave you or you made carries its own \`credit\` and \`licence\` instead, with no \`sources\` entry. Before changing a figure or answering a comment on one, \`read\` with \`images: true\` (\`diagrams: true\` for diagrams).
+3. Media, where a figure helps: a screenshot of what the page describes, a chart of data it discusses, a diagram of an architecture or a flow. Prefer rendered media, code in the concept that the app draws: a Mermaid diagram in a \`mermaid\` fence, or a drawing in an \`svg\` fence (\`\`\`svg alt="what it shows" title="Caption"\`; plain shapes and text, \`currentColor\` for ink, no scripts, style elements, images or links). It is text, diffs like text and needs no upload (preview a non-trivial one with \`render\`). A file (an image, video, audio or PDF) comes in only two ways, and never as bytes you type into a call: on the public web, \`attach\` with \`source_url\` (the server fetches it; never hotlink); one you made or the person has, \`prepare_upload\`: run its curl line when your shell reaches this server, else the person sends it from their browser (in a chat that shows apps an upload panel appears with the call; give them its upload link too). A file you made where you cannot reach this server (a chart in a chat's sandbox): give it to the person in the chat, call \`prepare_upload\` with \`origin: "agent"\`, and tell them in a sentence why: you cannot send files to Tempra yourself, so they upload the one you gave them. Put a file beside the concept that uses it, named for what it shows (\`dir/x.md\` uses \`dir/x-architecture.png\`). Write \`![what it shows](/dir/x-architecture.png "Caption")\` (alt says what it shows, the title is the caption), in a \`:::figure\` block for size, placement or a group (\`write\` says how), and cite a work taken from elsewhere (a web image) in \`sources\`; a file the person gave you or you made carries its own \`credit\` and \`licence\` instead, with no \`sources\` entry. Before changing a figure or answering a comment on one, \`read\` with \`images: true\` (\`diagrams: true\` for diagrams).
 4. Prefer \`edit\` for small changes, \`write\` for new concepts or rewrites, \`batch\` for related changes so they land as one request. Pass \`if_match\` (the hash from your last read); on a conflict, re-read and reapply. Bodies are stored in a canonical form (\`-\` bullets, \`*\` emphasis, padded tables): what you write reads back normalized, so \`edit\` the text as \`read\` shows it.
-5. Put a one-line \`note\` on every write. Read the \`lint\` in every write result and fix what it reports (figure and diagram lint too: \`image_*\`, \`figure_invalid\`, \`diagram_invalid\`, \`diagram_unrendered\` mean fix the image or the fence); the result's notes say what else to know (ignored fields, the stored form, open comments). A concept with no frontmatter, invalid YAML or no \`type\` is refused. Keep concepts under 100 KB; split big ones into linked concepts.
+5. Put a one-line \`note\` on every write. Read the \`lint\` in every write result and fix what it reports (figure and diagram lint too: \`image_*\`, \`figure_invalid\`, \`diagram_invalid\`, \`diagram_unrendered\`, \`svg_invalid\`, \`svg_unsafe\` mean fix the image or the fence); the result's notes say what else to know (ignored fields, the stored form, open comments). A concept with no frontmatter, invalid YAML or no \`type\` is refused. Keep concepts under 100 KB; split big ones into linked concepts.
 6. Never write index.md or log.md (the server synthesizes them). Never set \`generated\` (the server stamps it) or \`verified\` (not yours to claim). Set \`status\` and \`stale_after\` honestly. Timestamps are full ISO 8601 datetimes with an offset (\`stale_after: 2026-12-31T00:00:00Z\`); a plain date is flagged.
 7. Use \`work\` to find what needs doing: open comments, stale concepts, broken links, lint, hotlinked images (\`external_image\`), and structure (a directory's index.md made poor by its concepts: missing, long or title-repeating descriptions, duplicate titles, concepts nothing links to, a directory with one concept, none, or too many); \`work\` with kind stale_soon lists what goes stale within 14 days. Only a new \`stale_after\` resets a concept's clock; other edits leave it stale.
 8. Comments are how people ask you for changes. Before editing a concept, read its open threads with \`comments\`; make the change a comment asks for, then answer it with \`comment\` (reply, and resolve what you fixed). Ask with a reply when unsure; never resolve a thread you did not address. A concept with open threads cannot be deleted until they are resolved.`;
@@ -457,6 +461,7 @@ export function buildServer(ctx: McpContext): McpServer {
     source: string,
     theme: "light" | "dark",
     library?: string,
+    lang: RenderLang = "mermaid",
   ): Promise<Drawn> => {
     const unavailable = (message = RENDER_UNAVAILABLE): Drawn => ({
       kind: "unavailable",
@@ -479,7 +484,10 @@ export function buildServer(ctx: McpContext): McpServer {
         why: `over the limit of ${RENDERS_PER_MINUTE} renders a minute for this account; try again in a minute`,
       };
     }
-    const r = await ctx.render({ source, theme, width: RENDER_WIDTH, png: true }, library);
+    const r = await ctx.render(
+      { source, ...(lang !== "mermaid" ? { lang } : {}), theme, width: RENDER_WIDTH, png: true },
+      library,
+    );
     if (r.png) {
       const img = await images.fitForModel(r.png, "image/png");
       if ("bytes" in img) {
@@ -683,7 +691,7 @@ export function buildServer(ctx: McpContext): McpServer {
     const candidates: FigureFact[] = [];
     for (const f of asked) {
       if (f.kind === "diagram") {
-        if (f.lang !== "mermaid") left.set(f.n, `not a Mermaid diagram (${f.lang})`);
+        if (!isRenderLang(f.lang)) left.set(f.n, `not a figure the server draws (${f.lang})`);
         else candidates.push(f);
       } else if (f.status === "external") {
         left.set(f.n, "external images are not fetched (TEMPRA-163)");
@@ -708,14 +716,15 @@ export function buildServer(ctx: McpContext): McpServer {
       | { f: FigureFact & { kind: "image" }; img: Awaited<ReturnType<Images["forModel"]>> }
       | { f: FigureFact & { kind: "diagram" }; drawn: Drawn };
     const fetched = await Promise.all(
-      candidates
-        .slice(0, IMAGES_PER_CALL)
-        .map(
-          async (f): Promise<Got> =>
-            f.kind === "diagram"
-              ? { f, drawn: await draw(f.source, "light", token.library.id) }
-              : { f, img: await images.forModel(f.blob as NonNullable<typeof f.blob>) },
-        ),
+      candidates.slice(0, IMAGES_PER_CALL).map(
+        async (f): Promise<Got> =>
+          f.kind === "diagram"
+            ? {
+                f,
+                drawn: await draw(f.source, "light", token.library.id, f.lang as RenderLang),
+              }
+            : { f, img: await images.forModel(f.blob as NonNullable<typeof f.blob>) },
+      ),
     );
     const out: CallToolResult["content"] = [];
     let bytes = 0;
@@ -726,7 +735,10 @@ export function buildServer(ctx: McpContext): McpServer {
         const { f, drawn } = got;
         const name = `Figure ${f.n}: ${f.title || `diagram (${f.type ?? f.lang})`}`;
         if (drawn.kind === "refused") {
-          left.set(f.n, `Pele could not draw it: ${renderErrorText(drawn.error, f.source)}`);
+          left.set(
+            f.n,
+            `${drawerOf(f.lang)} could not draw it: ${renderErrorText(drawn.error, f.source)}`,
+          );
         } else if (drawn.kind === "unavailable") {
           left.set(f.n, `not drawn: ${drawn.why}`);
         } else if (drawn.kind === "svg") {
@@ -923,7 +935,7 @@ export function buildServer(ctx: McpContext): McpServer {
     {
       title: "Create or replace a concept",
       description:
-        'Write a whole concept as OKF markdown: a YAML frontmatter block with a non-empty `type` that names what kind of thing this is, e.g. `Metric`, `BigQuery Table`, `Decision`, not a generic `concept` or `note` (plus `title`, one-line `description`, optional `tags`, `resource`, `sources`, `status`, `stale_after`), then a markdown body. Each `sources` entry is `id`, `title` and `resource` (a URL, or a path in this library such as `/dir/x.md`); `url` is taken as `resource`. `stale_after` and other timestamps are full ISO 8601 datetimes with an offset, e.g. 2026-12-31T00:00:00Z (a plain date is flagged). Prefer absolute links like [orders](/tables/orders.md); cite sources with footnotes: [^id] in the text, matching a `sources[].id`, plus a `[^id]: …` definition line at the end of the body. Diagrams and charts are best as rendered media, code the app draws, rather than a picture: Mermaid in a ```mermaid fence (preview a non-trivial one with `render`); a fence with an unknown type, nothing after its header, or a bracket or quote left open is saved, shown as its source, and reported as `diagram_invalid` lint with the line and column inside the fence; `diagram_unrendered` lint (in the result when the renderer answers quickly, else in `work` and the next `read`) means Pele could not draw the fence, with its message, line and column: fix the fence. Images are `![what it shows](/dir/x-architecture.png "Caption")`, the file put beside the concept by `attach` with `source_url` (on the web) or `prepare_upload` (one you made or the person has; never type its bytes); for a width, a placement or a group, wrap one to four images, one to a line, in `:::figure[group caption]{width=480|60% layout=column|wide|full frame}` and a closing `:::` (`frame` is a hairline for screenshots; in a group each title is a small label). Video, audio and PDF use the same spelling (a video\'s poster is `x.poster.png` beside `x.mp4`). Figures are lint, never refused: `image_no_alt` (say what it shows), `image_external` (hotlinked; `attach` it with `source_url`), `image_large` (over 2 MB or 4000 px; attach a smaller one), `image_not_image` (not an image, video, audio or PDF; link it instead), `figure_invalid` (the markup does not parse). A file with no frontmatter, frontmatter that is not valid YAML, or no `type` is refused (400) and nothing is written. Without `if_match` it creates and fails if the path exists; to replace, pass the hash from your last read. The server stamps `generated` from your token; `verified` is not yours to set. The concept is stored in a canonical form (`-` bullets, `*` emphasis; `sources` entries one key per line, `tags: [a, b]` on one line); when that differs from what you sent, the result shows the diff, so `edit` the stored text. Prefer `edit` for small changes. Read the lint and notes in the result and fix the lint.',
+        'Write a whole concept as OKF markdown: a YAML frontmatter block with a non-empty `type` that names what kind of thing this is, e.g. `Metric`, `BigQuery Table`, `Decision`, not a generic `concept` or `note` (plus `title`, one-line `description`, optional `tags`, `resource`, `sources`, `status`, `stale_after`), then a markdown body. Each `sources` entry is `id`, `title` and `resource` (a URL, or a path in this library such as `/dir/x.md`); `url` is taken as `resource`. `stale_after` and other timestamps are full ISO 8601 datetimes with an offset, e.g. 2026-12-31T00:00:00Z (a plain date is flagged). Prefer absolute links like [orders](/tables/orders.md); cite sources with footnotes: [^id] in the text, matching a `sources[].id`, plus a `[^id]: …` definition line at the end of the body. Diagrams and charts are best as rendered media, code the app draws, rather than a picture: Mermaid in a ```mermaid fence, or SVG in a ```svg fence (preview a non-trivial one with `render`); a fence with an unknown type, nothing after its header, or a bracket or quote left open is saved, shown as its source, and reported as `diagram_invalid` lint with the line and column inside the fence; `diagram_unrendered` lint (in the result when the renderer answers quickly, else in `work` and the next `read`) means Pele could not draw the fence, with its message, line and column: fix the fence. An SVG fence (```svg alt="what it shows" title="Caption"; up to 50 KB; `currentColor` takes the text colour in light and dark) is sanitized when drawn: `svg_invalid` lint means it does not parse (line and column given), `svg_unsafe` names what was taken out (scripts, event handlers, `<style>`, images, links, animation, references outside the SVG), and a missing alt (no `alt="…"` nor a `<title>`) is `image_no_alt`. Images are `![what it shows](/dir/x-architecture.png "Caption")`, the file put beside the concept by `attach` with `source_url` (on the web) or `prepare_upload` (one you made or the person has; never type its bytes); for a width, a placement or a group, wrap one to four images, one to a line, in `:::figure[group caption]{width=480|60% layout=column|wide|full frame}` and a closing `:::` (`frame` is a hairline for screenshots; in a group each title is a small label). Video, audio and PDF use the same spelling (a video\'s poster is `x.poster.png` beside `x.mp4`). Figures are lint, never refused: `image_no_alt` (say what it shows), `image_external` (hotlinked; `attach` it with `source_url`), `image_large` (over 2 MB or 4000 px; attach a smaller one), `image_not_image` (not an image, video, audio or PDF; link it instead), `figure_invalid` (the markup does not parse). A file with no frontmatter, frontmatter that is not valid YAML, or no `type` is refused (400) and nothing is written. Without `if_match` it creates and fails if the path exists; to replace, pass the hash from your last read. The server stamps `generated` from your token; `verified` is not yours to set. The concept is stored in a canonical form (`-` bullets, `*` emphasis; `sources` entries one key per line, `tags: [a, b]` on one line); when that differs from what you sent, the result shows the diff, so `edit` the stored text. Prefer `edit` for small changes. Read the lint and notes in the result and fix the lint.',
       inputSchema: {
         path: z.string().describe("Where to write, e.g. `metrics/revenue.md`."),
         content: z.string().describe("The full OKF markdown document."),
@@ -1262,12 +1274,12 @@ export function buildServer(ctx: McpContext): McpServer {
       "render",
       {
         title: "Draw a diagram",
-        description: `${BEYOND}draw a Mermaid diagram as the app draws it (Pele, the reader's column and greys) and see it: preview a non-trivial diagram before you write it (layout, labels that fit), or look at one while you review it or fix its \`diagram_invalid\` or \`diagram_unrendered\` lint: pass \`source\` (a mermaid fence's body), or \`path\` and \`figure\` (its number in \`read\`'s Figures list). Returns a line with the diagram type and size, then the drawing as a PNG image; if Pele cannot draw it, its error with line and column, and the line it names; if the PNG cannot be made, the SVG as text. Writes nothing and records nothing in the ledger. At most ${RENDERS_PER_MINUTE} renders a minute per account.`,
+        description: `${BEYOND}draw rendered media as the app draws it and see it: a Mermaid diagram (Pele, the reader's column and greys) or an SVG fence (sanitized as the reader sanitizes it). Preview a non-trivial one before you write it (layout, labels that fit), or look at one while you review it or fix its \`diagram_invalid\`, \`diagram_unrendered\` or \`svg_invalid\` lint: pass \`source\` (a fence's body, with \`lang\` for SVG), or \`path\` and \`figure\` (its number in \`read\`'s Figures list). Returns a line with what it is and its size, then the drawing as a PNG image; if it cannot be drawn, the error with line and column, and the line it names; if the PNG cannot be made, the SVG as text. Writes nothing and records nothing in the ledger. At most ${RENDERS_PER_MINUTE} renders a minute per account.`,
         inputSchema: {
           source: z
             .string()
             .optional()
-            .describe("The diagram's Mermaid source: what goes inside a ```mermaid fence."),
+            .describe("The figure's source: what goes inside a ```mermaid (or ```svg) fence."),
           path: z
             .string()
             .optional()
@@ -1278,6 +1290,10 @@ export function buildServer(ctx: McpContext): McpServer {
             .min(1)
             .optional()
             .describe("The diagram's figure number in that concept, as `read` lists it."),
+          lang: z
+            .enum(RENDER_LANGS)
+            .optional()
+            .describe("With `source`: the fence's language, `mermaid` (default) or `svg`."),
           theme: z
             .enum(["light", "dark"])
             .optional()
@@ -1291,10 +1307,12 @@ export function buildServer(ctx: McpContext): McpServer {
           source?: string;
           path?: string;
           figure?: number;
+          lang?: RenderLang;
           theme?: "light" | "dark";
           library?: string;
         }) => {
           let source: string;
+          let lang: RenderLang = args.lang ?? "mermaid";
           let what: string;
           let library: string | undefined;
           if (args.source !== undefined) {
@@ -1305,11 +1323,12 @@ export function buildServer(ctx: McpContext): McpServer {
                 "Pass `source`, or `path` and `figure`, not both.",
               );
             }
-            // A whole fence pasted in is drawn as its body.
-            source =
-              /^\s*(`{3,}|~{3,})\s*mermaid\b[^\n]*\n([\s\S]*?)\n?\s*\1\s*$/i.exec(
-                args.source,
-              )?.[2] ?? args.source;
+            // A whole fence pasted in is drawn as its body, in its language.
+            const fence = /^\s*(`{3,}|~{3,})\s*(mermaid|svg)\b[^\n]*\n([\s\S]*?)\n?\s*\1\s*$/i.exec(
+              args.source,
+            );
+            source = fence?.[3] ?? args.source;
+            if (fence) lang = (fence[2] as string).toLowerCase() as RenderLang;
             what = "Diagram";
             library =
               args.library || ctx.libraries.length === 1
@@ -1345,6 +1364,14 @@ export function buildServer(ctx: McpContext): McpServer {
                 `Figure ${f.n} of ${view.path} is an image, not a diagram; \`read\` it with figures: [${f.n}].`,
               );
             }
+            if (!isRenderLang(f.lang)) {
+              throw new OkfError(
+                400,
+                "not_a_diagram",
+                `Figure ${f.n} of ${view.path} is a ${f.lang} fence, which the server does not draw.`,
+              );
+            }
+            lang = f.lang;
             source = f.source;
             what = `Figure ${f.n} of /${view.path}${f.title ? ` (${JSON.stringify(f.title)})` : ""}`;
           }
@@ -1352,15 +1379,15 @@ export function buildServer(ctx: McpContext): McpServer {
             throw new OkfError(400, "bad_request", "The diagram's source is empty.");
           }
           const theme = args.theme ?? "light";
-          const type = diagramTypeOf(source);
-          const head = `${what} · mermaid${type ? `, ${type}` : ""} · ${theme}`;
-          const drawn = await draw(source, theme, library);
+          const type = lang === "mermaid" ? diagramTypeOf(source) : null;
+          const head = `${what} · ${lang}${type ? `, ${type}` : ""} · ${theme}`;
+          const drawn = await draw(source, theme, library, lang);
           if (drawn.kind === "unavailable") {
             return { ...text(`${head}\nNot drawn: ${drawn.why}.`), isError: true };
           }
           if (drawn.kind === "refused") {
             return text(
-              `${head}\nPele could not draw it: ${renderErrorText(drawn.error, source)}\nFix the source and render it again; the app shows a diagram that does not draw as its source.`,
+              `${head}\n${drawerOf(lang)} could not draw it: ${renderErrorText(drawn.error, source)}\nFix the source and render it again; the app shows a figure that does not draw as its source.`,
             );
           }
           if (drawn.kind === "svg") {

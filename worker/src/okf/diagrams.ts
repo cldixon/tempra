@@ -8,7 +8,7 @@
  * and brackets that open and close. It reports only what Pele refuses too (tested against Pele,
  * which reads some types leniently); anything subtler is left to the reader's notice.
  */
-import { type Doc, idOf, walk } from "@tempra/editor/doc";
+import { type Doc, fenceAttr, idOf, sanitizeSvg, walk } from "@tempra/editor/doc";
 import type { Code } from "mdast";
 import type { LintWarning } from "./types";
 
@@ -254,11 +254,58 @@ function balance(
   return null;
 }
 
-/** Lint for each diagram in a body that is plainly broken. */
+/** The fences drawn as SVG figures (TEMPRA-206): a code block whose language is `svg`. */
+export function isSvgFence(n: { type: string; lang?: string | null }): boolean {
+  return n.type === "code" && n.lang?.toLowerCase() === "svg";
+}
+
+/**
+ * Lint for an SVG fence (TEMPRA-206): `svg_invalid` when it does not parse (or is over the size
+ * limit), `svg_unsafe` naming what sanitizing took out, `image_no_alt` when neither the fence's
+ * `alt="…"` nor the SVG's own `<title>` says what it shows.
+ */
+export function svgLint(code: Code, n: number): LintWarning[] {
+  const block = idOf(code);
+  const name = `SVG figure ${n}${block ? ` (block ${block})` : ""}`;
+  const r = sanitizeSvg(code.value);
+  if (!r.ok) {
+    const at = r.line > 0 ? ` at line ${r.line}, column ${r.column} of the fence` : "";
+    return [
+      {
+        code: "svg_invalid",
+        message: `${name} does not parse${at}: ${r.message}. The app shows its source until it does; fix the fence.`,
+        block,
+      },
+    ];
+  }
+  const out: LintWarning[] = [];
+  if (r.removed.length > 0) {
+    out.push({
+      code: "svg_unsafe",
+      message: `${name} is drawn without what could run, load or link: ${r.removed.join(", ")}. Take those out of the fence (use attributes for styles, and draw what an image or a link would show).`,
+      block,
+    });
+  }
+  if (!fenceAttr(code.meta, "alt") && !r.title) {
+    out.push({
+      code: "image_no_alt",
+      message: `${name} has no alt text: say what it shows with \`alt="…"\` after \`svg\` on the fence (or a <title> first in the SVG).`,
+      block,
+    });
+  }
+  return out;
+}
+
+/** Lint for each diagram in a body that is plainly broken, and for each SVG fence. */
 export function diagramLint(doc: Doc): LintWarning[] {
   const out: LintWarning[] = [];
   let n = 0;
+  let svgs = 0;
   walk(doc, (node) => {
+    if (isSvgFence(node)) {
+      out.push(...svgLint(node as Code, ++svgs));
+      return false;
+    }
     if (!isDiagram(node)) return undefined;
     n++;
     const code = node as Code;

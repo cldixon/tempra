@@ -1,13 +1,14 @@
 /**
  * Drawn diagrams in exports (TEMPRA-168; tempra-dev: app/media, Diagrams): a downloaded bundle
- * carries, beside each concept with Mermaid fences, `<concept>.diagrams/<n>.svg`, the light SVG
- * the render Worker draws (its R2 cache makes an unchanged fence cost nothing), numbered as the
+ * carries, beside each concept with Mermaid or SVG fences, `<concept>.diagrams/<n>.svg`: for
+ * Mermaid the light SVG the render Worker draws (its R2 cache makes an unchanged fence cost
+ * nothing), for an SVG fence its sanitized SVG, made here (TEMPRA-206); numbered as the
  * reader numbers figures (`findFigures`). Derived, never written into the concept, and ignored
  * on import. A fence that does not draw, or a render service that is not there, is left out
  * without a word: the export never fails for a diagram. Bounded by MAX_EXPORT_DIAGRAMS, a time
  * budget and a few renders at a time. Free of Worker APIs.
  */
-import { FIGURE_FENCES, findFigures, parseMarkdown } from "@tempra/editor/doc";
+import { FIGURE_FENCES, findFigures, parseMarkdown, sanitizeSvg } from "@tempra/editor/doc";
 import { splitFrontmatter } from "./okf/concept";
 import { RENDER_WIDTH, type RenderContext, type RenderDiagram } from "./render";
 
@@ -19,7 +20,8 @@ export const EXPORT_DIAGRAMS_MS = 60_000;
 export const EXPORT_RENDER_CONCURRENCY = 4;
 
 export interface DiagramExport {
-  render: RenderDiagram;
+  /** Draws Mermaid; without it only SVG fences are exported. */
+  render?: RenderDiagram;
   /** Whose renders these are, for metering. */
   ctx: RenderContext;
   max?: number;
@@ -28,7 +30,7 @@ export interface DiagramExport {
 }
 
 const DERIVED = /^(.*)\.diagrams\/\d+\.svg$/;
-const HAS_FENCE = /(?:`{3,}|~{3,})[ \t]*mermaid/i;
+const HAS_FENCE = /(?:`{3,}|~{3,})[ \t]*(?:mermaid|svg)/i;
 
 /** Where a concept's drawn diagrams go: `a/b.md` → `a/b.diagrams/`. */
 export function diagramsDir(conceptPath: string): string {
@@ -41,12 +43,17 @@ export function isDrawnDiagram(path: string, concepts: ReadonlySet<string>): boo
   return !!m && concepts.has(`${m[1]}.md`);
 }
 
-/** The Mermaid fences of a bundle's concepts, as export paths and sources, in bundle order. */
-export function diagramJobs(
-  files: { path: string; text?: string }[],
-): { path: string; source: string }[] {
+/** A fence to export: where it goes, its source and its language. */
+export interface DiagramJob {
+  path: string;
+  source: string;
+  lang: string;
+}
+
+/** The drawn fences of a bundle's concepts, as export paths and sources, in bundle order. */
+export function diagramJobs(files: { path: string; text?: string }[]): DiagramJob[] {
   const taken = new Set(files.map((f) => f.path));
-  const jobs: { path: string; source: string }[] = [];
+  const jobs: DiagramJob[] = [];
   for (const f of files) {
     if (f.text === undefined || !f.path.endsWith(".md") || !HAS_FENCE.test(f.text)) continue;
     const dir = diagramsDir(f.path);
@@ -56,7 +63,9 @@ export function diagramJobs(
       }
       const path = `${dir}${fig.n}.svg`;
       // A real file at that path is the library's own; keep it and draw nothing over it.
-      if (!taken.has(path) && fig.node.value.trim()) jobs.push({ path, source: fig.node.value });
+      if (!taken.has(path) && fig.node.value.trim()) {
+        jobs.push({ path, source: fig.node.value, lang: (fig.node.lang ?? "").toLowerCase() });
+      }
     }
   }
   return jobs;
@@ -70,23 +79,28 @@ export async function drawnDiagrams(
   const jobs = diagramJobs(files).slice(0, opts.max ?? MAX_EXPORT_DIAGRAMS);
   if (jobs.length === 0) return [];
   const drawn: (string | undefined)[] = new Array(jobs.length);
+  // SVG fences need no renderer: their sanitized SVG is the drawing.
+  for (const [i, job] of jobs.entries()) {
+    if (job.lang !== "svg") continue;
+    const r = sanitizeSvg(job.source);
+    if (r.ok) drawn[i] = r.svg;
+  }
+  const render = opts.render;
+  const queue = render ? [...jobs.keys()].filter((i) => jobs[i]?.lang === "mermaid") : [];
   let next = 0;
   let over = false;
   const worker = async () => {
-    while (!over && next < jobs.length) {
-      const i = next++;
-      const job = jobs[i] as (typeof jobs)[number];
-      const r = await opts.render(
-        { source: job.source, width: RENDER_WIDTH, theme: "light" },
-        opts.ctx,
-      );
+    while (!over && next < queue.length && render) {
+      const i = queue[next++] as number;
+      const job = jobs[i] as DiagramJob;
+      const r = await render({ source: job.source, width: RENDER_WIDTH, theme: "light" }, opts.ctx);
       if (!over && r.svg && !r.error) drawn[i] = r.svg;
     }
   };
   let timer: ReturnType<typeof setTimeout> | undefined;
   const pool = Promise.all(
     Array.from(
-      { length: Math.min(opts.concurrency ?? EXPORT_RENDER_CONCURRENCY, jobs.length) },
+      { length: Math.min(opts.concurrency ?? EXPORT_RENDER_CONCURRENCY, queue.length) },
       worker,
     ),
   );
