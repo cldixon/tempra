@@ -521,6 +521,28 @@ describe("upload URLs (TEMPRA-158)", () => {
     }
   });
 
+  test("the token is opaque: nothing of the prepared write can be read from the link (TEMPRA-210)", async () => {
+    const s = setup();
+    const p = await prepare(s, {
+      path: "figures/secret-plan.png",
+      description: "The secret plan",
+      note: "For the board.",
+    });
+    const token = p.body.url.split("/").pop() as string;
+    expect(token).toMatch(/^[A-Za-z0-9_-]{24}$/);
+    const decoded = Buffer.from(token, "base64url").toString("latin1");
+    for (const leak of ["secret", "board", "claude", "owner", "user_1", "role"]) {
+      expect(decoded).not.toContain(leak);
+    }
+    // It still opens to the prepared write, once.
+    expect((await put(s, p.body.url, PNG)).status).toBe(200);
+    expect(await code(await put(s, p.body.url, PNG))).toBe("upload_used");
+    // A token of the right shape that was never issued is refused.
+    expect(await code(await put(s, p.body.url.replace(token, "A".repeat(24)), PNG))).toBe(
+      "bad_upload",
+    );
+  });
+
   test("read access is refused at prepare, and so is a path outside a prefix", async () => {
     const s = setup();
     const r = await prepare(s, { path: "a.bin" }, "reader");
