@@ -4,6 +4,7 @@
  * like sign-in and consent: no script, the strict headers, one form posting to its own URL.
  */
 import { alertNotice, esc, invalid, PAGE_HEADERS, page } from "../oauth/pages";
+import { kindOf } from "../uploads";
 
 const ERROR_ID = "upload-error";
 
@@ -17,7 +18,6 @@ export interface UploadView {
   agent: string;
   description?: string;
   media: string | null;
-  size?: number;
   /** When the link stops working, in seconds since the epoch. */
   exp: number;
   /** The time now, in seconds since the epoch. */
@@ -40,8 +40,7 @@ export function uploadPage(v: UploadView, error?: { message: string; status: num
     fact("Library", `<a href="${esc(v.libraryHref)}">${esc(v.library)}</a>`),
     fact("Saved as", `<code>${esc(v.path)}</code>`),
     v.description ? fact("Shows", esc(v.description)) : "",
-    v.media ? fact("Type", esc(v.media)) : "",
-    v.size !== undefined ? fact("Size", esc(readableSize(v.size))) : "",
+    kindOf(v.media) ? fact("Kind", esc(kindOf(v.media) as string)) : "",
   ].join("");
   const accept = v.media ? ` accept="${esc(v.media)}"` : "";
   const body = `<h1>Upload a file</h1>

@@ -8,6 +8,7 @@ import { writeTar } from "../src/util/tar";
 import { API, setup } from "./harness";
 import { base64, makePng, SAMPLES, SVG, sample, truncatedIdatPng } from "./images";
 import { bunSqlHandle } from "./sqlite";
+import { attachFile } from "./upload";
 
 type S = ReturnType<typeof setup>;
 type Text = { type: "text"; text: string };
@@ -114,10 +115,10 @@ describe("attachments: checked images, type from the bytes, dimensions (TEMPRA-1
     );
     expect((await s.req("/files/a.md")).status).toBe(404);
 
-    // MCP attach.
+    // An upload link.
     const call = await mcp(s);
-    const m = await call("attach", { path: "c.png", content_base64: base64(broken) });
-    expect(m.isError).toBe(true);
+    const m = await attachFile(s.app, call, "c.png", broken);
+    expect(m.status).toBe(400);
     expect(m.text).toContain("bad_image");
   });
 

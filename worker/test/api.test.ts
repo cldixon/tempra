@@ -431,8 +431,9 @@ describe("upload URLs (TEMPRA-158)", () => {
     const s = setup();
     const p = await prepare(s, {
       path: "figures/chart.png",
-      size: PNG.length,
-      sha256: hex(PNG),
+      // Old clients may still send these; nothing checks them (TEMPRA-204).
+      size: 1,
+      sha256: "0".repeat(64),
       note: "The latency chart.",
     });
     expect(p.status).toBe(201);
@@ -462,19 +463,19 @@ describe("upload URLs (TEMPRA-158)", () => {
     expect(await code(again)).toBe("upload_used");
   });
 
-  test("bytes or a type that do not match are refused, and the link is not spent", async () => {
+  test("bytes short of their Content-Length or a type that does not match are refused, and the link is not spent", async () => {
     const s = setup();
-    const p = await prepare(s, { path: "a.png", size: PNG.length, sha256: hex(PNG) });
-    const short = await put(s, p.body.url, PNG.slice(0, 5));
+    const p = await prepare(s, { path: "a.png" });
+    const short = await s.anon.request(p.body.url, {
+      method: "PUT",
+      body: PNG.slice(0, 5),
+      headers: { "Content-Length": String(PNG.length) },
+    });
     expect(short.status).toBe(400);
-    expect(await short.json()).toMatchObject({ code: "checksum_mismatch", received_size: 5 });
-    const garbled = PNG.slice();
-    garbled[10] = 9;
-    const bad = await put(s, p.body.url, garbled);
-    expect(bad.status).toBe(400);
-    expect(await bad.json()).toMatchObject({
-      code: "checksum_mismatch",
-      received_sha256: hex(garbled),
+    expect(await short.json()).toMatchObject({
+      code: "incomplete_upload",
+      expected: PNG.length,
+      received: 5,
     });
     const type = await put(s, p.body.url, PNG, "image/jpeg");
     expect(type.status).toBe(400);
@@ -520,14 +521,12 @@ describe("upload URLs (TEMPRA-158)", () => {
     }
   });
 
-  test("read access is refused at prepare, and so are a path outside a prefix and a size over the cap", async () => {
+  test("read access is refused at prepare, and so is a path outside a prefix", async () => {
     const s = setup();
     const r = await prepare(s, { path: "a.bin" }, "reader");
     expect(r.status).toBe(403);
     expect(r.body.code).toBe("read_only");
     expect((await prepare(s, { path: "elsewhere/a.bin" }, "scoped")).status).toBe(403);
-    expect((await prepare(s, { path: "a.bin", size: 11 * 1024 * 1024 })).status).toBe(413);
-    expect((await prepare(s, { path: "a.bin", sha256: "abc" })).status).toBe(400);
   });
 
   test("a member demoted to read before the PUT lands nothing", async () => {
@@ -549,7 +548,7 @@ describe("upload URLs (TEMPRA-158)", () => {
 
   test("blob first: a link without a path stores the bytes for X-Blob", async () => {
     const s = setup();
-    const p = await prepare(s, { sha256: hex(PNG) });
+    const p = await prepare(s, {});
     expect(p.status).toBe(201);
     const r = await put(s, p.body.url, PNG);
     expect(r.status).toBe(201);

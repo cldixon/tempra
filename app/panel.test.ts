@@ -18,7 +18,7 @@ const UPLOAD: PreparedUpload = {
   path: "photos/ladle.png",
   library: "notes",
   media: "image/png",
-  size: 349_140,
+  kind: "PNG image",
   description: "Molten steel in a ladle.",
   expires: "2026-10-26T22:00:00.000Z",
 };
@@ -58,7 +58,8 @@ describe("the upload panel", () => {
     expect(root.querySelector("h1")?.textContent).toBe("Upload a file");
     expect(root.textContent).toContain("To notes, as photos/ladle.png.");
     expect(root.textContent).toContain("Molten steel in a ladle.");
-    expect(root.textContent).toContain("Expects image/png, 341 KB.");
+    expect(root.textContent).toContain("Kind: PNG image");
+    expect(root.textContent).not.toContain("KB");
     expect(root.textContent).toContain("If it came from the chat, choose it again here.");
     const input = root.querySelector("input[type=file]") as HTMLInputElement;
     expect(input.accept).toBe("image/png");

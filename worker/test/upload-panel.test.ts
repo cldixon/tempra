@@ -49,7 +49,7 @@ describe("the upload panel (TEMPRA-200)", () => {
     const client = await connect(setup().app);
     const r = await client.callTool({
       name: "prepare_upload",
-      arguments: { path: "figures/photo.png", size: PNG.length, description: "A photo." },
+      arguments: { path: "figures/photo.png", description: "A photo." },
     });
     const textOut = (r.content as { text: string }[]).map((c) => c.text).join("\n");
     expect(textOut).toContain("curl -sS -T photo.png");
@@ -60,9 +60,10 @@ describe("the upload panel (TEMPRA-200)", () => {
       path: "figures/photo.png",
       library: "demo",
       media: "image/png",
-      size: PNG.length,
+      kind: "PNG image",
       description: "A photo.",
     });
+    expect(upload).not.toHaveProperty("size");
     expect(upload.url).toStartWith("http://localhost/ul/lib-1/");
     expect(upload.page).toStartWith("http://localhost/owner/demo/-/upload/");
     expect(upload.url.split("/").pop()).toBe(upload.page?.split("/").pop());

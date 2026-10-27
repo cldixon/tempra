@@ -53,14 +53,7 @@ import {
 } from "./tenancy";
 import { registerUiRoutes } from "./ui/routes";
 import { STARTER } from "./ui/starter";
-import {
-  checkBytes,
-  checkDeclared,
-  checkMedia,
-  prepareUpload,
-  readCapped,
-  type UploadGrant,
-} from "./uploads";
+import { checkLength, checkMedia, prepareUpload, readCapped, type UploadGrant } from "./uploads";
 import { admit, admitSession, RETRY_AFTER_S, tokenAdmission, type UsageDeps } from "./usage";
 import { maybeGunzip, readTar } from "./util/tar";
 import { registerWaitlistRoutes } from "./waitlist";
@@ -586,8 +579,6 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     const body = await json<{
       path?: unknown;
       media?: unknown;
-      size?: unknown;
-      sha256?: unknown;
       if_match?: unknown;
       description?: unknown;
       credit?: unknown;
@@ -597,17 +588,12 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     const path = typeof body.path === "string" && body.path !== "" ? body.path : null;
     if (path) requireWrite(c, path);
     else requireWrite(c);
-    const declared = checkDeclared({
-      size: body.size === undefined ? undefined : (body.size as number),
-      sha256: typeof body.sha256 === "string" ? body.sha256 : undefined,
-    });
     const media = typeof body.media === "string" && body.media ? body.media : null;
     const facts = path ? checkFacts(body) : {};
     const ctx = requestContext(c, body.note);
     const prepared = await prepareUpload(c.var.lib, new URL(c.req.url).origin, {
       path,
       media: media ?? (path ? mediaFor(path) : null),
-      ...declared,
       if_match: typeof body.if_match === "string" ? body.if_match : undefined,
       ...facts,
       note: ctx.note ?? null,
@@ -1177,6 +1163,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     }
     checkMedia(grant.media, c.req.header("Content-Type"));
     const bytes = await readCapped(c.req.raw.body);
+    checkLength(bytes, c.req.header("Content-Length"));
     const person = grant.token.person || grant.token.library.owner;
     const done = await receiveUpload(d, lib, raw, grant, {
       bytes,
@@ -1679,7 +1666,7 @@ export interface UploadArrival {
 
 /**
  * An upload link's bytes, from curl's PUT or a person's upload page (TEMPRA-158, TEMPRA-196):
- * checked against what was declared, the caller's access checked again, the link spent, the
+ * the caller's access checked again, the link spent, the
  * bytes stored (putBlob) and the `attach` applied as the caller that asked, with its note. A
  * blob-first link (REST, no path) stores the bytes and answers with their hash, for `X-Blob` or a
  * batch's attach.
@@ -1692,7 +1679,6 @@ export async function receiveUpload(
   arrival: UploadArrival,
 ): Promise<{ blob: BlobRef } | { res: WriteResult }> {
   const { bytes, type } = arrival;
-  checkBytes(bytes, { size: grant.size, sha256: grant.sha256 });
   const token = await uploaderNow(d, grant.token);
   await admit(d, tokenAdmission(token), true, !token.id.startsWith("session:"));
   const media = grant.media ?? mediaFor(grant.path ?? "", type);
