@@ -125,3 +125,48 @@ describe("the upload panel (TEMPRA-200)", () => {
     expect(facts.supplied_by).toBeNull();
   });
 });
+
+describe("an agent's own file, handed to the person (TEMPRA-205)", () => {
+  test("origin agent: the reason for the agent, the panel told, the ledger kept", async () => {
+    const s = setup();
+    const client = await connect(s.app);
+    const r = await client.callTool({
+      name: "prepare_upload",
+      arguments: { path: "charts/latency.png", origin: "agent", note: "The latency chart." },
+    });
+    const textOut = (r.content as { text: string }[]).map((c) => c.text).join("\n");
+    expect(textOut).toContain("You made this file");
+    expect(textOut).toContain("you cannot send files to Tempra yourself");
+    const upload = (r.structuredContent as { upload: Upload & { origin?: string } }).upload;
+    expect(upload.origin).toBe("agent");
+    // The panel's PUT, from the person's chat.
+    const put = await s.app.request(`${upload.url}?via=chat`, { method: "PUT", body: PNG });
+    expect(put.status).toBe(200);
+    const meta = s.store().requests({ limit: 1 }).requests[0];
+    expect(meta).toMatchObject({ note: "The latency chart." });
+    const read = await client.callTool({
+      name: "read",
+      arguments: { path: "charts/latency.png", image: false },
+    });
+    expect((read.content as { text: string }[])[0]?.text).toContain(
+      "supplied by: @owner (an agent made the file; the person sent it)",
+    );
+    const file = (await (
+      await s.req("/files/charts/latency.png", { headers: { Accept: "application/json" } })
+    ).json()) as { origin: string; supplied_by: string };
+    expect(file).toMatchObject({ origin: "agent", supplied_by: "owner" });
+  });
+
+  test("origin defaults to the person, and nothing else is taken", async () => {
+    const client = await connect(setup().app);
+    const r = await client.callTool({ name: "prepare_upload", arguments: { path: "a.png" } });
+    const textOut = (r.content as { text: string }[]).map((c) => c.text).join("\n");
+    expect(textOut).not.toContain("You made this file");
+    expect((r.structuredContent as { upload: { origin: string } }).upload.origin).toBe("person");
+    const bad = await client.callTool({
+      name: "prepare_upload",
+      arguments: { path: "a.png", origin: "robot" },
+    });
+    expect(bad.isError).toBe(true);
+  });
+});

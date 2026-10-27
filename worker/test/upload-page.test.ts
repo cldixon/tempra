@@ -172,3 +172,29 @@ describe("the upload link's page (TEMPRA-196)", () => {
     }
   });
 });
+
+describe("an agent's own file on the upload page (TEMPRA-205)", () => {
+  test("the page says why the person is asked, and the ledger keeps who made it", async () => {
+    const s = setup();
+    const p = await prepare(s, { path: "charts/a.png", origin: "agent" });
+    const html = await (await s.app.request(p.page)).text();
+    expect(html).toContain("made this file and gave it to you in the chat.");
+    expect(html).toContain("Agents can't send files to Tempra themselves yet, so choose it here.");
+    expect(html).toContain("Save it from the chat first, then choose it here.");
+    expect(html).not.toContain("asked for this file");
+    expect((await send(s.app, p.page, PNG)).status).toBe(200);
+    const file = (await (
+      await s.req("/files/charts/a.png", { headers: { Accept: "application/json" } })
+    ).json()) as { origin: string };
+    expect(file.origin).toBe("agent");
+    // A person's own file reads as before.
+    const q = await prepare(s, { path: "b.png" });
+    expect(await (await s.app.request(q.page)).text()).toContain("asked for this file.");
+    const r = await s.req("/uploads", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: "c.png", origin: "robot" }),
+    });
+    expect(r.status).toBe(400);
+  });
+});

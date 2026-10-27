@@ -652,6 +652,7 @@ export function registerUiRoutes<E extends AppEnv>(
       agent: agent ? agentName(agent) : person ? `@${person}` : grant.actor,
       ...(grant.description ? { description: grant.description } : {}),
       media: grant.media,
+      ...(grant.origin === "agent" ? { fromAgent: true } : {}),
       exp: (grant as UploadGrant & { exp: number }).exp,
       now: Math.floor(Date.now() / 1000),
     };

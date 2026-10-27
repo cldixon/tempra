@@ -8,6 +8,9 @@ import { kindOf } from "../uploads";
 
 const ERROR_ID = "upload-error";
 
+/** Why a person is asked to upload a file an agent made (TEMPRA-205); the panel says the same. */
+const AGENTS_CANNOT = "Agents can't send files to Tempra themselves yet, so choose it here.";
+
 /** What the page shows about the prepared upload. */
 export interface UploadView {
   /** The library as people read it: its title, else its slug. */
@@ -18,6 +21,8 @@ export interface UploadView {
   agent: string;
   description?: string;
   media: string | null;
+  /** The agent made the file and handed it to the person in the chat (TEMPRA-205). */
+  fromAgent?: boolean;
   /** When the link stops working, in seconds since the epoch. */
   exp: number;
   /** The time now, in seconds since the epoch. */
@@ -44,12 +49,16 @@ export function uploadPage(v: UploadView, error?: { message: string; status: num
   ].join("");
   const accept = v.media ? ` accept="${esc(v.media)}"` : "";
   const body = `<h1>Upload a file</h1>
-<p>${esc(v.agent)} asked for this file.</p>
+<p>${
+    v.fromAgent
+      ? `${esc(v.agent)} made this file and gave it to you in the chat. ${AGENTS_CANNOT}`
+      : `${esc(v.agent)} asked for this file.`
+  }</p>
 <dl class="facts">${facts}</dl>
 ${error ? alertNotice(ERROR_ID, error.message) : ""}<form method="post" enctype="multipart/form-data" class="stack">
 <label class="field">File
 <input name="file" type="file" required${accept}${invalid(ERROR_ID, !!error)}>
-<span class="field-hint">If it came from a chat, choose it again here.</span></label>
+<span class="field-hint">${v.fromAgent ? "Save it from the chat first, then choose it here." : "If it came from a chat, choose it again here."}</span></label>
 <p><button class="primary" type="submit">Upload</button></p></form>
 <p class="muted">This link works once, for ${minutes} more ${minutes === 1 ? "minute" : "minutes"}.</p>`;
   return new Response(page("Upload a file", body), {

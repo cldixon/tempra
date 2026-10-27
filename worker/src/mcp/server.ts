@@ -874,7 +874,9 @@ export function buildServer(ctx: McpContext): McpServer {
               ...(view.credit ? [`credit: ${view.credit}`] : []),
               ...(view.licence ? [`licence: ${view.licence}`] : []),
               ...(view.supplied_by
-                ? [`supplied by: @${view.supplied_by} (the person sent the file)`]
+                ? [
+                    `supplied by: @${view.supplied_by} (${view.origin === "agent" ? "an agent made the file; the person sent it" : "the person sent the file"})`,
+                  ]
                 : []),
               `versions: ${versions}`,
               `download (15 minutes): ${url}`,
@@ -1149,7 +1151,7 @@ export function buildServer(ctx: McpContext): McpServer {
     {
       title: "Upload a file",
       description:
-        "The way to add a file up to 10 MB that is not on the web: one you made (a screenshot, a chart, a PDF), or one the person has, such as a photo they attached in the chat. Put it beside the concept that uses it, named for what it shows (`dir/x-architecture.png`). Returns a URL good for one PUT within an hour, a ready `curl -T <file> '<url>'` line, and an upload link for the person. With a shell that reaches this server, run the curl line: the server stores the bytes and attaches them at `path` as you, with your `note`, and curl prints the write result as JSON (path, hash, seq, lint). From a sandbox that cannot reach this server (curl fails to connect, or a proxy refuses it), or for a file the person has (you cannot pass on a chat's attachment), give the person the upload link instead: signed in, they choose the file in their browser, and it is attached as your write with your note, description, credit and licence, recorded as supplied by them. Then `read` the path to see when it has arrived. Whatever file arrives is the file; a transfer cut short is refused (`incomplete_upload`). The URL needs no token, so keep it to yourself; the link needs the person signed in with write access.",
+        "The way to add a file up to 10 MB that is not on the web: one you made (a screenshot, a chart, a PDF), or one the person has, such as a photo they attached in the chat. Put it beside the concept that uses it, named for what it shows (`dir/x-architecture.png`). Returns a URL good for one PUT within an hour, a ready `curl -T <file> '<url>'` line, and an upload link for the person. With a shell that reaches this server, run the curl line: the server stores the bytes and attaches them at `path` as you, with your `note`, and curl prints the write result as JSON (path, hash, seq, lint). From a sandbox that cannot reach this server (curl fails to connect, or a proxy refuses it), or for a file the person has (you cannot pass on a chat's attachment), give the person the upload link instead: signed in, they choose the file in their browser, and it is attached as your write with your note, description, credit and licence, recorded as supplied by them. A file you made in such a sandbox (a chart, a processed image): send it to the person in the chat first, then call this with `origin` set to `agent` and tell them in a sentence or two why they are asked: you cannot send files to Tempra yourself, so they upload the one you gave them. Then `read` the path to see when it has arrived. Whatever file arrives is the file; a transfer cut short is refused (`incomplete_upload`). The URL needs no token, so keep it to yourself; the link needs the person signed in with write access.",
       _meta: { ui: { resourceUri: UPLOAD_PANEL_URI } },
       inputSchema: {
         path: z
@@ -1158,6 +1160,12 @@ export function buildServer(ctx: McpContext): McpServer {
             "Where the file goes, beside the concept that uses it, e.g. `metrics/latency-p99.png`.",
           ),
         media: z.string().optional().describe("MIME type; guessed from the extension if omitted."),
+        origin: z
+          .enum(["person", "agent"])
+          .optional()
+          .describe(
+            "Who has the file: `person` (default; e.g. one they attached in the chat) or `agent` (you made it, cannot send it from your sandbox, and have handed it to the person in the chat).",
+          ),
         if_match: z.string().optional().describe("Replacing a file: its current hash."),
         description: z
           .string()
@@ -1176,65 +1184,75 @@ export function buildServer(ctx: McpContext): McpServer {
       },
       annotations: writes,
     },
-    guarded(async ({ path, media, if_match, description, credit, licence, note, library }) => {
-      const picked = pick(library);
-      checkWrite(picked.token, path);
-      const clean = normalizePath(path);
-      if (!clean || clean.endsWith(".md")) {
-        throw new OkfError(
-          400,
-          "bad_path",
-          "prepare_upload is for attachments: a file path that is not markdown (use `write` for concepts).",
-        );
-      }
-      const req = request(note);
-      const facts = checkFacts({ description, credit, licence });
-      const up = await prepareUpload(picked.lib, ctx.origin, {
-        path: clean,
-        media: media ?? mediaFor(clean),
-        if_match,
-        ...facts,
-        note: req.note ?? null,
-        actor: req.actor,
-        by: req.by,
-        token: picked.token,
-      });
-      const result = text(
-        [
-          `Upload URL for ${clean} (one PUT, until ${up.expires}):`,
-          up.url,
-          "",
-          "Run, from the directory holding the file (rename it to the file's real name if it differs):",
-          up.curl,
-          "",
-          "curl prints the write result as JSON; read its lint. An error comes back as JSON with a code (incomplete_upload, media_mismatch, bad_image, upload_used); prepare again and resend.",
-          ...(up.upload_page
-            ? [
-                "",
-                "If your shell cannot reach this server, or the file is the person's (one they attached in the chat), give them this link to upload it from their browser, signed in; the same link, so it works once, until the same time:",
-                up.upload_page,
-              ]
-            : []),
-          "",
-          "In a chat that shows apps, an upload panel appears with this call: the person can choose the file there instead, and the chat is told when it has arrived. Say so, and give the link too in case the panel does not show.",
-        ].join("\n"),
-      );
-      // For the upload panel (TEMPRA-200): the host hands it the result, and keeps
-      // structuredContent out of the model's context.
-      result.structuredContent = {
-        upload: {
-          url: up.url,
-          ...(up.upload_page ? { page: up.upload_page } : {}),
+    guarded(
+      async ({ path, media, origin, if_match, description, credit, licence, note, library }) => {
+        const picked = pick(library);
+        checkWrite(picked.token, path);
+        const clean = normalizePath(path);
+        if (!clean || clean.endsWith(".md")) {
+          throw new OkfError(
+            400,
+            "bad_path",
+            "prepare_upload is for attachments: a file path that is not markdown (use `write` for concepts).",
+          );
+        }
+        const req = request(note);
+        const facts = checkFacts({ description, credit, licence });
+        const up = await prepareUpload(picked.lib, ctx.origin, {
           path: clean,
-          library: picked.token.library.slug,
           media: media ?? mediaFor(clean),
-          ...(kindOf(media ?? mediaFor(clean)) ? { kind: kindOf(media ?? mediaFor(clean)) } : {}),
-          ...(facts.description ? { description: facts.description } : {}),
-          expires: up.expires,
-        },
-      };
-      return result;
-    }),
+          origin: origin ?? "person",
+          if_match,
+          ...facts,
+          note: req.note ?? null,
+          actor: req.actor,
+          by: req.by,
+          token: picked.token,
+        });
+        const result = text(
+          [
+            `Upload URL for ${clean} (one PUT, until ${up.expires}):`,
+            up.url,
+            "",
+            "Run, from the directory holding the file (rename it to the file's real name if it differs):",
+            up.curl,
+            "",
+            "curl prints the write result as JSON; read its lint. An error comes back as JSON with a code (incomplete_upload, media_mismatch, bad_image, upload_used); prepare again and resend.",
+            ...(up.upload_page
+              ? [
+                  "",
+                  "If your shell cannot reach this server, or the file is the person's (one they attached in the chat), give them this link to upload it from their browser, signed in; the same link, so it works once, until the same time:",
+                  up.upload_page,
+                ]
+              : []),
+            "",
+            "In a chat that shows apps, an upload panel appears with this call: the person can choose the file there instead, and the chat is told when it has arrived. Say so, and give the link too in case the panel does not show.",
+            ...(origin === "agent"
+              ? [
+                  "",
+                  "You made this file: make sure the person has it in the chat, and tell them in a sentence or two why they are asked to upload it: you cannot send files to Tempra yourself (MCP has no way to pass a file to a server, and your sandbox cannot reach it), so they choose the file you gave them in the panel or the link. The panel and the link say the same.",
+                ]
+              : []),
+          ].join("\n"),
+        );
+        // For the upload panel (TEMPRA-200): the host hands it the result, and keeps
+        // structuredContent out of the model's context.
+        result.structuredContent = {
+          upload: {
+            url: up.url,
+            ...(up.upload_page ? { page: up.upload_page } : {}),
+            path: clean,
+            library: picked.token.library.slug,
+            media: media ?? mediaFor(clean),
+            ...(kindOf(media ?? mediaFor(clean)) ? { kind: kindOf(media ?? mediaFor(clean)) } : {}),
+            origin: origin ?? "person",
+            ...(facts.description ? { description: facts.description } : {}),
+            expires: up.expires,
+          },
+        };
+        return result;
+      },
+    ),
   );
 
   // ------------------------------------------------------------------ tier 2: beyond files

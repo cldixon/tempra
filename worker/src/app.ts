@@ -53,7 +53,14 @@ import {
 } from "./tenancy";
 import { registerUiRoutes } from "./ui/routes";
 import { STARTER } from "./ui/starter";
-import { checkLength, checkMedia, prepareUpload, readCapped, type UploadGrant } from "./uploads";
+import {
+  checkLength,
+  checkMedia,
+  checkOrigin,
+  prepareUpload,
+  readCapped,
+  type UploadGrant,
+} from "./uploads";
 import { admit, admitSession, RETRY_AFTER_S, tokenAdmission, type UsageDeps } from "./usage";
 import { maybeGunzip, readTar } from "./util/tar";
 import { registerWaitlistRoutes } from "./waitlist";
@@ -579,6 +586,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     const body = await json<{
       path?: unknown;
       media?: unknown;
+      origin?: unknown;
       if_match?: unknown;
       description?: unknown;
       credit?: unknown;
@@ -594,6 +602,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     const prepared = await prepareUpload(c.var.lib, new URL(c.req.url).origin, {
       path,
       media: media ?? (path ? mediaFor(path) : null),
+      ...(path ? { origin: checkOrigin(body.origin) } : {}),
       if_match: typeof body.if_match === "string" ? body.if_match : undefined,
       ...facts,
       note: ctx.note ?? null,
@@ -1546,6 +1555,8 @@ async function fileJson(lib: LibraryClient, blobs: BlobStore, view: FileView) {
       licence: v.licence ?? null,
       // Who sent the bytes from the upload link, for the agent's write (TEMPRA-196).
       supplied_by: v.supplied_by ?? null,
+      // Who had the file for an upload: the person, or the agent that made it (TEMPRA-205).
+      origin: v.origin ?? null,
     };
   }
   if (view.kind === "derived") {
@@ -1698,6 +1709,7 @@ export async function receiveUpload(
         if_match: grant.if_match,
         ...checkFacts(grant),
         ...(arrival.supplied_by ? { supplied_by: arrival.supplied_by } : {}),
+        ...(grant.origin ? { origin: grant.origin } : {}),
       },
     ],
   );

@@ -18,6 +18,8 @@ export interface PreparedUpload {
   media?: string | null;
   /** The kind of file expected, as people say it: "PNG image". */
   kind?: string;
+  /** Who has the file: the agent made it and handed it to the person (TEMPRA-205), or theirs. */
+  origin?: "person" | "agent";
   description?: string;
   expires: string;
 }
@@ -65,6 +67,7 @@ export function preparedFrom(result: { structuredContent?: unknown }): PreparedU
     ...(typeof u.page === "string" ? { page: u.page } : {}),
     ...(typeof u.media === "string" ? { media: u.media } : {}),
     ...(typeof u.kind === "string" ? { kind: u.kind } : {}),
+    ...(u.origin === "agent" || u.origin === "person" ? { origin: u.origin } : {}),
     ...(typeof u.description === "string" ? { description: u.description } : {}),
   };
 }
@@ -119,6 +122,7 @@ export function mountUploadPanel(
       );
       return;
     }
+    const fromAgent = upload.origin === "agent";
     const input = el("input");
     input.type = "file";
     input.name = "file";
@@ -130,7 +134,9 @@ export function mountUploadPanel(
       input,
       el("span", {
         className: "muted hint",
-        text: "If it came from the chat, choose it again here.",
+        text: fromAgent
+          ? "Save it from the chat first, then choose it here."
+          : "If it came from the chat, choose it again here.",
       }),
     );
     const status = el("p", { className: "status" });
@@ -160,6 +166,13 @@ export function mountUploadPanel(
         el("code", { text: upload.path }),
         ".",
       ),
+      ...(fromAgent
+        ? [
+            el("p", {
+              text: "The agent made this file and gave it to you in the chat. Agents can't send files to Tempra themselves yet, so choose it here.",
+            }),
+          ]
+        : []),
       ...(upload.description ? [el("p", { className: "muted", text: upload.description })] : []),
       ...(upload.kind ? [el("p", { className: "muted", text: `Kind: ${upload.kind}` })] : []),
       drop,
