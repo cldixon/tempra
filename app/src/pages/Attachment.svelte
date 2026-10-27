@@ -126,7 +126,7 @@
           ></div
         >{/if}<div
         ><dt>Source</dt><dd
-          ><SourceFact {urls} source={file.source} suppliedBy={file.supplied_by} version={current} uses={usesShown} {titles} {name} /></dd
+          ><SourceFact {urls} source={file.source} suppliedBy={file.supplied_by} madeFrom={file.made_from} version={current} uses={usesShown} {titles} {name} /></dd
         ></div
       >{#if file.credit}<div><dt>Credit</dt><dd>{file.credit}</dd></div>{/if}{#if file.licence}<div
           ><dt>Licence</dt><dd>{file.licence}</dd></div

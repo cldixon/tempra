@@ -142,7 +142,7 @@ export function imageTargetLint(
       const dims = a.width && a.height ? `, ${a.width} × ${a.height} px` : "";
       out.push({
         code: "image_large",
-        message: `Image /${l.path} is ${megabytes(a.size)}${dims}, over the ${megabytes(IMAGE_MAX_BYTES)} or ${IMAGE_MAX_EDGE} px (long edge) a figure should be; attach a smaller version within both and point the image at it.`,
+        message: `Image /${l.path} is ${megabytes(a.size)}${dims}, over the ${megabytes(IMAGE_MAX_BYTES)} or ${IMAGE_MAX_EDGE} px (long edge) a figure should be; make a smaller one with \`transform\` (op \`resize\`, an \`edge\` of 1920 or less) and point the image at it if you put it elsewhere.`,
         target: l.path,
       });
     }

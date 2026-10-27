@@ -10,6 +10,7 @@ import {
   figuresWithDimensions,
   type LibraryClient,
   mediaFor,
+  putBlob,
   withDimensions,
 } from "../client";
 import { type FetchFn, fetchBlob, selfHosts } from "../fetch-source";
@@ -17,6 +18,7 @@ import {
   IMAGE_BYTES_PER_CALL,
   IMAGES_PER_CALL,
   type Images,
+  type ImageTransform,
   imagesService,
   RASTER_MEDIA,
   readBytes,
@@ -31,6 +33,7 @@ import {
   drawerOf,
   isRenderLang,
   MAX_RENDER_SOURCE,
+  type PosterResult,
   RENDER_LANGS,
   RENDER_UNAVAILABLE,
   RENDER_WIDTH,
@@ -98,6 +101,8 @@ export interface McpContext {
    * caller's account; without it, `render` and `read`'s diagrams say the service is unavailable.
    */
   render?(req: RenderRequest, library?: string): Promise<RenderResult>;
+  /** A video's frame for `transform`'s poster (TEMPRA-208); without it, posters are unavailable. */
+  poster?(req: { url: string; time: number }, library?: string): Promise<PosterResult>;
   /** One render against the account's per-minute cap (RENDERS_PER_MINUTE); false when over it. */
   allowRender?(): Promise<boolean>;
   /** The Worker's origin, for download URLs. */
@@ -117,7 +122,7 @@ export const INSTRUCTIONS = `This server holds OKF (Open Knowledge Format) libra
 How to work:
 1. Call \`start\` first. It opens your library, or lists the libraries you can reach when there are several; then pass \`library\` (owner/slug) on every call. When the person asks for a new library, \`create_library\` makes one they own and opens it (only on a connection they allowed to). Then \`browse\` a directory before reading, follow links, and \`read\` what you need. Check frontmatter (type, status, trust tier, stale) before relying on a body.
 2. Write conformant concepts: a non-empty \`type\` naming what kind of thing it is (Metric, Protocol, Decision; never a generic word like concept, page or note, and reuse the types \`start\` lists), a \`title\` and one-line \`description\`, absolute links like [x](/dir/x.md), footnotes [^id] keyed to \`sources[].id\` (an entry is \`id\`, \`title\` and \`resource\`: a URL or a path in this library), one idea per concept.
-3. Media, where a figure helps: a screenshot of what the page describes, a chart of data it discusses, a diagram of an architecture or a flow. Prefer rendered media, code in the concept that the app draws: a chart as a Vega-Lite spec in a \`vega-lite\` fence (\`\`\`vega-lite alt="what it shows" title="Caption"\`; its data inline in \`values\`, or a CSV, TSV or JSON file in this library named by \`data.url\`; never a picture of a chart), a Mermaid diagram in a \`mermaid\` fence, or a drawing in an \`svg\` fence (\`\`\`svg alt="what it shows" title="Caption"\`; plain shapes and text, \`currentColor\` for ink, no scripts, style elements, images or links). It is text, diffs like text and needs no upload (preview a non-trivial one with \`render\`). A file (an image, video, audio or PDF) comes in only two ways, and never as bytes you type into a call: on the public web, \`attach\` with \`source_url\` (the server fetches it; never hotlink); one you made or the person has, \`prepare_upload\`: run its curl line when your shell reaches this server, else the person sends it from their browser (in a chat that shows apps an upload panel appears with the call; give them its upload link too). A file you made where you cannot reach this server (a chart in a chat's sandbox): give it to the person in the chat, call \`prepare_upload\` with \`origin: "agent"\`, and tell them in a sentence why: you cannot send files to Tempra yourself, so they upload the one you gave them. Put a file beside the concept that uses it, named for what it shows (\`dir/x.md\` uses \`dir/x-architecture.png\`). Write \`![what it shows](/dir/x-architecture.png "Caption")\` (alt says what it shows, the title is the caption), in a \`:::figure\` block for size, placement or a group (\`write\` says how), and cite a work taken from elsewhere (a web image) in \`sources\`; a file the person gave you or you made carries its own \`credit\` and \`licence\` instead, with no \`sources\` entry. Before changing a figure or answering a comment on one, \`read\` with \`images: true\` (\`diagrams: true\` for diagrams).
+3. Media, where a figure helps: a screenshot of what the page describes, a chart of data it discusses, a diagram of an architecture or a flow. Prefer rendered media, code in the concept that the app draws: a chart as a Vega-Lite spec in a \`vega-lite\` fence (\`\`\`vega-lite alt="what it shows" title="Caption"\`; its data inline in \`values\`, or a CSV, TSV or JSON file in this library named by \`data.url\`; never a picture of a chart), a Mermaid diagram in a \`mermaid\` fence, or a drawing in an \`svg\` fence (\`\`\`svg alt="what it shows" title="Caption"\`; plain shapes and text, \`currentColor\` for ink, no scripts, style elements, images or links). It is text, diffs like text and needs no upload (preview a non-trivial one with \`render\`). A file (an image, video, audio or PDF) comes in only two ways, and never as bytes you type into a call: on the public web, \`attach\` with \`source_url\` (the server fetches it; never hotlink); one you made or the person has, \`prepare_upload\`: run its curl line when your shell reaches this server, else the person sends it from their browser (in a chat that shows apps an upload panel appears with the call; give them its upload link too). A file you made where you cannot reach this server (a chart in a chat's sandbox): give it to the person in the chat, call \`prepare_upload\` with \`origin: "agent"\`, and tell them in a sentence why: you cannot send files to Tempra yourself, so they upload the one you gave them. Put a file beside the concept that uses it, named for what it shows (\`dir/x.md\` uses \`dir/x-architecture.png\`). Write \`![what it shows](/dir/x-architecture.png "Caption")\` (alt says what it shows, the title is the caption), in a \`:::figure\` block for size, placement or a group (\`write\` says how), and cite a work taken from elsewhere (a web image) in \`sources\`; a file the person gave you or you made carries its own \`credit\` and \`licence\` instead, with no \`sources\` entry. To change a stored image (resize, crop, convert, a thumbnail) or make a video's poster, use \`transform\`: the server does it, since you cannot fetch the file. Before changing a figure or answering a comment on one, \`read\` with \`images: true\` (\`diagrams: true\` for diagrams).
 4. Prefer \`edit\` for small changes, \`write\` for new concepts or rewrites, \`batch\` for related changes so they land as one request. Pass \`if_match\` (the hash from your last read); on a conflict, re-read and reapply. Bodies are stored in a canonical form (\`-\` bullets, \`*\` emphasis, padded tables): what you write reads back normalized, so \`edit\` the text as \`read\` shows it.
 5. Put a one-line \`note\` on every write. Read the \`lint\` in every write result and fix what it reports (figure and diagram lint too: \`image_*\`, \`figure_invalid\`, \`diagram_invalid\`, \`diagram_unrendered\`, \`svg_invalid\`, \`svg_unsafe\`, \`chart_invalid\` mean fix the image or the fence); the result's notes say what else to know (ignored fields, the stored form, open comments). A concept with no frontmatter, invalid YAML or no \`type\` is refused. Keep concepts under 100 KB; split big ones into linked concepts.
 6. Never write index.md or log.md (the server synthesizes them). Never set \`generated\` (the server stamps it) or \`verified\` (not yours to claim). Set \`status\` and \`stale_after\` honestly. Timestamps are full ISO 8601 datetimes with an offset (\`stale_after: 2026-12-31T00:00:00Z\`); a plain date is flagged.
@@ -898,6 +903,11 @@ export function buildServer(ctx: McpContext): McpServer {
               ...(view.description ? [`description: ${view.description}`] : []),
               ...(view.credit ? [`credit: ${view.credit}`] : []),
               ...(view.licence ? [`licence: ${view.licence}`] : []),
+              ...(view.made_from
+                ? [
+                    `made from: /${view.made_from.path} (${view.made_from.op}; that file at hash ${view.made_from.hash.slice(0, 12)})`,
+                  ]
+                : []),
               ...(view.supplied_by
                 ? [
                     `supplied by: @${view.supplied_by} (${view.origin === "agent" ? "an agent made the file; the person sent it" : "the person sent the file"})`,
@@ -955,7 +965,7 @@ export function buildServer(ctx: McpContext): McpServer {
     {
       title: "Create or replace a concept",
       description:
-        'Write a whole concept as OKF markdown: a YAML frontmatter block with a non-empty `type` that names what kind of thing this is, e.g. `Metric`, `BigQuery Table`, `Decision`, not a generic `concept` or `note` (plus `title`, one-line `description`, optional `tags`, `resource`, `sources`, `status`, `stale_after`), then a markdown body. Each `sources` entry is `id`, `title` and `resource` (a URL, or a path in this library such as `/dir/x.md`); `url` is taken as `resource`. `stale_after` and other timestamps are full ISO 8601 datetimes with an offset, e.g. 2026-12-31T00:00:00Z (a plain date is flagged). Prefer absolute links like [orders](/tables/orders.md); cite sources with footnotes: [^id] in the text, matching a `sources[].id`, plus a `[^id]: …` definition line at the end of the body. Diagrams and charts are best as rendered media, code the app draws, rather than a picture: a chart as a Vega-Lite spec in a ```vega-lite fence, Mermaid in a ```mermaid fence, or SVG in a ```svg fence (preview a non-trivial one with `render`); a fence with an unknown type, nothing after its header, or a bracket or quote left open is saved, shown as its source, and reported as `diagram_invalid` lint with the line and column inside the fence; `diagram_unrendered` lint (in the result when the renderer answers quickly, else in `work` and the next `read`) means Pele could not draw the fence, with its message, line and column: fix the fence. An SVG fence (```svg alt="what it shows" title="Caption"; up to 50 KB; `currentColor` takes the text colour in light and dark) is sanitized when drawn: `svg_invalid` lint means it does not parse (line and column given), `svg_unsafe` names what was taken out (scripts, event handlers, `<style>`, images, links, animation, references outside the SVG), and a missing alt (no `alt="…"` nor a `<title>`) is `image_no_alt`. A Vega-Lite fence (```vega-lite alt="what it shows" title="Caption"; a JSON spec, Vega-Lite 6) is drawn in the reader\'s greys in light and dark; its data is inline (`values`, rows or CSV text with `format`) or a CSV, TSV or JSON file in this library (`data.url`, a path such as `/data/sales.csv`, put there with `attach` or `prepare_upload`), nothing else is fetched; `chart_invalid` lint means it is not JSON, names data from elsewhere, or Vega could not draw it (with its message); no alt (`alt="…"` or the spec\'s `description`) is `image_no_alt`. Images are `![what it shows](/dir/x-architecture.png "Caption")`, the file put beside the concept by `attach` with `source_url` (on the web) or `prepare_upload` (one you made or the person has; never type its bytes); for a width, a placement or a group, wrap one to four images, one to a line, in `:::figure[group caption]{width=480|60% layout=column|wide|full frame}` and a closing `:::` (`frame` is a hairline for screenshots; in a group each title is a small label). Video, audio and PDF use the same spelling (a video\'s poster is `x.poster.png` beside `x.mp4`). Figures are lint, never refused: `image_no_alt` (say what it shows), `image_external` (hotlinked; `attach` it with `source_url`), `image_large` (over 2 MB or 4000 px; attach a smaller one), `image_not_image` (not an image, video, audio or PDF; link it instead), `figure_invalid` (the markup does not parse). A file with no frontmatter, frontmatter that is not valid YAML, or no `type` is refused (400) and nothing is written. Without `if_match` it creates and fails if the path exists; to replace, pass the hash from your last read. The server stamps `generated` from your token; `verified` is not yours to set. The concept is stored in a canonical form (`-` bullets, `*` emphasis; `sources` entries one key per line, `tags: [a, b]` on one line); when that differs from what you sent, the result shows the diff, so `edit` the stored text. Prefer `edit` for small changes. Read the lint and notes in the result and fix the lint.',
+        'Write a whole concept as OKF markdown: a YAML frontmatter block with a non-empty `type` that names what kind of thing this is, e.g. `Metric`, `BigQuery Table`, `Decision`, not a generic `concept` or `note` (plus `title`, one-line `description`, optional `tags`, `resource`, `sources`, `status`, `stale_after`), then a markdown body. Each `sources` entry is `id`, `title` and `resource` (a URL, or a path in this library such as `/dir/x.md`); `url` is taken as `resource`. `stale_after` and other timestamps are full ISO 8601 datetimes with an offset, e.g. 2026-12-31T00:00:00Z (a plain date is flagged). Prefer absolute links like [orders](/tables/orders.md); cite sources with footnotes: [^id] in the text, matching a `sources[].id`, plus a `[^id]: …` definition line at the end of the body. Diagrams and charts are best as rendered media, code the app draws, rather than a picture: a chart as a Vega-Lite spec in a ```vega-lite fence, Mermaid in a ```mermaid fence, or SVG in a ```svg fence (preview a non-trivial one with `render`); a fence with an unknown type, nothing after its header, or a bracket or quote left open is saved, shown as its source, and reported as `diagram_invalid` lint with the line and column inside the fence; `diagram_unrendered` lint (in the result when the renderer answers quickly, else in `work` and the next `read`) means Pele could not draw the fence, with its message, line and column: fix the fence. An SVG fence (```svg alt="what it shows" title="Caption"; up to 50 KB; `currentColor` takes the text colour in light and dark) is sanitized when drawn: `svg_invalid` lint means it does not parse (line and column given), `svg_unsafe` names what was taken out (scripts, event handlers, `<style>`, images, links, animation, references outside the SVG), and a missing alt (no `alt="…"` nor a `<title>`) is `image_no_alt`. A Vega-Lite fence (```vega-lite alt="what it shows" title="Caption"; a JSON spec, Vega-Lite 6) is drawn in the reader\'s greys in light and dark; its data is inline (`values`, rows or CSV text with `format`) or a CSV, TSV or JSON file in this library (`data.url`, a path such as `/data/sales.csv`, put there with `attach` or `prepare_upload`), nothing else is fetched; `chart_invalid` lint means it is not JSON, names data from elsewhere, or Vega could not draw it (with its message); no alt (`alt="…"` or the spec\'s `description`) is `image_no_alt`. Images are `![what it shows](/dir/x-architecture.png "Caption")`, the file put beside the concept by `attach` with `source_url` (on the web) or `prepare_upload` (one you made or the person has; never type its bytes); for a width, a placement or a group, wrap one to four images, one to a line, in `:::figure[group caption]{width=480|60% layout=column|wide|full frame}` and a closing `:::` (`frame` is a hairline for screenshots; in a group each title is a small label). Video, audio and PDF use the same spelling (a video\'s poster is `x.poster.png` beside `x.mp4`). Figures are lint, never refused: `image_no_alt` (say what it shows), `image_external` (hotlinked; `attach` it with `source_url`), `image_large` (over 2 MB or 4000 px; make a smaller one with `transform`), `image_not_image` (not an image, video, audio or PDF; link it instead), `figure_invalid` (the markup does not parse). A file with no frontmatter, frontmatter that is not valid YAML, or no `type` is refused (400) and nothing is written. Without `if_match` it creates and fails if the path exists; to replace, pass the hash from your last read. The server stamps `generated` from your token; `verified` is not yours to set. The concept is stored in a canonical form (`-` bullets, `*` emphasis; `sources` entries one key per line, `tags: [a, b]` on one line); when that differs from what you sent, the result shows the diff, so `edit` the stored text. Prefer `edit` for small changes. Read the lint and notes in the result and fix the lint.',
       inputSchema: {
         path: z.string().describe("Where to write, e.g. `metrics/revenue.md`."),
         content: z.string().describe("The full OKF markdown document."),
@@ -1285,6 +1295,193 @@ export function buildServer(ctx: McpContext): McpServer {
         return result;
       },
     ),
+  );
+
+  server.registerTool(
+    "transform",
+    {
+      title: "Make a file from an attachment",
+      description:
+        "Change an attachment on the server, since you cannot fetch it to change it yourself: `resize` an image to a long edge (`edge`, never enlarged; fixes `image_large`), `crop` it to a `box` in its pixels, `convert` it to `format` (webp, png or jpeg), make a `thumbnail` (a long edge of `edge`, default 320), or make a video's `poster`, its frame at `time` seconds as a PNG beside it, which the reader shows before the video plays. The result is an ordinary write as you, its source recorded as made from the original at its hash. Where it goes: `to`, or by default resize and crop replace the image itself (pass `if_match`, its hash from `read`), convert writes `x.<format>`, thumbnail `x.thumb.<ext>`, poster `x.poster.png`, beside the original. The description, credit and licence carry over unless you give new ones. `read` the original with `image: true` first to see what to change.",
+      inputSchema: {
+        path: z.string().describe("The attachment to make from, e.g. `ops/latency.png`."),
+        op: z.enum(["resize", "crop", "convert", "thumbnail", "poster"]),
+        edge: z
+          .number()
+          .int()
+          .min(16)
+          .max(4000)
+          .optional()
+          .describe("resize, thumbnail: the long edge in pixels."),
+        box: z
+          .object({
+            x: z.number().int().min(0),
+            y: z.number().int().min(0),
+            width: z.number().int().min(1),
+            height: z.number().int().min(1),
+          })
+          .optional()
+          .describe("crop: the box to keep, in the image's pixels from its top left."),
+        format: z
+          .enum(["webp", "png", "jpeg"])
+          .optional()
+          .describe("convert: the new format; others keep the original's (WebP when it has none)."),
+        time: z.number().min(0).optional().describe("poster: seconds into the video (default 0)."),
+        to: z.string().optional().describe("Where the new file goes, if not the default."),
+        if_match: z.string().optional().describe("Replacing a file at `to`: its current hash."),
+        description: z.string().optional(),
+        credit: z.string().optional(),
+        licence: z.string().optional(),
+        note: z.string().optional().describe("One line for the ledger."),
+        ...libArg,
+      },
+      annotations: writes,
+    },
+    guarded(async (args) => {
+      const picked = pick(args.library);
+      const from = normalizePath(args.path);
+      if (!from || from.endsWith(".md")) {
+        throw new OkfError(400, "bad_path", "`transform` works on attachments, not concepts.");
+      }
+      const view = await picked.lib.read(from).catch(() => null);
+      if (!view || view.kind !== "attachment") {
+        throw new OkfError(404, "not_found", `No attachment at /${from}.`);
+      }
+      const media = (view.media ?? "").toLowerCase();
+      const base = from.replace(/\.[^./]+$/, "");
+      const ext = (f: string) => (f === "jpeg" ? "jpg" : f);
+      const own = ({ "image/png": "png", "image/jpeg": "jpeg", "image/webp": "webp" } as const)[
+        media as "image/png"
+      ];
+      const format = args.format ?? own ?? "webp";
+      const defaultTo = {
+        resize: from,
+        crop: from,
+        convert: `${base}.${ext(format)}`,
+        thumbnail: `${base}.thumb.${ext(format)}`,
+        poster: `${base}.poster.png`,
+      }[args.op];
+      const to = normalizePath(args.to ?? defaultTo);
+      if (!to || to.endsWith(".md")) {
+        throw new OkfError(400, "bad_path", "`to` is an attachment path, not a concept.");
+      }
+      checkWrite(picked.token, to);
+      // A replacement in place needs the hash, as any replace does.
+      if (to === from && args.if_match === undefined) {
+        throw new OkfError(
+          400,
+          "if_match_required",
+          `This replaces /${from}; pass \`if_match\` (its hash, ${view.hash}) or a \`to\` path.`,
+        );
+      }
+      let made: { bytes: Uint8Array; media: string };
+      let op: string;
+      if (args.op === "poster") {
+        if (!media.startsWith("video/")) {
+          throw new OkfError(
+            400,
+            "not_a_video",
+            `/${from} is ${media || "not a video"}; a poster is made from a video.`,
+          );
+        }
+        if (ctx.allowRender && !(await ctx.allowRender())) {
+          throw new OkfError(
+            429,
+            "rate_limited",
+            `Over ${RENDERS_PER_MINUTE} renders a minute for this account; try again in a minute.`,
+          );
+        }
+        const time = args.time ?? 0;
+        const url = await downloadUrl(picked, {
+          k: "file",
+          path: view.path,
+          hash: view.hash,
+          media: view.media,
+        });
+        const r = ctx.poster
+          ? await ctx.poster({ url, time }, picked.token.library.id)
+          : { error: RENDER_UNAVAILABLE };
+        if ("error" in r) {
+          throw new OkfError(502, "transform_failed", `No poster for /${from}: ${r.error}.`);
+        }
+        made = { bytes: r.png, media: "image/png" };
+        op = `poster ${time}s`;
+      } else {
+        if (!["image/png", "image/jpeg", "image/gif", "image/webp", "image/avif"].includes(media)) {
+          throw new OkfError(
+            400,
+            "not_an_image",
+            `/${from} is ${media || "of no known type"}; resize, crop, convert and thumbnail take PNG, JPEG, GIF, WebP or AVIF.`,
+          );
+        }
+        let t: ImageTransform;
+        if (args.op === "resize" || args.op === "thumbnail") {
+          const edge = args.edge ?? (args.op === "thumbnail" ? 320 : undefined);
+          if (edge === undefined) throw new OkfError(400, "bad_request", "`resize` needs `edge`.");
+          t = { width: edge, height: edge, fit: "scale-down" };
+          op = `${args.op} ${edge}`;
+        } else if (args.op === "crop") {
+          const b = args.box;
+          if (!b) throw new OkfError(400, "bad_request", "`crop` needs `box`.");
+          const sized = await withDimensions(picked.lib, ctx.blobs, view);
+          const w = sized.kind === "attachment" ? sized.width : null;
+          const h = sized.kind === "attachment" ? sized.height : null;
+          if (w && h && (b.x + b.width > w || b.y + b.height > h)) {
+            throw new OkfError(
+              400,
+              "bad_request",
+              `The box runs past the image, which is ${w}×${h}.`,
+            );
+          }
+          t = { trim: { top: b.y, left: b.x, width: b.width, height: b.height } };
+          op = `crop ${b.x},${b.y} ${b.width}x${b.height}`;
+        } else {
+          t = {};
+          op = `convert ${format}`;
+        }
+        const obj = await ctx.blobs.get(view.hash);
+        if (!obj) throw new OkfError(500, "blob_missing", `Bytes for /${from} are missing.`);
+        const out = await images.transform(await readBytes(obj.body), t, format).catch((e) => {
+          throw new OkfError(
+            502,
+            "transform_failed",
+            `Images could not ${args.op} /${from}: ${e instanceof Error ? e.message : String(e)}.`,
+          );
+        });
+        if (!out) {
+          throw new OkfError(
+            503,
+            "transform_unavailable",
+            "Image transforms are not available on this deployment.",
+          );
+        }
+        made = out;
+      }
+      const blob = await putBlob(ctx.blobs, made.bytes, made.media, to);
+      // What the original says of itself carries over unless new words are given.
+      const facts = checkFacts({
+        description: args.description ?? view.description ?? undefined,
+        credit: args.credit ?? view.credit ?? undefined,
+        licence: args.licence ?? view.licence ?? undefined,
+      });
+      const res = await picked.lib.apply(request(args.note), [
+        {
+          op: "attach",
+          path: to,
+          blob,
+          if_match: args.if_match,
+          made_from: { path: from, hash: view.hash, op },
+          ...facts,
+        },
+      ]);
+      const dims = blob.width && blob.height ? `${blob.width}×${blob.height}, ` : "";
+      return text(
+        [
+          writeText("Stored", res),
+          `Made /${to} from /${from} (${op}): ${dims}${sizeText(blob.size)}, ${blob.media ?? made.media}.`,
+        ].join("\n"),
+      );
+    }),
   );
 
   // ------------------------------------------------------------------ tier 2: beyond files

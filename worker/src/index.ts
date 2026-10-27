@@ -12,7 +12,7 @@ import { exportsPrefix, listExports } from "./maintain";
 import { d1Notifications } from "./notify";
 import { devMailer, flushMail } from "./notify-mail";
 import { listRestores, RESTORE_ID, restoresPrefix } from "./recovery";
-import { type RenderService, serviceRenderer } from "./render";
+import { type RenderService, servicePoster, serviceRenderer } from "./render";
 import { d1Sessions } from "./session";
 import type { Mailer } from "./signin";
 import {
@@ -124,6 +124,7 @@ const depsFor = (env: Env): Deps => {
     meter,
     // Not bound in local dev (cloudflare.config.ts): every render answers "render unavailable".
     renderDiagram: serviceRenderer((env as unknown as { RENDER?: RenderService }).RENDER, meter),
+    posterFrame: servicePoster((env as unknown as { RENDER?: RenderService }).RENDER, meter),
     // Each blob put is recorded in D1 first, so the sweep never lists the bucket (TEMPRA-81).
     blobs: recordingBlobStore(r2BlobStore(env.BLOBS), d1BlobRefs(env.DB)),
     // Scaled copies under variants/ in the same bucket (TEMPRA-153); reads only, so no recording.

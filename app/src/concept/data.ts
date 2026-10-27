@@ -57,7 +57,16 @@ export type FileJson =
       licence?: string | null;
       /** The person who sent the bytes from an agent's upload link, by handle (TEMPRA-196). */
       supplied_by?: string | null;
+      /** What this version was made from on the server, by an agent's `transform` (TEMPRA-208). */
+      made_from?: MadeFrom | null;
     };
+
+/** An attachment made from another: the file, the hash it had, and what was done. */
+export interface MadeFrom {
+  path: string;
+  hash: string;
+  op: string;
+}
 
 /** An attachment fetched from a URL: the URL, where it ended after redirects, and when. */
 export interface AttachSource {

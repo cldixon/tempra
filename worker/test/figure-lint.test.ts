@@ -118,7 +118,7 @@ describe("figure lint (TEMPRA-159)", () => {
     expect(lint.map((l) => l.target)).toContain("a/big.png");
     expect(lint.find((l) => l.target === "a/wide.png")?.message).toContain("4001 × 200 px");
     expect(stored(s, "a/page.md")).toEqual(["image_large", "image_large"]);
-    expect(work(s, "a/page.md")).toContain("smaller version");
+    expect(work(s, "a/page.md")).toContain("make a smaller one with `transform`");
     // A link (not an image) to a large file is fine.
     expect(figure(write(s, "a/page.md", "[Big](/a/big.png)"))).toEqual([]);
   });
