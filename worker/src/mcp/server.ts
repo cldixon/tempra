@@ -1302,7 +1302,7 @@ export function buildServer(ctx: McpContext): McpServer {
     {
       title: "Make a file from an attachment",
       description:
-        "Change an attachment on the server, since you cannot fetch it to change it yourself: `resize` an image to a long edge (`edge`, never enlarged; fixes `image_large`), `crop` it to a `box` in its pixels, `convert` it to `format` (webp, png or jpeg), make a `thumbnail` (a long edge of `edge`, default 320), or make a video's `poster`, its frame at `time` seconds as a PNG beside it, which the reader shows before the video plays. The result is an ordinary write as you, its source recorded as made from the original at its hash. Where it goes: `to`, or by default resize and crop replace the image itself (pass `if_match`, its hash from `read`), convert writes `x.<format>`, thumbnail `x.thumb.<ext>`, poster `x.poster.png`, beside the original. The description, credit and licence carry over unless you give new ones. `read` the original with `image: true` first to see what to change.",
+        "Change an attachment on the server, since you cannot fetch it to change it yourself: `resize` an image to a long edge (`edge`, never enlarged; fixes `image_large`), `crop` it to a `box` in its pixels, `convert` it to `format` (webp, png or jpeg), make a `thumbnail` (a long edge of `edge`, default 320), or make a video's `poster`, its frame at `time` seconds as a PNG beside it, which the reader shows before the video plays (WebM for now: the server cannot decode MP4's H.264 yet). The result is an ordinary write as you, its source recorded as made from the original at its hash. Where it goes: `to`, or by default resize and crop replace the image itself (pass `if_match`, its hash from `read`), convert writes `x.<format>`, thumbnail `x.thumb.<ext>`, poster `x.poster.png`, beside the original. The description, credit and licence carry over unless you give new ones. `read` the original with `image: true` first to see what to change.",
       inputSchema: {
         path: z.string().describe("The attachment to make from, e.g. `ops/latency.png`."),
         op: z.enum(["resize", "crop", "convert", "thumbnail", "poster"]),
@@ -1402,7 +1402,12 @@ export function buildServer(ctx: McpContext): McpServer {
           ? await ctx.poster({ url, time }, picked.token.library.id)
           : { error: RENDER_UNAVAILABLE };
         if ("error" in r) {
-          throw new OkfError(502, "transform_failed", `No poster for /${from}: ${r.error}.`);
+          // The render Worker's browser has no H.264 decoder (seen on a preview, 2026-10-27).
+          const why =
+            media === "video/mp4" && r.error.includes("decoded")
+              ? `${r.error} (the server's browser cannot decode MP4's H.264 yet; a WebM poster works, or upload a poster image beside the video as ${base}.poster.png)`
+              : r.error;
+          throw new OkfError(502, "transform_failed", `No poster for /${from}: ${why}.`);
         }
         made = { bytes: r.png, media: "image/png" };
         op = `poster ${time}s`;
