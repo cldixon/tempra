@@ -45,13 +45,7 @@ import {
   type WriteResult,
 } from "../store/store";
 import { requireOwner } from "../tenancy";
-import {
-  BASE64_MAX_BYTES,
-  checkBytes,
-  checkDeclared,
-  decodeBase64,
-  prepareUpload,
-} from "../uploads";
+import { kindOf, prepareUpload } from "../uploads";
 
 export interface McpContext {
   /** The ledger actor, access and tool tier: the same in every library the caller reaches. */
@@ -119,7 +113,7 @@ export const INSTRUCTIONS = `This server holds OKF (Open Knowledge Format) libra
 How to work:
 1. Call \`start\` first. It opens your library, or lists the libraries you can reach when there are several; then pass \`library\` (owner/slug) on every call. When the person asks for a new library, \`create_library\` makes one they own and opens it (only on a connection they allowed to). Then \`browse\` a directory before reading, follow links, and \`read\` what you need. Check frontmatter (type, status, trust tier, stale) before relying on a body.
 2. Write conformant concepts: a non-empty \`type\` naming what kind of thing it is (Metric, Protocol, Decision; never a generic word like concept, page or note, and reuse the types \`start\` lists), a \`title\` and one-line \`description\`, absolute links like [x](/dir/x.md), footnotes [^id] keyed to \`sources[].id\` (an entry is \`id\`, \`title\` and \`resource\`: a URL or a path in this library), one idea per concept.
-3. Figures, where one helps: a screenshot of what the page describes, a chart of data it discusses; for an architecture or a flow, a Mermaid diagram in a \`mermaid\` fence (text, diffable, drawn by the app; preview a non-trivial one with \`render\`). Put a file beside the concept that uses it, named for what it shows (\`dir/x.md\` uses \`dir/x-architecture.png\`): a web image by \`attach\` with \`source_url\` (never hotlink); a file you made or the person gave you by \`prepare_upload\`: run its curl line when your shell reaches this server, else the person sends it from their browser: in a chat that shows apps, an upload panel appears with the call, and give them its upload link too; \`attach\` base64 with \`sha256\` for small files only. Write \`![what it shows](/dir/x-architecture.png "Caption")\` (alt says what it shows, the title is the caption), in a \`:::figure\` block for size, placement or a group (\`write\` says how), and cite a work taken from elsewhere (a web image) in \`sources\`; a file the person gave you or you made carries its own \`credit\` and \`licence\` instead, with no \`sources\` entry. Before changing a figure or answering a comment on one, \`read\` with \`images: true\` (\`diagrams: true\` for diagrams).
+3. Figures, where one helps: a screenshot of what the page describes, a chart of data it discusses; for an architecture or a flow, a Mermaid diagram in a \`mermaid\` fence (text, diffable, drawn by the app; preview a non-trivial one with \`render\`). Put a file beside the concept that uses it, named for what it shows (\`dir/x.md\` uses \`dir/x-architecture.png\`): a web image by \`attach\` with \`source_url\` (never hotlink); a file you made or the person gave you by \`prepare_upload\`: run its curl line when your shell reaches this server, else the person sends it from their browser: in a chat that shows apps, an upload panel appears with the call, and give them its upload link too. Write \`![what it shows](/dir/x-architecture.png "Caption")\` (alt says what it shows, the title is the caption), in a \`:::figure\` block for size, placement or a group (\`write\` says how), and cite a work taken from elsewhere (a web image) in \`sources\`; a file the person gave you or you made carries its own \`credit\` and \`licence\` instead, with no \`sources\` entry. Before changing a figure or answering a comment on one, \`read\` with \`images: true\` (\`diagrams: true\` for diagrams).
 4. Prefer \`edit\` for small changes, \`write\` for new concepts or rewrites, \`batch\` for related changes so they land as one request. Pass \`if_match\` (the hash from your last read); on a conflict, re-read and reapply. Bodies are stored in a canonical form (\`-\` bullets, \`*\` emphasis, padded tables): what you write reads back normalized, so \`edit\` the text as \`read\` shows it.
 5. Put a one-line \`note\` on every write. Read the \`lint\` in every write result and fix what it reports (figure and diagram lint too: \`image_*\`, \`figure_invalid\`, \`diagram_invalid\`, \`diagram_unrendered\` mean fix the image or the fence); the result's notes say what else to know (ignored fields, the stored form, open comments). A concept with no frontmatter, invalid YAML or no \`type\` is refused. Keep concepts under 100 KB; split big ones into linked concepts.
 6. Never write index.md or log.md (the server synthesizes them). Never set \`generated\` (the server stamps it) or \`verified\` (not yours to claim). Set \`status\` and \`stale_after\` honestly. Timestamps are full ISO 8601 datetimes with an offset (\`stale_after: 2026-12-31T00:00:00Z\`); a plain date is flagged.
@@ -207,6 +201,19 @@ export function healthLines(h: LibraryHealth): string[] {
         ]
       : []),
   ];
+}
+
+/**
+ * A call that still sends the removed `content_base64` (an old client, a cached schema) is
+ * refused by name, never stored or ignored (TEMPRA-203; tempra-dev
+ * decisions/agents-never-type-file-bytes).
+ */
+function base64Removed(): OkfError {
+  return new OkfError(
+    400,
+    "base64_removed",
+    "`attach` no longer takes `content_base64`: a file's bytes never go through a tool argument. For a file on the public web, call `attach` with `source_url` and the server fetches it. For a file you made or the person has, call `prepare_upload`: run its curl line if your shell reaches this server, otherwise the person sends the file from their browser (the upload panel or link). Nothing was written.",
+  );
 }
 
 function errorResult(e: unknown): CallToolResult {
@@ -1069,22 +1076,18 @@ export function buildServer(ctx: McpContext): McpServer {
   server.registerTool(
     "attach",
     {
-      title: "Add an attachment",
-      description: `Store a non-markdown file (an image, a script, a PDF) at a path, from exactly one of \`source_url\` or \`content_base64\`. Put a figure beside the concept that uses it, named for what it shows (\`dir/x.md\` uses \`dir/x-architecture.png\`), and link it by absolute path. An image on the public web goes in with \`source_url\`: the server fetches it (https only, no credentials in the URL, at most 3 redirects, 10 s, up to 10 MB; images, video, audio and PDF only, judged by the bytes), so nothing passes through you, and records the URL and fetch time as the file's source; a refused fetch is \`fetch_refused\` naming the rule. That source is not a citation: a work taken from elsewhere is cited in the concept's \`sources\` too. Never hotlink a web image in a concept; bring it in this way. A file you made goes in with \`prepare_upload\` when you can run a shell (the real file, up to 10 MB); \`content_base64\` is the last resort, for small files only (advised under about 50 KB; at most ${BASE64_MAX_BYTES / 1024} KB decoded, refused above that as \`base64_too_large\`): every character is typed out, and a long run gets cut short or garbled. Pass \`sha256\` (hex; \`sha256sum file\`, or \`hashlib.sha256(data).hexdigest()\`) or at least \`size\` in bytes, so bytes that arrive damaged are refused (\`checksum_mismatch\`, with what arrived) instead of stored. Images (PNG, JPEG, GIF, WebP, AVIF, SVG) are checked on write: a broken or truncated one is refused with \`bad_image\`, and an image's type is taken from its bytes, not from \`media\` or the extension. \`description\` says in a line what the file shows (up to 500 characters); \`credit\` (who made it) and \`licence\` (free text) a line each, up to 200 characters. They show on the file's page, and for a file the person gave you or you made they are its attribution: it needs no \`sources\` entry (say who supplied it, e.g. \`Photo supplied by @ann\`, and the licence if known). Replacing needs \`if_match\`; the same bytes with a new description, credit or licence is a write too. Reading it back with \`read\` returns its facts (source, description, credit, licence and how many versions), a short-lived download URL and, for an image, the image.`,
-      inputSchema: {
+      title: "Add an attachment from the web",
+      description:
+        "Store a file from the public web at a path: the server fetches `source_url` (https only, no credentials in the URL, at most 3 redirects, 10 s, up to 10 MB; images, video, audio and PDF only, judged by the bytes), so nothing passes through you, and records the URL and fetch time as the file's source; a refused fetch is `fetch_refused` naming the rule. Put a figure beside the concept that uses it, named for what it shows (`dir/x.md` uses `dir/x-architecture.png`), and link it by absolute path. Never hotlink a web image in a concept; bring it in this way, and cite the original in the concept's `sources` (the fetch records where it came from but is not a citation). A file that is not on the web (one you made, or one the person has) goes in with `prepare_upload`. Images (PNG, JPEG, GIF, WebP, AVIF, SVG) are checked on write: a broken or truncated one is refused with `bad_image`, and the type is taken from the bytes, not the extension. `description` says in a line what the file shows (up to 500 characters); `credit` (who made it) and `licence` (free text) a line each, up to 200 characters; they show on the file's page. Replacing needs `if_match`; the same bytes with a new description, credit or licence is a write too. Reading it back with `read` returns its facts, a short-lived download URL and, for an image, the image.",
+      // Loose, so a call that still sends the removed `content_base64` reaches the handler and is
+      // refused by name rather than having it silently dropped (TEMPRA-203).
+      inputSchema: z.looseObject({
         path: z.string(),
+        // Optional only so a call without it reaches the handler and is answered in words.
         source_url: z
           .string()
           .optional()
-          .describe(
-            "A public https URL the server fetches the file from; instead of content_base64.",
-          ),
-        content_base64: z
-          .string()
-          .optional()
-          .describe(
-            `The file's bytes as base64, for small files (at most ${BASE64_MAX_BYTES / 1024} KB decoded); instead of source_url.`,
-          ),
+          .describe("A public https URL the server fetches the file from (required)."),
         description: z
           .string()
           .optional()
@@ -1097,96 +1100,49 @@ export function buildServer(ctx: McpContext): McpServer {
           .string()
           .optional()
           .describe("Its licence, as free text, e.g. `CC BY-SA 4.0` (at most 200 characters)."),
-        media: z.string().optional().describe("MIME type; guessed from the extension if omitted."),
-        sha256: z
-          .string()
-          .optional()
-          .describe("The file's SHA-256 as hex; the decoded bytes must match."),
-        size: z.number().int().optional().describe("The file's length in bytes; checked likewise."),
         if_match: z.string().optional(),
         note: z.string().optional().describe("One line for the ledger."),
         ...libArg,
-      },
+      }),
       annotations: writes,
     },
-    guarded(
-      async ({
-        path,
+    guarded(async (args) => {
+      const { path, source_url, description, credit, licence, if_match, note, library } = args;
+      const { token, lib } = pick(library);
+      checkWrite(token, path);
+      if ("content_base64" in args) throw base64Removed();
+      if (source_url === undefined) {
+        throw new OkfError(
+          400,
+          "bad_attach",
+          "Pass `source_url`, a public https URL the server fetches. A file that is not on the web goes in with `prepare_upload`.",
+        );
+      }
+      const facts = checkFacts({ description, credit, licence });
+      const clean = normalizePath(path) ?? path;
+      if (!clean || clean.endsWith(".md")) {
+        throw new OkfError(400, "bad_attachment", "Markdown files are concepts, not attachments.");
+      }
+      const got = await fetchBlob(
+        {
+          fetch: ctx.fetch ?? ((u, i) => fetch(u, i)),
+          blobs: ctx.blobs,
+          selfHosts: selfHosts(ctx.origin),
+        },
         source_url,
-        content_base64,
-        description,
-        credit,
-        licence,
-        media,
-        sha256,
-        size,
-        if_match,
-        note,
-        library,
-      }) => {
-        const { token, lib } = pick(library);
-        checkWrite(token, path);
-        if ((source_url === undefined) === (content_base64 === undefined)) {
-          throw new OkfError(
-            400,
-            "bad_attach",
-            "Pass exactly one of `source_url` (a public https URL the server fetches) or `content_base64` (a small file's bytes).",
-          );
-        }
-        const declared = checkDeclared({ size, sha256 });
-        const facts = checkFacts({ description, credit, licence });
-        const clean = normalizePath(path) ?? path;
-        if (source_url !== undefined) {
-          if (!clean || clean.endsWith(".md")) {
-            throw new OkfError(
-              400,
-              "bad_attachment",
-              "Markdown files are concepts, not attachments.",
-            );
-          }
-          const got = await fetchBlob(
-            {
-              fetch: ctx.fetch ?? ((u, i) => fetch(u, i)),
-              blobs: ctx.blobs,
-              selfHosts: selfHosts(ctx.origin),
-            },
-            source_url,
-            clean,
-          );
-          ctx.meter?.({ kind: "fetch", library: token.library.id, bytes: got.bytes.byteLength });
-          checkBytes(got.bytes, declared);
-          const res = await lib.apply(request(note), [
-            {
-              op: "attach",
-              path,
-              blob: got.blob,
-              if_match,
-              source: got.source,
-              ...facts,
-            },
-          ]);
-          return text(
-            [
-              writeText("Stored", res),
-              `Fetched ${got.bytes.byteLength} bytes from ${got.source.final_url ?? got.source.url} as ${got.blob.media ?? "unknown"}. Cite the original in the concept's \`sources\` too.`,
-            ].join("\n"),
-          );
-        }
-        const bytes = decodeBase64(content_base64 as string);
-        checkBytes(bytes, declared);
-        const blob = await putBlob(ctx.blobs, bytes, media ?? mediaFor(path), path);
-        const res = await lib.apply(request(note), [
-          {
-            op: "attach",
-            path,
-            blob,
-            if_match,
-            ...facts,
-          },
-        ]);
-        return text(writeText("Stored", res));
-      },
-    ),
+        clean,
+      );
+      ctx.meter?.({ kind: "fetch", library: token.library.id, bytes: got.bytes.byteLength });
+      const res = await lib.apply(request(note), [
+        { op: "attach", path, blob: got.blob, if_match, source: got.source, ...facts },
+      ]);
+      return text(
+        [
+          writeText("Stored", res),
+          `Fetched ${got.bytes.byteLength} bytes from ${got.source.final_url ?? got.source.url} as ${got.blob.media ?? "unknown"}. Cite the original in the concept's \`sources\` too.`,
+        ].join("\n"),
+      );
+    }),
   );
 
   server.registerTool(
@@ -1194,7 +1150,7 @@ export function buildServer(ctx: McpContext): McpServer {
     {
       title: "Upload a file",
       description:
-        "The way to add a file up to 10 MB that is not on the web: one you made (a screenshot, a chart, a PDF), or one the person has, such as a photo they attached in the chat. Put it beside the concept that uses it, named for what it shows (`dir/x-architecture.png`). Returns a URL good for one PUT within an hour, a ready `curl -T <file> '<url>'` line, and an upload link for the person. With a shell that reaches this server, run the curl line: the server stores the bytes and attaches them at `path` as you, with your `note`, and curl prints the write result as JSON (path, hash, seq, lint). From a sandbox that cannot reach this server (curl fails to connect, or a proxy refuses it), or for a file the person has (you cannot pass on a chat's attachment), give the person the upload link instead: signed in, they choose the file in their browser, and it is attached as your write with your note, description, credit and licence, recorded as supplied by them. Then `read` the path to see when it has arrived. Pass `sha256` (`sha256sum file`) or `size` only when you have the exact file, so damaged bytes are refused. The URL needs no token, so keep it to yourself; the link needs the person signed in with write access.",
+        "The way to add a file up to 10 MB that is not on the web: one you made (a screenshot, a chart, a PDF), or one the person has, such as a photo they attached in the chat. Put it beside the concept that uses it, named for what it shows (`dir/x-architecture.png`). Returns a URL good for one PUT within an hour, a ready `curl -T <file> '<url>'` line, and an upload link for the person. With a shell that reaches this server, run the curl line: the server stores the bytes and attaches them at `path` as you, with your `note`, and curl prints the write result as JSON (path, hash, seq, lint). From a sandbox that cannot reach this server (curl fails to connect, or a proxy refuses it), or for a file the person has (you cannot pass on a chat's attachment), give the person the upload link instead: signed in, they choose the file in their browser, and it is attached as your write with your note, description, credit and licence, recorded as supplied by them. Then `read` the path to see when it has arrived. Whatever file arrives is the file; a transfer cut short is refused (`incomplete_upload`). The URL needs no token, so keep it to yourself; the link needs the person signed in with write access.",
       _meta: { ui: { resourceUri: UPLOAD_PANEL_URI } },
       inputSchema: {
         path: z
@@ -1203,8 +1159,6 @@ export function buildServer(ctx: McpContext): McpServer {
             "Where the file goes, beside the concept that uses it, e.g. `metrics/latency-p99.png`.",
           ),
         media: z.string().optional().describe("MIME type; guessed from the extension if omitted."),
-        size: z.number().int().optional().describe("The file's length in bytes."),
-        sha256: z.string().optional().describe("The file's SHA-256 as hex."),
         if_match: z.string().optional().describe("Replacing a file: its current hash."),
         description: z
           .string()
@@ -1223,79 +1177,65 @@ export function buildServer(ctx: McpContext): McpServer {
       },
       annotations: writes,
     },
-    guarded(
-      async ({
-        path,
-        media,
-        size,
-        sha256,
-        if_match,
-        description,
-        credit,
-        licence,
-        note,
-        library,
-      }) => {
-        const picked = pick(library);
-        checkWrite(picked.token, path);
-        const clean = normalizePath(path);
-        if (!clean || clean.endsWith(".md")) {
-          throw new OkfError(
-            400,
-            "bad_path",
-            "prepare_upload is for attachments: a file path that is not markdown (use `write` for concepts).",
-          );
-        }
-        const req = request(note);
-        const facts = checkFacts({ description, credit, licence });
-        const up = await prepareUpload(picked.lib, ctx.origin, {
-          path: clean,
-          media: media ?? mediaFor(clean),
-          ...checkDeclared({ size, sha256 }),
-          if_match,
-          ...facts,
-          note: req.note ?? null,
-          actor: req.actor,
-          by: req.by,
-          token: picked.token,
-        });
-        const result = text(
-          [
-            `Upload URL for ${clean} (one PUT, until ${up.expires}):`,
-            up.url,
-            "",
-            "Run, from the directory holding the file (rename it to the file's real name if it differs):",
-            up.curl,
-            "",
-            "curl prints the write result as JSON; read its lint. An error comes back as JSON with a code (checksum_mismatch, media_mismatch, upload_used); prepare again and resend.",
-            ...(up.upload_page
-              ? [
-                  "",
-                  "If your shell cannot reach this server, or the file is the person's (one they attached in the chat), give them this link to upload it from their browser, signed in; the same link, so it works once, until the same time:",
-                  up.upload_page,
-                ]
-              : []),
-            "",
-            "In a chat that shows apps, an upload panel appears with this call: the person can choose the file there instead, and the chat is told when it has arrived. Say so, and give the link too in case the panel does not show.",
-          ].join("\n"),
+    guarded(async ({ path, media, if_match, description, credit, licence, note, library }) => {
+      const picked = pick(library);
+      checkWrite(picked.token, path);
+      const clean = normalizePath(path);
+      if (!clean || clean.endsWith(".md")) {
+        throw new OkfError(
+          400,
+          "bad_path",
+          "prepare_upload is for attachments: a file path that is not markdown (use `write` for concepts).",
         );
-        // For the upload panel (TEMPRA-200): the host hands it the result, and keeps
-        // structuredContent out of the model's context.
-        result.structuredContent = {
-          upload: {
-            url: up.url,
-            ...(up.upload_page ? { page: up.upload_page } : {}),
-            path: clean,
-            library: picked.token.library.slug,
-            media: media ?? mediaFor(clean),
-            ...(size !== undefined ? { size } : {}),
-            ...(facts.description ? { description: facts.description } : {}),
-            expires: up.expires,
-          },
-        };
-        return result;
-      },
-    ),
+      }
+      const req = request(note);
+      const facts = checkFacts({ description, credit, licence });
+      const up = await prepareUpload(picked.lib, ctx.origin, {
+        path: clean,
+        media: media ?? mediaFor(clean),
+        if_match,
+        ...facts,
+        note: req.note ?? null,
+        actor: req.actor,
+        by: req.by,
+        token: picked.token,
+      });
+      const result = text(
+        [
+          `Upload URL for ${clean} (one PUT, until ${up.expires}):`,
+          up.url,
+          "",
+          "Run, from the directory holding the file (rename it to the file's real name if it differs):",
+          up.curl,
+          "",
+          "curl prints the write result as JSON; read its lint. An error comes back as JSON with a code (incomplete_upload, media_mismatch, bad_image, upload_used); prepare again and resend.",
+          ...(up.upload_page
+            ? [
+                "",
+                "If your shell cannot reach this server, or the file is the person's (one they attached in the chat), give them this link to upload it from their browser, signed in; the same link, so it works once, until the same time:",
+                up.upload_page,
+              ]
+            : []),
+          "",
+          "In a chat that shows apps, an upload panel appears with this call: the person can choose the file there instead, and the chat is told when it has arrived. Say so, and give the link too in case the panel does not show.",
+        ].join("\n"),
+      );
+      // For the upload panel (TEMPRA-200): the host hands it the result, and keeps
+      // structuredContent out of the model's context.
+      result.structuredContent = {
+        upload: {
+          url: up.url,
+          ...(up.upload_page ? { page: up.upload_page } : {}),
+          path: clean,
+          library: picked.token.library.slug,
+          media: media ?? mediaFor(clean),
+          ...(kindOf(media ?? mediaFor(clean)) ? { kind: kindOf(media ?? mediaFor(clean)) } : {}),
+          ...(facts.description ? { description: facts.description } : {}),
+          expires: up.expires,
+        },
+      };
+      return result;
+    }),
   );
 
   // ------------------------------------------------------------------ tier 2: beyond files

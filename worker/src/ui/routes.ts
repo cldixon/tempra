@@ -19,7 +19,7 @@ import {
   requireOwner,
   sessionToken,
 } from "../tenancy";
-import { checkMedia, type UploadGrant } from "../uploads";
+import { checkMedia, kindOf, type UploadGrant, withArticle } from "../uploads";
 import { type BootPage, bootData, bootScript, bootUrls } from "./boot";
 import { spaShell } from "./spa";
 import { type UploadView, uploadedPage, uploadPage } from "./upload";
@@ -70,15 +70,13 @@ function atParam(c: C): number | undefined {
 
 /**
  * An upload refused, in a person's words where the server's are written for agents (TEMPRA-196):
- * the type and the declared size or hash are what the agent prepared.
+ * the type is what the agent prepared.
  */
 function forPeople(e: OkfError, grant: UploadGrant, sent: string): string {
   const again = "Choose the right file, or ask the agent for a new link.";
   switch (e.code) {
     case "media_mismatch":
-      return `The agent asked for a file of type ${grant.media}, and this one is ${sent}. ${again}`;
-    case "checksum_mismatch":
-      return `This is not the file the agent described${grant.size !== undefined ? ` (${grant.size} bytes)` : ""}. ${again}`;
+      return `The agent asked for ${withArticle(kindOf(grant.media) ?? "file")}, and this file is ${withArticle(kindOf(sent) ?? sent)}. ${again}`;
     case "exists":
     case "precondition_failed":
       return "There is already a file at this path, and this link does not replace it. Ask the agent for a new link.";
@@ -654,7 +652,6 @@ export function registerUiRoutes<E extends AppEnv>(
       agent: agent ? agentName(agent) : person ? `@${person}` : grant.actor,
       ...(grant.description ? { description: grant.description } : {}),
       media: grant.media,
-      ...(grant.size !== undefined ? { size: grant.size } : {}),
       exp: (grant as UploadGrant & { exp: number }).exp,
       now: Math.floor(Date.now() / 1000),
     };

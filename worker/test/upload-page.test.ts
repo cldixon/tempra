@@ -100,18 +100,20 @@ describe("the upload link's page (TEMPRA-196)", () => {
 
   test("a refusal shows on the page with the form, and leaves the link good", async () => {
     const s = setup();
-    const p = await prepare(s, { path: "a.png", size: PNG.length });
+    const p = await prepare(s, { path: "a.png" });
     const cut = await send(s.app, p.page, PNG.slice(0, PNG.length - 20));
     expect(cut.status).toBe(400);
     const html = await cut.text();
-    expect(html).toContain(`This is not the file the agent described (${PNG.length} bytes).`);
+    expect(html).toContain("a.png is not a valid PNG");
+    expect(html).toContain("<dt>Kind</dt><dd>PNG image</dd>");
+    expect(html).not.toContain("<dt>Size</dt>");
     expect(html).toContain('role="alert"');
     expect(html).toContain('aria-invalid="true"');
     expect(html).toContain('name="file"');
     const type = await send(s.app, p.page, PNG, { name: "photo.jpg" });
     expect(type.status).toBe(400);
     expect(await type.text()).toContain(
-      "The agent asked for a file of type image/png, and this one is image/jpeg.",
+      "The agent asked for a PNG image, and this file is a JPEG image.",
     );
     const none = await send(s.app, p.page, null);
     expect(none.status).toBe(400);

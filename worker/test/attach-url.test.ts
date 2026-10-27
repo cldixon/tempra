@@ -5,6 +5,7 @@ import { checkSourceUrl, fetchSource } from "../src/fetch-source";
 import { sniffMedia } from "../src/media";
 import { API, ORIGIN, setup } from "./harness";
 import { base64, makePng } from "./images";
+import { attachFile } from "./upload";
 
 type S = ReturnType<typeof setup>;
 type Text = { type: "text"; text: string };
@@ -236,7 +237,7 @@ describe("attach from a URL (TEMPRA-157)", () => {
     }
   });
 
-  test("exactly one of source_url and content_base64; read access refused", async () => {
+  test("source_url is required, base64 is refused; read access refused", async () => {
     const s = setup();
     s.web.set("https://example.com/fig.png", png);
     const call = await mcp(s);
@@ -245,31 +246,22 @@ describe("attach from a URL (TEMPRA-157)", () => {
       source_url: "https://example.com/fig.png",
       content_base64: base64(PNG),
     });
-    expect(both.text).toContain("exactly one");
-    expect((await call("attach", { path: "a.png" })).text).toContain("exactly one");
+    expect(both.text).toContain("base64_removed");
+    expect((await call("attach", { path: "a.png" })).text).toContain("`source_url`");
     const reader = await mcp(s, "reader");
     const r = await reader("attach", { path: "a.png", source_url: "https://example.com/fig.png" });
     expect(r.isError).toBe(true);
     expect(s.fetched).toEqual([]);
   });
 
-  test("a description on all three ways in, kept for the version, and checked", async () => {
+  test("a description on every way in, kept for the version, and checked", async () => {
     const s = setup();
     const call = await mcp(s);
-    // base64
-    const b = await call("attach", {
-      path: "one.png",
-      content_base64: base64(PNG),
-      description: "  Base64's.  ",
-    });
-    expect(b.isError).toBe(false);
-    expect((await describeFile(s, "one.png")).description).toBe("Base64's.");
-    expect((await describeFile(s, "one.png")).source).toBeNull();
+    const put = (path: string, bytes: Uint8Array, facts: Record<string, unknown> = {}) =>
+      attachFile(s.app, call, path, bytes, facts);
     // prepare_upload
-    const up = await call("prepare_upload", { path: "two.png", description: "Uploaded's." });
-    const url = /'(http\S+)'/.exec(up.text)?.[1] ?? "";
-    expect((await s.app.request(url, { method: "PUT", body: PNG })).status).toBe(200);
-    expect((await describeFile(s, "two.png")).description).toBe("Uploaded's.");
+    expect((await put("one.png", PNG, { description: "  Uploaded's.  " })).status).toBe(200);
+    expect((await describeFile(s, "one.png")).description).toBe("Uploaded's.");
     // source_url (above too) and REST ?from=
     s.web.set("https://example.com/fig.png", png);
     const viaUrl = await call("attach", {
@@ -281,17 +273,13 @@ describe("attach from a URL (TEMPRA-157)", () => {
     expect((await describeFile(s, "three.png")).description).toBe("Fetched's.");
     // The same bytes with a new description is a write; with the same, a no-op.
     const seq = s.store().headSeq();
-    await call("attach", {
-      path: "one.png",
-      content_base64: base64(PNG),
+    await put("one.png", PNG, {
       if_match: (await describeFile(s, "one.png")).hash,
       description: "Better.",
     });
     expect(s.store().headSeq()).toBe(seq + 1);
     expect((await describeFile(s, "one.png")).description).toBe("Better.");
-    await call("attach", {
-      path: "one.png",
-      content_base64: base64(PNG),
+    await put("one.png", PNG, {
       if_match: (await describeFile(s, "one.png")).hash,
       description: "Better.",
     });
@@ -302,17 +290,13 @@ describe("attach from a URL (TEMPRA-157)", () => {
         headers: { Accept: "application/json" },
       })
     ).json()) as { description: string };
-    expect(old.description).toBe("Base64's.");
+    expect(old.description).toBe("Uploaded's.");
     // New bytes start without one.
-    await call("attach", {
-      path: "one.png",
-      content_base64: base64(makePng(2, 2)),
-      if_match: (await describeFile(s, "one.png")).hash,
-    });
+    await put("one.png", makePng(2, 2), { if_match: (await describeFile(s, "one.png")).hash });
     expect((await describeFile(s, "one.png")).description).toBeNull();
     const long = await call("attach", {
       path: "x.png",
-      content_base64: base64(PNG),
+      source_url: "https://example.com/fig.png",
       description: "x".repeat(501),
     });
     expect(long.text).toContain("bad_description");

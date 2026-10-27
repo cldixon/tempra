@@ -1,12 +1,12 @@
 /**
- * Getting a file's bytes in (TEMPRA-156, TEMPRA-158). An agent with a shell asks for an upload
- * URL (MCP `prepare_upload`, REST `POST …/uploads`) and PUTs the file to it; an agent without
- * one sends small files to `attach` as base64, checked against the size and hash it declares.
+ * Getting a file's bytes in (TEMPRA-158, TEMPRA-204; tempra-dev decisions/agents-never-type-file-bytes):
+ * a caller asks for an upload URL (MCP `prepare_upload`, REST `POST …/uploads`), and a shell
+ * PUTs the file to it or a person sends it from their browser. Nothing is declared about the
+ * bytes: whatever arrives is the file, and a transfer cut short is caught by its length.
  * Free of Worker APIs.
  */
 import type { TokenInfo } from "./auth";
 import { type LibraryClient, WORKER_ATTACHMENT_CAP } from "./client";
-import { sha256Hex } from "./okf/hash";
 import { OkfError } from "./store/errors";
 import type { RequestContext } from "./store/store";
 
@@ -16,21 +16,12 @@ import type { RequestContext } from "./store/store";
  */
 export const UPLOAD_TTL_SECONDS = 60 * 60;
 
-/**
- * The most MCP `attach` takes as `content_base64`, decoded (TEMPRA-156, tempra-dev app/media,
- * Limits): the model types every byte, so anything bigger goes by `source_url` or
- * `prepare_upload`. REST, uploads, fetches and import keep WORKER_ATTACHMENT_CAP.
- */
-export const BASE64_MAX_BYTES = 256 * 1024;
-
 /** What an upload URL's token carries: the write to apply when the bytes arrive, and as whom. */
 export interface UploadGrant {
   k: "upload";
   /** Null for a blob-first upload (REST): the PUT stores the bytes and answers with their hash. */
   path: string | null;
   media: string | null;
-  size?: number;
-  sha256?: string;
   if_match?: string;
   /** What the file shows, kept with the attach op (TEMPRA-157, for the file's page). */
   description?: string;
@@ -44,84 +35,47 @@ export interface UploadGrant {
   token: TokenInfo;
 }
 
-export interface Declared {
-  size?: number;
-  sha256?: string;
-}
-
-/** Checks a declared size and hash as given, before any bytes move. */
-export function checkDeclared({ size, sha256 }: Declared): Declared {
-  if (size !== undefined && (!Number.isInteger(size) || size < 0)) {
-    throw new OkfError(400, "bad_size", "`size` is the file's length in bytes, an integer.");
-  }
-  if (size !== undefined && size > WORKER_ATTACHMENT_CAP) {
-    throw new OkfError(
-      413,
-      "attachment_too_large",
-      `Attachments are capped at ${WORKER_ATTACHMENT_CAP} bytes; this one is ${size}.`,
-    );
-  }
-  const hash = sha256?.trim().toLowerCase();
-  if (hash !== undefined && !/^[0-9a-f]{64}$/.test(hash)) {
-    throw new OkfError(400, "bad_sha256", "`sha256` is the file's SHA-256 as 64 hex digits.");
-  }
-  return { size, sha256: hash };
-}
-
 /**
- * The bytes against what the caller said they are: refused with what arrived, so an agent can
- * see how far a truncated or garbled send got.
+ * The bytes received against the request's `Content-Length` (TEMPRA-204): a transfer cut short
+ * is refused rather than stored. No header (a chunked send) means nothing to compare.
  */
-export function checkBytes(bytes: Uint8Array, want: Declared): string {
-  const hash = sha256Hex(bytes);
-  const sizeOff = want.size !== undefined && want.size !== bytes.length;
-  const hashOff = want.sha256 !== undefined && want.sha256 !== hash;
-  if (sizeOff || hashOff) {
-    const said = [
-      ...(want.size !== undefined ? [`size ${want.size}`] : []),
-      ...(want.sha256 !== undefined ? [`sha256 ${want.sha256}`] : []),
-    ].join(", ");
-    throw new OkfError(
-      400,
-      "checksum_mismatch",
-      `The bytes received do not match what was declared (${said}): received ${bytes.length} bytes, sha256 ${hash}. Nothing was written; send the file again.`,
-      { received_size: bytes.length, received_sha256: hash },
-    );
-  }
-  return hash;
+export function checkLength(bytes: Uint8Array, header: string | undefined): void {
+  if (header === undefined || header.trim() === "") return;
+  const want = Number(header);
+  if (!Number.isInteger(want) || want < 0 || want === bytes.length) return;
+  throw new OkfError(
+    400,
+    "incomplete_upload",
+    `The upload was cut short: the request said ${want} bytes and ${bytes.length} arrived. Nothing was written; send the file again.`,
+    { expected: want, received: bytes.length },
+  );
 }
 
-const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
+const KIND: Record<string, string> = {
+  "image/png": "PNG image",
+  "image/jpeg": "JPEG image",
+  "image/gif": "GIF image",
+  "image/webp": "WebP image",
+  "image/avif": "AVIF image",
+  "image/svg+xml": "SVG image",
+  "video/mp4": "MP4 video",
+  "video/webm": "WebM video",
+  "audio/mpeg": "MP3 audio",
+  "audio/ogg": "Ogg audio",
+  "audio/wav": "WAV audio",
+  "application/pdf": "PDF",
+};
 
-/**
- * Strict base64 (TEMPRA-156): whitespace is dropped, then the length must be a multiple of 4
- * and every character in the standard alphabet, padding only at the end. `atob` alone accepts
- * unpadded and some sloppy input, which hides a truncated send. Refused past `max` decoded bytes
- * (`base64_too_large`), worked out from the text's length before anything is decoded.
- */
-export function decodeBase64(text: string, max = BASE64_MAX_BYTES): Uint8Array {
-  const s = text.replace(/\s+/g, "");
-  if (s.length % 4 !== 0 || !BASE64.test(s)) {
-    throw new OkfError(
-      400,
-      "bad_base64",
-      `content_base64 is not valid base64 (${s.length} characters after whitespace; a whole base64 string is a multiple of 4, from A-Z a-z 0-9 + / with = padding only at the end). It may have been cut short.`,
-    );
-  }
-  // The decoded length from the text's, before decoding anything.
-  const size = (s.length / 4) * 3 - (s.endsWith("==") ? 2 : s.endsWith("=") ? 1 : 0);
-  if (size > max) {
-    throw new OkfError(
-      400,
-      "base64_too_large",
-      `content_base64 decodes to ${size} bytes, over the limit of ${max} bytes (${max / 1024} KB). Nothing was written. For an image on the web, use \`attach\` with \`source_url\`; for a file you made, with a shell, use \`prepare_upload\` and PUT the file (up to ${WORKER_ATTACHMENT_CAP / 1048576} MB).`,
-      { size, limit: max },
-    );
-  }
-  const bin = atob(s);
-  const bytes = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-  return bytes;
+/** "a PNG image", "an MP4 video": the kinds above that are said with a vowel sound take "an". */
+export function withArticle(kind: string): string {
+  return `${/^(AVIF|SVG|MP[34]|Ogg|[aeiou])/i.test(kind) ? "an" : "a"} ${kind}`;
+}
+
+/** The kind of file an upload expects, as people say it: "PNG image"; the type itself otherwise. */
+export function kindOf(media: string | null | undefined): string | null {
+  if (!media) return null;
+  const m = media.split(";")[0]?.trim().toLowerCase() ?? "";
+  return KIND[m] ?? (m === "application/octet-stream" ? null : m);
 }
 
 /** A request body read whole, refused once it passes `cap` (no Content-Length is trusted). */

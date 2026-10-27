@@ -16,7 +16,8 @@ export interface PreparedUpload {
   path: string;
   library: string;
   media?: string | null;
-  size?: number;
+  /** The kind of file expected, as people say it: "PNG image". */
+  kind?: string;
   description?: string;
   expires: string;
 }
@@ -63,7 +64,7 @@ export function preparedFrom(result: { structuredContent?: unknown }): PreparedU
     expires: typeof u.expires === "string" ? u.expires : "",
     ...(typeof u.page === "string" ? { page: u.page } : {}),
     ...(typeof u.media === "string" ? { media: u.media } : {}),
-    ...(typeof u.size === "number" ? { size: u.size } : {}),
+    ...(typeof u.kind === "string" ? { kind: u.kind } : {}),
     ...(typeof u.description === "string" ? { description: u.description } : {}),
   };
 }
@@ -118,10 +119,6 @@ export function mountUploadPanel(
       );
       return;
     }
-    const expects = [
-      upload.media ?? null,
-      upload.size !== undefined ? readableSize(upload.size) : null,
-    ].filter((x): x is string => !!x);
     const input = el("input");
     input.type = "file";
     input.name = "file";
@@ -164,9 +161,7 @@ export function mountUploadPanel(
         ".",
       ),
       ...(upload.description ? [el("p", { className: "muted", text: upload.description })] : []),
-      ...(expects.length > 0
-        ? [el("p", { className: "muted", text: `Expects ${expects.join(", ")}.` })]
-        : []),
+      ...(upload.kind ? [el("p", { className: "muted", text: `Kind: ${upload.kind}` })] : []),
       drop,
       bar,
       status,

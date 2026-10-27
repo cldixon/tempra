@@ -71,16 +71,25 @@ export async function mcpSmoke(opts: {
     const hash = /hash: ([0-9a-f]{64})/.exec(await call("read", { path: moved }))?.[1];
     await call("delete", { path: moved, if_match: hash, note: "mcp smoke cleanup" });
 
+    // A real file's bytes over an upload URL (TEMPRA-158), as an agent with a shell sends one;
+    // nothing about the bytes is declared (TEMPRA-204).
+    const png = PIXEL_PNG;
+    const sha = new Bun.CryptoHasher("sha256").update(png).digest("hex");
+    const file = `_smoke/pixel-${Date.now()}.png`;
+    const prep = await call("prepare_upload", { path: file, note: "mcp smoke upload" });
+    const url = /^curl -sS -T \S+ '(\S+)'$/m.exec(prep)?.[1];
+    const put = url ? await fetch(url, { method: "PUT", body: png }) : null;
+    const res = put ? ((await put.json().catch(() => null)) as { hash?: string } | null) : null;
+    const back = /download \(15 minutes\): (\S+)/.exec(await call("read", { path: file }))?.[1];
+    const got = back ? new Uint8Array(await (await fetch(back)).arrayBuffer()) : null;
+    const uploaded =
+      put?.status === 200 && res?.hash === sha && got !== null && Bun.deepEquals(got, png);
+    if (!uploaded) failed = true;
+    log(`${uploaded ? "ok  " : "FAIL"} mcp upload over prepare_upload (${put?.status})`);
+
     // An image comes back as image content that decodes (TEMPRA-153): scaled through the
-    // IMAGES binding where there is one, else the original, which this 1x1 PNG is small enough for.
-    const png = `_smoke/dot-${Date.now()}.png`;
-    await call("attach", {
-      path: png,
-      content_base64:
-        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==",
-      note: "mcp smoke image",
-    });
-    const r = await client.callTool({ name: "read", arguments: { path: png } });
+    // IMAGES binding where there is one, else the original, which this PNG is small enough for.
+    const r = await client.callTool({ name: "read", arguments: { path: file } });
     const blocks = r.content as { type: string; text?: string; data?: string; mimeType?: string }[];
     const img = blocks.find((b) => b.type === "image");
     const bytes = img?.data ? Uint8Array.from(atob(img.data), (c) => c.charCodeAt(0)) : null;
@@ -92,30 +101,17 @@ export async function mcpSmoke(opts: {
         (magic.startsWith("52 49 46 46") && magic.endsWith("57 45 42 50"))); // RIFF....WEBP
     if (!decodes) failed = true;
     log(`${decodes ? "ok  " : "FAIL"} mcp read image (${img?.mimeType ?? "no image block"})`);
-    const pngHash = /hash: ([0-9a-f]{64})/.exec(blocks[0]?.text ?? "")?.[1];
-    await call("delete", { path: png, if_match: pngHash, note: "mcp smoke cleanup" });
-    // A real file's bytes over an upload URL (TEMPRA-158), as an agent with a shell sends one.
-    if (tools.includes("prepare_upload")) {
-      const png = PIXEL_PNG;
-      const sha = new Bun.CryptoHasher("sha256").update(png).digest("hex");
-      const file = `_smoke/pixel-${Date.now()}.png`;
-      const prep = await call("prepare_upload", {
-        path: file,
-        sha256: sha,
-        size: png.length,
-        note: "mcp smoke upload",
-      });
-      const url = /^curl -sS -T \S+ '(\S+)'$/m.exec(prep)?.[1];
-      const put = url ? await fetch(url, { method: "PUT", body: png }) : null;
-      const res = put ? ((await put.json().catch(() => null)) as { hash?: string } | null) : null;
-      const back = /download \(15 minutes\): (\S+)/.exec(await call("read", { path: file }))?.[1];
-      const got = back ? new Uint8Array(await (await fetch(back)).arrayBuffer()) : null;
-      const ok =
-        put?.status === 200 && res?.hash === sha && got !== null && Bun.deepEquals(got, png);
-      if (!ok) failed = true;
-      log(`${ok ? "ok  " : "FAIL"} mcp upload over prepare_upload (${put?.status})`);
-      await call("delete", { path: file, if_match: sha, note: "mcp smoke cleanup" });
-    }
+    await call("delete", { path: file, if_match: sha, note: "mcp smoke cleanup" });
+
+    // Bytes typed into a tool argument are refused by name (TEMPRA-203).
+    const typed = await call(
+      "attach",
+      { path: `_smoke/typed-${Date.now()}.png`, content_base64: "AAAA" },
+      true,
+    );
+    const refused = typed.includes("base64_removed");
+    if (!refused) failed = true;
+    log(`${refused ? "ok  " : "FAIL"} mcp attach refuses typed bytes`);
   }
 
   await client.close();

@@ -3,6 +3,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { API, setup } from "./harness";
 import { base64, makePng } from "./images";
+import { attachFile } from "./upload";
 
 type S = ReturnType<typeof setup>;
 type Text = { type: "text"; text: string };
@@ -35,14 +36,12 @@ describe("an attachment's credit and licence (TEMPRA-170)", () => {
   test("on every way in, returned in the JSON, kept per version, and checked", async () => {
     const s = setup();
     const call = await mcp(s);
-    // base64
-    const b = await call("attach", {
-      path: "one.png",
-      content_base64: base64(PNG),
+    // prepare_upload
+    const b = await attachFile(s.app, call, "one.png", PNG, {
       credit: "  Ann Example  ",
       licence: "CC BY-SA 4.0",
     });
-    expect(b.isError).toBe(false);
+    expect(b.ok).toBe(true);
     const one = await describeFile(s, "one.png");
     expect(one.credit).toBe("Ann Example");
     expect(one.licence).toBe("CC BY-SA 4.0");
@@ -80,19 +79,9 @@ describe("an attachment's credit and licence (TEMPRA-170)", () => {
     // The same bytes with a new credit is a write of its own; the same again is a no-op.
     const seq = s.store().headSeq();
     const hash = one.hash as string;
-    await call("attach", {
-      path: "one.png",
-      content_base64: base64(PNG),
-      if_match: hash,
-      credit: "Ann E.",
-    });
+    await attachFile(s.app, call, "one.png", PNG, { if_match: hash, credit: "Ann E." });
     expect(s.store().headSeq()).toBe(seq + 1);
-    await call("attach", {
-      path: "one.png",
-      content_base64: base64(PNG),
-      if_match: hash,
-      credit: "Ann E.",
-    });
+    await attachFile(s.app, call, "one.png", PNG, { if_match: hash, credit: "Ann E." });
     expect(s.store().headSeq()).toBe(seq + 1);
     const now = await describeFile(s, "one.png");
     // The licence given earlier for these bytes still stands.
@@ -100,12 +89,6 @@ describe("an attachment's credit and licence (TEMPRA-170)", () => {
     expect((await describeFile(s, "one.png", seq)).credit).toBe("Ann Example");
     // Checked: a line each.
     for (const k of ["credit", "licence"]) {
-      const long = await call("attach", {
-        path: "x.png",
-        content_base64: base64(PNG),
-        [k]: "x".repeat(201),
-      });
-      expect(long.text).toContain(`bad_${k}`);
       expect(
         (await call("prepare_upload", { path: "y.png", [k]: "x".repeat(201) })).text,
       ).toContain(`bad_${k}`);
@@ -121,15 +104,13 @@ describe("an attachment's credit and licence (TEMPRA-170)", () => {
   test("MCP read prints credit, licence and the number of versions", async () => {
     const s = setup();
     const call = await mcp(s);
-    await call("attach", {
-      path: "a.png",
-      content_base64: base64(PNG),
+    await attachFile(s.app, call, "a.png", PNG, {
       description: "Two boxes.",
       credit: "Ann",
       licence: "CC BY 4.0",
     });
     const hash = (await describeFile(s, "a.png")).hash as string;
-    await call("attach", { path: "a.png", content_base64: base64(makePng(3, 3)), if_match: hash });
+    await attachFile(s.app, call, "a.png", makePng(3, 3), { if_match: hash });
     const r = await call("read", { path: "a.png", image: false });
     expect(r.text).toContain("versions: 2");
     // The new bytes start without the old version's facts.
@@ -143,10 +124,10 @@ describe("an attachment's credit and licence (TEMPRA-170)", () => {
   test("an attachment's history lists each version with its size and dimensions", async () => {
     const s = setup();
     const call = await mcp(s);
-    await call("attach", { path: "h.png", content_base64: base64(PNG) });
+    await attachFile(s.app, call, "h.png", PNG);
     const hash = (await describeFile(s, "h.png")).hash as string;
     const bigger = makePng(30, 20);
-    await call("attach", { path: "h.png", content_base64: base64(bigger), if_match: hash });
+    await attachFile(s.app, call, "h.png", bigger, { if_match: hash });
     const res = await s.req("/history/h.png");
     expect(res.status).toBe(200);
     const h = (await res.json()) as {

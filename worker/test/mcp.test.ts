@@ -11,11 +11,11 @@ import {
 } from "../src/images";
 import { INSTRUCTIONS, PDF_RESOURCE_BYTES } from "../src/mcp/server";
 import { fakeRenderer } from "../src/render";
-import { BASE64_MAX_BYTES } from "../src/uploads";
 import { readTar } from "../src/util/tar";
 import { setup } from "./harness";
 import { base64, makePng, sample } from "./images";
 import { approve, connectApp } from "./oauth-flow";
+import { attachFile } from "./upload";
 
 type Text = { type: "text"; text: string };
 
@@ -38,16 +38,14 @@ type Call = (
   args?: Record<string, unknown>,
 ) => Promise<{ text: string; isError: boolean }>;
 
-/** A file over the base64 cap goes in as an agent with a shell sends it: prepare_upload, then the PUT. */
+/** A file goes in as an agent with a shell sends it: prepare_upload, then the PUT. */
 async function upload(
   app: ReturnType<typeof setup>["app"],
   call: Call,
   path: string,
   bytes: Uint8Array,
 ) {
-  const r = await call("prepare_upload", { path });
-  const url = /'(http\S+\/ul\/\S+)'$/m.exec(r.text)?.[1] ?? "";
-  const put = await app.request(url, { method: "PUT", body: bytes });
+  const put = await attachFile(app, call, path, bytes);
   expect(put.status).toBe(200);
 }
 
@@ -126,8 +124,6 @@ describe("MCP server", () => {
       "`source_url`",
       "never hotlink",
       "`prepare_upload`",
-      "`sha256`",
-      "small files only",
       "beside the concept that uses it",
       "`dir/x.md` uses `dir/x-architecture.png`",
       "the title is the caption",
@@ -283,11 +279,7 @@ describe("MCP server", () => {
     const { call } = await connect(app);
     await call("write", { path: "a.md", content: doc("A", "a\n") });
     const bytes = new Uint8Array([1, 2, 3, 250]);
-    const r = await call("attach", {
-      path: "refs/data.bin",
-      content_base64: btoa(String.fromCharCode(...bytes)),
-    });
-    expect(r.isError).toBe(false);
+    await upload(app, call, "refs/data.bin", bytes);
 
     const read = (await call("read", { path: "refs/data.bin" })).text;
     const fileUrl = /download \(15 minutes\): (\S+)/.exec(read)?.[1] ?? "";
@@ -309,14 +301,12 @@ describe("MCP server", () => {
     expect((await app.request(url.replace("/dl/lib-1/", "/dl/other/"))).status).toBe(403);
   });
 
-  test("attach round-trips a quarter-megabyte image byte for byte (TEMPRA-105)", async () => {
+  test("an upload round-trips a quarter-megabyte image byte for byte (TEMPRA-105)", async () => {
     const { app } = setup();
     const { call } = await connect(app);
     const png = makePng(290, 290, { noise: true });
     expect(png.length).toBeGreaterThan(250_000);
-    expect(png.length).toBeLessThanOrEqual(BASE64_MAX_BYTES);
-    const r = await call("attach", { path: "assets/attach-test.png", content_base64: base64(png) });
-    expect(r.isError).toBe(false);
+    await upload(app, call, "assets/attach-test.png", png);
     const read = (await call("read", { path: "assets/attach-test.png" })).text;
     expect(read).toContain(`size: ${png.length} bytes · media: image/png`);
     expect(read).toContain("dimensions: 290×290 px");
@@ -324,18 +314,14 @@ describe("MCP server", () => {
     const got = new Uint8Array(await (await app.request(url)).arrayBuffer());
     expect(got.length).toBe(png.length);
     expect(Buffer.from(got).equals(Buffer.from(png))).toBe(true);
-    // The same image with its base64 cut short, as a model typing it out might send it.
-    const cut = await call("attach", {
-      path: "assets/attach-cut.png",
-      content_base64: base64(png).slice(0, 4000),
-    });
-    expect(cut.isError).toBe(true);
-    expect(cut.text).toContain("bad_image");
+    // The same image cut short is refused, never stored.
+    const cut = await attachFile(app, call, "assets/attach-cut.png", png.slice(0, 4000));
+    expect(cut.status).toBe(400);
+    expect(cut.body.code).toBe("bad_image");
   });
 
-  describe("adding files (TEMPRA-156, TEMPRA-158)", () => {
+  describe("adding files (TEMPRA-158, TEMPRA-203, TEMPRA-204)", () => {
     const bytes = makePng(4, 3);
-    const b64 = base64(bytes);
     const sha = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
 
     test("prepare_upload: a curl line whose PUT attaches the file as the caller", async () => {
@@ -343,8 +329,6 @@ describe("MCP server", () => {
       const { call } = await connect(app);
       const r = await call("prepare_upload", {
         path: "figures/plot.png",
-        sha256: sha,
-        size: bytes.length,
         note: "Plot from the run.",
       });
       expect(r.isError).toBe(false);
@@ -393,81 +377,58 @@ describe("MCP server", () => {
       expect((await call("prepare_upload", { path: "a.md" })).text).toContain("bad_path");
     });
 
-    test("attach: a matching checksum stores, a mismatch says what arrived", async () => {
-      const { app } = setup();
-      const { call } = await connect(app);
-      const ok = await call("attach", { path: "a.png", content_base64: b64, sha256: sha });
-      expect(ok.isError).toBe(false);
-      const sized = await call("attach", {
-        path: "b.png",
-        content_base64: b64,
-        size: bytes.length,
-      });
-      expect(sized.isError).toBe(false);
-
-      const wrong = await call("attach", {
-        path: "c.png",
-        content_base64: b64,
-        sha256: "0".repeat(64),
-      });
-      expect(wrong.isError).toBe(true);
-      expect(wrong.text).toContain("checksum_mismatch");
-      expect(wrong.text).toContain(`received ${bytes.length} bytes, sha256 ${sha}`);
-      const short = await call("attach", { path: "c.png", content_base64: b64, size: 99 });
-      expect(short.text).toContain("checksum_mismatch");
-      expect((await call("read", { path: "c.png" })).isError).toBe(true);
-    });
-
-    test("attach: truncated or sloppy base64 is refused", async () => {
-      const { app } = setup();
-      const { call } = await connect(app);
-      // Cut short: not a multiple of 4.
-      const cut = await call("attach", { path: "a.png", content_base64: b64.slice(0, -3) });
-      expect(cut.isError).toBe(true);
-      expect(cut.text).toContain("bad_base64");
-      // Unpadded, which atob alone accepts.
-      const unpadded = await call("attach", { path: "a.bin", content_base64: "AAE" });
-      expect(unpadded.text).toContain("bad_base64");
-      // Characters outside the alphabet, and padding in the middle.
-      for (const s of ["AA$A", "AA=A", "AAAA-_AA"]) {
-        expect((await call("attach", { path: "a.bin", content_base64: s })).text).toContain(
-          "bad_base64",
+    test("attach takes no bytes: content_base64 is gone from the schema and refused by name", async () => {
+      const { app, store } = setup();
+      const { client, call } = await connect(app);
+      const { tools } = await client.listTools();
+      const attach = tools.find((t) => t.name === "attach");
+      const prepare = tools.find((t) => t.name === "prepare_upload");
+      const props = (t: typeof attach) => Object.keys(t?.inputSchema.properties ?? {});
+      expect(props(attach)).not.toContain("content_base64");
+      expect(props(attach)).not.toContain("sha256");
+      expect(props(attach)).not.toContain("size");
+      expect(props(attach)).toContain("source_url");
+      expect(props(prepare)).not.toContain("sha256");
+      expect(props(prepare)).not.toContain("size");
+      for (const t of tools) {
+        expect(`${t.description} ${JSON.stringify(t.inputSchema)}`).not.toMatch(
+          /base64|sha256|checksum/i,
         );
       }
-      // Whitespace (line-wrapped base64) is fine.
-      const wrapped = `${b64.slice(0, 8)}\n${b64.slice(8)}\n`;
-      expect((await call("attach", { path: "a.png", content_base64: wrapped })).isError).toBe(
-        false,
-      );
+      expect(INSTRUCTIONS).not.toMatch(/base64|sha256|checksum/i);
+
+      const head = store().headSeq();
+      const old = await call("attach", { path: "a.png", content_base64: base64(bytes) });
+      expect(old.isError).toBe(true);
+      expect(old.text).toContain("base64_removed");
+      expect(old.text).toContain("`source_url`");
+      expect(old.text).toContain("`prepare_upload`");
+      // Even beside a source_url: never ignored.
+      const both = await call("attach", {
+        path: "a.png",
+        source_url: "https://example.com/a.png",
+        content_base64: base64(bytes),
+      });
+      expect(both.text).toContain("base64_removed");
+      expect(store().headSeq()).toBe(head);
+      expect((await call("read", { path: "a.png" })).isError).toBe(true);
     });
 
-    test("attach: base64 is capped at 256 KB decoded, and nothing over it is stored", async () => {
-      const { app, store } = setup();
+    test("an upload cut short of its Content-Length is refused, and the link stays good", async () => {
+      const { app } = setup();
       const { call } = await connect(app);
-      expect(BASE64_MAX_BYTES).toBe(256 * 1024);
-      // Exactly at the cap (padded, so the length check counts the padding) is stored.
-      const at = new Uint8Array(BASE64_MAX_BYTES).fill(7);
-      expect(BASE64_MAX_BYTES % 3).not.toBe(0);
-      const ok = await call("attach", {
-        path: "at.bin",
-        content_base64: base64(at),
-        size: at.length,
+      const r = await call("prepare_upload", { path: "a.png" });
+      const url = /'(http\S+\/ul\/\S+)'$/m.exec(r.text)?.[1] ?? "";
+      const short = await app.request(url, {
+        method: "PUT",
+        body: bytes.slice(0, 10),
+        headers: { "Content-Length": String(bytes.length) },
       });
-      expect(ok.isError).toBe(false);
-      expect((await call("read", { path: "at.bin" })).isError).toBe(false);
-      // One byte over is refused before anything is stored, naming the other ways in.
-      const head = store().headSeq();
-      const over = await call("attach", {
-        path: "over.bin",
-        content_base64: base64(new Uint8Array(BASE64_MAX_BYTES + 1).fill(7)),
-      });
-      expect(over.isError).toBe(true);
-      expect(over.text).toContain("base64_too_large");
-      expect(over.text).toContain(`decodes to ${BASE64_MAX_BYTES + 1} bytes`);
-      expect(over.text).toContain("source_url");
-      expect(over.text).toContain("prepare_upload");
-      expect(store().headSeq()).toBe(head);
-      expect((await call("read", { path: "over.bin" })).isError).toBe(true);
+      expect(short.status).toBe(400);
+      expect(((await short.json()) as { code: string }).code).toBe("incomplete_upload");
+      expect((await call("read", { path: "a.png" })).isError).toBe(true);
+      const whole = await app.request(url, { method: "PUT", body: bytes });
+      expect(whole.status).toBe(200);
     });
   });
 
@@ -574,7 +535,7 @@ describe("MCP server", () => {
     test("read returns a PNG as an image block, with no binding", async () => {
       const s = setup();
       const { client, call } = await connect(s.app);
-      await call("attach", { path: "img/dot.png", content_base64: b64(PNG) });
+      await upload(s.app, call, "img/dot.png", PNG);
       const c = await content(client, { path: "img/dot.png" });
       expect(c[0]?.type).toBe("text");
       expect((c[0] as Text).text).toContain("media: image/png");
@@ -624,11 +585,11 @@ describe("MCP server", () => {
       const s = setup();
       const { client, call } = await connect(s.app);
       const svg = '<svg xmlns="http://www.w3.org/2000/svg"><circle r="4"/></svg>';
-      await call("attach", { path: "img/c.svg", content_base64: btoa(svg) });
+      await upload(s.app, call, "img/c.svg", new TextEncoder().encode(svg));
       const c = await content(client, { path: "img/c.svg" });
       expect(c.map((x) => x.type)).toEqual(["text", "text"]);
       expect((c[1] as Text).text).toContain("<circle");
-      await call("attach", { path: "refs/data.bin", content_base64: btoa("\u0001\u0002") });
+      await upload(s.app, call, "refs/data.bin", new Uint8Array([1, 2]));
       const bin = await content(client, { path: "refs/data.bin" });
       expect(bin.map((x) => x.type)).toEqual(["text"]);
     });
@@ -637,7 +598,7 @@ describe("MCP server", () => {
       const s = setup();
       const { client, call } = await connect(s.app);
       const pdf = new TextEncoder().encode("%PDF-1.4\n1 0 obj << >> endobj\n%%EOF\n");
-      await call("attach", { path: "docs/paper.pdf", content_base64: b64(pdf) });
+      await upload(s.app, call, "docs/paper.pdf", pdf);
       const c = (await client.callTool({ name: "read", arguments: { path: "docs/paper.pdf" } }))
         .content as ({ type: "text"; text: string } | { type: "resource"; resource: unknown })[];
       expect(c[0]?.type).toBe("text");
@@ -668,7 +629,7 @@ describe("MCP server", () => {
       expect((over[1] as Text).text).toContain("not attached here");
       expect(PDF_RESOURCE_BYTES).toBeLessThanOrEqual(IMAGE_BYTES_PER_CALL);
       // A video: its facts, its frame size and the link; no bytes.
-      await call("attach", { path: "clips/demo.webm", content_base64: b64(sample("clip.webm")) });
+      await upload(s.app, call, "clips/demo.webm", sample("clip.webm"));
       const video = await content(client, { path: "clips/demo.webm" });
       expect(video.map((x) => x.type)).toEqual(["text"]);
       expect((video[0] as Text).text).toContain("media: video/webm");
@@ -693,7 +654,7 @@ describe("MCP server", () => {
       fakeImages(s);
       const { client, call } = await connect(s.app);
       await upload(s.app, call, "img/big.jpg", bigJpeg());
-      await call("attach", { path: "refs/data.csv", content_base64: btoa("a,b\n1,2\n") });
+      await upload(s.app, call, "refs/data.csv", new TextEncoder().encode("a,b\n1,2\n"));
       const big = new Uint8Array(3 * 1024 * 1024).fill(7);
       // Over MCP's request cap, so it goes up over REST.
       const put = await s.req("/files/refs/huge.bin", {
@@ -744,7 +705,7 @@ describe("MCP server", () => {
 
       const page = async (s: ReturnType<typeof setup>) => {
         const conn = await connect(s.app);
-        await conn.call("attach", { path: "img/dot.png", content_base64: b64(PNG) });
+        await upload(s.app, conn.call, "img/dot.png", PNG);
         const w = await conn.call("write", { path: "t/figs.md", content: doc("Figs", FIGS) });
         expect(w.isError).toBe(false);
         return conn;
