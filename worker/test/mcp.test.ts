@@ -135,6 +135,7 @@ describe("MCP server", () => {
       "`sources`",
       "taken from elsewhere",
       "upload link",
+      "upload panel",
       "carries its own `credit` and `licence`",
       "`images: true`",
       "`diagrams: true`",
@@ -378,7 +379,7 @@ describe("MCP server", () => {
       });
       expect(sent.status).toBe(200);
       expect((await call("read", { path: "figures/photo.png" })).text).toContain(
-        "supplied by: @owner, from the upload link",
+        "supplied by: @owner (the person sent the file)",
       );
     });
 
@@ -492,7 +493,11 @@ describe("MCP server", () => {
     const { client, call } = await connect(app);
     await call("write", { path: "t/a.md", content: doc("A", "a\n") });
     const list = await client.listResources();
-    expect(list.resources.map((r) => [r.uri, r.title])).toEqual([["okf://owner/demo/t/a.md", "A"]]);
+    // The library's files, then the upload panel (TEMPRA-200).
+    expect(list.resources.map((r) => [r.uri, r.title])).toEqual([
+      ["ui://tempra/upload", "Upload a file"],
+      ["okf://owner/demo/t/a.md", "A"],
+    ]);
     const res = await client.readResource({ uri: "okf://owner/demo/t/a.md" });
     expect((res.contents[0] as { text: string }).text).toContain("title: A");
   });

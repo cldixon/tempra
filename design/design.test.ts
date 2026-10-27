@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { generate, generatePele } from "./build";
+import { generate, generatePanel, generatePele } from "./build";
 import { css, fonts, hash, href } from "./dist/tempra";
 
 test("dist/ is up to date with src/ (run `bun run build` in design/)", () => {
@@ -9,6 +9,7 @@ test("dist/ is up to date with src/ (run `bun run build` in design/)", () => {
   expect(readFileSync(join(import.meta.dir, "dist", "tempra.css"), "utf8")).toBe(fresh.css);
   expect(readFileSync(join(import.meta.dir, "dist", "tempra.ts"), "utf8")).toBe(fresh.ts);
   expect(readFileSync(join(import.meta.dir, "dist", "pele.ts"), "utf8")).toBe(generatePele());
+  expect(readFileSync(join(import.meta.dir, "dist", "panel.ts"), "utf8")).toBe(generatePanel());
 });
 
 test("the diagram theme resolves every --pele-* to a concrete value, light and dark (TEMPRA-165)", async () => {
