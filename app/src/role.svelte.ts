@@ -1,6 +1,12 @@
 import { api } from "./api";
 import { useLoad } from "./load.svelte.ts";
-import { LIBRARIES_EVENT, libraryLabel, type ReachableLibrary, type Role } from "./role";
+import {
+  LIBRARIES_EVENT,
+  LIBRARY_NAMES_URL,
+  libraryLabel,
+  type ReachableLibrary,
+  type Role,
+} from "./role";
 import { useTitle } from "./ui.svelte.ts";
 
 /**
@@ -10,7 +16,7 @@ import { useTitle } from "./ui.svelte.ts";
 export function useLibraries() {
   return useLoad(
     () => "workspace libraries",
-    () => api<{ libraries: ReachableLibrary[] }>("/api/v1/libraries"),
+    () => api<{ libraries: ReachableLibrary[] }>(LIBRARY_NAMES_URL),
     [LIBRARIES_EVENT],
   );
 }

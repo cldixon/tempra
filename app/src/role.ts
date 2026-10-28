@@ -16,6 +16,13 @@ export interface ReachableLibrary {
   description?: string;
 }
 
+/**
+ * The person's libraries by name and role alone, from D1, waking none of them (TEMPRA-190): what
+ * the frame needs on every page. The library list asks `/api/v1/libraries` for their summaries.
+ * The shell's boot data carries this URL (worker/src/ui/boot.ts).
+ */
+export const LIBRARY_NAMES_URL = "/api/v1/libraries?summary=false";
+
 /** Said on window when the libraries changed (a title set, one made): every list reloads. */
 export const LIBRARIES_EVENT = "tempra:libraries";
 

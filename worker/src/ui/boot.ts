@@ -42,7 +42,10 @@ const isConceptPath = (path: string) =>
  * important first, since the size budget keeps what fits in order.
  */
 export function bootUrls(page: BootPage): string[] {
-  const frame = ["/api/v1/me", "/api/v1/libraries", "/api/v1/inbox/count"];
+  // The frame's libraries by name alone, as `useLibraries` asks (app/src/role.ts
+  // LIBRARY_NAMES_URL): the shell waits on these calls, and the summaries would make it wait on
+  // the slowest cold library the person has (TEMPRA-190).
+  const frame = ["/api/v1/me", "/api/v1/libraries?summary=false", "/api/v1/inbox/count"];
   if (page.kind === "account") return frame;
   const lib = `/api/v1/libraries/${encodeURIComponent(page.owner)}/${encodeURIComponent(page.slug)}`;
   const library = [`${lib}/outline`, `${lib}/agents`];

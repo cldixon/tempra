@@ -7,7 +7,7 @@
   import { useConfirm } from "../confirm.svelte.ts";
   import Dialog from "../Dialog.svelte";
   import { useAction, useLoad } from "../load.svelte.ts";
-  import { isShared, type ReachableLibrary } from "../role";
+  import { isShared, LIBRARY_NAMES_URL, type ReachableLibrary } from "../role";
   import Status from "../Status.svelte";
   import { day, type Me } from "../ui";
   import { useNow, useTitle } from "../ui.svelte.ts";
@@ -28,7 +28,7 @@
       const [a, t, l] = await Promise.all([
         api<{ apps: AppGrant[] }>("/api/v1/apps"),
         api<{ tokens: TokenRow[] }>("/api/v1/tokens"),
-        api<{ libraries: ReachableLibrary[] }>("/api/v1/libraries"),
+        api<{ libraries: ReachableLibrary[] }>(LIBRARY_NAMES_URL),
       ]);
       // An own library by its slug; one shared with the person as owner/slug, the name the
       // server mints on (a member's token is held to their role there).

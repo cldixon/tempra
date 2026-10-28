@@ -1688,9 +1688,16 @@ async function browserRenders(
         // The first page's data comes in the shell (TEMPRA-175): a full load of a concept draws
         // its body without asking the API for the file, its context or the frame's first calls.
         const asked: string[] = [];
+        // The frame's libraries by name alone (TEMPRA-190): never the list with every library's
+        // summary, which wakes them all.
+        const summarised: string[] = [];
         const onRequest = (r: import("playwright-core").Request) => {
           const u = new URL(r.url());
-          if (u.origin === base && u.pathname.startsWith("/api/")) asked.push(u.pathname);
+          if (u.origin !== base || !u.pathname.startsWith("/api/")) return;
+          asked.push(u.pathname);
+          if (u.pathname === "/api/v1/libraries" && u.searchParams.get("summary") !== "false") {
+            summarised.push(u.pathname + u.search);
+          }
         };
         page.on("request", onRequest);
         await page.goto(`${base}/${owner}/${slug}/${enc(concept)}`);
@@ -1702,6 +1709,9 @@ async function browserRenders(
         const refetched = asked.filter((a) => booted.includes(a));
         if (refetched.length > 0) {
           throw new Error(`asked the API for what the shell carries: ${refetched.join(", ")}`);
+        }
+        if (summarised.length > 0) {
+          throw new Error(`woke every library for the frame: ${summarised.join(", ")}`);
         }
         // The page is one call (TEMPRA-191): none of the five it replaced.
         const split = asked.filter(
@@ -4897,6 +4907,9 @@ async function freshAccountConnects(): Promise<string[]> {
       await switchTo(asOwner);
       await page.goto(`${lib}/`);
       await libraryLink("Delete library");
+      // The page's other sections load as it opens (Members asks …/members and …/agents): wait
+      // for them, as a person would, so no load is still on its way when the library goes.
+      await page.locator(".ws-main td.name", { hasText: "@stranger" }).waitFor({ timeout: 15_000 });
       await page.locator('input[name="confirm"]').fill("notes");
       await page.getByRole("button", { name: "Delete library" }).click();
       // The last library gone: first run again.

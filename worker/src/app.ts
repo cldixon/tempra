@@ -1226,6 +1226,21 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
   app.get("/api/v1/libraries", async (c) => {
     const { d, user } = await human(c);
     const refs = await d.accounts.reachable(user.id);
+    // `?summary=false`: names and roles from D1 alone, waking no library (TEMPRA-190). The app's
+    // frame asks this way on every page; a cold object costs 250 to 600 ms to reach, and the
+    // list would otherwise wait on the slowest of them.
+    if (bool(c, "summary") === false) {
+      return c.json({
+        libraries: refs.map(({ id, slug, owner, role, title, description }) => ({
+          id,
+          owner,
+          slug,
+          role,
+          ...(title ? { title } : {}),
+          ...(description ? { description } : {}),
+        })),
+      });
+    }
     // Each library's summary fails on its own (TEMPRA-23): without it the list still names it.
     const libraries = await Promise.all(
       refs.map(async ({ id, slug, owner, do_id, role, title, description, created }) => {
