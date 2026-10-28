@@ -12,12 +12,14 @@ import {
   chartDataPaths,
   type Doc,
   fenceAttr,
+  findFigures,
   idOf,
   parseChart,
   sanitizeSvg,
   walk,
 } from "@tempra/editor/doc";
 import type { Code } from "mdast";
+import { checkChartSpec } from "./chart-schema";
 import type { LintWarning } from "./types";
 
 /** The fences drawn as diagrams: a code block whose language is `mermaid`. */
@@ -272,9 +274,8 @@ export function isSvgFence(n: { type: string; lang?: string | null }): boolean {
  * limit), `svg_unsafe` naming what sanitizing took out, `image_no_alt` when neither the fence's
  * `alt="…"` nor the SVG's own `<title>` says what it shows.
  */
-export function svgLint(code: Code, n: number): LintWarning[] {
+export function svgLint(code: Code, name: string): LintWarning[] {
   const block = idOf(code);
-  const name = `SVG figure ${n}${block ? ` (block ${block})` : ""}`;
   const r = sanitizeSvg(code.value);
   if (!r.ok) {
     const at = r.line > 0 ? ` at line ${r.line}, column ${r.column} of the fence` : "";
@@ -309,31 +310,34 @@ export function isChartFence(n: { type: string; lang?: string | null }): boolean
   return n.type === "code" && n.lang?.toLowerCase() === "vega-lite";
 }
 
-const chartName = (code: Code, n: number) => {
-  const block = idOf(code);
-  return `Vega-Lite chart ${n}${block ? ` (block ${block})` : ""}`;
-};
-
 /** What the write can tell of a chart without Vega: JSON, data only from the library. */
 function chartProblems(code: Code): { message: string; line: number; column: number }[] {
   const r = parseChart(code.value);
   if (!r.ok) {
     return [{ message: `is not a Vega-Lite spec: ${r.message}`, line: r.line, column: r.column }];
   }
-  return chartDataPaths(r.spec, "").problems.map((p) => ({ message: p, line: 0, column: 0 }));
+  // Vega-Lite's own schema (TEMPRA-214): what Vega would refuse, said at its path in the spec.
+  const shape = checkChartSpec(r.spec).map((p) => ({
+    message: p.path ? `${p.path}: ${p.message}` : `the spec ${p.message}`,
+    line: 0,
+    column: 0,
+  }));
+  const data = chartDataPaths(r.spec, "").problems.map((p) => ({ message: p, line: 0, column: 0 }));
+  return [...data, ...shape];
 }
 
 /**
  * Lint for a Vega-Lite fence on write (TEMPRA-207): `chart_invalid` when it is not a JSON object
  * or names data outside the library (never fetched), `image_no_alt` when neither the fence's
- * `alt="…"` nor the spec's `description` says what it shows. Vega-Lite's own compile errors come
+ * `alt="…"` nor the spec's `description` says what it shows; a spec Vega-Lite's JSON schema does
+ * not take is `chart_invalid` at its path in the spec (TEMPRA-214). What only compiling finds comes
  * from the render service after the write (`chartRenderWarning`).
  */
-export function chartLint(code: Code, n: number): LintWarning[] {
+export function chartLint(code: Code, name: string): LintWarning[] {
   const block = idOf(code);
   const out: LintWarning[] = chartProblems(code).map((p) => ({
     code: "chart_invalid",
-    message: `${chartName(code, n)}${p.message.startsWith("is ") ? " " : ": "}${p.message}${
+    message: `${name}${p.message.startsWith("is ") ? " " : ": "}${p.message}${
       p.line > 0 ? ` (line ${p.line}, column ${p.column} of the fence)` : ""
     }. The app shows its source until it draws; fix the fence.`,
     block,
@@ -343,7 +347,7 @@ export function chartLint(code: Code, n: number): LintWarning[] {
   if (r.ok && !fenceAttr(code.meta, "alt") && !described) {
     out.push({
       code: "image_no_alt",
-      message: `${chartName(code, n)} has no alt text: say what it shows with \`alt="…"\` after \`vega-lite\` on the fence (or a \`description\` in the spec).`,
+      message: `${name} has no alt text: say what it shows with \`alt="…"\` after \`vega-lite\` on the fence (or a \`description\` in the spec).`,
       block,
     });
   }
@@ -353,81 +357,129 @@ export function chartLint(code: Code, n: number): LintWarning[] {
 /** A chart the write's checks passed, for the render service to compile and draw (TEMPRA-207). */
 export function checkedCharts(doc: Doc): CheckedFence[] {
   const out: CheckedFence[] = [];
-  let n = 0;
+  const numbers = figureNumbers(doc);
   walk(doc, (node) => {
     if (!isChartFence(node)) return undefined;
-    n++;
     const code = node as Code;
     if (chartProblems(code).length === 0) {
-      out.push({ n, code, block: idOf(code), source: code.value });
+      out.push({ n: numbers.get(code), code, block: idOf(code), source: code.value });
     }
     return false;
   });
   return out;
 }
 
+/** A JavaScript error from inside Vega's own code, rather than one of its messages about the spec. */
+const INTERNAL =
+  /^(?:Cannot (?:read|set) propert|[\w$.]+ is (?:not a function|not defined|not iterable|undefined|null)|undefined is not|null is not|Maximum call stack)/;
+
+/**
+ * Vega's message on a chart it could not draw, as an agent is told it (TEMPRA-214): its own words
+ * when it says what is wrong with the spec ("Invalid mark type "bra""), and when it failed inside
+ * its own code ("Cannot read properties of undefined (reading 'filled')"), that it did and where
+ * to look, with the exception after it.
+ */
+export function vegaErrorText(message: string): string {
+  const said = message.trim().replace(/[.…]?$/, (end) => end || ".");
+  return INTERNAL.test(said)
+    ? `Vega failed inside its own code, which a spec it does not understand can cause (an unknown mark, channel, field type or transform; check them against Vega-Lite's). Vega said: ${said}`
+    : said;
+}
+
 /** Vega's verdict on a chart the write's checks passed: `chart_invalid`, with its message. */
 export function chartRenderWarning(f: CheckedFence, e: RenderFailure): LintWarning {
-  const message = e.message.trim().replace(/[.…]?$/, (end) => end || ".");
+  const message = vegaErrorText(e.message);
   return {
     code: "chart_invalid",
-    message: `${chartName(f.code, f.n)} could not be drawn by Vega: ${message} The app shows its source until it draws; fix the fence (\`render\` previews it).`,
+    message: `${fenceName(f.code, f.n)} could not be drawn by Vega: ${message} The app shows its source until it draws; fix the fence (\`render\` previews it).`,
     block: f.block,
     rendered: true,
   };
 }
 
+/**
+ * What a write would lint in one SVG or chart fence, for `render`'s preview of a source not yet
+ * written (TEMPRA-213): the same checks, the fence named as what it is rather than by its place.
+ * `image_no_alt` only when the fence's header was given, since that is where alt text goes.
+ */
+export function previewLint(lang: string, source: string, meta: string | null): LintWarning[] {
+  const code: Code = { type: "code", lang, meta, value: source };
+  const found =
+    lang === "svg"
+      ? svgLint(code, "The SVG")
+      : lang === "vega-lite"
+        ? chartLint(code, "The chart")
+        : [];
+  return meta === null ? found.filter((l) => l.code !== "image_no_alt") : found;
+}
+
+/**
+ * Each figure fence's number in the body's figures (TEMPRA-215): the one numbering, shared with
+ * the reader and MCP `read`'s Figures list (`findFigures`), so the n in a lint message is the n
+ * `render` and `read` take. A fence that is not a figure (one in a footnote) has none.
+ */
+function figureNumbers(doc: Doc): Map<Code, number> {
+  const out = new Map<Code, number>();
+  for (const f of findFigures(doc)) if (f.kind === "diagram") out.set(f.node, f.n);
+  return out;
+}
+
+/**
+ * "Figure 4 (mermaid, `flowchart LR`, block b7)": a fence by its figure number, its language (and
+ * a diagram's first line) and its block; "The svg fence (block b7)" when it is not a figure.
+ */
+function fenceName(code: Code, n: number | undefined): string {
+  const lang = (code.lang ?? "").toLowerCase();
+  const parts = n === undefined ? [] : [lang];
+  if (lang === "mermaid") {
+    const first = code.value.split("\n").find((l) => l.trim() !== "");
+    parts.push(`\`${(first?.trim() || "(empty)").slice(0, 40)}\``);
+  }
+  const block = idOf(code);
+  if (block) parts.push(`block ${block}`);
+  const said = parts.length > 0 ? ` (${parts.join(", ")})` : "";
+  return n === undefined ? `The ${lang} fence${said}` : `Figure ${n}${said}`;
+}
+
 /** Lint for each diagram in a body that is plainly broken, and for each SVG and chart fence. */
 export function diagramLint(doc: Doc): LintWarning[] {
   const out: LintWarning[] = [];
-  let n = 0;
-  let svgs = 0;
-  let charts = 0;
+  const numbers = figureNumbers(doc);
   walk(doc, (node) => {
     if (isSvgFence(node)) {
-      out.push(...svgLint(node as Code, ++svgs));
+      const code = node as Code;
+      out.push(...svgLint(code, fenceName(code, numbers.get(code))));
       return false;
     }
     if (isChartFence(node)) {
-      out.push(...chartLint(node as Code, ++charts));
+      const code = node as Code;
+      out.push(...chartLint(code, fenceName(code, numbers.get(code))));
       return false;
     }
     if (!isDiagram(node)) return undefined;
-    n++;
     const code = node as Code;
     const problem = checkDiagram(code.value);
-    if (problem) out.push(diagramWarning(code, n, problem));
+    if (problem) out.push(diagramWarning(code, numbers.get(code), problem));
     return false;
   });
   return out;
 }
 
-/** "Mermaid diagram 2 (`flowchart LR`, block b7)": a diagram by its place, first line and block. */
-function diagramName(code: Code, n: number): string {
-  const first =
-    code.value
-      .split("\n")
-      .find((l) => l.trim() !== "")
-      ?.trim() || "(empty)";
-  const block = idOf(code);
-  return `Mermaid diagram ${n} (\`${first.slice(0, 40)}\`${block ? `, block ${block}` : ""})`;
-}
-
-function diagramWarning(code: Code, n: number, p: DiagramProblem): LintWarning {
+function diagramWarning(code: Code, n: number | undefined, p: DiagramProblem): LintWarning {
   const kind = p.kind === "unsupported-diagram" ? "is not a diagram" : "has a syntax error";
   return {
     code: "diagram_invalid",
-    message: `${diagramName(code, n)} ${kind} at line ${p.line}, column ${p.column} of the fence: ${p.message} The app shows its source until it draws; fix the fence.`,
+    message: `${fenceName(code, n)} ${kind} at line ${p.line}, column ${p.column} of the fence: ${p.message} The app shows its source until it draws; fix the fence.`,
     block: idOf(code),
   };
 }
 
 /**
- * A diagram the fast check passed, for the render service to try (TEMPRA-167): its place among
- * the body's diagrams, its block and its source.
+ * A diagram the fast check passed, for the render service to try (TEMPRA-167): its figure number
+ * (undefined for one that is not a figure), its block and its source.
  */
 export interface CheckedFence {
-  n: number;
+  n: number | undefined;
   code: Code;
   block: string | undefined;
   source: string;
@@ -436,12 +488,13 @@ export interface CheckedFence {
 /** The body's diagrams that `diagramLint` finds nothing wrong with, in order. */
 export function checkedFences(doc: Doc): CheckedFence[] {
   const out: CheckedFence[] = [];
-  let n = 0;
+  const numbers = figureNumbers(doc);
   walk(doc, (node) => {
     if (!isDiagram(node)) return undefined;
-    n++;
     const code = node as Code;
-    if (!checkDiagram(code.value)) out.push({ n, code, block: idOf(code), source: code.value });
+    if (!checkDiagram(code.value)) {
+      out.push({ n: numbers.get(code), code, block: idOf(code), source: code.value });
+    }
     return false;
   });
   return out;
@@ -466,7 +519,7 @@ export function unrenderedWarning(f: CheckedFence, e: RenderFailure): LintWarnin
   const message = e.message.trim().replace(/[.…]?$/, (end) => end || ".");
   return {
     code: "diagram_unrendered",
-    message: `${diagramName(f.code, f.n)} could not be drawn by Pele${at}: ${message} The app shows its source until it draws; fix the fence.`,
+    message: `${fenceName(f.code, f.n)} could not be drawn by Pele${at}: ${message} The app shows its source until it draws; fix the fence.`,
     block: f.block,
     rendered: true,
   };

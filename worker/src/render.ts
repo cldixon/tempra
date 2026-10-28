@@ -41,6 +41,18 @@ export function isRenderLang(lang: string): lang is RenderLang {
   return (RENDER_LANGS as readonly string[]).includes(lang);
 }
 
+/**
+ * The language of a source passed to `render` without one (TEMPRA-213): markup is SVG, a JSON
+ * object is a Vega-Lite spec, anything else Mermaid (whose sources start with a diagram type or
+ * a `%%` directive, never `<` or `{`).
+ */
+export function sourceLang(source: string): RenderLang {
+  const s = source.trimStart();
+  if (s.startsWith("<")) return "svg";
+  if (s.startsWith("{")) return "vega-lite";
+  return "mermaid";
+}
+
 /** Who refuses a source of a language, as an agent is told: "Pele could not draw it". */
 export function drawerOf(lang: string): string {
   return lang === "mermaid" ? "Pele" : lang === "vega-lite" ? "Vega" : "Tempra";

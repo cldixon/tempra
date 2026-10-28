@@ -9,6 +9,7 @@
     "includes": [
       "**",
       "!**/worker-configuration.d.ts",
+      "!worker/src/okf/vega-lite-schema.ts",
       "!fixtures",
       "!design/dist",
       "!design/handoff"

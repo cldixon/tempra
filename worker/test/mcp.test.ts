@@ -404,6 +404,36 @@ describe("MCP server", () => {
       expect(props(attach)).toContain("source_url");
       expect(props(prepare)).not.toContain("sha256");
       expect(props(prepare)).not.toContain("size");
+      // The advertised schemas exactly (TEMPRA-212): a field added or left behind fails here, so
+      // what agents read before anything else cannot drift from what the handlers accept again.
+      expect(props(attach).sort()).toEqual(
+        [
+          "credit",
+          "description",
+          "if_match",
+          "library",
+          "licence",
+          "note",
+          "path",
+          "source_url",
+        ].sort(),
+      );
+      expect(props(prepare).sort()).toEqual(
+        [
+          "credit",
+          "description",
+          "if_match",
+          "library",
+          "licence",
+          "media",
+          "note",
+          "origin",
+          "path",
+        ].sort(),
+      );
+      expect(prepare?.inputSchema.properties?.origin).toMatchObject({ enum: ["person", "agent"] });
+      expect(attach?.inputSchema.required).toEqual(["path"]);
+      expect(prepare?.inputSchema.required).toEqual(["path"]);
       for (const t of tools) {
         expect(`${t.description} ${JSON.stringify(t.inputSchema)}`).not.toMatch(
           /base64|sha256|checksum/i,

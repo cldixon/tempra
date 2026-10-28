@@ -51,7 +51,7 @@ describe("SVG fences (TEMPRA-206)", () => {
     expect(await write("ok.md", fence(SVG))).toContain("Lint: none");
     const bad = await write("bad.md", fence("<svg><rect></svg>", 'alt="x"'));
     expect(bad).toContain("svg_invalid");
-    expect(bad).toContain("SVG figure 1");
+    expect(bad).toContain("Figure 1 (svg, block ");
     expect(bad).toContain("does not parse at line 1, column 12 of the fence: </svg> closes <rect>");
     const unsafe = await write("unsafe.md", fence(UNSAFE));
     expect(unsafe).toContain("svg_unsafe");
@@ -105,10 +105,28 @@ describe("SVG fences (TEMPRA-206)", () => {
     // A source, by lang or as a pasted fence.
     expect((await call("render", { source: SVG, lang: "svg" })).content[1]?.type).toBe("image");
     expect((await call("render", { source: fence(SVG) })).text).toContain("· svg ·");
+    // Before it is written (TEMPRA-213): told from the source with no lang, and checked as a
+    // write would check it, what a write would report said with the drawing.
+    const before = sent.length;
+    const told = await call("render", { source: UNSAFE });
+    expect(told.content[1]?.type).toBe("image");
+    expect(sent.length).toBe(before + 1);
+    const said = (told.content[0] as Text).text;
+    expect(said).toContain("Diagram · svg · light");
+    expect(said).toContain("A write would report:\n- svg_unsafe: The SVG is drawn without");
+    expect(said).toContain("event handlers, scripts");
+    // Alt text lives on the fence's header, so it is asked for only when the fence is given.
+    expect(said).not.toContain("image_no_alt");
+    expect((await call("render", { source: fence(UNSAFE) })).text).toContain(
+      "- image_no_alt: The SVG has no alt text",
+    );
+    expect((await call("render", { source: fence(SVG) })).text).not.toContain("A write would");
+    // One a write would call invalid is not sent to be drawn.
     const broken = await call("render", { source: "<svg><g></svg>", lang: "svg" });
     expect(broken.text).toContain(
-      "Tempra could not draw it: The SVG does not parse: </svg> closes <g>.",
+      "Not drawn.\nA write would report:\n- svg_invalid: The SVG does not parse at line 1, column 9 of the fence: </svg> closes <g>.",
     );
+    expect(sent.length).toBe(before + 3);
   });
 
   test("the render client sanitizes before the render Worker, and passes lang", async () => {

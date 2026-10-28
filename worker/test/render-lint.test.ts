@@ -122,7 +122,7 @@ describe("diagram_unrendered (TEMPRA-167)", () => {
     const [lint, ...rest] = first.lint.filter((l) => l.code === "diagram_unrendered");
     expect(rest).toEqual([]);
     expect(codes(first.lint)).not.toContain("diagram_invalid");
-    expect(lint?.message).toContain("Mermaid diagram 2 (`flowchart LR`");
+    expect(lint?.message).toContain("Figure 2 (mermaid, `flowchart LR`, block ");
     expect(lint?.message).toContain(
       "could not be drawn by Pele at line 2, column 8 of the fence: Expecting 'NODE_STRING', got 'TAGEND'. The app shows",
     );
