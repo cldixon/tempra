@@ -4,7 +4,6 @@
   import {
     ancestors,
     buildDirs,
-    countConcepts,
     fileLabel,
     insideDirs,
     loadClosed,
@@ -12,14 +11,13 @@
     rollUp,
     saveClosed,
   } from "./tree";
-  import { plural } from "./ui";
   import { folderName, type Urls } from "./urls";
 
   /**
    * The library's file tree (tempra-dev: app/workspace). The whole index (paths, titles,
    * sequences; no bodies; Workspace loads it in one small request and keeps it following the
-   * feed) is here at once, so opening a folder never waits. A folder (named for people, with its
-   * count of concepts) is a group, not a page: its row opens and closes it (TEMPRA-138), and a
+   * feed) is here at once, so opening a folder never waits. A folder (named for people) is a
+   * group, not a page: its row opens and closes it (TEMPRA-138), and a
    * folder's address reveals it here. Every folder starts open; the ones the person closed are
    * remembered on this browser, and the open file is revealed and marked. A closed folder rolls
    * up the marks of what is inside it. Change is not marked here (TEMPRA-173): Activity is where
@@ -39,7 +37,6 @@
   let closed = $state.raw(loadClosed(untrack(() => props.urls)));
   const isOpen = (dir: string) => !closed.has(dir);
   const dirs = $derived(props.files ? buildDirs(props.files) : null);
-  const counts = $derived(props.files ? countConcepts(props.files) : new Map<string, number>());
   const inside = $derived(props.files ? insideDirs(props.files) : new Map<string, OutlineFile[]>());
 
   // The open file's folders are revealed when it opens (and may be collapsed after); so is a
@@ -129,7 +126,6 @@
   {:else}
     {#each dirs[dir] ?? [] as e (e.path)}
       {#if e.kind === "dir"}
-        {@const n = counts.get(e.path) ?? 0}
         <li>
           <!-- A folder is a group, not a page (TEMPRA-138): its whole row opens and closes it. -->
           <div class={isOpen(e.path) ? "tree-row dir open" : "tree-row dir"}
@@ -140,9 +136,8 @@
               title={folderName(e.path)}
               {@attach reveal(e.path)}
               onclick={() => toggle(e.path)}
-              >{folderName(e.path)}{#if n > 0}<span class="visually-hidden">, {plural(n, "page")}</span
-                >{/if}</button
-            >{#if n > 0}<span class="tree-count" aria-hidden="true">{n}</span>{/if}{#if !isOpen(e.path)}{@render rolledUp(
+              >{folderName(e.path)}</button
+            >{#if !isOpen(e.path)}{@render rolledUp(
                 e.path,
               )}{/if}</div
           >{#if isOpen(e.path)}<ul>{@render rows(e.path)}</ul>{/if}</li

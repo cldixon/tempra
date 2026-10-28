@@ -56,16 +56,6 @@ export function saveClosed(urls: Urls, dirs: Set<string>) {
   }
 }
 
-/** The concepts under each folder, at any depth. */
-export function countConcepts(files: OutlineFile[]): Map<string, number> {
-  const counts = new Map<string, number>();
-  for (const f of files) {
-    if (f.kind !== "concept") continue;
-    for (const d of ancestors(f.path)) counts.set(d, (counts.get(d) ?? 0) + 1);
-  }
-  return counts;
-}
-
 /** Where a row sorts within its folder: folders, then pages, then files (TEMPRA-123). */
 const RANK: Record<OutlineFile["kind"], number> = { dir: 0, concept: 1, attachment: 2 };
 
