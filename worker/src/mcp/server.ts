@@ -25,7 +25,7 @@ import {
   toBase64,
 } from "../images";
 import { imageInfo } from "../media";
-import { diagramTypeOf } from "../okf/diagrams";
+import { diagramTypeOf, previewLint, vegaErrorText } from "../okf/diagrams";
 import { type FigureFact, figureLine, sizeText } from "../okf/figures";
 import { normalizePath, underPrefix } from "../okf/paths";
 import type { LintWarning } from "../okf/types";
@@ -41,6 +41,7 @@ import {
   type RenderLang,
   type RenderRequest,
   type RenderResult,
+  sourceLang,
 } from "../render";
 import type { CommentAction, CommentResult } from "../store/comments";
 import { OkfError } from "../store/errors";
@@ -124,7 +125,7 @@ How to work:
 2. Write conformant concepts: a non-empty \`type\` naming what kind of thing it is (Metric, Protocol, Decision; never a generic word like concept, page or note, and reuse the types \`start\` lists), a \`title\` and one-line \`description\`, absolute links like [x](/dir/x.md), footnotes [^id] keyed to \`sources[].id\` (an entry is \`id\`, \`title\` and \`resource\`: a URL or a path in this library), one idea per concept.
 3. Media, where a figure helps: a screenshot of what the page describes, a chart of data it discusses, a diagram of an architecture or a flow. Prefer rendered media, code in the concept that the app draws: a chart as a Vega-Lite spec in a \`vega-lite\` fence (\`\`\`vega-lite alt="what it shows" title="Caption"\`; its data inline in \`values\`, or a CSV, TSV or JSON file in this library named by \`data.url\`; never a picture of a chart), a Mermaid diagram in a \`mermaid\` fence, or a drawing in an \`svg\` fence (\`\`\`svg alt="what it shows" title="Caption"\`; plain shapes and text, \`currentColor\` for ink, no scripts, style elements, images or links). It is text, diffs like text and needs no upload (preview a non-trivial one with \`render\`). A file (an image, video, audio or PDF) comes in only two ways, and never as bytes you type into a call: on the public web, \`attach\` with \`source_url\` (the server fetches it; never hotlink); one you made or the person has, \`prepare_upload\`: run its curl line when your shell reaches this server, else the person sends it from their browser (in a chat that shows apps an upload panel appears with the call; give them its upload link too). A file you made where you cannot reach this server (a chart in a chat's sandbox): give it to the person in the chat, call \`prepare_upload\` with \`origin: "agent"\`, and tell them in a sentence why: you cannot send files to Tempra yourself, so they upload the one you gave them. Put a file beside the concept that uses it, named for what it shows (\`dir/x.md\` uses \`dir/x-architecture.png\`). Write \`![what it shows](/dir/x-architecture.png "Caption")\` (alt says what it shows, the title is the caption), in a \`:::figure\` block for size, placement or a group (\`write\` says how), and cite a work taken from elsewhere (a web image) in \`sources\`; a file the person gave you or you made carries its own \`credit\` and \`licence\` instead, with no \`sources\` entry. To change a stored image (resize, crop, convert, a thumbnail) or make a video's poster, use \`transform\`: the server does it, since you cannot fetch the file. Before changing a figure or answering a comment on one, \`read\` with \`images: true\` (\`diagrams: true\` for diagrams).
 4. Prefer \`edit\` for small changes, \`write\` for new concepts or rewrites, \`batch\` for related changes so they land as one request. Pass \`if_match\` (the hash from your last read); on a conflict, re-read and reapply. Bodies are stored in a canonical form (\`-\` bullets, \`*\` emphasis, padded tables): what you write reads back normalized, so \`edit\` the text as \`read\` shows it.
-5. Put a one-line \`note\` on every write. Read the \`lint\` in every write result and fix what it reports (figure and diagram lint too: \`image_*\`, \`figure_invalid\`, \`diagram_invalid\`, \`diagram_unrendered\`, \`svg_invalid\`, \`svg_unsafe\`, \`chart_invalid\` mean fix the image or the fence); the result's notes say what else to know (ignored fields, the stored form, open comments). A concept with no frontmatter, invalid YAML or no \`type\` is refused. Keep concepts under 100 KB; split big ones into linked concepts.
+5. Put a one-line \`note\` on every write. Read the \`lint\` in every write result and fix what it reports (figure and diagram lint too: \`image_*\`, \`figure_invalid\`, \`diagram_invalid\`, \`diagram_unrendered\`, \`svg_invalid\`, \`svg_unsafe\`, \`chart_invalid\` mean fix the image or the fence; a fence's lint names it by its number in \`read\`'s Figures list, the number \`render\` and \`read\` take); the result's notes say what else to know (ignored fields, the stored form, open comments). A concept with no frontmatter, invalid YAML or no \`type\` is refused. Keep concepts under 100 KB; split big ones into linked concepts.
 6. Never write index.md or log.md (the server synthesizes them). Never set \`generated\` (the server stamps it) or \`verified\` (not yours to claim). Set \`status\` and \`stale_after\` honestly. Timestamps are full ISO 8601 datetimes with an offset (\`stale_after: 2026-12-31T00:00:00Z\`); a plain date is flagged.
 7. Use \`work\` to find what needs doing: open comments, stale concepts, broken links, lint, hotlinked images (\`external_image\`), and structure (a directory's index.md made poor by its concepts: missing, long or title-repeating descriptions, duplicate titles, concepts nothing links to, a directory with one concept, none, or too many); \`work\` with kind stale_soon lists what goes stale within 14 days. Only a new \`stale_after\` resets a concept's clock; other edits leave it stale.
 8. Comments are how people ask you for changes. Before editing a concept, read its open threads with \`comments\`; make the change a comment asks for, then answer it with \`comment\` (reply, and resolve what you fixed). Ask with a reply when unsure; never resolve a thread you did not address. A concept with open threads cannot be deleted until they are resolved.`;
@@ -528,6 +529,8 @@ export function buildServer(ctx: McpContext): McpServer {
     }
     const error = r.error ?? { message: "Nothing was drawn.", line: 0, column: 0 };
     if (error.message.startsWith(RENDER_UNAVAILABLE)) return unavailable(error.message);
+    if (lang === "vega-lite")
+      return { kind: "refused", error: { ...error, message: vegaErrorText(error.message) } };
     return { kind: "refused", error };
   };
 
@@ -965,7 +968,7 @@ export function buildServer(ctx: McpContext): McpServer {
     {
       title: "Create or replace a concept",
       description:
-        'Write a whole concept as OKF markdown: a YAML frontmatter block with a non-empty `type` that names what kind of thing this is, e.g. `Metric`, `BigQuery Table`, `Decision`, not a generic `concept` or `note` (plus `title`, one-line `description`, optional `tags`, `resource`, `sources`, `status`, `stale_after`), then a markdown body. Each `sources` entry is `id`, `title` and `resource` (a URL, or a path in this library such as `/dir/x.md`); `url` is taken as `resource`. `stale_after` and other timestamps are full ISO 8601 datetimes with an offset, e.g. 2026-12-31T00:00:00Z (a plain date is flagged). Prefer absolute links like [orders](/tables/orders.md); cite sources with footnotes: [^id] in the text, matching a `sources[].id`, plus a `[^id]: …` definition line at the end of the body. Diagrams and charts are best as rendered media, code the app draws, rather than a picture: a chart as a Vega-Lite spec in a ```vega-lite fence, Mermaid in a ```mermaid fence, or SVG in a ```svg fence (preview a non-trivial one with `render`); a fence with an unknown type, nothing after its header, or a bracket or quote left open is saved, shown as its source, and reported as `diagram_invalid` lint with the line and column inside the fence; `diagram_unrendered` lint (in the result when the renderer answers quickly, else in `work` and the next `read`) means Pele could not draw the fence, with its message, line and column: fix the fence. An SVG fence (```svg alt="what it shows" title="Caption"; up to 50 KB; `currentColor` takes the text colour in light and dark) is sanitized when drawn: `svg_invalid` lint means it does not parse (line and column given), `svg_unsafe` names what was taken out (scripts, event handlers, `<style>`, images, links, animation, references outside the SVG), and a missing alt (no `alt="…"` nor a `<title>`) is `image_no_alt`. A Vega-Lite fence (```vega-lite alt="what it shows" title="Caption"; a JSON spec, Vega-Lite 6) is drawn in the reader\'s greys in light and dark; its data is inline (`values`, rows or CSV text with `format`) or a CSV, TSV or JSON file in this library (`data.url`, a path such as `/data/sales.csv`, put there with `attach` or `prepare_upload`), nothing else is fetched; `chart_invalid` lint means it is not JSON, names data from elsewhere, or Vega could not draw it (with its message); no alt (`alt="…"` or the spec\'s `description`) is `image_no_alt`. Images are `![what it shows](/dir/x-architecture.png "Caption")`, the file put beside the concept by `attach` with `source_url` (on the web) or `prepare_upload` (one you made or the person has; never type its bytes); for a width, a placement or a group, wrap one to four images, one to a line, in `:::figure[group caption]{width=480|60% layout=column|wide|full frame}` and a closing `:::` (`frame` is a hairline for screenshots; in a group each title is a small label). Video, audio and PDF use the same spelling (a video\'s poster is `x.poster.png` beside `x.mp4`). Figures are lint, never refused: `image_no_alt` (say what it shows), `image_external` (hotlinked; `attach` it with `source_url`), `image_large` (over 2 MB or 4000 px; make a smaller one with `transform`), `image_not_image` (not an image, video, audio or PDF; link it instead), `figure_invalid` (the markup does not parse). A file with no frontmatter, frontmatter that is not valid YAML, or no `type` is refused (400) and nothing is written. Without `if_match` it creates and fails if the path exists; to replace, pass the hash from your last read. The server stamps `generated` from your token; `verified` is not yours to set. The concept is stored in a canonical form (`-` bullets, `*` emphasis; `sources` entries one key per line, `tags: [a, b]` on one line); when that differs from what you sent, the result shows the diff, so `edit` the stored text. Prefer `edit` for small changes. Read the lint and notes in the result and fix the lint.',
+        'Write a whole concept as OKF markdown: a YAML frontmatter block with a non-empty `type` that names what kind of thing this is, e.g. `Metric`, `BigQuery Table`, `Decision`, not a generic `concept` or `note` (plus `title`, one-line `description`, optional `tags`, `resource`, `sources`, `status`, `stale_after`), then a markdown body. Each `sources` entry is `id`, `title` and `resource` (a URL, or a path in this library such as `/dir/x.md`); `url` is taken as `resource`. `stale_after` and other timestamps are full ISO 8601 datetimes with an offset, e.g. 2026-12-31T00:00:00Z (a plain date is flagged). Prefer absolute links like [orders](/tables/orders.md); cite sources with footnotes: [^id] in the text, matching a `sources[].id`, plus a `[^id]: …` definition line at the end of the body. Diagrams and charts are best as rendered media, code the app draws, rather than a picture: a chart as a Vega-Lite spec in a ```vega-lite fence, Mermaid in a ```mermaid fence, or SVG in a ```svg fence (preview a non-trivial one with `render`); a fence with an unknown type, nothing after its header, or a bracket or quote left open is saved, shown as its source, and reported as `diagram_invalid` lint with the line and column inside the fence; `diagram_unrendered` lint (in the result when the renderer answers quickly, else in `work` and the next `read`) means Pele could not draw the fence, with its message, line and column: fix the fence. An SVG fence (```svg alt="what it shows" title="Caption"; up to 50 KB; `currentColor` takes the text colour in light and dark) is sanitized when drawn: `svg_invalid` lint means it does not parse (line and column given), `svg_unsafe` names what was taken out (scripts, event handlers, `<style>`, images, links, animation, references outside the SVG), and a missing alt (no `alt="…"` nor a `<title>`) is `image_no_alt`. A Vega-Lite fence (```vega-lite alt="what it shows" title="Caption"; a JSON spec, Vega-Lite 6) is drawn in the reader\'s greys in light and dark; its data is inline (`values`, rows or CSV text with `format`) or a CSV, TSV or JSON file in this library (`data.url`, a path such as `/data/sales.csv`, put there with `attach` or `prepare_upload`), nothing else is fetched; `chart_invalid` lint means it is not JSON, names data from elsewhere, does not fit the Vega-Lite schema (said at its path in the spec, e.g. `encoding.x.type: "bogus" is not one of …`), or Vega could not draw it (with its message); no alt (`alt="…"` or the spec\'s `description`) is `image_no_alt`. Images are `![what it shows](/dir/x-architecture.png "Caption")`, the file put beside the concept by `attach` with `source_url` (on the web) or `prepare_upload` (one you made or the person has; never type its bytes); for a width, a placement or a group, wrap one to four images, one to a line, in `:::figure[group caption]{width=480|60% layout=column|wide|full frame}` and a closing `:::` (`frame` is a hairline for screenshots; in a group each title is a small label). Video, audio and PDF use the same spelling (a video\'s poster is `x.poster.png` beside `x.mp4`). Figures are lint, never refused: `image_no_alt` (say what it shows), `image_external` (hotlinked; `attach` it with `source_url`), `image_large` (over 2 MB or 4000 px; make a smaller one with `transform`), `image_not_image` (not an image, video, audio or PDF; link it instead), `figure_invalid` (the markup does not parse). A file with no frontmatter, frontmatter that is not valid YAML, or no `type` is refused (400) and nothing is written. Without `if_match` it creates and fails if the path exists; to replace, pass the hash from your last read. The server stamps `generated` from your token; `verified` is not yours to set. The concept is stored in a canonical form (`-` bullets, `*` emphasis; `sources` entries one key per line, `tags: [a, b]` on one line); when that differs from what you sent, the result shows the diff, so `edit` the stored text. Prefer `edit` for small changes. Read the lint and notes in the result and fix the lint.',
       inputSchema: {
         path: z.string().describe("Where to write, e.g. `metrics/revenue.md`."),
         content: z.string().describe("The full OKF markdown document."),
@@ -1193,7 +1196,7 @@ export function buildServer(ctx: McpContext): McpServer {
     {
       title: "Upload a file",
       description:
-        "The way to add a file that is not on the web, up to 10 MB: one you made (a screenshot, a processed image, a PDF) or one the person has (a photo they attached in the chat). Never type a file's bytes into a call, and for a chart or a flow prefer rendered media in the concept (a ```mermaid fence) to a picture. Put it beside the concept that uses it, named for what it shows (`dir/x-architecture.png`). Returns a URL good for one PUT within an hour, a ready `curl -T <file> '<url>'` line and an upload link for the person; in a chat that shows apps, an upload panel appears with the call. Then, by where the file is: (1) your shell reaches this server: run the curl line, and the server attaches the file at `path` as you, with your `note`; curl prints the write result as JSON (path, hash, seq, lint). (2) The person has it (you cannot pass on a chat's attachment): ask them to choose it in the panel, and give them the link in case the panel does not show. (3) You made it where you cannot reach this server (curl fails to connect, or a proxy refuses it, as in a chat's sandbox): give the file to the person in the chat, pass `origin` `agent`, and tell them in a sentence or two why they are asked: you cannot send files to Tempra yourself, so they upload the one you gave them (the panel and the link say the same). From their browser it is attached as your write, with your note, description, credit and licence, recorded as supplied by them; `read` the path to see when it has arrived. Whatever file arrives is the file; a transfer cut short is refused (`incomplete_upload`). The URL needs no token, so keep it to yourself; the link needs the person signed in with write access.",
+        "The way to add a file that is not on the web, up to 10 MB: one you made (a screenshot, a processed image, a PDF) or one the person has (a photo they attached in the chat). Never type a file's bytes into a call, and for a chart, a flow or a drawing prefer rendered media in the concept (a ```vega-lite, ```mermaid or ```svg fence) to a picture. Put it beside the concept that uses it, named for what it shows (`dir/x-architecture.png`). Returns a URL good for one PUT within an hour, a ready `curl -T <file> '<url>'` line and an upload link for the person; in a chat that shows apps, an upload panel appears with the call. Then, by where the file is: (1) your shell reaches this server: run the curl line, and the server attaches the file at `path` as you, with your `note`; curl prints the write result as JSON (path, hash, seq, lint). (2) The person has it (you cannot pass on a chat's attachment): ask them to choose it in the panel, and give them the link in case the panel does not show. (3) You made it where you cannot reach this server (curl fails to connect, or a proxy refuses it, as in a chat's sandbox): give the file to the person in the chat, pass `origin` `agent`, and tell them in a sentence or two why they are asked: you cannot send files to Tempra yourself, so they upload the one you gave them (the panel and the link say the same). From their browser it is attached as your write, with your note, description, credit and licence, recorded as supplied by them; `read` the path to see when it has arrived. Whatever file arrives is the file; a transfer cut short is refused (`incomplete_upload`). The URL needs no token, so keep it to yourself; the link needs the person signed in with write access.",
       _meta: { ui: { resourceUri: UPLOAD_PANEL_URI } },
       inputSchema: {
         path: z
@@ -1496,7 +1499,7 @@ export function buildServer(ctx: McpContext): McpServer {
       "render",
       {
         title: "Draw a diagram",
-        description: `${BEYOND}draw rendered media as the app draws it and see it: a Mermaid diagram (Pele, the reader's column and greys), an SVG fence (sanitized as the reader sanitizes it) or a Vega-Lite chart (Vega, its data inline or from this library). Preview a non-trivial one before you write it (layout, labels that fit), or look at one while you review it or fix its \`diagram_invalid\`, \`diagram_unrendered\`, \`svg_invalid\` or \`chart_invalid\` lint: pass \`source\` (a fence's body, with \`lang\` for SVG or Vega-Lite), or \`path\` and \`figure\` (its number in \`read\`'s Figures list). Returns a line with what it is and its size, then the drawing as a PNG image; if it cannot be drawn, the error with line and column, and the line it names; if the PNG cannot be made, the SVG as text. Writes nothing and records nothing in the ledger. At most ${RENDERS_PER_MINUTE} renders a minute per account.`,
+        description: `${BEYOND}draw rendered media as the app draws it and see it: a Mermaid diagram (Pele, the reader's column and greys), an SVG fence (sanitized as the reader sanitizes it) or a Vega-Lite chart (Vega, its data inline or from this library). Preview a non-trivial one before you write it (layout, labels that fit), or look at one while you review it or fix its \`diagram_invalid\`, \`diagram_unrendered\`, \`svg_invalid\` or \`chart_invalid\` lint: pass \`source\` (a fence's body, or the whole fence with its header; the language from \`lang\`, the fence, or the source itself: \`<svg\` is SVG, a JSON object Vega-Lite), or \`path\` and \`figure\` (its number in \`read\`'s Figures list). A \`source\` is checked as a write would check it, with the same sanitizing and data rules (only data inline or in this library), and what a write would report comes back with the drawing (\`svg_unsafe\` naming what is taken out, \`chart_invalid\`, \`svg_invalid\`, and \`image_no_alt\` when you pass the whole fence); one a write would call invalid is not drawn. Returns a line with what it is and its size, then the drawing as a PNG image; if it cannot be drawn, the error with line and column, and the line it names; if the PNG cannot be made, the SVG as text. Writes nothing and records nothing in the ledger. At most ${RENDERS_PER_MINUTE} renders a minute per account.`,
         inputSchema: {
           source: z
             .string()
@@ -1518,7 +1521,7 @@ export function buildServer(ctx: McpContext): McpServer {
             .enum(RENDER_LANGS)
             .optional()
             .describe(
-              "With `source`: the fence's language, `mermaid` (default), `svg` or `vega-lite`.",
+              "With `source`: the fence's language, `mermaid`, `svg` or `vega-lite`. Left out, it is told from the source: `<svg …>` is SVG, a JSON object is Vega-Lite, anything else Mermaid.",
             ),
           theme: z
             .enum(["light", "dark"])
@@ -1541,6 +1544,8 @@ export function buildServer(ctx: McpContext): McpServer {
           let lang: RenderLang = args.lang ?? "mermaid";
           let what: string;
           let library: string | undefined;
+          // A pasted fence's header (its alt and title), for what a write would lint (TEMPRA-213).
+          let meta: string | null = null;
           // Where a chart's data paths resolve (TEMPRA-207): its concept, or the library's root.
           let from: { lib: LibraryClient; path: string } | undefined;
           if (args.source !== undefined) {
@@ -1553,11 +1558,14 @@ export function buildServer(ctx: McpContext): McpServer {
             }
             // A whole fence pasted in is drawn as its body, in its language.
             const fence =
-              /^\s*(`{3,}|~{3,})\s*(mermaid|svg|vega-lite)\b[^\n]*\n([\s\S]*?)\n?\s*\1\s*$/i.exec(
+              /^\s*(`{3,}|~{3,})\s*(mermaid|svg|vega-lite)\b([^\n]*)\n([\s\S]*?)\n?\s*\1\s*$/i.exec(
                 args.source,
               );
-            source = fence?.[3] ?? args.source;
-            if (fence) lang = (fence[2] as string).toLowerCase() as RenderLang;
+            source = fence?.[4] ?? args.source;
+            if (fence) {
+              lang = (fence[2] as string).toLowerCase() as RenderLang;
+              meta = (fence[3] as string).trim();
+            } else if (args.lang === undefined) lang = sourceLang(source);
             what = "Diagram";
             if (args.library || ctx.libraries.length === 1) {
               const picked = pick(args.library);
@@ -1569,7 +1577,7 @@ export function buildServer(ctx: McpContext): McpServer {
               throw new OkfError(
                 400,
                 "bad_request",
-                "Pass `source` (the diagram's Mermaid), or `path` and `figure`.",
+                "Pass `source` (the fence's Mermaid, SVG or Vega-Lite), or `path` and `figure`.",
               );
             }
             const picked = pick(args.library);
@@ -1612,21 +1620,30 @@ export function buildServer(ctx: McpContext): McpServer {
           const theme = args.theme ?? "light";
           const type = lang === "mermaid" ? diagramTypeOf(source) : null;
           const head = `${what} · ${lang}${type ? `, ${type}` : ""} · ${theme}`;
+          // A source not yet written gets the lint its write would (TEMPRA-213); one a write would
+          // call invalid is not sent to be drawn. A figure's lint is already on its concept.
+          const findings = args.source !== undefined ? previewLint(lang, source, meta) : [];
+          const said = findings.length
+            ? `\nA write would report:\n${findings.map((l) => `- ${l.code}: ${l.message}`).join("\n")}`
+            : "";
+          if (findings.some((l) => l.code === "svg_invalid" || l.code === "chart_invalid")) {
+            return text(`${head}\nNot drawn.${said}`);
+          }
           const drawn = await draw(source, theme, library, lang, from);
           if (drawn.kind === "unavailable") {
-            return { ...text(`${head}\nNot drawn: ${drawn.why}.`), isError: true };
+            return { ...text(`${head}\nNot drawn: ${drawn.why}.${said}`), isError: true };
           }
           if (drawn.kind === "refused") {
             return text(
-              `${head}\n${drawerOf(lang)} could not draw it: ${renderErrorText(drawn.error, source)}\nFix the source and render it again; the app shows a figure that does not draw as its source.`,
+              `${head}\n${drawerOf(lang)} could not draw it: ${renderErrorText(drawn.error, source)}\nFix the source and render it again; the app shows a figure that does not draw as its source.${said}`,
             );
           }
           if (drawn.kind === "svg") {
             const size = new TextEncoder().encode(drawn.svg).byteLength;
             return text(
               size > SVG_TEXT_BYTES
-                ? `${head}\nDrawn, but the PNG could not be made (${drawn.why}) and the SVG is ${sizeText(size)}, over ${sizeText(SVG_TEXT_BYTES)}; it draws, so the source is valid.`
-                : `${head}\nDrawn, but the PNG could not be made (${drawn.why}); the SVG follows as text (${sizeText(size)}).\n${drawn.svg}`,
+                ? `${head}\nDrawn, but the PNG could not be made (${drawn.why}) and the SVG is ${sizeText(size)}, over ${sizeText(SVG_TEXT_BYTES)}; it draws, so the source is valid.${said}`
+                : `${head}\nDrawn, but the PNG could not be made (${drawn.why}); the SVG follows as text (${sizeText(size)}).${said}\n${drawn.svg}`,
             );
           }
           ctx.meter?.({
@@ -1636,7 +1653,9 @@ export function buildServer(ctx: McpContext): McpServer {
           });
           return {
             content: [
-              line(`${head} · ${drawn.width > 0 ? `${drawn.width}×${drawn.height} px` : "drawn"}`),
+              line(
+                `${head} · ${drawn.width > 0 ? `${drawn.width}×${drawn.height} px` : "drawn"}${said}`,
+              ),
               { type: "image", data: toBase64(drawn.bytes), mimeType: drawn.media },
             ],
           };
