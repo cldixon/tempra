@@ -196,10 +196,46 @@ describe("diagram check (TEMPRA-98)", () => {
     expect(rest).toEqual([]);
     expect(w?.code).toBe("diagram_invalid");
     expect(w?.block).toBe((doc.children[2] as { id?: string }).id);
-    expect(w?.message).toContain("Mermaid diagram 2 (`flowchart LR`");
+    expect(w?.message).toContain("Figure 2 (mermaid, `flowchart LR`, block ");
     expect(w?.message).toContain(
       "has a syntax error at line 2, column 4 of the fence: `[` is never closed with `]`.",
     );
+  });
+
+  test("lint numbers fences as read's Figures list does, across kinds and images (TEMPRA-215)", () => {
+    // The trial's page: vega-lite, svg, mermaid, svg, vega-lite, vega-lite, with an image first.
+    const chart = (ok: boolean) => fence(ok ? '{"mark":"bar"' : "{nope", "vega-lite");
+    const svg = (ok: boolean) => fence(ok ? '<svg alt="x"><title>t</title></svg>' : "<svg>", "svg");
+    const body = [
+      "![A photo](/a.png)",
+      chart(false),
+      svg(true),
+      fence("flowchart LR\n  A[Start --> B"),
+      svg(false),
+      chart(false),
+      `${"```"}vega-lite alt="x"\n{"mark": "bar", "data": {"url": "https://example.com/x.csv"}}\n${"```"}`,
+      "[^n]\n\n[^n]: A note.\n\n    indented",
+    ].join("\n\n");
+    const doc = reconcile(null, parseMarkdown(body));
+    const said = diagramLint(doc).map((w) => `${w.code} ${w.message.split(")")[0]})`);
+    const block = (i: number) => (doc.children[i] as { id?: string }).id;
+    expect(said).toEqual([
+      `chart_invalid Figure 2 (vega-lite, block ${block(1)})`,
+      `diagram_invalid Figure 4 (mermaid, \`flowchart LR\`, block ${block(3)})`,
+      `svg_invalid Figure 5 (svg, block ${block(4)})`,
+      `chart_invalid Figure 6 (vega-lite, block ${block(5)})`,
+      `chart_invalid Figure 7 (vega-lite, block ${block(6)})`,
+    ]);
+  });
+
+  test("a fence that is not a figure (in a footnote) is named by its language", () => {
+    const doc = reconcile(
+      null,
+      parseMarkdown("Text.[^n]\n\n[^n]: A note.\n\n    ```svg\n    <svg>\n    ```"),
+    );
+    expect(diagramLint(doc).map((w) => w.message)).toEqual([
+      expect.stringMatching(/^The svg fence( \(block \w+\))? does not parse/),
+    ]);
   });
 
   test("a write lands with the lint, stores it, and a fix clears it; import lints too", () => {

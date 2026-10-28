@@ -51,7 +51,7 @@ describe("SVG fences (TEMPRA-206)", () => {
     expect(await write("ok.md", fence(SVG))).toContain("Lint: none");
     const bad = await write("bad.md", fence("<svg><rect></svg>", 'alt="x"'));
     expect(bad).toContain("svg_invalid");
-    expect(bad).toContain("SVG figure 1");
+    expect(bad).toContain("Figure 1 (svg, block ");
     expect(bad).toContain("does not parse at line 1, column 12 of the fence: </svg> closes <rect>");
     const unsafe = await write("unsafe.md", fence(UNSAFE));
     expect(unsafe).toContain("svg_unsafe");

@@ -72,7 +72,7 @@ describe("Vega-Lite fences (TEMPRA-207)", () => {
     expect(await write("ok.md", fence(BAR))).toContain("Lint: none");
     const json = await write("json.md", fence('{\n  "mark": "bar",\n}'));
     expect(json).toContain("chart_invalid");
-    expect(json).toContain("Vega-Lite chart 1");
+    expect(json).toContain("Figure 1 (vega-lite, block ");
     expect(json).toContain("is not a Vega-Lite spec: it is not JSON");
     const ext = await write(
       "ext.md",
@@ -87,18 +87,61 @@ describe("Vega-Lite fences (TEMPRA-207)", () => {
     );
   });
 
+  test("a spec Vega-Lite's schema does not take is chart_invalid in the write result, by path (TEMPRA-214)", async () => {
+    const s = setup();
+    await withData(s);
+    const r = fakeRenderer(() => ({ svg: "<svg/>" }));
+    s.deps.renderDiagram = r;
+    const call = await connect(s.app);
+    // The trial's fence, with the trial's page around it: a chart as Figure 2.
+    const res = await call("write", {
+      path: "bad.md",
+      content: doc(
+        `${fence(BAR)}\n${fence({ ...BAR, mark: "notamark", encoding: { x: { field: "a", type: "bogus" } } })}`,
+      ),
+      note: "bad chart",
+    });
+    expect(res.text).toContain("Figure 2 (vega-lite, block");
+    expect(res.text).toContain(
+      'mark: "notamark" is not one of "boxplot", "errorbar", "errorband", "arc", "area", "bar"',
+    );
+    expect(res.text).toContain(
+      'encoding.x.type: "bogus" is not one of "quantitative", "ordinal", "temporal" or "nominal"',
+    );
+    // Typos are named, at any depth.
+    const typo = await call("write", {
+      path: "typo.md",
+      content: doc(
+        fence({
+          ...BAR,
+          encoding: { colr: { field: "v" }, x: { field: "m", type: "ordinal", timeUnit: "yeer" } },
+        }),
+      ),
+    });
+    expect(typo.text).toContain('encoding: "colr" is not a property here (did you mean "color"?)');
+    // Not sent to be drawn: the write already says what is wrong.
+    expect(r.calls.filter((c) => c.source.includes("notamark"))).toEqual([]);
+  });
+
   test("Vega's verdict after the write is chart_invalid, kept beside the write's own", async () => {
     const s = setup();
     await withData(s);
     const seen: RenderRequest[] = [];
     s.deps.renderDiagram = fakeRenderer((req) => {
       seen.push(req);
-      return req.source.includes('"mark":"bra"')
-        ? { error: { message: 'Invalid mark type "bra".', line: 0, column: 0 } }
+      // A spec the schema takes and Vega fails on inside its own code (TEMPRA-214).
+      return req.source.includes('"title":"boom"')
+        ? {
+            error: {
+              message: "Cannot read properties of undefined (reading 'filled')",
+              line: 0,
+              column: 0,
+            },
+          }
         : { svg: "<svg/>" };
     });
     const call = await connect(s.app);
-    const body = `${fence({ ...BAR, mark: "bra" })}\n${fence("not json")}`;
+    const body = `${fence({ ...BAR, title: "boom" })}\n${fence("not json")}`;
     await call("write", { path: "c.md", content: doc(body), note: "two charts" });
     // The render Worker got the chart with its data inline, never the URL.
     const sent = seen.find((r) => r.lang === "vega-lite");
@@ -111,8 +154,9 @@ describe("Vega-Lite fences (TEMPRA-207)", () => {
     }
     const charts = lint.filter((l) => l.code === "chart_invalid");
     expect(charts.map((l) => !!l.rendered).sort()).toEqual([false, true]);
+    expect(charts.find((l) => l.rendered)?.message).toContain("Figure 1 (vega-lite, block ");
     expect(charts.find((l) => l.rendered)?.message).toContain(
-      'could not be drawn by Vega: Invalid mark type "bra".',
+      "could not be drawn by Vega: Vega failed inside its own code, which a spec it does not understand can cause (an unknown mark, channel, field type or transform; check them against Vega-Lite's). Vega said: Cannot read properties of undefined (reading 'filled').",
     );
     // An edit elsewhere keeps both: the verdict is known by the source's hash.
     await call("edit", { path: "c.md", edits: [{ old: "C", new: "C2" }] });
