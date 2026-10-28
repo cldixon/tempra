@@ -70,6 +70,7 @@ function payload(over: Partial<PagePayload> = {}): PagePayload {
     viewer: { id: "u1", handle: "ann", comment: true, check: true },
     grant: "g.sig",
     ask: "Does this match what we agreed?",
+    asker: "a1",
     focus: null,
     concept: {
       path: "metrics/margin.md",
@@ -210,7 +211,9 @@ describe("the page panel", () => {
     await settle();
     const root = d.host;
     expect(root.querySelector(".pp-title")?.textContent).toBe("Margin");
-    expect(root.querySelector(".pp-ask")?.textContent).toContain("Does this match");
+    expect(root.querySelector(".pp-ask")?.textContent).toContain(
+      "Claude for @ann asksDoes this match",
+    );
     expect(root.querySelector(".pp-byline")?.textContent).toContain("Claude for @ann · edited");
     expect(root.querySelector(".pp-byline .chip")?.textContent).toBe("Draft");
     // The body is the app's reader: textblocks at their offsets, the repeated title hidden.
@@ -239,7 +242,7 @@ describe("the page panel", () => {
     box.value = "Add the cost of goods.";
     box.dispatchEvent(new Event("input", { bubbles: true }));
     flushSync();
-    box.form?.requestSubmit();
+    d.host.querySelector<HTMLButtonElement>("form.comment-form button.primary")?.click();
     await settle();
     await settle();
     expect(h.acts).toEqual([
@@ -297,7 +300,7 @@ describe("the page panel", () => {
       'About this passage in "Margin" (ann/notes, metrics/margin.md):\n\n> revenue minus cost\n\nWhich cost?',
     );
     expect(actedText(p, { action: "open", quote: "revenue", body: "Which?" })).toContain(
-      'the person commented on "Margin" (ann/notes, metrics/margin.md) on the passage "revenue": Which?',
+      'the person commented on "Margin" (ann/notes, metrics/margin.md) on the passage "revenue": "Which"',
     );
   });
 });

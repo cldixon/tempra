@@ -1010,7 +1010,7 @@ export function buildServer(ctx: McpContext): McpServer {
     },
     guarded(async ({ path, ask, focus, since, library }) => {
       const { token, lib } = pick(library);
-      const opts: ShowOptions = { ask, focus, since };
+      const opts: ShowOptions = { ask, focus, since, asker: ctx.by?.agent ?? null };
       const person = ctx.by?.person ?? null;
       const payload = await pagePayload(lib, token, ctx.origin, path, opts, person, ctx.agentNames);
       const result = text(shownText(payload, true));

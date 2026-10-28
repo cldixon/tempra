@@ -4176,9 +4176,21 @@ async function uploadPanel(token: string): Promise<string[]> {
  * chat, is sent to Tempra to check it, and follows a link to another page in place.
  */
 async function pagePanel(token: string): Promise<string[]> {
-  /** Selects the first `n` characters of an element's first text, as a person dragging would. */
-  const selectStart = (n: number) =>
-    `(p) => { const r = document.createRange(); r.setStart(p.firstChild, 0); r.setEnd(p.firstChild, ${n}); const s = document.getSelection(); s.removeAllRanges(); s.addRange(r); }`;
+  // Run in the panel's frame (another origin), so with Playwright's element handles; this file has
+  // no DOM types, so the page's objects are typed loosely here.
+  // biome-ignore lint/suspicious/noExplicitAny: the panel's DOM, untyped in this file.
+  type Dom = any;
+  /** Selects the first `n` characters of an element's text, as a person dragging would. */
+  const selectStart = (n: number) => (p: Dom) => {
+    const d = p.ownerDocument;
+    const t = d.createTreeWalker(p, 4).nextNode();
+    const r = d.createRange();
+    r.setStart(t, 0);
+    r.setEnd(t, n);
+    const s = d.getSelection();
+    s.removeAllRanges();
+    s.addRange(r);
+  };
   const client = new Client({ name: "gate", version: "1.0.0" });
   await client.connect(
     new StreamableHTTPClientTransport(new URL(`${base}/mcp`), {
@@ -4308,7 +4320,7 @@ async function pagePanel(token: string): Promise<string[]> {
       // Script strings: this file has no DOM types, and the panel's frame is another origin.
       let loaded = false;
       for (let i = 0; i < 50 && !loaded; i++) {
-        loaded = (await img.evaluate("(i) => i.complete && i.naturalWidth > 0")) === true;
+        loaded = await img.evaluate((i: Dom) => i.complete && i.naturalWidth > 0);
         if (!loaded) await page.waitForTimeout(200);
       }
       if (!loaded) throw new Error("the page's image did not load in the panel");
@@ -4319,11 +4331,11 @@ async function pagePanel(token: string): Promise<string[]> {
       const more = panel.getByRole("button", { name: "Read the whole page" });
       if (await more.count()) await more.click();
       await panel.locator(".prose h2", { hasText: "Caveats" }).waitFor();
-      const inter = await panel
-        .locator("body")
-        .evaluate(
-          `async () => { await document.fonts.ready; return [...document.fonts].some((f) => f.family.includes("Inter") && f.status === "loaded"); }`,
-        );
+      const inter = await panel.locator("body").evaluate(async (b: Dom) => {
+        const d = b.ownerDocument;
+        await d.fonts.ready;
+        return [...d.fonts].some((f: Dom) => f.family.includes("Inter") && f.status === "loaded");
+      });
       if (!inter) throw new Error("Inter did not load in the panel");
     });
     await step("the person comments on a passage, as themselves; the agent is told", async () => {

@@ -15,6 +15,7 @@
   import {
     actedText,
     addressText,
+    agentName,
     askText,
     bodyOptions,
     conceptOf,
@@ -184,8 +185,16 @@
     if (kind === "comment") commentsOpen = true;
   }
 
-  async function submitDraft(e: SubmitEvent) {
-    e.preventDefault();
+  // A host's frame may be sandboxed without `allow-forms`, where a form never submits: the
+  // panel's forms act on their buttons and on Ctrl/Cmd+Enter, never on submit.
+  const sendKey = (e: KeyboardEvent, send: () => void) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      send();
+    }
+  };
+
+  async function submitDraft() {
     const d = draft;
     const p = page;
     const said = words.trim();
@@ -214,8 +223,7 @@
     say("Comment posted.");
   }
 
-  async function reply(t: Thread, kind: "reply" | "resolve" | "reopen", e?: Event) {
-    e?.preventDefault();
+  async function reply(t: Thread, kind: "reply" | "resolve" | "reopen") {
     const said = (replies[t.id] ?? "").trim();
     if (kind === "reply" && !said) return;
     const next = await act({ action: kind, thread: t.id, body: said || undefined });
@@ -320,16 +328,17 @@
       >{#if outdated}<span class="thread-outdated">Outdated</span>{/if}{#if t.anchor}<blockquote class="quote thread-quote">{clip(t.anchor.quote, 300)}</blockquote>{/if}{#each t.actions ?? [] as a (a.seq)}{@const c = a.comment ? t.comments.find((x) => x.id === a.comment) : undefined}{#if a.kind === "resolve" || a.kind === "reopen"}<div
             ><p class="said-change">{a.kind === "resolve" ? "Resolved" : "Reopened"} by {page ? nameOf(page, a.actor, a.by) : a.actor}{" "}{@render when(a.ts)}</p
             >{#if c}<p class="comment">{c.body}</p>{/if}</div
-          >{:else if c}{@render said(c)}{/if}{/each}{#if page?.viewer.comment && host.canCall()}<form class="reply-form" onsubmit={(e) => reply(t, "reply", e)}
+          >{:else if c}{@render said(c)}{/if}{/each}{#if page?.viewer.comment && host.canCall()}<form class="reply-form" onsubmit={(e) => e.preventDefault()}
           >{#if t.status === "open"}<label class="visually-hidden" for={`reply-${t.id}`}>Reply</label><textarea
               id={`reply-${t.id}`}
               rows="2"
               placeholder="Reply…"
               value={replies[t.id] ?? ""}
               oninput={(e) => (replies = { ...replies, [t.id]: e.currentTarget.value })}
+              onkeydown={(e) => sendKey(e, () => reply(t, "reply"))}
             ></textarea>{/if}<div class="actions"
             >{#if t.status === "open"}<button type="button" disabled={busy} onclick={() => reply(t, "resolve")}>Resolve</button
-              ><button type="submit" class="primary" disabled={busy || !(replies[t.id] ?? "").trim()}>Reply</button
+              ><button type="button" class="primary" disabled={busy || !(replies[t.id] ?? "").trim()} onclick={() => reply(t, "reply")}>Reply</button
               >{:else}<button type="button" disabled={busy} onclick={() => reply(t, "reopen")}>Reopen</button>{/if}</div
           ></form
         >{/if}</section
@@ -351,7 +360,7 @@
           >{page.library.owner}/{page.library.slug}{#if folders}{" · "}{folders.split("/").map(folderName).join(" / ")}{/if}</span
         >
       </p>
-      {#if page.ask}<p class="pp-ask"><span class="pp-ask-who">{author && page.byline?.agent ? author : "The agent"} asks</span>{page.ask}</p>{/if}
+      {#if page.ask}<p class="pp-ask"><span class="pp-ask-who">{agentName(page, page.asker) ?? "The agent"} asks</span>{page.ask}</p>{/if}
       <h1 class="pp-title">{page.concept.title}</h1>
       {#if page.concept.description}<p class="pp-description">{page.concept.description}</p>{/if}
       <p class="pp-byline">
@@ -414,7 +423,7 @@
       {#if commentsOpen || draft}
         <aside class="pp-side" aria-label="Comments">
           {#if draft}
-            <form class="thread open comment-form" onsubmit={submitDraft}
+            <form class="thread open comment-form" onsubmit={(e) => e.preventDefault()}
               >{#if draft.quote}<blockquote class="quote thread-quote">{clip(draft.quote, 300)}</blockquote>{/if}<label
                 class="visually-hidden"
                 for="pp-draft">{draft.kind === "ask" ? "Ask the agent" : "Comment"}</label
@@ -427,13 +436,13 @@
                   if (e.key === "Escape") {
                     e.preventDefault();
                     draft = null;
-                  }
+                  } else sendKey(e, submitDraft);
                 }}
                 {@attach (el) => el.focus()}
               ></textarea>{#if draft.kind === "ask"}<p class="small muted">Sent to the chat as your message, with the passage.</p>{/if}<div
                 class="actions"
                 ><button type="button" class="ghost" onclick={() => (draft = null)}>Cancel</button
-                ><button class="primary" type="submit" disabled={busy || !words.trim()}
+                ><button class="primary" type="button" disabled={busy || !words.trim()} onclick={submitDraft}
                   >{draft.kind === "ask" ? "Send to chat" : "Comment"}</button
                 ></div
               ></form

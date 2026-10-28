@@ -39,8 +39,9 @@ export interface PagePayload {
   viewer: { id: string | null; handle: string | null; comment: boolean; check: boolean };
   /** Lets the panel act as the viewer on this page (`page_act`); null when it may not. */
   grant: string | null;
-  /** What the agent asks of the person, in its words. */
+  /** What the agent asks of the person, in its words, and that agent's id (`names` names it). */
   ask: string | null;
+  asker: string | null;
   /** A passage the agent points at, to show first. */
   focus: string | null;
   concept: {
@@ -77,6 +78,8 @@ export interface ShowOptions {
   focus?: string;
   /** Draw the changes since: a seq, the version before this one, or the person's last check. */
   since?: number | "previous" | "checked";
+  /** The agent showing it (its id), named beside its ask. */
+  asker?: string | null;
 }
 
 interface HistoryRow {
@@ -175,6 +178,7 @@ export async function pagePayload(
   for (const c of threads.flatMap((t) => t.comments)) byAgent(c.by);
   const agent = current ? agentOf(current.meta) : null;
   if (agent) ids.add(agent);
+  if (opts.asker) ids.add(opts.asker);
   const named = ids.size > 0 && names ? await names([...ids]).catch(() => new Map()) : new Map();
 
   const writable = token.scope === "write";
@@ -198,6 +202,7 @@ export async function pagePayload(
       ? await lib.signPanel({ k: "panel", path: file.path, person }, PANEL_TTL_SECONDS)
       : null,
     ask: str(opts.ask),
+    asker: opts.asker ?? null,
     focus: str(opts.focus),
     concept: {
       path: file.path,

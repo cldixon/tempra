@@ -9,7 +9,7 @@
  */
 import type { Doc, LinkTarget } from "@tempra/editor";
 import type { ActedBy } from "../agents";
-import { actorAgentName, inChat } from "../agents";
+import { actorAgentName, inChat, readableName } from "../agents";
 import type { Thread } from "../comments/data";
 import type { ImageRef, ImageSource } from "../images";
 import { mediaKind } from "../images";
@@ -27,6 +27,7 @@ export interface PagePayload {
   viewer: { id: string | null; handle: string | null; comment: boolean; check: boolean };
   grant: string | null;
   ask: string | null;
+  asker: string | null;
   focus: string | null;
   concept: {
     path: string;
@@ -69,9 +70,20 @@ export function pageFrom(result: { structuredContent?: unknown } | null | undefi
 export function nameOf(page: PagePayload, actor: string, by?: ActedBy | null): string {
   const human = actor.startsWith("human:") ? actor.slice("human:".length) : null;
   if (human !== null) return human === page.viewer.handle ? "You" : `@${human}`;
-  const agent = (by?.agent ? page.names[by.agent] : undefined) ?? actorAgentName(actor);
+  const agent = agentName(page, by?.agent) ?? actorAgentName(actor);
   if (by?.surface !== "chat") return agent;
   return by.person === page.viewer.id ? "You" : inChat(agent);
+}
+
+/**
+ * An agent by id as people read it: the server names one by its app's slug ("claude-code for
+ * @dev"), the app in words ("Claude Code for @dev").
+ */
+export function agentName(page: PagePayload, id: string | null | undefined): string | null {
+  const named = id ? page.names[id] : undefined;
+  if (!named) return null;
+  const m = / for (@\S+)$/.exec(named);
+  return m ? `${readableName(named.slice(0, m.index))} for ${m[1]}` : readableName(named);
 }
 
 /** The page's app URL for a library path (a concept, an attachment or a folder). */
@@ -161,7 +173,8 @@ export function actedText(
   act: { action: string; quote?: string | null; body?: string | null; thread?: string | null },
 ): string {
   const where = `"${page.concept.title}" (${page.library.owner}/${page.library.slug}, ${page.concept.path})`;
-  const said = act.body?.trim() ? `: ${act.body.trim()}` : "";
+  const body = act.body?.trim().replace(/[.!?…]$/, "");
+  const said = body ? `: "${body}"` : "";
   const on = act.quote ? ` on the passage "${act.quote.replace(/\s+/g, " ").trim()}"` : "";
   switch (act.action) {
     case "open":
