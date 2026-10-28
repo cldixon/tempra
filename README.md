@@ -180,7 +180,7 @@ teaches the workflow to agents that load skills.
   calls and alarms from Workers Observability (`--minutes 60`, `--errors`, `--json`);
   `bunx cf workers deployments list --worker <worker name>` lists deployments. `cf` cannot stream
   live logs yet, so for a live tail run `bunx wrangler tail <worker name>`.
-- **Limits.** Per account: 5 libraries and 50 active tokens (`bun run admin limits --email <email>
+- **Limits.** Per account: 10 libraries and 50 active tokens (`bun run admin limits --email <email>
   --set libraries=10` overrides). Per library: 100 MB of storage (`LIBRARY_STORAGE_MB`); past it,
   writes get `507` but reads, deletes and moves still work. Tokens and connected apps get 60 writes a
   minute per account and 600 requests a minute each (`429`). Usage is metered to the Analytics Engine
