@@ -372,6 +372,19 @@ describe("GET /api/v1/libraries (TEMPRA-23)", () => {
     });
   });
 
+  test("?summary=false names them from D1 and wakes no library (TEMPRA-190)", async () => {
+    const s = setup();
+    s.db.run("UPDATE libraries SET title = ? WHERE slug = ?", ["Demo", "demo"]);
+    s.deps.libraryByDoId = async () => {
+      throw new Error("a library was woken");
+    };
+    const r = await s.app.request("/api/v1/libraries?summary=false");
+    expect(r.status).toBe(200);
+    expect((await r.json()) as unknown).toEqual({
+      libraries: [{ id: "lib-1", owner: "owner", slug: "demo", role: "owner", title: "Demo" }],
+    });
+  });
+
   test("newest activity first: the last event, else when it was made (TEMPRA-202)", async () => {
     const s = setup();
     for (const slug of ["alpha", "beta", "gamma"]) {

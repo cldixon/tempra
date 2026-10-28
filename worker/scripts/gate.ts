@@ -1698,7 +1698,13 @@ async function browserRenders(
         await body.waitFor({ timeout: 15_000 });
         page.off("request", onRequest);
         const lib = `/api/v1/libraries/${owner}/${slug}`;
-        const booted = [`${lib}/page/${enc(concept)}`, `${lib}/outline`, "/api/v1/inbox/count"];
+        // The frame's libraries too, by name alone (TEMPRA-190): the shell carries them.
+        const booted = [
+          `${lib}/page/${enc(concept)}`,
+          `${lib}/outline`,
+          "/api/v1/inbox/count",
+          "/api/v1/libraries",
+        ];
         const refetched = asked.filter((a) => booted.includes(a));
         if (refetched.length > 0) {
           throw new Error(`asked the API for what the shell carries: ${refetched.join(", ")}`);
