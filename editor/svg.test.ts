@@ -97,6 +97,18 @@ describe("SVG fences (TEMPRA-206)", () => {
     expect(r.removed).toEqual([]);
   });
 
+  test("an author's font-family stays, as an attribute or a style (TEMPRA-216)", () => {
+    const r = ok(
+      '<svg viewBox="0 0 10 10" font-family="Georgia, serif"><text>a</text><text font-family="Menlo">b</text><text style="font-family:&quot;Inter&quot;, sans-serif">c</text></svg>',
+    );
+    expect(r.svg).toContain(
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" font-family="Georgia, serif">',
+    );
+    expect(r.svg).toContain('<text font-family="Menlo">b</text>');
+    expect(r.svg).toContain("font-family:");
+    expect(r.removed).toEqual([]);
+  });
+
   test("what does not parse says where", () => {
     const cases: [string, string, number, number][] = [
       ["<svg><rect></svg>", "</svg> closes <rect>", 1, 12],

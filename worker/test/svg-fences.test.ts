@@ -6,10 +6,12 @@
 import { describe, expect, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { type RenderCache, renderDiagram, svgFigure } from "../render/src/render";
+import { FONT, pageFor, type RenderCache, renderDiagram, svgFigure } from "../render/src/render";
 import { type RenderService, serviceRenderer } from "../src/render";
 import { readTar } from "../src/util/tar";
 import { setup } from "./harness";
+
+const attr = (s: string) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
 
 const SVG = '<svg viewBox="0 0 20 10"><title>Two squares</title><rect width="5" height="5"/></svg>';
 const UNSAFE = '<svg viewBox="0 0 2 2" onload="x()"><script>x()</script><circle r="1"/></svg>';
@@ -191,8 +193,29 @@ describe("SVG fences (TEMPRA-206)", () => {
     expect(r.error).toBeUndefined();
     expect(r.svg).toStartWith('<svg width="680" height="100" color="');
     expect(pages[0]).toMatchObject({ width: 680, height: 100 });
-    expect([...objects.keys()].every((k) => k.includes("/svg-1/"))).toBe(true);
+    expect([...objects.keys()].every((k) => k.includes("/svg-2/"))).toBe(true);
     expect(() => svgFigure("<svg><script>x()</script></svg>", "light", 0)).toThrow("not sanitized");
+  });
+
+  test("the render Worker draws an SVG fence's text in the reader's Inter, unless the author chose (TEMPRA-216)", () => {
+    const plain = svgFigure(
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 10"><text y="8">a</text></svg>',
+      "light",
+      0,
+    );
+    expect(plain).toStartWith(
+      `<svg width="20" height="10" color="#1a1a1b" font-family="${attr(FONT)}"`,
+    );
+    expect(FONT).toStartWith('"Inter"');
+    const own = svgFigure(
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 10" font-family="Georgia"><text y="8">a</text></svg>',
+      "light",
+      0,
+    );
+    expect(own).toContain(' font-family="Georgia"');
+    expect(own.match(/font-family=/g)).toHaveLength(1);
+    // The page around it is in Inter as well, so no text falls back to the browser's serif.
+    expect(pageFor(plain, "dark")).toContain(`font-family:${FONT}}`);
   });
 
   test("exports carry a sanitized SVG beside the concept, with no renderer needed", async () => {

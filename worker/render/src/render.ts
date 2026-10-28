@@ -123,7 +123,7 @@ export function cacheKey(
 ): string {
   const by =
     lang === "svg"
-      ? "svg-1"
+      ? "svg-2"
       : lang === "vega-lite"
         ? `vl-${VEGA_LITE_VERSION}`
         : `pele-${PELE_VERSION}`;
@@ -132,7 +132,9 @@ export function cacheKey(
 
 /**
  * An SVG fence's sanitized SVG as it is drawn on its own: scaled down to `width` when wider, with
- * the theme's text colour as `color`, so `currentColor` reads as it does in the reader.
+ * the theme's text colour as `color`, so `currentColor` reads as it does in the reader, and the
+ * reader's text font as `font-family` unless the author set one on the root (TEMPRA-216), which
+ * its text inherits unless it sets its own, as it does under the reader's `.diagram-svg`.
  */
 export function svgFigure(svg: string, theme: Theme, width: number): string {
   const open = /^<svg\b[^>]*>/.exec(svg);
@@ -151,7 +153,8 @@ export function svgFigure(svg: string, theme: Theme, width: number): string {
   }
   const fg = peleThemes[theme]["--pele-fg"] ?? "#000000";
   const bare = tag.replace(/ (width|height|color)="[^"]*"/g, "");
-  return `${bare.replace(/^<svg\b/, `<svg width="${Math.round(w)}" height="${Math.round(h)}" color="${attr(fg)}"`)}${svg.slice(tag.length)}`;
+  const font = / font-family="/.test(tag) ? "" : ` font-family="${attr(FONT)}"`;
+  return `${bare.replace(/^<svg\b/, `<svg width="${Math.round(w)}" height="${Math.round(h)}" color="${attr(fg)}"${font}`)}${svg.slice(tag.length)}`;
 }
 
 const attr = (s: string) => s.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;");
@@ -173,10 +176,13 @@ export function themed(svg: string, theme: Theme): string {
   return withVars + svg.slice(tag.length);
 }
 
-/** The page the rasterizer screenshots: the SVG alone on the theme's background, in Inter. */
+/**
+ * The page the rasterizer screenshots: the SVG alone on the theme's background, in Inter (the
+ * page's own font too, so nothing falls back to the browser's serif; TEMPRA-216).
+ */
 export function pageFor(svg: string, theme: Theme): string {
   const bg = peleThemes[theme]["--pele-bg"] ?? "#ffffff";
-  return `<!doctype html><html><head><meta charset="utf-8"><style>@font-face{font-family:"Inter";font-style:normal;font-weight:100 900;src:url(data:font/woff2;base64,${interLatinWoff2}) format("woff2")}html,body{margin:0;padding:0;background:${bg}}svg{display:block}</style></head><body>${svg}</body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8"><style>@font-face{font-family:"Inter";font-style:normal;font-weight:100 900;src:url(data:font/woff2;base64,${interLatinWoff2}) format("woff2")}html,body{margin:0;padding:0;background:${bg};font-family:${FONT}}svg{display:block}</style></head><body>${svg}</body></html>`;
 }
 
 /** What a render's error says: Pele's as one short line (message.ts), anything else as thrown. */
