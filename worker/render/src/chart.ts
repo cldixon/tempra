@@ -2,11 +2,11 @@
  * Vega-Lite charts on the render Worker (TEMPRA-207; tempra-dev: app/diagrams): a spec with its
  * data already inline (the main Worker reads the library's files, @tempra/editor
  * `inlineChartData`) compiled by Vega-Lite and drawn by Vega to an SVG string, themed with the
- * reader's greys. Vega evaluates expressions with its interpreter, never `new Function`, which
- * Workers forbid; it is given a loader that loads nothing, and what it draws is sanitized, so a
+ * reader's greys and the chart series (TEMPRA-217). Vega evaluates expressions with its
+ * interpreter, never `new Function`, which Workers forbid; it is given a loader that loads nothing, and what it draws is sanitized, so a
  * spec reaches no network.
  */
-import { peleThemes } from "@tempra/design/pele";
+import { chartSeries, peleThemes } from "@tempra/design/pele";
 import {
   type ChartSpec,
   chartConfig,
@@ -46,7 +46,7 @@ export async function chartSvg(source: string, theme: Theme, width: number): Pro
     throw new Error("The chart's data was not made inline.");
   }
   const { spec: vega } = compile(sizedChart(spec, width) as never, {
-    config: chartConfig(peleThemes[theme]) as never,
+    config: chartConfig(peleThemes[theme], chartSeries[theme]) as never,
   });
   const view = new View(parse(vega, undefined, { ast: true }), {
     renderer: "none",

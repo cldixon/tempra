@@ -134,4 +134,25 @@ describe("Vega-Lite fences (TEMPRA-207)", () => {
     expect(c.axis.labelColor).toBe("#666");
     expect(c.range.category.slice(0, 2)).toEqual(["#111", "#666"]);
   });
+
+  test("the series in colour, greys for the rest, level x labels thinned on collision (TEMPRA-217)", () => {
+    const theme = { "--pele-fg": "#111", "--pele-muted": "#666", "--pele-border": "#ddd" };
+    const series = ["#2a78d6", "#eb6834", "#1baf7a"];
+    const c = chartConfig(theme, series) as {
+      mark: { color: string };
+      axis: { labelColor: string; gridColor: string; domainColor: string };
+      axisX: { labelAngle: number; labelOverlap: boolean };
+      range: { category: string[]; ordinal: string[]; ramp: string[] };
+    };
+    expect(c.range.category).toEqual(series);
+    expect(c.range.ordinal).toEqual(series);
+    expect(c.mark.color).toBe("#2a78d6");
+    expect([c.axis.labelColor, c.axis.gridColor, c.axis.domainColor]).toEqual([
+      "#666",
+      "#ddd",
+      "#666",
+    ]);
+    expect(c.axisX).toEqual({ labelAngle: 0, labelOverlap: true });
+    expect(c.range.ramp.every((v) => !series.includes(v))).toBe(true);
+  });
 });
