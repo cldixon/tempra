@@ -272,9 +272,8 @@ export function isSvgFence(n: { type: string; lang?: string | null }): boolean {
  * limit), `svg_unsafe` naming what sanitizing took out, `image_no_alt` when neither the fence's
  * `alt="…"` nor the SVG's own `<title>` says what it shows.
  */
-export function svgLint(code: Code, n: number): LintWarning[] {
+export function svgLint(code: Code, name: string): LintWarning[] {
   const block = idOf(code);
-  const name = `SVG figure ${n}${block ? ` (block ${block})` : ""}`;
   const r = sanitizeSvg(code.value);
   if (!r.ok) {
     const at = r.line > 0 ? ` at line ${r.line}, column ${r.column} of the fence` : "";
@@ -329,11 +328,11 @@ function chartProblems(code: Code): { message: string; line: number; column: num
  * `alt="…"` nor the spec's `description` says what it shows. Vega-Lite's own compile errors come
  * from the render service after the write (`chartRenderWarning`).
  */
-export function chartLint(code: Code, n: number): LintWarning[] {
+export function chartLint(code: Code, name: string): LintWarning[] {
   const block = idOf(code);
   const out: LintWarning[] = chartProblems(code).map((p) => ({
     code: "chart_invalid",
-    message: `${chartName(code, n)}${p.message.startsWith("is ") ? " " : ": "}${p.message}${
+    message: `${name}${p.message.startsWith("is ") ? " " : ": "}${p.message}${
       p.line > 0 ? ` (line ${p.line}, column ${p.column} of the fence)` : ""
     }. The app shows its source until it draws; fix the fence.`,
     block,
@@ -343,7 +342,7 @@ export function chartLint(code: Code, n: number): LintWarning[] {
   if (r.ok && !fenceAttr(code.meta, "alt") && !described) {
     out.push({
       code: "image_no_alt",
-      message: `${chartName(code, n)} has no alt text: say what it shows with \`alt="…"\` after \`vega-lite\` on the fence (or a \`description\` in the spec).`,
+      message: `${name} has no alt text: say what it shows with \`alt="…"\` after \`vega-lite\` on the fence (or a \`description\` in the spec).`,
       block,
     });
   }
@@ -377,6 +376,22 @@ export function chartRenderWarning(f: CheckedFence, e: RenderFailure): LintWarni
   };
 }
 
+/**
+ * What a write would lint in one SVG or chart fence, for `render`'s preview of a source not yet
+ * written (TEMPRA-213): the same checks, the fence named as what it is rather than by its place.
+ * `image_no_alt` only when the fence's header was given, since that is where alt text goes.
+ */
+export function previewLint(lang: string, source: string, meta: string | null): LintWarning[] {
+  const code: Code = { type: "code", lang, meta, value: source };
+  const found =
+    lang === "svg"
+      ? svgLint(code, "The SVG")
+      : lang === "vega-lite"
+        ? chartLint(code, "The chart")
+        : [];
+  return meta === null ? found.filter((l) => l.code !== "image_no_alt") : found;
+}
+
 /** Lint for each diagram in a body that is plainly broken, and for each SVG and chart fence. */
 export function diagramLint(doc: Doc): LintWarning[] {
   const out: LintWarning[] = [];
@@ -385,11 +400,13 @@ export function diagramLint(doc: Doc): LintWarning[] {
   let charts = 0;
   walk(doc, (node) => {
     if (isSvgFence(node)) {
-      out.push(...svgLint(node as Code, ++svgs));
+      const code = node as Code;
+      const block = idOf(code);
+      out.push(...svgLint(code, `SVG figure ${++svgs}${block ? ` (block ${block})` : ""}`));
       return false;
     }
     if (isChartFence(node)) {
-      out.push(...chartLint(node as Code, ++charts));
+      out.push(...chartLint(node as Code, chartName(node as Code, ++charts)));
       return false;
     }
     if (!isDiagram(node)) return undefined;

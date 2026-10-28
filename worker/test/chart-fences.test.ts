@@ -153,6 +153,22 @@ describe("Vega-Lite fences (TEMPRA-207)", () => {
     expect(missing.text).toContain(
       "Vega could not draw it: The chart's data: no file at /nope.csv",
     );
+    // Told from the source with no lang (TEMPRA-213), and checked by the write's rules: data
+    // from elsewhere is never fetched, so it is not drawn and says why.
+    const calls = r.calls.length;
+    const told = await call("render", { source: JSON.stringify(BAR) });
+    expect(told.text).toContain("Diagram · vega-lite · light");
+    expect(told.content[1]?.type).toBe("image");
+    const away = await call("render", {
+      source: JSON.stringify({ ...BAR, data: { url: "https://example.com/x.csv" } }),
+    });
+    expect(away.text).toContain("Not drawn.\nA write would report:\n- chart_invalid: The chart");
+    expect(away.text).toContain("https://example.com/x.csv");
+    const notJson = await call("render", { source: "{nope", lang: "vega-lite" });
+    expect(notJson.text).toContain("- chart_invalid: The chart is not a Vega-Lite spec");
+    expect(r.calls.length).toBe(calls + 1);
+    const noAlt = await call("render", { source: fence(BAR, "") });
+    expect(noAlt.text).toContain("- image_no_alt: The chart has no alt text");
   });
 
   test("exports draw charts with their data from the bundle", async () => {

@@ -25,7 +25,7 @@ import {
   toBase64,
 } from "../images";
 import { imageInfo } from "../media";
-import { diagramTypeOf } from "../okf/diagrams";
+import { diagramTypeOf, previewLint } from "../okf/diagrams";
 import { type FigureFact, figureLine, sizeText } from "../okf/figures";
 import { normalizePath, underPrefix } from "../okf/paths";
 import type { LintWarning } from "../okf/types";
@@ -41,6 +41,7 @@ import {
   type RenderLang,
   type RenderRequest,
   type RenderResult,
+  sourceLang,
 } from "../render";
 import type { CommentAction, CommentResult } from "../store/comments";
 import { OkfError } from "../store/errors";
@@ -1496,7 +1497,7 @@ export function buildServer(ctx: McpContext): McpServer {
       "render",
       {
         title: "Draw a diagram",
-        description: `${BEYOND}draw rendered media as the app draws it and see it: a Mermaid diagram (Pele, the reader's column and greys), an SVG fence (sanitized as the reader sanitizes it) or a Vega-Lite chart (Vega, its data inline or from this library). Preview a non-trivial one before you write it (layout, labels that fit), or look at one while you review it or fix its \`diagram_invalid\`, \`diagram_unrendered\`, \`svg_invalid\` or \`chart_invalid\` lint: pass \`source\` (a fence's body, with \`lang\` for SVG or Vega-Lite), or \`path\` and \`figure\` (its number in \`read\`'s Figures list). Returns a line with what it is and its size, then the drawing as a PNG image; if it cannot be drawn, the error with line and column, and the line it names; if the PNG cannot be made, the SVG as text. Writes nothing and records nothing in the ledger. At most ${RENDERS_PER_MINUTE} renders a minute per account.`,
+        description: `${BEYOND}draw rendered media as the app draws it and see it: a Mermaid diagram (Pele, the reader's column and greys), an SVG fence (sanitized as the reader sanitizes it) or a Vega-Lite chart (Vega, its data inline or from this library). Preview a non-trivial one before you write it (layout, labels that fit), or look at one while you review it or fix its \`diagram_invalid\`, \`diagram_unrendered\`, \`svg_invalid\` or \`chart_invalid\` lint: pass \`source\` (a fence's body, or the whole fence with its header; the language from \`lang\`, the fence, or the source itself: \`<svg\` is SVG, a JSON object Vega-Lite), or \`path\` and \`figure\` (its number in \`read\`'s Figures list). A \`source\` is checked as a write would check it, with the same sanitizing and data rules (only data inline or in this library), and what a write would report comes back with the drawing (\`svg_unsafe\` naming what is taken out, \`chart_invalid\`, \`svg_invalid\`, and \`image_no_alt\` when you pass the whole fence); one a write would call invalid is not drawn. Returns a line with what it is and its size, then the drawing as a PNG image; if it cannot be drawn, the error with line and column, and the line it names; if the PNG cannot be made, the SVG as text. Writes nothing and records nothing in the ledger. At most ${RENDERS_PER_MINUTE} renders a minute per account.`,
         inputSchema: {
           source: z
             .string()
@@ -1518,7 +1519,7 @@ export function buildServer(ctx: McpContext): McpServer {
             .enum(RENDER_LANGS)
             .optional()
             .describe(
-              "With `source`: the fence's language, `mermaid` (default), `svg` or `vega-lite`.",
+              "With `source`: the fence's language, `mermaid`, `svg` or `vega-lite`. Left out, it is told from the source: `<svg …>` is SVG, a JSON object is Vega-Lite, anything else Mermaid.",
             ),
           theme: z
             .enum(["light", "dark"])
@@ -1541,6 +1542,8 @@ export function buildServer(ctx: McpContext): McpServer {
           let lang: RenderLang = args.lang ?? "mermaid";
           let what: string;
           let library: string | undefined;
+          // A pasted fence's header (its alt and title), for what a write would lint (TEMPRA-213).
+          let meta: string | null = null;
           // Where a chart's data paths resolve (TEMPRA-207): its concept, or the library's root.
           let from: { lib: LibraryClient; path: string } | undefined;
           if (args.source !== undefined) {
@@ -1553,11 +1556,14 @@ export function buildServer(ctx: McpContext): McpServer {
             }
             // A whole fence pasted in is drawn as its body, in its language.
             const fence =
-              /^\s*(`{3,}|~{3,})\s*(mermaid|svg|vega-lite)\b[^\n]*\n([\s\S]*?)\n?\s*\1\s*$/i.exec(
+              /^\s*(`{3,}|~{3,})\s*(mermaid|svg|vega-lite)\b([^\n]*)\n([\s\S]*?)\n?\s*\1\s*$/i.exec(
                 args.source,
               );
-            source = fence?.[3] ?? args.source;
-            if (fence) lang = (fence[2] as string).toLowerCase() as RenderLang;
+            source = fence?.[4] ?? args.source;
+            if (fence) {
+              lang = (fence[2] as string).toLowerCase() as RenderLang;
+              meta = (fence[3] as string).trim();
+            } else if (args.lang === undefined) lang = sourceLang(source);
             what = "Diagram";
             if (args.library || ctx.libraries.length === 1) {
               const picked = pick(args.library);
@@ -1569,7 +1575,7 @@ export function buildServer(ctx: McpContext): McpServer {
               throw new OkfError(
                 400,
                 "bad_request",
-                "Pass `source` (the diagram's Mermaid), or `path` and `figure`.",
+                "Pass `source` (the fence's Mermaid, SVG or Vega-Lite), or `path` and `figure`.",
               );
             }
             const picked = pick(args.library);
@@ -1612,21 +1618,30 @@ export function buildServer(ctx: McpContext): McpServer {
           const theme = args.theme ?? "light";
           const type = lang === "mermaid" ? diagramTypeOf(source) : null;
           const head = `${what} · ${lang}${type ? `, ${type}` : ""} · ${theme}`;
+          // A source not yet written gets the lint its write would (TEMPRA-213); one a write would
+          // call invalid is not sent to be drawn. A figure's lint is already on its concept.
+          const findings = args.source !== undefined ? previewLint(lang, source, meta) : [];
+          const said = findings.length
+            ? `\nA write would report:\n${findings.map((l) => `- ${l.code}: ${l.message}`).join("\n")}`
+            : "";
+          if (findings.some((l) => l.code === "svg_invalid" || l.code === "chart_invalid")) {
+            return text(`${head}\nNot drawn.${said}`);
+          }
           const drawn = await draw(source, theme, library, lang, from);
           if (drawn.kind === "unavailable") {
-            return { ...text(`${head}\nNot drawn: ${drawn.why}.`), isError: true };
+            return { ...text(`${head}\nNot drawn: ${drawn.why}.${said}`), isError: true };
           }
           if (drawn.kind === "refused") {
             return text(
-              `${head}\n${drawerOf(lang)} could not draw it: ${renderErrorText(drawn.error, source)}\nFix the source and render it again; the app shows a figure that does not draw as its source.`,
+              `${head}\n${drawerOf(lang)} could not draw it: ${renderErrorText(drawn.error, source)}\nFix the source and render it again; the app shows a figure that does not draw as its source.${said}`,
             );
           }
           if (drawn.kind === "svg") {
             const size = new TextEncoder().encode(drawn.svg).byteLength;
             return text(
               size > SVG_TEXT_BYTES
-                ? `${head}\nDrawn, but the PNG could not be made (${drawn.why}) and the SVG is ${sizeText(size)}, over ${sizeText(SVG_TEXT_BYTES)}; it draws, so the source is valid.`
-                : `${head}\nDrawn, but the PNG could not be made (${drawn.why}); the SVG follows as text (${sizeText(size)}).\n${drawn.svg}`,
+                ? `${head}\nDrawn, but the PNG could not be made (${drawn.why}) and the SVG is ${sizeText(size)}, over ${sizeText(SVG_TEXT_BYTES)}; it draws, so the source is valid.${said}`
+                : `${head}\nDrawn, but the PNG could not be made (${drawn.why}); the SVG follows as text (${sizeText(size)}).${said}\n${drawn.svg}`,
             );
           }
           ctx.meter?.({
@@ -1636,7 +1651,9 @@ export function buildServer(ctx: McpContext): McpServer {
           });
           return {
             content: [
-              line(`${head} · ${drawn.width > 0 ? `${drawn.width}×${drawn.height} px` : "drawn"}`),
+              line(
+                `${head} · ${drawn.width > 0 ? `${drawn.width}×${drawn.height} px` : "drawn"}${said}`,
+              ),
               { type: "image", data: toBase64(drawn.bytes), mimeType: drawn.media },
             ],
           };
