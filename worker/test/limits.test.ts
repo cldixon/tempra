@@ -19,38 +19,38 @@ const md = (body: string) => `---\ntype: Note\n---\n${body}\n`;
 describe("limits (v2 spec: Limits, abuse and metering)", () => {
   test("overrides apply over the defaults; junk is ignored", () => {
     expect(limitsFrom(null)).toEqual(DEFAULT_LIMITS);
-    expect(limitsFrom('{"libraries": 10, "tokens": -1, "x": 3}')).toEqual({
+    expect(limitsFrom('{"libraries": 20, "tokens": -1, "x": 3}')).toEqual({
       ...DEFAULT_LIMITS,
-      libraries: 10,
+      libraries: 20,
     });
     expect(limitsFrom("not json")).toEqual(DEFAULT_LIMITS);
   });
 
   test("libraries per account, everywhere one can be created", async () => {
     const s = setup();
-    for (const n of [2, 3, 4, 5]) {
+    for (let n = 2; n <= 10; n++) {
       expect((await post(s, "/api/v1/libraries", { slug: `lib-${n}` })).status).toBe(201);
     }
-    const sixth = await post(s, "/api/v1/libraries", { slug: "lib-6" });
-    expect(sixth.status).toBe(403);
-    expect(await sixth.text()).toContain("limit of 5 libraries");
+    const eleventh = await post(s, "/api/v1/libraries", { slug: "lib-11" });
+    expect(eleventh.status).toBe(403);
+    expect(await eleventh.text()).toContain("limit of 10 libraries");
     const rest = await s.anon.request("/api/v1/libraries", {
       method: "POST",
       headers: { Authorization: "Bearer human", "Content-Type": "application/json" },
-      body: JSON.stringify({ slug: "lib-6" }),
+      body: JSON.stringify({ slug: "lib-11" }),
     });
     expect(rest.status).toBe(403);
     expect(((await rest.json()) as { code: string }).code).toBe("library_limit");
 
     // An override raises it; the account page shows both.
-    s.db.run(`UPDATE users SET limits = '{"libraries": 6}' WHERE id = 'user_1'`);
-    expect((await post(s, "/api/v1/libraries", { slug: "lib-6" })).status).toBe(201);
+    s.db.run(`UPDATE users SET limits = '{"libraries": 11}' WHERE id = 'user_1'`);
+    expect((await post(s, "/api/v1/libraries", { slug: "lib-11" })).status).toBe(201);
     const account = (await (await s.app.request("/api/v1/account")).json()) as {
       usage: { libraries: number };
       limits: { libraries: number };
     };
-    expect(account.usage.libraries).toBe(6);
-    expect(account.limits.libraries).toBe(6);
+    expect(account.usage.libraries).toBe(11);
+    expect(account.limits.libraries).toBe(11);
   });
 
   test("active tokens per account; revoked ones do not count", async () => {

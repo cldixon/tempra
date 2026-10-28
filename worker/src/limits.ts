@@ -11,7 +11,7 @@ export interface Limits {
   tokens: number;
 }
 
-export const DEFAULT_LIMITS: Limits = { libraries: 5, tokens: 50 };
+export const DEFAULT_LIMITS: Limits = { libraries: 10, tokens: 50 };
 
 /**
  * Per-minute rate limits are per deployment, in the Rate Limiting bindings (cloudflare.config.ts):
