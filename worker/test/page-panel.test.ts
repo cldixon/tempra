@@ -16,6 +16,8 @@ type Page = {
   grant: string | null;
   viewer: { id: string | null; handle: string | null; comment: boolean; check: boolean };
   ask: string | null;
+  asker: string | null;
+  names: Record<string, string>;
   url: string;
   concept: {
     path: string;
@@ -109,6 +111,8 @@ describe("the page panel", () => {
     const page = r.page as Page;
     expect(page.concept.title).toBe("Margin");
     expect(page.ask).toBe("Is this right?");
+    // The agent showing it is named beside its ask.
+    expect(page.names[page.asker ?? ""]).toBe("Claude for @owner");
     expect(page.viewer).toEqual({
       id: "user_1",
       handle: "owner",
