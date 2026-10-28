@@ -9,6 +9,15 @@ import { AppBridge, PostMessageTransport } from "@modelcontextprotocol/ext-apps/
 
 interface Csp {
   connectDomains?: string[];
+  /** Where images and fonts may load from (the page panel's signed images and Inter). */
+  resourceDomains?: string[];
+}
+
+/** How the host frames a panel. */
+interface Frame {
+  title?: string;
+  width?: number;
+  height?: number;
 }
 
 declare global {
@@ -18,6 +27,7 @@ declare global {
       csp: Csp,
       args: Record<string, unknown>,
       result: Record<string, unknown>,
+      frame?: Frame,
     ): Promise<void>;
     panelMessages: string[];
   }
@@ -25,20 +35,22 @@ declare global {
 
 window.panelMessages = [];
 
-window.startPanel = async (html, csp, args, result) => {
+window.startPanel = async (html, csp, args, result, frame = {}) => {
+  const resources = (csp.resourceDomains ?? []).join(" ");
   // What a host enforces: nothing but the panel itself and the domains it declares.
   const policy = [
     "default-src 'none'",
     "script-src 'unsafe-inline'",
     "style-src 'unsafe-inline'",
-    "img-src data:",
+    `img-src data: ${resources}`.trim(),
+    `font-src ${resources || "'none'"}`,
     `connect-src ${(csp.connectDomains ?? []).join(" ") || "'none'"}`,
   ].join("; ");
   const iframe = document.createElement("iframe");
   iframe.sandbox.add("allow-scripts");
-  iframe.title = "Upload panel";
-  iframe.width = "480";
-  iframe.height = "360";
+  iframe.title = frame.title ?? "Upload panel";
+  iframe.width = String(frame.width ?? 480);
+  iframe.height = String(frame.height ?? 360);
   iframe.srcdoc = html.replace(
     "<head>",
     `<head><meta http-equiv="Content-Security-Policy" content="${policy}">`,

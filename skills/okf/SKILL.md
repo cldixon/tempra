@@ -151,6 +151,10 @@ Comments are how people ask you for changes. A thread sits on a concept, often o
 - An outdated thread's quote is gone from the body; it may already be fixed. Check, then answer it.
 - A concept with open threads cannot be deleted (409 `open_comments`): answer and resolve them first.
 
+## Showing a page to the person
+
+`show` draws one concept for the person, as the Tempra app draws it, in a panel in the chat (in a chat that shows apps; elsewhere give them the link it returns). Use it when they ask to see a page, or when you want them to read one, such as one you just wrote. It is for reading only. Do not `show` pages you only read for yourself.
+
 ## When to split a concept
 
 Split when a concept covers more than one idea, mixes definitions with procedures, or approaches the 100 KB cap (the server refuses larger ones). Write each part as its own concept and link them from a short overview. Prefer several focused concepts that link to each other over one long page.
