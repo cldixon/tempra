@@ -1688,9 +1688,16 @@ async function browserRenders(
         // The first page's data comes in the shell (TEMPRA-175): a full load of a concept draws
         // its body without asking the API for the file, its context or the frame's first calls.
         const asked: string[] = [];
+        // The frame's libraries by name alone (TEMPRA-190): never the list with every library's
+        // summary, which wakes them all.
+        const summarised: string[] = [];
         const onRequest = (r: import("playwright-core").Request) => {
           const u = new URL(r.url());
-          if (u.origin === base && u.pathname.startsWith("/api/")) asked.push(u.pathname);
+          if (u.origin !== base || !u.pathname.startsWith("/api/")) return;
+          asked.push(u.pathname);
+          if (u.pathname === "/api/v1/libraries" && u.searchParams.get("summary") !== "false") {
+            summarised.push(u.pathname + u.search);
+          }
         };
         page.on("request", onRequest);
         await page.goto(`${base}/${owner}/${slug}/${enc(concept)}`);
@@ -1698,16 +1705,13 @@ async function browserRenders(
         await body.waitFor({ timeout: 15_000 });
         page.off("request", onRequest);
         const lib = `/api/v1/libraries/${owner}/${slug}`;
-        // The frame's libraries too, by name alone (TEMPRA-190): the shell carries them.
-        const booted = [
-          `${lib}/page/${enc(concept)}`,
-          `${lib}/outline`,
-          "/api/v1/inbox/count",
-          "/api/v1/libraries",
-        ];
+        const booted = [`${lib}/page/${enc(concept)}`, `${lib}/outline`, "/api/v1/inbox/count"];
         const refetched = asked.filter((a) => booted.includes(a));
         if (refetched.length > 0) {
           throw new Error(`asked the API for what the shell carries: ${refetched.join(", ")}`);
+        }
+        if (summarised.length > 0) {
+          throw new Error(`woke every library for the frame: ${summarised.join(", ")}`);
         }
         // The page is one call (TEMPRA-191): none of the five it replaced.
         const split = asked.filter(
