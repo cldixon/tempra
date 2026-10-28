@@ -10,11 +10,14 @@
     library?: string;
     /** On the Agents page, New token opens its dialog there. */
     onNewToken?: () => void;
+    /** Its headings' level: 2 on a page of its own, 3 inside a section (Settings' Connect). */
+    level?: 2 | 3;
   } = $props();
+  const heading = $derived(`h${props.level ?? 2}`);
   const mcp = `${location.origin}/mcp`;
 </script>
 
-<h2>claude.ai</h2>
+<svelte:element this={heading}>claude.ai</svelte:element>
 <p>
   Add a custom connector with this URL. When asked, {props.slug
     ? `choose All libraries, or select ${props.slug}`
@@ -23,12 +26,12 @@
 <p>
   <CopyField value={mcp} label="the MCP URL" />
 </p>
-<h2>Claude Code</h2>
+<svelte:element this={heading}>Claude Code</svelte:element>
 <p>
   <CopyField value={`claude mcp add --transport http tempra ${mcp}`} label="the Claude Code command" />
 </p>
 <p>Then run /mcp in Claude Code to sign in.</p>
-<h2>Other clients and scripts</h2>
+<svelte:element this={heading}>Other clients and scripts</svelte:element>
 <p>
   {#if props.onNewToken}
     <button type="button" onclick={props.onNewToken}>New token</button>

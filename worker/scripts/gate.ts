@@ -4626,7 +4626,7 @@ async function freshAccountConnects(): Promise<string[]> {
     await step("invite a person from Settings' Members section", async () => {
       await page.goto(`${lib}/`);
       await libraryLink("Members");
-      await page.locator('input[name="to"]').fill("@stranger");
+      await page.locator('#members input[name="to"]').fill("@stranger");
       await page.getByRole("button", { name: "Invite" }).click();
       await page.getByText("Invited @stranger").waitFor({ timeout: 15_000 });
     });

@@ -46,7 +46,7 @@
     with the same access; pick it by name when you connect.
   </p>
 {/if}
-<ConnectSteps slug={urls.slug} library={`${urls.owner}/${urls.slug}`} />
+<ConnectSteps slug={urls.slug} library={`${urls.owner}/${urls.slug}`} level={3} />
 <h3>Status</h3>
 <Status loaded={loaded.current}>
   {#snippet children({ latest })}
