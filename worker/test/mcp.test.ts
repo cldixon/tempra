@@ -766,6 +766,38 @@ describe("MCP server", () => {
         ]);
       });
 
+      test("an image with its footnote right after it is a figure (TEMPRA-218)", async () => {
+        const s = setup();
+        const conn = await connect(s.app);
+        await upload(s.app, conn.call, "img/dot.png", PNG);
+        const body = [
+          '![A dot](/img/dot.png "The dot")[^dot]',
+          "",
+          "![Also a dot](/img/dot.png) [^dot]",
+          "",
+          "![Inline dot](/img/dot.png)[^dot] with words is not one.",
+          "",
+          "[^dot]: Where the dot came from.",
+          "",
+        ].join("\n");
+        const w = await conn.call("write", { path: "t/cited.md", content: doc("Cited", body) });
+        expect(w.isError).toBe(false);
+        const c = await content(conn.client, { path: "t/cited.md" });
+        const head = (c[0] as Text).text.split("\n---\n")[0] ?? "";
+        expect(head).toContain(
+          [
+            "Figures:",
+            `Figure 1 · /img/dot.png · alt "A dot" · caption "The dot" · 1×1 · ${PNG.byteLength} B · ok`,
+            `Figure 2 · /img/dot.png · alt "Also a dot" · 1×1 · ${PNG.byteLength} B · ok`,
+          ].join("\n"),
+        );
+        expect(head).not.toContain("Figure 3");
+        const imgs = await content(conn.client, { path: "t/cited.md", images: true });
+        expect(imgs.map((x) => x.type)).toEqual(["text", "text", "image", "text", "image"]);
+        expect((imgs[1] as Text).text).toBe("Figure 1: The dot");
+        expect(imgs[2]).toEqual({ type: "image", data: b64(PNG), mimeType: "image/png" });
+      });
+
       test("figures: [n] returns only those", async () => {
         const s = setup();
         const { client } = await page(s);
