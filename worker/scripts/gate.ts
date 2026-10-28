@@ -4907,6 +4907,11 @@ async function freshAccountConnects(): Promise<string[]> {
       await switchTo(asOwner);
       await page.goto(`${lib}/`);
       await libraryLink("Delete library");
+      // The page's other sections load as it opens (Members asks …/members and …/agents): wait
+      // for them, as a person would, so no load is still on its way when the library goes.
+      await page
+        .locator(".ws-main td.name", { hasText: "@stranger" })
+        .waitFor({ timeout: 15_000 });
       await page.locator('input[name="confirm"]').fill("notes");
       await page.getByRole("button", { name: "Delete library" }).click();
       // The last library gone: first run again.
