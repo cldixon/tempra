@@ -95,15 +95,24 @@ describe("routes follow the server's URLs (tempra-dev: v2/urls-and-handles)", ()
       path: "a/b.md",
       to: 4,
     });
-    expect(at("/ann/notes/-/connect")).toMatchObject({ page: "library-connect" });
     expect(at("/invitations")).toEqual({ page: "invitations" });
     // No Inbox page (TEMPRA-189): notifications are the bell's panel; its old links land on `/`.
     expect(at("/inbox")).toEqual({ page: "redirect", to: "/" });
     expect(at("/inbox?done=1&library=ann/notes")).toEqual({ page: "redirect", to: "/" });
     expect(at("/notifications")).toEqual({ page: "redirect", to: "/account#email" });
-    for (const p of ["activity", "transfer", "recovery", "delete", "members"]) {
+    for (const p of ["activity", "settings"]) {
       expect(at(`/ann/notes/-/${p}`)).toMatchObject({ page: p, owner: "ann", slug: "notes" });
     }
+    // Settings is one page (2026-10-28): the former tabs' URLs open it at their section.
+    for (const p of ["members", "connect", "transfer", "recovery", "delete"] as const) {
+      expect(at(`/ann/notes/-/${p}`)).toEqual({
+        page: "settings",
+        owner: "ann",
+        slug: "notes",
+        section: p,
+      });
+    }
+    expect(at("/ann/notes/-/settings")).toEqual({ page: "settings", owner: "ann", slug: "notes" });
   });
 
   test("server pages and downloads are left to the server", () => {

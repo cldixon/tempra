@@ -1,6 +1,6 @@
 /*
  * The person's views of a library (take 3, TEMPRA-106; take 4, TEMPRA-115 and 117; tempra-dev:
- * app/home, app/activity, app/workspace): the library's home, Activity,
+ * app/home, app/activity, app/workspace): the library's home, Activity, Settings,
  * a folder, an attachment and Not found. Quiet pages in one column: a header, then sections of rows.
  */
 
@@ -823,4 +823,30 @@ a.activity-download {
   display: inline-flex;
   align-items: center;
   gap: var(--tempra-space-1);
+}
+
+/* ---------- Settings: one page of sections, a hairline between them ---------- */
+
+/* Each section under its own heading (General, Members, …), ruled off from the one before;
+   the section's own headings (Invite, Export, …) are h3s under it. */
+.settings-section {
+  margin-top: var(--tempra-space-4);
+  padding-top: var(--tempra-space-4);
+  border-top: 1px solid var(--tempra-color-border);
+  scroll-margin-top: var(--tempra-space-4);
+}
+
+.view-head + .settings-section {
+  margin-top: 0;
+}
+
+.settings-section > h2 {
+  margin: 0 0 var(--tempra-space-3);
+  font-size: var(--tempra-text-reader);
+  font-weight: var(--tempra-weight-strong);
+  line-height: var(--tempra-leading-tight);
+}
+
+.settings-section h3 {
+  margin: var(--tempra-space-3) 0 var(--tempra-space-2);
 }

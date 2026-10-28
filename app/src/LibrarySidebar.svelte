@@ -7,7 +7,7 @@
 
   /**
    * The library's sidebar (TEMPRA-145): the files, then a fixed foot of the library's tools,
-   * Activity and Settings. Home is the library's name in the bar; the Inbox is the bell's.
+   * Activity and Settings, each a page in this frame. Home is the library's name in the bar; the Inbox is the bell's.
    */
   let props: {
     urls: Urls;
@@ -36,5 +36,10 @@
     icon="activity"
     label="Activity"
   />
-  <NavRow href={props.urls.settings()} icon="settings" label="Settings" />
+  <NavRow
+    href={props.urls.settings()}
+    current={props.place.view === "settings"}
+    icon="settings"
+    label="Settings"
+  />
 </nav>

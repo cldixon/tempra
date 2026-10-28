@@ -2,28 +2,20 @@
   import { field, post } from "../api";
   import { useAction } from "../load.svelte.ts";
   import { librariesChanged } from "../role";
-  import { useLibrary, useLibraryTitle, useRole } from "../role.svelte.ts";
-  import { navigate } from "../router";
+  import { useLibrary, useRole } from "../role.svelte.ts";
   import type { Urls } from "../urls";
 
   /**
-   * General (take 4's first settings tab; TEMPRA-102): the library's title and description, which
-   * the owner edits under the limits create_library enforces; a write member reads them. A read
-   * member's settings are Members alone, so General sends them there.
+   * General, the Settings page's first section (TEMPRA-102): the library's title and
+   * description, which the owner edits under the limits create_library enforces; a write member
+   * reads them. A read member's settings are Members alone (Settings.svelte).
    */
   let { urls }: { urls: Urls } = $props();
-  useLibraryTitle(
-    () => urls,
-    () => "General",
-  );
   const library = useLibrary(() => urls);
   const lib = $derived(library.current);
   const role = useRole(() => urls);
   const action = useAction();
   let notice = $state<string | null>(null);
-  $effect(() => {
-    if (role.current === "read") navigate(urls.members(), { replace: true });
-  });
 
   function save(e: SubmitEvent & { currentTarget: HTMLFormElement }) {
     e.preventDefault();
@@ -45,7 +37,6 @@
 {#if role.current === null || role.current === "read"}
   <p class="muted">Loading…</p>
 {:else}
-  <h1>General</h1>
   {#if notice}<div class="notice ok">{notice}</div>{/if}
   {#if action.error}<div class="notice">{action.error}</div>{/if}
   {#if role.current === "owner"}

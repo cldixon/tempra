@@ -1,19 +1,17 @@
 <script lang="ts">
   import { api, field, post } from "../api";
   import { useAction, useLoad } from "../load.svelte.ts";
-  import { useLibraryTitle, useRole } from "../role.svelte.ts";
+  import { useRole } from "../role.svelte.ts";
   import Status from "../Status.svelte";
   import { plural } from "../ui";
   import type { Urls } from "../urls";
   import { exportLabel, forOwner, type Nightly } from "./manage";
-  import OwnerOnly from "./OwnerOnly.svelte";
 
-  /** Export a bundle, import one as a single change, and the nightly exports (owner only). */
+  /**
+   * The Settings page's Import & export section (the owner's alone, Settings.svelte): export a
+   * bundle, import one as a single change, and the nightly exports.
+   */
   let { urls }: { urls: Urls } = $props();
-  useLibraryTitle(
-    () => urls,
-    () => "Import & export",
-  );
   const role = useRole(() => urls);
   const loaded = useLoad(
     () => `transfer ${urls.base} ${role.current}`,
@@ -62,81 +60,78 @@
     });
 </script>
 
-<OwnerOnly {urls}>
-  <h1>Import &amp; export</h1>
-  {#if result}
-    <div class="notice ok">
-      {#if typeof result === "string"}{result}{:else}Imported {plural(result.files, "file")} from {result.name} as
-        one change. <a href={urls.activity({ view: "events" })}>See it in Activity</a>.{/if}
-    </div>
-  {/if}
-  {#if action.error}<div class="notice">{action.error}</div>{/if}
-  <div class="panel-box">
-    <h2>Export</h2>
-    <p>Every page and file as they are now, as one .tar bundle.</p>
-    <!-- A plain link: the browser downloads the signed export link it redirects to. -->
-    <a class="button primary" href={urls.exportTar()}>Download .tar</a>
+{#if result}
+  <div class="notice ok">
+    {#if typeof result === "string"}{result}{:else}Imported {plural(result.files, "file")} from {result.name} as
+      one change. <a href={urls.activity({ view: "events" })}>See it in Activity</a>.{/if}
   </div>
-  <div class="panel-box">
-    <h2>Import</h2>
-    <p>A .tar or .tar.gz bundle, as one change you can revert.</p>
-    <form onsubmit={upload}>
-      <p>
-        <input
-          type="file"
-          name="bundle"
-          aria-label="Bundle"
-          accept=".tar,.tgz,.gz,application/x-tar,application/gzip"
-          required
-        />
-      </p>
-      <p>
-        <label class="small">
-          Leading folders to drop
-          <input type="number" name="strip" min={0} max={10} defaultValue={0} />
-        </label>
-      </p>
-      <p>
-        <input type="text" name="note" aria-label="Note" placeholder="Note (optional)" />
-      </p>
-      <button class="primary" type="submit" disabled={action.busy}>Import</button>
-    </form>
-  </div>
-  <Status loaded={loaded.current}>
-    {#snippet children({ nightly })}
-      <div class="panel-box">
-        <h2>Nightly exports</h2>
-        {#if nightly.length === 0}
-          <p>None yet.</p>
-        {:else}
-          <div class="table-wrap">
-            <table class="list">
-              <thead class="visually-hidden">
+{/if}
+{#if action.error}<div class="notice">{action.error}</div>{/if}
+<div class="panel-box">
+  <h3>Export</h3>
+  <p>Every page and file as they are now, as one .tar bundle.</p>
+  <!-- A plain link: the browser downloads the signed export link it redirects to. -->
+  <a class="button primary" href={urls.exportTar()}>Download .tar</a>
+</div>
+<div class="panel-box">
+  <h3>Import</h3>
+  <p>A .tar or .tar.gz bundle, as one change you can revert.</p>
+  <form onsubmit={upload}>
+    <p>
+      <input
+        type="file"
+        name="bundle"
+        aria-label="Bundle"
+        accept=".tar,.tgz,.gz,application/x-tar,application/gzip"
+        required
+      />
+    </p>
+    <p>
+      <label class="small">
+        Leading folders to drop
+        <input type="number" name="strip" min={0} max={10} defaultValue={0} />
+      </label>
+    </p>
+    <p>
+      <input type="text" name="note" aria-label="Note" placeholder="Note (optional)" />
+    </p>
+    <button class="primary" type="submit" disabled={action.busy}>Import</button>
+  </form>
+</div>
+<Status loaded={loaded.current}>
+  {#snippet children({ nightly })}
+    <div class="panel-box">
+      <h3>Nightly exports</h3>
+      {#if nightly.length === 0}
+        <p>None yet.</p>
+      {:else}
+        <div class="table-wrap">
+          <table class="list">
+            <thead class="visually-hidden">
+              <tr>
+                <th>Export</th>
+                <th>Files</th>
+                <th>Downloads</th>
+              </tr>
+            </thead>
+            <tbody>
+              {#each nightly as n (n.date)}
                 <tr>
-                  <th>Export</th>
-                  <th>Files</th>
-                  <th>Downloads</th>
+                  <td>
+                    <strong>{exportLabel(n.date)}</strong>
+                  </td>
+                  <td class="muted small">{n.files !== null ? plural(n.files, "file") : ""}</td>
+                  <td>
+                    <a href={urls.nightly(n.date, "bundle.tar")}>Bundle</a> ·
+                    <a href={urls.nightly(n.date, "ledger.jsonl")}>History</a>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {#each nightly as n (n.date)}
-                  <tr>
-                    <td>
-                      <strong>{exportLabel(n.date)}</strong>
-                    </td>
-                    <td class="muted small">{n.files !== null ? plural(n.files, "file") : ""}</td>
-                    <td>
-                      <a href={urls.nightly(n.date, "bundle.tar")}>Bundle</a> ·
-                      <a href={urls.nightly(n.date, "ledger.jsonl")}>History</a>
-                    </td>
-                  </tr>
-                {/each}
-              </tbody>
-            </table>
-          </div>
-        {/if}
-        <button type="button" disabled={action.busy} onclick={() => void exportNow()}>Export now</button>
-      </div>
-    {/snippet}
-  </Status>
-</OwnerOnly>
+              {/each}
+            </tbody>
+          </table>
+        </div>
+      {/if}
+      <button type="button" disabled={action.busy} onclick={() => void exportNow()}>Export now</button>
+    </div>
+  {/snippet}
+</Status>

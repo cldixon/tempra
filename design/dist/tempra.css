@@ -1763,8 +1763,8 @@ details > summary {
  * sidebar's edge (the mark, the library switcher and search over the sidebar; the page's tools,
  * the bell and the avatar over the page; no crumbs), a navigation sidebar with a hairline on
  * its right, and the page as a flat column: no ground, no sheet. The sidebar can be hidden; under
- * 900px it is a drawer behind a top bar. Library settings and the account's pages use the same
- * frame with a sidebar of their own. A concept's own layout is in concept.css; the person's views
+ * 900px it is a drawer behind a top bar. A library's Settings is one of its pages; the account's
+ * pages use the same frame with a sidebar of their own. A concept's own layout is in concept.css; the person's views
  * (home, Activity, a folder) in views.css.
  */
 body:has(> #root),
@@ -2678,8 +2678,8 @@ a.button.pill-button {
   color: var(--tempra-color-muted);
 }
 
-/* The sidebar: a hairline on its right; the views, a rule, the files (which scroll), and
-   Settings at its foot. A settings frame holds a way back and its tabs instead. */
+/* The sidebar: a hairline on its right; the files (which scroll), and Activity and Settings at
+   its foot. The account's settings frame holds a way back and its pages instead. */
 .ws-sidebar {
   grid-area: sidebar;
   display: flex;
@@ -2727,7 +2727,7 @@ a.button.pill-button {
   border-top: 1px solid var(--tempra-color-border);
 }
 
-/* The way back at the top of a settings sidebar: "‹ Back to tempra-dev". */
+/* The way back at the top of the account's settings sidebar: "‹ Back to libraries". */
 .nav-row.back {
   margin-bottom: 14px;
   color: var(--tempra-color-muted);
@@ -3346,7 +3346,8 @@ table.list td.name a {
   background: var(--tempra-color-bg);
 }
 
-.panel-box > h2:first-child {
+.panel-box > h2:first-child,
+.panel-box > h3:first-child {
   margin-top: 0;
 }
 
@@ -4531,7 +4532,7 @@ section.thread.open {
 
 /*
  * The person's views of a library (take 3, TEMPRA-106; take 4, TEMPRA-115 and 117; tempra-dev:
- * app/home, app/activity, app/workspace): the library's home, Activity,
+ * app/home, app/activity, app/workspace): the library's home, Activity, Settings,
  * a folder, an attachment and Not found. Quiet pages in one column: a header, then sections of rows.
  */
 
@@ -5354,6 +5355,32 @@ a.activity-download {
   display: inline-flex;
   align-items: center;
   gap: var(--tempra-space-1);
+}
+
+/* ---------- Settings: one page of sections, a hairline between them ---------- */
+
+/* Each section under its own heading (General, Members, …), ruled off from the one before;
+   the section's own headings (Invite, Export, …) are h3s under it. */
+.settings-section {
+  margin-top: var(--tempra-space-4);
+  padding-top: var(--tempra-space-4);
+  border-top: 1px solid var(--tempra-color-border);
+  scroll-margin-top: var(--tempra-space-4);
+}
+
+.view-head + .settings-section {
+  margin-top: 0;
+}
+
+.settings-section > h2 {
+  margin: 0 0 var(--tempra-space-3);
+  font-size: var(--tempra-text-reader);
+  font-weight: var(--tempra-weight-strong);
+  line-height: var(--tempra-leading-tight);
+}
+
+.settings-section h3 {
+  margin: var(--tempra-space-3) 0 var(--tempra-space-2);
 }
 
 /*

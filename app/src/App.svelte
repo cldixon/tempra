@@ -68,10 +68,8 @@
       case "revert":
         place.view = "activity";
         break;
-      case "library-connect":
-        place.view = "connect";
-        break;
-      default:
+      case "activity":
+      case "settings":
         place.view = r.page;
     }
     return { urls: urlsFor(r.owner, r.slug, undefined), place };
@@ -138,17 +136,7 @@
            version view. -->
       <Redirect to={urls.diff(route.path, route.from, route.to)} />
     {:else if route.page === "settings"}
-      {#await settings() then S}<S.General {urls} />{/await}
-    {:else if route.page === "transfer"}
-      {#await settings() then S}<S.Transfer {urls} />{/await}
-    {:else if route.page === "recovery"}
-      {#await settings() then S}<S.Recovery {urls} />{/await}
-    {:else if route.page === "library-connect"}
-      {#await settings() then S}<S.ConnectLibrary {urls} />{/await}
-    {:else if route.page === "delete"}
-      {#await settings() then S}<S.DeleteLibrary {urls} />{/await}
-    {:else if route.page === "members"}
-      {#await settings() then S}<S.Members {urls} me={me.current?.handle ?? null} />{/await}
+      {#await settings() then S}<S.Settings {urls} me={me.current?.handle ?? null} section={route.section} />{/await}
     {:else if route.page === "revert"}
       {#await settings() then S}<S.Revert {urls} request={route.request} />{/await}
     {:else if route.page === "restore"}

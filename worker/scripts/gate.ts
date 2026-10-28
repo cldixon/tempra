@@ -632,9 +632,9 @@ function greyscalePng(
  * The app in a real browser, signed in as the seeded user (layout take 4, TEMPRA-113 to 118):
  * the library's home (no sections, no housekeeping, nothing counted for the person), the workspace (the bar's
  * mark, library, switcher, search and page path, the tree, the foot's Activity and Settings, the
- * quick switcher, the hidden sidebar; at phone width the bar's mark and library, the drawer with
- * the bar's parts at its head, the tree, Activity and Settings, the home stacked, a
- * settings page's drawer with its tabs), a folder's address revealing it, Not found for a moved
+ * Settings page's sections in the library's frame, the quick switcher, the hidden sidebar; at
+ * phone width the bar's mark and library, the drawer with the bar's parts at its head, the tree,
+ * Activity and Settings, the home stacked, the Settings page's drawer, the library's own), a folder's address revealing it, Not found for a moved
  * path, an attachment's page, every concept in the reader (drawn from the stored
  * tree, with no Edit, a footnote card on hover), the concept's panels (Comments, History,
  * Properties: opened from the top bar, closed by ×, Escape and the control, the contents back,
@@ -1367,19 +1367,40 @@ async function browserRenders(
       await foot.getByRole("link", { name: "Settings", exact: true }).click();
       await page.waitForURL(`${lib}/-/settings`);
       await main
-        .getByRole("heading", { level: 1, name: "General", exact: true })
+        .getByRole("heading", { level: 1, name: "Settings", exact: true })
         .waitFor({ timeout: 15_000 });
       await brandIs("the library's settings");
-      // The settings' sidebar: a way back, then the tabs.
-      for (const tab of ["General", "Members", "Connect", "Import & export", "Recovery"]) {
-        await sidebar.getByRole("link", { name: tab, exact: true }).waitFor({ timeout: 5000 });
+      // Settings is one page in the library's frame, as Activity is: the tree and the foot stay,
+      // Settings the current row, and every section is a heading on the page, the owner's in order.
+      await sidebar.locator(".tree").waitFor({ timeout: 5000 });
+      await foot
+        .locator('a[aria-current="page"]', { hasText: "Settings" })
+        .waitFor({ timeout: 5000 });
+      if ((await sidebar.getByRole("link", { name: "Back to library", exact: true }).count()) > 0) {
+        throw new Error("the Settings page still has a settings sidebar");
       }
-      await sidebar.getByRole("link", { name: "Delete library", exact: true }).waitFor();
+      const sectionNames = [
+        "General",
+        "Members",
+        "Connect",
+        "Import & export",
+        "Recovery",
+        "Delete library",
+      ];
+      await main
+        .getByRole("heading", { level: 2, name: "Delete library", exact: true })
+        .waitFor({ timeout: 5000 });
+      const sectionHeads = await main.locator(".settings-section > h2").allTextContents();
+      if (JSON.stringify(sectionHeads) !== JSON.stringify(sectionNames)) {
+        throw new Error(`Settings' sections: ${JSON.stringify(sectionHeads)}`);
+      }
+      if (shots) await page.screenshot({ path: `${shots}/settings.png`, fullPage: true });
       // A title, saved: the switcher and the home show it; cleared again, they show the slug.
       await page.locator("#library-title").fill("The gate's library");
       await page.getByRole("button", { name: "Save", exact: true }).click();
       await page.getByText("Saved.").waitFor({ timeout: 15_000 });
-      await sidebar.getByRole("link", { name: "Back to library", exact: true }).click();
+      // Leaving Settings is opening anything else in the library: here its home, by its name.
+      await brand.locator("a.brand-name").click();
       await page.waitForURL(`${lib}/`);
       await main
         .getByRole("heading", { level: 1, name: "The gate's library", exact: true })
@@ -1572,22 +1593,24 @@ async function browserRenders(
           await folderRow.click();
           await page.keyboard.press("Escape");
           await sidebar.waitFor({ state: "hidden" });
-          // A settings page's drawer holds the settings' sidebar: back to the library, the tabs.
+          // The Settings page's drawer is the library's: the tree, then Activity and Settings,
+          // Settings the current row; Activity leaves it.
           await page.goto(`${lib}/-/settings`);
-          await phoneNamed("General");
+          await phoneNamed("Settings");
           await menu.click();
           await sidebar.waitFor({ state: "visible" });
-          const tabs = sidebar.getByRole("navigation", { name: "Library settings" });
-          for (const tab of ["Back to library", "General", "Members", "Connect"]) {
-            await tabs.getByRole("link", { name: tab, exact: true }).waitFor({ timeout: 5000 });
-          }
+          const settingsFoot = sidebar.getByRole("navigation", { name: "Library" });
+          await settingsFoot
+            .locator('a[aria-current="page"]', { hasText: "Settings" })
+            .waitFor({ timeout: 5000 });
+          await sidebar.locator(".tree").waitFor({ timeout: 5000 });
           await sidebar.getByRole("button", { name: "Close menu" }).waitFor();
           await drawerHead(libraryName);
           if (shots) await page.screenshot({ path: `${shots}/settings-drawer-phone.png` });
-          await tabs.getByRole("link", { name: "Members", exact: true }).click();
-          await page.waitForURL(`${lib}/-/members`);
+          await settingsFoot.getByRole("link", { name: "Activity", exact: true }).click();
+          await page.waitForURL(`${lib}/-/activity`);
           await sidebar.waitFor({ state: "hidden" });
-          await phoneNamed("Members");
+          await phoneNamed("Activity");
           // The account's pages: the mark and "Tempra" on the bar and at the drawer's head, with
           // search and no switcher, never the page's own name there. Email settings are one
           // switch on Account, where /notifications lands (TEMPRA-189).
@@ -1644,8 +1667,10 @@ async function browserRenders(
           await making.waitFor({ timeout: 5000 });
           await page.keyboard.press("Escape");
           await making.waitFor({ state: "hidden", timeout: 5000 });
+          // A former tab's URL opens Settings at its section.
           await page.goto(`${lib}/-/members`);
-          await phoneNamed("Members");
+          await page.waitForURL(`${lib}/-/settings#members`);
+          await phoneNamed("Settings");
         } finally {
           await page.setViewportSize({ width: 1280, height: 720 });
         }
@@ -3889,9 +3914,12 @@ async function browserRenders(
           ready: () => main.locator("table").first().waitFor({ timeout: 15_000 }),
         },
         {
-          name: "Members",
-          url: `${lib}/-/members`,
-          ready: () => main.locator("h1").first().waitFor({ timeout: 15_000 }),
+          name: "Settings",
+          url: `${lib}/-/settings`,
+          ready: () =>
+            main
+              .getByRole("heading", { level: 2, name: "Members", exact: true })
+              .waitFor({ timeout: 15_000 }),
         },
         {
           name: "libraries",
@@ -4383,6 +4411,8 @@ async function strangers(owner: string, slug: string, token: string): Promise<st
     "-/work",
     "-/needs",
     "-/activity",
+    "-/settings",
+    "-/members",
     "-/transfer",
     "-/recovery",
     "-/connect",
@@ -4531,7 +4561,7 @@ async function oauthConnect(
  * welcome page, then connect an MCP client through OAuth with PKCE, as Claude Code would, and
  * write through MCP; the open Connect page turns to the agent's write live. Then the account's
  * pages (Agents: the connected app and tokens, account, work queue, import and export, recovery) work, and
- * the library is deleted from its Delete tab, which ends the connection.
+ * the library is deleted from its Settings page's Delete section, which ends the connection.
  */
 /**
  * The daily cron through cf dev's scheduled handler, run again every few seconds while the queue
@@ -4608,7 +4638,8 @@ async function freshAccountConnects(): Promise<string[]> {
         const imp = await page
           .getByRole("link", { name: "Import a bundle", exact: true })
           .getAttribute("href");
-        if (imp !== "/newcomer/notes/-/transfer") throw new Error(`Import a bundle: ${imp}`);
+        if (imp !== "/newcomer/notes/-/settings#transfer")
+          throw new Error(`Import a bundle: ${imp}`);
         await page
           .locator("section.ws-sidebar .tree-note", { hasText: "No pages yet." })
           .waitFor({ timeout: 10_000 });
@@ -4618,7 +4649,7 @@ async function freshAccountConnects(): Promise<string[]> {
       },
     );
     const connectTab = await b.context.newPage();
-    await connectTab.goto(`${lib}/-/connect`);
+    await connectTab.goto(`${lib}/-/settings#connect`);
     await connectTab.getByText("No agent has written yet").waitFor({ timeout: 15_000 });
 
     const connected = await oauthConnect(cookie, {
@@ -4653,20 +4684,23 @@ async function freshAccountConnects(): Promise<string[]> {
       await page.locator(".menu-list").getByRole("link", { name, exact: true }).click();
     };
     /**
-     * A settings tab from the settings' sidebar, reached through Settings at the library
-     * sidebar's foot (TEMPRA-145) unless the settings are already open.
+     * A section of the library's Settings page, opened through Settings at the library
+     * sidebar's foot (TEMPRA-145) unless the page is already open, and scrolled to.
      */
     const libraryLink = async (name: string) => {
-      const tab = page.locator(".ws-sidebar").getByRole("link", { name, exact: true });
-      if ((await tab.count()) === 0 || !(await tab.first().isVisible())) {
+      if (!new URL(page.url()).pathname.endsWith("/-/settings")) {
         await page
           .locator(".ws-sidebar")
           .getByRole("navigation", { name: "Library" })
           .getByRole("link", { name: "Settings", exact: true })
           .click();
-        await tab.waitFor({ timeout: 15_000 });
+        await page.waitForURL(`${lib}/-/settings`);
       }
-      await tab.click();
+      const heading = page
+        .locator(".ws-main")
+        .getByRole("heading", { level: 2, name, exact: true });
+      await heading.waitFor({ timeout: 15_000 });
+      await heading.scrollIntoViewIfNeeded();
     };
     // Agents (2026-10-23): the connected app and tokens in one list, New token in the compose
     // dialog, the secret shown once in a dialog after.
@@ -4719,10 +4753,10 @@ async function freshAccountConnects(): Promise<string[]> {
       ["Import & export", "Nightly exports"],
       ["Recovery", "Past restores"],
     ] as const) {
-      await step(`library tab ${tab}`, async () => {
+      await step(`Settings section ${tab}`, async () => {
         await page.goto(`${lib}/`);
         await libraryLink(tab);
-        // On the page: the phone's top bar (hidden here) names the page too.
+        // In its section: the phone's top bar (hidden here) names the page too.
         await page.locator(".ws-main").getByText(text).first().waitFor({ timeout: 15_000 });
       });
     }
@@ -4732,12 +4766,12 @@ async function freshAccountConnects(): Promise<string[]> {
       await page.getByText("Export saved").waitFor({ timeout: 15_000 });
     });
 
-    // Sharing in the app (tempra-dev: v2/sharing): invite from the Members tab; the invitee
+    // Sharing in the app (tempra-dev: v2/sharing): invite from Settings' Members section; the invitee
     // accepts from Invitations; as a reader there is no Verify, at write there is.
-    await step("invite a person from the Members tab", async () => {
+    await step("invite a person from Settings' Members section", async () => {
       await page.goto(`${lib}/`);
       await libraryLink("Members");
-      await page.locator('input[name="to"]').fill("@stranger");
+      await page.locator('#members input[name="to"]').fill("@stranger");
       await page.getByRole("button", { name: "Invite" }).click();
       await page.getByText("Invited @stranger").waitFor({ timeout: 15_000 });
     });
@@ -4859,7 +4893,7 @@ async function freshAccountConnects(): Promise<string[]> {
         .waitFor({ timeout: 15_000 });
     });
     // Deleting the library wipes its Durable Object and ends the connection.
-    await step("delete the library from its Delete tab", async () => {
+    await step("delete the library from its Settings section", async () => {
       await switchTo(asOwner);
       await page.goto(`${lib}/`);
       await libraryLink("Delete library");

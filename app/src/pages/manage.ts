@@ -2,7 +2,7 @@ import type { Touched } from "../activity";
 import { ApiError } from "../api";
 import type { Role } from "../role";
 import { day, localTime } from "../ui";
-import { dirOf, folderName } from "../urls";
+import { dirOf, folderName, type SettingsSection } from "../urls";
 
 /**
  * A library's management pages (TEMPRA-14; take 4 follow-ups, TEMPRA-124 and 135): import and
@@ -17,6 +17,27 @@ import { dirOf, folderName } from "../urls";
  */
 export const forOwner = <T>(role: Role | null, load: () => Promise<T>): Promise<T> =>
   role === "owner" ? load() : Promise.reject(new ApiError(403, "owner_only", "Owner only."));
+
+// ---------------------------------------------------------------- the Settings page
+
+/**
+ * The Settings page's sections by role (tempra-dev: v2/sharing, app/workspace): a read member has
+ * Members (and Leave in it), a write member also General and Connect, the owner also Import &
+ * export, Recovery and Delete. None until the role is known, so no section shows and then goes.
+ */
+export function settingsSections(role: Role | null): { id: SettingsSection; label: string }[] {
+  const owner = role === "owner";
+  const writer = owner || role === "write";
+  const all: [SettingsSection, string, boolean][] = [
+    ["general", "General", writer],
+    ["members", "Members", role !== null],
+    ["connect", "Connect", writer],
+    ["transfer", "Import & export", owner],
+    ["recovery", "Recovery", owner],
+    ["delete", "Delete library", owner],
+  ];
+  return all.filter(([, , shown]) => shown).map(([id, label]) => ({ id, label }));
+}
 
 // ---------------------------------------------------------------- import and export
 
