@@ -5,7 +5,6 @@
   import { useConfirm } from "../confirm.svelte.ts";
   import { useAction, useLoad } from "../load.svelte.ts";
   import Moment from "../Moment.svelte";
-  import { useLibraryTitle } from "../role.svelte.ts";
   import Status from "../Status.svelte";
   import { day, plural } from "../ui";
   import type { Urls } from "../urls";
@@ -17,10 +16,6 @@
    * removes; a member may leave. Each of those asks first (S-4).
    */
   let { urls, me }: { urls: Urls; me: string | null } = $props();
-  useLibraryTitle(
-    () => urls,
-    () => "Members",
-  );
   const loaded = useLoad(
     () => `members ${urls.base}`,
     async () => {
@@ -57,7 +52,7 @@
       form.reset();
       done(
         r.sent === "invited"
-          ? `Invited @${r.handle}. They accept it from their Inbox.`
+          ? `Invited @${r.handle}. They accept it from their notifications.`
           : "If that address has a Tempra account, they will get the invitation.",
       );
     });
@@ -134,7 +129,6 @@
   <p>@{subject.handle} can no longer accept it.</p>
 {/snippet}
 
-<h1>Members</h1>
 <ConfirmDialog asking={c} />
 {#if notice}<div class="notice ok">{notice}</div>{/if}
 {#if action.error}<div class="notice">{action.error}</div>{/if}
@@ -195,7 +189,7 @@
     </div>
 
     {#if owner}
-      <h2>Invite</h2>
+      <h3>Invite</h3>
       <form class="token" onsubmit={invite}>
         <p>
           <label>
@@ -216,7 +210,7 @@
         </p>
       </form>
       {#if (d.invitations ?? []).length > 0}
-        <h2>Waiting</h2>
+        <h3>Waiting</h3>
         <ul>
           {#each d.invitations ?? [] as i (i.id)}
             <li>
@@ -228,7 +222,7 @@
       {/if}
     {/if}
 
-    <h2>Who has worked here</h2>
+    <h3>Who has worked here</h3>
     {#if d.contributors.length === 0}
       <p class="muted">Nobody yet.</p>
     {:else}

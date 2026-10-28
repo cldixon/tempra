@@ -88,24 +88,24 @@ export class Urls {
   nightly(date: string, file: string) {
     return this.page(`exports/${encodeURIComponent(date)}/${encodeURIComponent(file)}`);
   }
-  /** The library's settings: General (its title and description), the first tab (take 4). */
-  settings() {
-    return this.page("settings");
+  /** The library's settings: one page of sections (General first), each at its own anchor. */
+  settings(section?: SettingsSection) {
+    return `${this.page("settings")}${section ? `#${section}` : ""}`;
   }
   transfer() {
-    return this.page("transfer");
+    return this.settings("transfer");
   }
   recovery() {
-    return this.page("recovery");
+    return this.settings("recovery");
   }
   connect() {
-    return this.page("connect");
+    return this.settings("connect");
   }
   remove() {
-    return this.page("delete");
+    return this.settings("delete");
   }
   members() {
-    return this.page("members");
+    return this.settings("members");
   }
   /** The REST API for this library. */
   api(rest: string, params: Record<string, string | number | undefined> = {}) {
@@ -116,6 +116,15 @@ export class Urls {
     return `/api/v1/libraries/${encodeURIComponent(this.owner)}/${encodeURIComponent(this.slug)}`;
   }
 }
+
+/** The library's Settings page's sections, by their anchors (tempra-dev: app/workspace). */
+export type SettingsSection =
+  | "general"
+  | "members"
+  | "connect"
+  | "transfer"
+  | "recovery"
+  | "delete";
 
 /** Activity's views: the Summary (the default) and Every event (the ledger as a table). */
 export type ActivityView = "summary" | "events";

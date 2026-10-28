@@ -4,8 +4,8 @@
  * sidebar's edge (the mark, the library switcher and search over the sidebar; the page's tools,
  * the bell and the avatar over the page; no crumbs), a navigation sidebar with a hairline on
  * its right, and the page as a flat column: no ground, no sheet. The sidebar can be hidden; under
- * 900px it is a drawer behind a top bar. Library settings and the account's pages use the same
- * frame with a sidebar of their own. A concept's own layout is in concept.css; the person's views
+ * 900px it is a drawer behind a top bar. A library's Settings is one of its pages; the account's
+ * pages use the same frame with a sidebar of their own. A concept's own layout is in concept.css; the person's views
  * (home, Activity, a folder) in views.css.
  */
 body:has(> #root),
@@ -919,8 +919,8 @@ a.button.pill-button {
   color: var(--tempra-color-muted);
 }
 
-/* The sidebar: a hairline on its right; the views, a rule, the files (which scroll), and
-   Settings at its foot. A settings frame holds a way back and its tabs instead. */
+/* The sidebar: a hairline on its right; the files (which scroll), and Activity and Settings at
+   its foot. The account's settings frame holds a way back and its pages instead. */
 .ws-sidebar {
   grid-area: sidebar;
   display: flex;
@@ -968,7 +968,7 @@ a.button.pill-button {
   border-top: 1px solid var(--tempra-color-border);
 }
 
-/* The way back at the top of a settings sidebar: "‹ Back to tempra-dev". */
+/* The way back at the top of the account's settings sidebar: "‹ Back to libraries". */
 .nav-row.back {
   margin-bottom: 14px;
   color: var(--tempra-color-muted);
@@ -1587,7 +1587,8 @@ table.list td.name a {
   background: var(--tempra-color-bg);
 }
 
-.panel-box > h2:first-child {
+.panel-box > h2:first-child,
+.panel-box > h3:first-child {
   margin-top: 0;
 }
 

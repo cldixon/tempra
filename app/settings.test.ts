@@ -149,7 +149,7 @@ describe("drawn", () => {
     expect(text(host.querySelector("li") as Element)).toBe(
       "@cat, read and write, open until Nov 30 Withdraw…",
     );
-    expect(host.querySelector("h2 + p.muted")?.textContent).toBe("Nobody yet.");
+    expect(host.querySelector("h3 + p.muted")?.textContent).toBe("Nobody yet.");
     // Changing the access asks first; the select keeps showing the saved access meanwhile.
     if (!select) throw new Error("no select");
     select.value = "write";

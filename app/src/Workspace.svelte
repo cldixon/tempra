@@ -3,14 +3,13 @@
   import { api, cache } from "./api";
   import { isConceptPath } from "./concept/data";
   import FeedNotice from "./FeedNotice.svelte";
-  import { type Place, SETTINGS_VIEWS } from "./frame";
+  import type { Place } from "./frame";
   import { inboxChanged } from "./inbox";
   import LibrarySidebar from "./LibrarySidebar.svelte";
   import { useFeed } from "./live.svelte.ts";
   import { useLoad } from "./load.svelte.ts";
   import { isShared, libraryLabel } from "./role";
   import { useLibrary } from "./role.svelte.ts";
-  import SettingsSidebar from "./SettingsSidebar.svelte";
   import Shell from "./Shell.svelte";
   import Switcher from "./Switcher.svelte";
   import { loadHidden, saveHidden } from "./sidebar";
@@ -22,8 +21,8 @@
 
   /**
    * A library's frame, keyed by the library so it stays mounted while the person moves within it:
-   * the library in the bar (its name, switcher and search), the library's sidebar, or its
-   * settings' sidebar on a settings page, the quick switcher, the library's index, and the feed's
+   * the library in the bar (its name, switcher and search), the library's sidebar (on its
+   * Settings page too, which is one of its pages), the quick switcher, the library's index, and the feed's
    * refresh of the inbox count.
    */
   let {
@@ -105,7 +104,7 @@
     hidden = h;
     saveHidden(urls, h);
   }
-  // Ctrl or Cmd+K opens the quick switcher, and again closes it (on the settings pages too;
+  // Ctrl or Cmd+K opens the quick switcher, and again closes it (on the Settings page too;
   // TEMPRA-127).
   $effect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -117,8 +116,6 @@
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   });
-
-  const settings = $derived(SETTINGS_VIEWS.has(place.view));
   const shared = $derived(library.current !== undefined && isShared(library.current));
 </script>
 
@@ -127,22 +124,17 @@
       path={place.file}
       title={index?.find((f) => f.path === place.file)?.title ?? baseName(place.file).replace(/\.md$/, "")}
     />{/if}{/snippet}
-<!-- Only the library's own sidebar hides; the settings' is how the person moves between tabs. -->
 <Shell
   library={{ urls, name, shared, home: place.view === "home" }}
   onSearch={() => (switching = true)}
-  hidden={settings ? undefined : hidden}
-  onHide={settings ? undefined : hide}
+  {hidden}
+  onHide={hide}
   {me}
   {index}
   {nextPath}
 >
   {#snippet sidebar()}
-    {#if settings}
-      <SettingsSidebar {urls} {place} />
-    {:else}
-      <LibrarySidebar {urls} {place} files={index} failed={outline.state === "error"} onRetry={refresh} />
-    {/if}
+    <LibrarySidebar {urls} {place} files={index} failed={outline.state === "error"} onRetry={refresh} />
   {/snippet}
   {#snippet status()}<FeedNotice {urls} />{/snippet}
   {@render children()}

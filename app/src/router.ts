@@ -1,4 +1,4 @@
-import type { ActivityFilters, ActivityView } from "./urls";
+import type { ActivityFilters, ActivityView, SettingsSection } from "./urls";
 
 /** The pages the app draws itself; every other URL is a server page, loaded in full. */
 export type Route =
@@ -9,13 +9,9 @@ export type Route =
   | { page: "invitations" }
   /** A page that moved: the app replaces the URL with `to` (as the server answers with a 308). */
   | { page: "redirect"; to: string }
-  | { page: "members"; owner: string; slug: string }
-  | { page: "settings"; owner: string; slug: string }
+  /** The library's settings, one page; `section` from a former tab's URL, moved to its anchor. */
+  | { page: "settings"; owner: string; slug: string; section?: SettingsSection }
   | { page: "activity"; owner: string; slug: string; filters: ActivityFilters; done: Done }
-  | { page: "transfer"; owner: string; slug: string }
-  | { page: "recovery"; owner: string; slug: string }
-  | { page: "library-connect"; owner: string; slug: string }
-  | { page: "delete"; owner: string; slug: string }
   | { page: "revert"; owner: string; slug: string; request: string }
   | { page: "restore"; owner: string; slug: string; path: string; to?: number }
   | { page: "directory"; owner: string; slug: string; dir: string; at?: number }
@@ -141,13 +137,16 @@ export function match(url: URL): Route | null {
       case "needs":
         return tail === "" ? { page: "redirect", to: `/${owner}/${slug}/` } : null;
       case "settings":
+        return tail === "" ? { page: "settings", owner, slug } : null;
+      // The former settings tabs: sections of the one Settings page, at their anchors.
       case "transfer":
       case "recovery":
       case "delete":
       case "members":
-        return tail === "" ? { page: pageName, owner, slug } : null;
       case "connect":
-        return tail === "" ? { page: "library-connect", owner, slug } : null;
+        return tail === ""
+          ? { page: "settings", owner, slug, section: pageName as SettingsSection }
+          : null;
       case "revert":
         return tail !== "" && !tail.includes("/")
           ? { page: "revert", owner, slug, request: decode(tail) }

@@ -5,17 +5,16 @@
   import { useFeed, useTrailing } from "../live.svelte.ts";
   import { useLoad } from "../load.svelte.ts";
   import Moment from "../Moment.svelte";
-  import { useLibraryTitle, useRole } from "../role.svelte.ts";
+  import { useRole } from "../role.svelte.ts";
   import Status from "../Status.svelte";
   import type { Urls } from "../urls";
   import ConnectSteps from "./ConnectSteps.svelte";
 
-  /** A library's Connect tab: the steps naming it, and (live) whether an agent has written yet. */
+  /**
+   * The Settings page's Connect section: the steps naming the library, and (live) whether an
+   * agent has written yet.
+   */
   let { urls }: { urls: Urls } = $props();
-  useLibraryTitle(
-    () => urls,
-    () => "Connect",
-  );
   const loaded = useLoad(
     () => `connect ${urls.base}`,
     async () => {
@@ -40,7 +39,6 @@
   const names = useAgentNames(() => urls);
 </script>
 
-<h1>Connect an agent</h1>
 {#if role.current && role.current !== "owner"}
   <p>
     This library is @{urls.owner}'s, shared with you to
@@ -49,7 +47,7 @@
   </p>
 {/if}
 <ConnectSteps slug={urls.slug} library={`${urls.owner}/${urls.slug}`} />
-<h2>Status</h2>
+<h3>Status</h3>
 <Status loaded={loaded.current}>
   {#snippet children({ latest })}
     <p id="status">
