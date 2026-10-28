@@ -32,6 +32,7 @@ import type { FigureView } from "./src/reader/lightbox";
 import Note from "./src/reader/Note.svelte";
 import { openFigureContext } from "./src/reader/open-figure";
 import { type BodyOptions, prepare } from "./src/reader/prepare";
+import { hoveredOf } from "./src/reader/reading";
 import { Urls } from "./src/urls";
 
 const FIXTURES = join(import.meta.dir, "..", "fixtures");
@@ -829,6 +830,117 @@ describe("figure markup (TEMPRA-161)", () => {
       );
       await act(async () => root.unmount());
     });
+  });
+});
+
+const CITED = [
+  "Before the figures.",
+  '![A mountain ridge](assets/ridge.jpg "Fronalpstock panorama")[^fronalp]',
+  "![](assets/bare.png) [^a][^b]",
+  "![An icon](assets/icon.png)[^a] and words after it.",
+  ':::figure{width=480}\n![One](assets/one.png "One")[^b]\n:::',
+  ':::figure[Two]\n![L](assets/l.png "Left")[^a]\n![R](assets/r.png "Right")\n:::',
+  "After the figures.",
+  "[^fronalp]: Fronalpstock.",
+  "[^a]: A.",
+  "[^b]: B.",
+].join("\n\n");
+
+/** Markers numbered by label, as the concept page numbers sources. */
+const numbered: BodyOptions["footnote"] = (label) => ({
+  href: `#src-${label}`,
+  mark: String(["fronalp", "a", "b"].indexOf(label) + 1),
+});
+
+describe("an image with its footnote is a figure (TEMPRA-218)", () => {
+  const options: BodyOptions = { href: hrefs, path: "c.md", footnote: numbered };
+
+  test("the reader's counting holds, with and without a diff", () => {
+    counts("cited", stored(CITED), options);
+    counts("cited, no href", stored(CITED));
+    const older = stored(CITED.replace("Before the figures.", "Before figures."));
+    const { p, root } = draw(stored(CITED), options, older);
+    for (const tb of textblocks(root)) {
+      const at = Number(tb.getAttribute("data-text"));
+      const b = p.text.blocks.find((x) => x.from === at);
+      expect(readText(tb)).toBe(p.text.text.slice(b?.from, b?.to));
+    }
+  });
+
+  test("the marker ends the caption, an atom of the figure's textblock", () => {
+    const { p, root } = draw(stored(CITED), options);
+    expect(p.figures.map((f) => [f.n, f.kind === "image" ? f.notes.length : -1])).toEqual([
+      [1, 1],
+      [2, 2],
+      [3, 1],
+      [4, 1],
+      [5, 0],
+    ]);
+    const figures = [...root.querySelectorAll("figure")];
+    expect(figures.map((f) => f.querySelector(":scope > figcaption")?.textContent)).toEqual([
+      "Figure 1. Fronalpstock panorama1",
+      "Figure 2. 23", // the space is the hidden gap between the image and its markers
+      "Figure 3. One3",
+      "Figures 4 and 5. Two",
+    ]);
+    // The figure is the textblock: the image's atom, then the marker's, as docText reads them.
+    const first = figures[0] as Element;
+    const ridge = p.figures[0];
+    const at = ridge?.kind === "image" ? p.starts.get(ridge.node) : undefined;
+    expect(first.getAttribute("data-text")).toBe(String(at));
+    expect(first.querySelector("p")?.hasAttribute("data-text")).toBe(false);
+    expect(readText(first)).toBe(`${ATOM}${ATOM}`);
+    const caption = first.querySelector("figcaption") as Element;
+    expect(caption.hasAttribute("data-skip")).toBe(false);
+    expect(caption.querySelector(":scope > [data-skip]")?.textContent).toBe(
+      "Figure 1. Fronalpstock panorama",
+    );
+    const sup = caption.querySelector("sup.fnref") as Element;
+    expect(sup.hasAttribute("data-atom")).toBe(true);
+    expect(sup.closest("[data-skip]")).toBeNull();
+    expect(sup.querySelector("a")?.getAttribute("href")).toBe("#src-fronalp");
+    expect(sup.querySelector("a")?.getAttribute("aria-label")).toBe("footnote 1");
+    // Its card: the marker in the caption is a footnote marker like any other.
+    expect(hoveredOf(sup)).toEqual({ kind: "footnote", label: "fronalp" });
+    // The marker's offset is the paragraph's second character, there and back.
+    const point = pointAt(root, (at ?? 0) + 1);
+    expect(point && offsetAt(root, point.node, point.offset, false)).toBe((at ?? 0) + 1);
+    // No title or alt: the markers still end the caption line; the space between is hidden text.
+    const bare = figures[1] as Element;
+    expect(readText(bare)).toBe(`${ATOM} ${ATOM}${ATOM}`);
+    expect(bare.querySelector("figcaption .figure-gap")?.textContent).toBe(" ");
+    // Any other text and the image stays inline, with its marker in the text.
+    const icon = root.querySelector('img[alt="An icon"]') as Element;
+    expect(icon.closest("figure")).toBeNull();
+    expect(icon.closest("p")?.querySelector("sup.fnref")).not.toBeNull();
+  });
+
+  test("in figure markup: one image's marker ends the caption, a group's its label", () => {
+    const { root } = draw(stored(CITED), options);
+    const [, , one, group] = [...root.querySelectorAll("figure")] as Element[];
+    expect(one?.getAttribute("data-text")).not.toBeNull();
+    expect(one?.querySelector("p")?.hasAttribute("data-text")).toBe(false);
+    expect(readText(one as Element)).toBe(`${ATOM}${ATOM}`);
+    expect(one?.querySelector("figcaption sup.fnref")?.getAttribute("data-label")).toBe("b");
+    const row = group?.querySelector("p.figure-row[data-text]") as Element;
+    expect(readText(row)).toBe(`${ATOM}${ATOM}\n${ATOM}`);
+    expect([...row.querySelectorAll(".figure-label")].map((l) => l.textContent)).toEqual([
+      "Left2",
+      "Right",
+    ]);
+    expect(row.querySelector(".figure-label sup.fnref")?.closest("[data-skip]")).toBeNull();
+    expect(group?.querySelector("figcaption")?.hasAttribute("data-skip")).toBe(true);
+  });
+
+  test("markers keep their reading order, so the sources' numbers stay", () => {
+    const seen: string[] = [];
+    prepare(stored(CITED), {
+      footnote: (label) => {
+        seen.push(label);
+        return { href: null, mark: String(seen.length) };
+      },
+    });
+    expect(seen).toEqual(["fronalp", "a", "b", "a", "b", "a"]);
   });
 });
 

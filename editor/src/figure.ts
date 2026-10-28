@@ -13,7 +13,7 @@
  * stays one atom. A directive with another name is kept as written (rule 6 of the structured
  * documents decision). DOM-free: the Worker lints with it and the reader draws with it.
  */
-import type { Image, Paragraph, RootContent } from "mdast";
+import type { FootnoteReference, Image, Paragraph, RootContent } from "mdast";
 import type { ContainerDirective } from "mdast-util-directive";
 
 export type { ContainerDirective };
@@ -73,12 +73,22 @@ export function directiveContent(node: ContainerDirective): RootContent[] {
   return (label ? node.children.slice(1) : node.children) as RootContent[];
 }
 
-/** The images of a paragraph that holds images and nothing else (whitespace aside), or null. */
-function onlyImages(n: RootContent): Image[] | null {
+/** An image of a figure and the footnote references written right after it (its sources). */
+interface ImageRun {
+  image: Image;
+  notes: FootnoteReference[];
+}
+
+/**
+ * The images of a paragraph that holds images and nothing else (whitespace aside, and footnote
+ * references after an image, TEMPRA-218), each with its references, or null.
+ */
+function imageRuns(n: RootContent): ImageRun[] | null {
   if (n.type !== "paragraph") return null;
-  const out: Image[] = [];
+  const out: ImageRun[] = [];
   for (const c of n.children) {
-    if (c.type === "image") out.push(c);
+    if (c.type === "image") out.push({ image: c, notes: [] });
+    else if (c.type === "footnoteReference" && out.length > 0) out.at(-1)?.notes.push(c);
     else if (c.type !== "text" || c.value.trim() !== "") return null;
   }
   return out;
@@ -120,8 +130,8 @@ export function checkFigure(node: ContainerDirective): FigureCheck {
   const images: Image[] = [];
   let other = false;
   for (const c of directiveContent(node)) {
-    const found = onlyImages(c);
-    if (found) images.push(...found);
+    const found = imageRuns(c);
+    if (found) images.push(...found.map((r) => r.image));
     else other = true;
   }
   if (other) problems.push('a figure holds images only (each `![alt](/path "caption")`)');
@@ -135,7 +145,8 @@ export function checkFigure(node: ContainerDirective): FigureCheck {
 /**
  * A directive in its canonical form, in place, as it is parsed: a figure's attributes in a fixed
  * order (width, layout, frame, then any others as written), and its images in one paragraph, one
- * to a line, however they were spaced. Other directives are kept as written.
+ * to a line, however they were spaced, each with its footnote references right after it. Other
+ * directives are kept as written.
  */
 export function canonicalDirective(node: ContainerDirective): void {
   if (!isFigure(node)) return;
@@ -147,14 +158,14 @@ export function canonicalDirective(node: ContainerDirective): void {
 
   const label = directiveLabel(node);
   const content = directiveContent(node);
-  const groups = content.map(onlyImages);
+  const groups = content.map(imageRuns);
   if (content.length === 0 || groups.some((g) => g === null)) return;
   const images = groups.flatMap((g) => g ?? []);
   if (images.length === 0) return;
   const paragraph: Paragraph = { type: "paragraph", children: [] };
-  images.forEach((image, i) => {
+  images.forEach(({ image, notes }, i) => {
     if (i > 0) paragraph.children.push({ type: "text", value: "\n" });
-    paragraph.children.push(image);
+    paragraph.children.push(image, ...notes);
   });
   node.children = label ? [label, paragraph] : [paragraph];
 }

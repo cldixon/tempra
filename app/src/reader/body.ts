@@ -7,7 +7,11 @@
  * markdown, hard break) is one element marked `data-atom` that counts one, and what the diff
  * inserts is marked `data-skip` and counts nothing. dom.ts counts the same way. A paragraph that
  * is one image is a figure (Figure*.svelte): the paragraph keeps its `data-text` element holding
- * the image's atom, and its caption is drawn beside it, outside the text, marked `data-skip`.
+ * the image's atom, and its caption is drawn beside it, outside the text, marked `data-skip`. When
+ * footnote references follow the image (TEMPRA-218), their markers are drawn at the caption's end:
+ * the figure itself is then the `data-text` element, so the image's atom, the hidden whitespace
+ * between them and the markers' atoms read in docText's order, and only the caption's own parts
+ * (its number, its text, the image's site) are `data-skip`.
  *
  * Kept apart from the components because the diff's pieces are cut by a cursor through each
  * textblock's text (`Run`), which must walk the inline content once, in order; the components
@@ -24,7 +28,7 @@ import {
   toMarkdown,
   type WordDiff,
 } from "@tempra/editor";
-import type { Code, PhrasingContent, RootContent, TableCell } from "mdast";
+import type { Code, Paragraph, PhrasingContent, RootContent, TableCell } from "mdast";
 import type { ImageSource } from "../images";
 import {
   externalHost,
@@ -58,8 +62,11 @@ export type Inline =
     }
   /** A figure's image, video, audio or PDF (one atom). */
   | { k: "figure"; figure: ImageFigure }
-  /** One image of a group, with its title as a small label (one atom). */
-  | { k: "cell"; figure: ImageFigure; label: string | null }
+  /**
+   * One image of a group, with its title as a small label (one atom), and the markers of the
+   * footnote references right after it at the label's end.
+   */
+  | { k: "cell"; figure: ImageFigure; label: string | null; notes: Inline[] }
   /** An image whose source is dropped: its alt text. */
   | { k: "dropped"; alt: string }
   /** Video, audio or a PDF in running text: a link to its page, named by its alt text. */
@@ -88,8 +95,12 @@ interface FigureRow {
 /** A block as drawn. `key` is unique among its siblings: the block's ID where it has one. */
 export type Block = { key: string; id: string | undefined } & (
   | { kind: "p"; offset: number | undefined; text: Inline[] }
-  /** A paragraph that is one image: the figure, its textblock, and its caption beside it. */
-  | { kind: "figure"; offset: number | undefined; text: Inline[]; figure: Figure }
+  /**
+   * A paragraph that is one image: the figure, its textblock, and its caption beside it; `notes`,
+   * the rest of the textblock after the image (footnote markers, whitespace as gaps), drawn at the
+   * caption's end.
+   */
+  | { kind: "figure"; offset: number | undefined; text: Inline[]; notes: Inline[]; figure: Figure }
   | {
       kind: "heading";
       depth: number;
@@ -135,6 +146,10 @@ export type Block = { key: string; id: string | undefined } & (
       number: number;
       /** The label drawn as inline content, else the one image's caption, else none. */
       caption: Inline[] | string | null;
+      /** One image's footnote markers, drawn at the caption's end (the figure is the textblock). */
+      notes: Inline[];
+      /** Where the one image's textblock starts, when its markers are in the caption. */
+      offset: number | undefined;
       figures: ImageFigure[];
     }
   /** A directive the reader does not draw: its fences as markdown, its content as usual. */
@@ -326,6 +341,24 @@ function textblock(ctx: Ctx, n: DocNode, nodes: readonly PhrasingContent[]): Inl
   return out;
 }
 
+/**
+ * A figure's paragraph (its image first, then only footnote references and whitespace): the
+ * image's atom, and what follows it as drawn at the caption's end, whitespace as hidden gaps, in
+ * the order docText reads them.
+ */
+function figureText(ctx: Ctx, n: Paragraph): { text: Inline[]; notes: Inline[] } {
+  const r = run(ctx, n);
+  const [image, ...rest] = n.children;
+  const text = inline(ctx, r, image ? [image] : []);
+  const notes: Inline[] = [];
+  for (const c of rest) {
+    if (c.type === "text") notes.push({ k: "gap", kids: r.text(c.value) });
+    else notes.push(...inline(ctx, r, [c]));
+  }
+  r.end(rest.length > 0 ? notes : text);
+  return { text, notes };
+}
+
 /** Keys for siblings: each one's ID, else (or when an ID repeats) its place. */
 function keys(ids: readonly (string | undefined)[]): string[] {
   const seen = new Set<string>();
@@ -348,29 +381,42 @@ function markupFigure(ctx: Ctx, n: ContainerDirective, m: FigureMarkup) {
   const content = directiveContent(n);
   const rowKeys = keys(content.map((c) => idOf(c)));
   const rows: FigureRow[] = [];
+  // One image's footnote markers go to the caption's end, a group's to its image's label.
+  const notes: Inline[] = [];
+  let textOffset: number | undefined;
   content.forEach((c, i) => {
     if (c.type !== "paragraph") return;
     const r = run(ctx, c);
     const out: Inline[] = [];
-    for (const child of c.children) {
+    let cell: Extract<Inline, { k: "cell" }> | null = null;
+    const where = () => (group ? (cell?.notes ?? out) : notes);
+    c.children.forEach((child, j) => {
       if (child.type === "text") {
-        out.push({ k: "gap", kids: r.text(child.value) });
-        continue;
+        // Whitespace before an image's footnote reference goes with the reference.
+        const before = c.children[j + 1]?.type === "footnoteReference";
+        (before ? where() : out).push({ k: "gap", kids: r.text(child.value) });
+        return;
+      }
+      if (child.type === "footnoteReference") {
+        where().push(...inline(ctx, r, [child]));
+        return;
       }
       const f = child.type === "image" ? ctx.p.figureOf.get(child) : undefined;
-      if (f?.kind !== "image") continue;
-      r.atom(
-        out,
-        group
-          ? { k: "cell", figure: f, label: f.image.title?.trim() || null }
-          : { k: "figure", figure: f },
-      );
-    }
-    r.end(out);
+      if (f?.kind !== "image") return;
+      if (group) {
+        cell = { k: "cell", figure: f, label: f.image.title?.trim() || null, notes: [] };
+        r.atom(out, cell);
+      } else r.atom(out, { k: "figure", figure: f });
+    });
+    const inCaption = !group && notes.length > 0;
+    if (inCaption) {
+      r.end(notes);
+      textOffset = offsetOf(ctx, c);
+    } else r.end(out);
     rows.push({
       key: rowKeys[i] ?? `#${i}`,
       id: idOf(c),
-      offset: offsetOf(ctx, c),
+      offset: inCaption ? undefined : offsetOf(ctx, c),
       group,
       text: out,
     });
@@ -393,6 +439,8 @@ function markupFigure(ctx: Ctx, n: ContainerDirective, m: FigureMarkup) {
     labelId: label ? idOf(label) : undefined,
     number: first?.n ?? 1,
     caption,
+    notes,
+    offset: textOffset,
     figures: m.figures,
   };
 }
@@ -436,8 +484,8 @@ function block(ctx: Ctx, n: RootContent, hidden: boolean): Drawn | null {
     case "paragraph": {
       const figure = ctx.offsets ? ctx.p.figureOf.get(n) : undefined;
       const offset = offsetOf(ctx, n);
-      const text = textblock(ctx, n, n.children);
-      return figure ? { kind: "figure", offset, text, figure } : { kind: "p", offset, text };
+      if (!figure) return { kind: "p", offset, text: textblock(ctx, n, n.children) };
+      return { kind: "figure", offset, ...figureText(ctx, n), figure };
     }
     case "heading":
       return {

@@ -20,7 +20,7 @@ import {
   slugger,
   walk,
 } from "@tempra/editor";
-import type { Code, FootnoteDefinition, Image, Nodes, Paragraph } from "mdast";
+import type { Code, FootnoteDefinition, FootnoteReference, Image, Nodes, Paragraph } from "mdast";
 import type { ImageSource } from "../images";
 import type { ChartSource } from "./diagram";
 
@@ -67,8 +67,8 @@ export interface Footnote {
 }
 
 /**
- * A figure (tempra-dev: app/reader, Figures): an image that is a paragraph's only content, or a
- * fence drawn as a diagram. Numbered in document order, from 1, so "Figure n." is stable.
+ * A figure (tempra-dev: app/reader, Figures): an image that is a paragraph's only content (with
+ * the footnote references right after it, TEMPRA-218), or a fence drawn as a diagram. Numbered in document order, from 1, so "Figure n." is stable.
  */
 export type Figure = ImageFigure | DiagramFigure;
 
@@ -97,6 +97,8 @@ export interface ImageFigure extends FigureBase {
   host: string | null;
   /** The figure markup it is drawn by (`:::figure`), when it has some that parses. */
   markup?: FigureMarkup;
+  /** The footnote references right after the image, drawn at the end of its caption. */
+  notes: FootnoteReference[];
 }
 
 /**
@@ -235,6 +237,7 @@ export function prepare(tree: Doc, options: BodyOptions = {}): Prepared {
         source: imageSource(options, image.url),
         path: target?.kind === "internal" ? target.path : null,
         host: externalHost(image.url),
+        notes: found.notes,
       };
       f.src = f.source?.src ?? null;
       figures.push(f);

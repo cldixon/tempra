@@ -3,6 +3,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import type { ContainerDirective } from "mdast-util-directive";
 import {
+  ATOM,
   checkFigure,
   type Doc,
   docText,
@@ -217,6 +218,48 @@ describe("figure markup", () => {
     expect(normalize("\\:::figure\ntext")).toBe("::\\:figure\ntext\n");
     expect(normalize("::\\:figure\ntext")).toBe("::\\:figure\ntext\n");
     expect(parseMarkdown("\\:::figure\ntext").children[0]?.type).toBe("paragraph");
+  });
+});
+
+describe("an image with its footnote is a figure (TEMPRA-218)", () => {
+  const notes = (md: string) =>
+    findFigures(stored(md)).map((f) =>
+      f.kind === "image" ? [f.image.alt, f.notes.map((r) => r.identifier)] : [],
+    );
+
+  test("one image and only footnote references after it, whitespace between, is a figure", () => {
+    const defs = "\n\n[^src]: Source.\n\n[^two]: Another.\n";
+    expect(
+      notes(`![A mountain ridge](/assets/r.jpg "Fronalpstock panorama")[^src]${defs}`),
+    ).toEqual([["A mountain ridge", ["src"]]]);
+    expect(notes(`![Two](/two.png) [^src][^two]${defs}`)).toEqual([["Two", ["src", "two"]]]);
+    expect(notes(`![Plain](/p.png)${defs}`)).toEqual([["Plain", []]]);
+    // Any other text, or a reference before the image, and it stays inline: no figure.
+    expect(notes(`![Inline](/i.png)[^src] and words.${defs}`)).toEqual([]);
+    expect(notes(`[^src]![Inline](/i.png)${defs}`)).toEqual([]);
+    expect(notes(`![One](/1.png)[^src]![Two](/2.png)${defs}`)).toEqual([]);
+    // The stored form keeps the reference where it was written; the text has its atom.
+    const md = `![A](/a.png "Caption")[^src]${defs}`;
+    expect(normalize(md)).toBe(md);
+    expect(docText(stored(md)).text).toBe(`${ATOM}${ATOM}`);
+  });
+
+  test("in figure markup an image may carry its references, kept beside it", () => {
+    const md = ':::figure[Two]\n![L](/l.png "Left") [^src]\n\n![R](/r.png)[^two]\n:::';
+    const c = checkFigure(parseMarkdown(md).children[0] as never);
+    expect(c.ok).toBe(true);
+    expect(normalize(md)).toBe(
+      ':::figure[Two]\n![L](/l.png "Left")[^src]\n![R](/r.png)[^two]\n:::\n',
+    );
+    expect(notes(`${md}\n\n[^src]: S.\n\n[^two]: T.`)).toEqual([
+      ["L", ["src"]],
+      ["R", ["two"]],
+    ]);
+    // A reference before the first image is not a figure's.
+    const before = checkFigure(
+      parseMarkdown(":::figure\n[^src]![a](/a.png)\n:::").children[0] as never,
+    );
+    expect(before.ok).toBe(false);
   });
 });
 

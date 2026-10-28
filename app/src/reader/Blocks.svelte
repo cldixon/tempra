@@ -58,10 +58,11 @@
     {:else if x.k === "figure"}
       {@render figureOf(x.figure)}
     {:else if x.k === "cell"}
+      <!-- The image's footnote markers end its label: atoms in the text, the label's words not. -->
       <span class="figure-cell"
-        >{@render figureOf(x.figure)}{#if x.label}<span class="figure-label" data-skip=""
-            >{x.label}</span
-          >{/if}</span
+        >{@render figureOf(x.figure)}{#if x.notes.length > 0}<span class="figure-label"
+            ><span data-skip="">{x.label ?? ""}</span>{@render inline(x.notes)}</span
+          >{:else if x.label}<span class="figure-label" data-skip="">{x.label}</span>{/if}</span
       >
     {:else if x.k === "dropped"}
       <span class="image-dropped" data-atom="">{x.alt}</span>
@@ -88,6 +89,12 @@
   {#each nodes as b (b.key)}
     {#if b.kind === "p"}
       <p data-block={b.id} data-text={b.offset}>{@render inline(b.text)}</p>
+    {:else if b.kind === "figure" && b.notes.length > 0}
+      <!-- Its footnote markers end the caption: the figure is the textblock (TEMPRA-218). -->
+      {#snippet notes()}{@render inline(b.notes)}{/snippet}
+      <figure class="figure" data-block={b.id} data-text={b.offset}
+        ><p>{@render inline(b.text)}</p><Caption figure={b.figure} {notes} /></figure
+      >
     {:else if b.kind === "figure"}
       <figure class="figure" data-block={b.id}
         ><p data-text={b.offset}>{@render inline(b.text)}</p><Caption figure={b.figure} /></figure
@@ -137,19 +144,26 @@
         ></div
       >
     {:else if b.kind === "markup"}
-      <FigureBox spec={b.spec} count={b.count} block={b.id}
+      {#snippet markupCaption()}<span class="figure-number">{figureNumber(b.number, b.count)}</span
+        >{#if b.caption}{" "}{#if typeof b.caption === "string"}{b.caption}{:else}{@render inline(
+              b.caption,
+            )}{/if}{/if}{/snippet}
+      <!-- One image's footnote markers end the caption, and the figure is its textblock. -->
+      <FigureBox spec={b.spec} count={b.count} block={b.id} offset={b.offset}
         >{#each b.rows as row (row.key)}<p
             class={row.group ? "figure-row" : undefined}
             data-block={row.id}
             data-text={row.offset}>{@render inline(row.text)}</p
-          >{/each}<!-- Inside FigureBox's figure. --><!-- svelte-ignore a11y_figcaption_parent --><figcaption
-          data-skip=""
-          data-block={b.labelId}
-          ><span class="figure-number">{figureNumber(b.number, b.count)}</span
-          >{#if b.caption}{" "}{#if typeof b.caption === "string"}{b.caption}{:else}{@render inline(
-                b.caption,
-              )}{/if}{/if}<FromHosts figures={b.figures} /></figcaption
-        ></FigureBox
+          >{/each}<!-- Inside FigureBox's figure. -->{#if b.notes.length > 0}<!-- svelte-ignore a11y_figcaption_parent --><figcaption
+            data-block={b.labelId}
+            ><span data-skip="">{@render markupCaption()}</span>{@render inline(b.notes)}<FromHosts
+              figures={b.figures}
+            /></figcaption
+          >{:else}<!-- svelte-ignore a11y_figcaption_parent --><figcaption
+            data-skip=""
+            data-block={b.labelId}
+            >{@render markupCaption()}<FromHosts figures={b.figures} /></figcaption
+          >{/if}</FigureBox
       >
     {:else if b.kind === "directive"}
       <div class="directive" data-block={b.id}
