@@ -140,3 +140,190 @@
   height: 6px;
   margin-top: 8px;
 }
+
+/* ---------- The page panel (tempra-dev app/page-panel): a page shown in the chat by `show` ----------
+ * Unlike the upload panel it reads as Tempra does, not as the host: Inter, the reader's prose,
+ * the comments' threads, the base pills. Its stylesheet is fonts, tokens, base, prose, reader,
+ * comments and this file (build.ts, dist/panel.ts `pagePanelCss`); the host's light or dark
+ * comes in as data-theme. Inline it shows the head and the page's start under a fade; read in
+ * full (or the host's full screen) the comments sit beside the text where there is room. */
+
+.page-body {
+  margin: 0;
+  padding: 20px 20px 12px;
+  background: var(--tempra-color-bg);
+  container-type: inline-size;
+}
+
+.page-panel .pp-head {
+  margin-bottom: 20px;
+}
+
+.page-panel .pp-where {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 12px;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+}
+
+.page-panel .pp-back {
+  padding: 2px 10px;
+  font-size: var(--tempra-text-meta);
+}
+
+/* What the agent asks of the person: a quiet note with a rule, above the title. */
+.page-panel .pp-ask {
+  margin: 0 0 16px;
+  padding: 8px 12px;
+  border-left: 2px solid var(--tempra-color-text);
+  background: var(--tempra-color-ground);
+  font-size: var(--tempra-text-ui);
+}
+
+.page-panel .pp-ask-who {
+  display: block;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+}
+
+.page-panel .pp-title {
+  margin: 0 0 8px;
+  font-family: var(--tempra-font-display);
+  font-variation-settings: var(--tempra-font-display-settings);
+  font-size: var(--tempra-text-page);
+  font-weight: var(--tempra-weight-medium);
+  line-height: var(--tempra-leading-tight);
+  letter-spacing: -0.01em;
+}
+
+.page-panel .pp-description {
+  margin: 0;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-reader);
+}
+
+.page-panel .pp-byline,
+.page-panel .pp-checked {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin: 12px 0 0;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-ui);
+}
+
+.page-panel .pp-checked {
+  margin-top: 4px;
+}
+
+.page-panel .pp-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.page-panel .pp-tools button[aria-pressed="true"] {
+  background: var(--tempra-color-selected);
+}
+
+.page-panel .pp-count {
+  color: var(--tempra-color-muted);
+}
+
+.page-panel .pp-changes {
+  margin: 0 0 16px;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-ui);
+}
+
+.page-panel .pp-columns {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.page-panel .pp-page {
+  position: relative;
+  min-width: 0;
+}
+
+.page-panel .prose {
+  max-width: none;
+}
+
+/* Inline: the page's start, fading out above Read the whole page. */
+.page-panel .pp-page.clipped .doc {
+  max-height: 420px;
+  overflow: hidden;
+  mask-image: linear-gradient(to bottom, #000 70%, transparent);
+}
+
+.page-panel .pp-more {
+  margin-top: 8px;
+}
+
+.page-panel .pp-sources {
+  margin-top: 2em;
+  padding-top: 1em;
+  border-top: 1px solid var(--tempra-color-border);
+}
+
+.page-panel .pp-sources h2 {
+  margin-top: 0;
+}
+
+.page-panel .pp-side {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  font-size: var(--tempra-text-ui);
+}
+
+.page-panel .pp-side .comment-form textarea,
+.page-panel .pp-side .reply-form textarea {
+  width: 100%;
+}
+
+.page-panel .pp-resolved summary {
+  margin: 8px 0;
+  color: var(--tempra-color-muted);
+  cursor: pointer;
+}
+
+.page-panel .pp-status {
+  min-height: 1.5em;
+  margin: 12px 0 0;
+  color: var(--tempra-color-muted);
+}
+
+.pp-failed {
+  color: var(--tempra-color-muted);
+}
+
+/* Read in full with room beside the text: the comments in their own column, the text centred. */
+@container (min-width: 900px) {
+  .page-panel.full.with-comments .pp-columns {
+    flex-direction: row;
+    align-items: flex-start;
+  }
+
+  .page-panel.full.with-comments .pp-page {
+    flex: 1;
+  }
+
+  .page-panel.full.with-comments .pp-side {
+    position: sticky;
+    top: 12px;
+    flex: 0 0 var(--tempra-panel);
+  }
+
+  .page-panel.full .prose {
+    max-width: var(--tempra-measure-reader);
+    margin-inline: auto;
+  }
+}

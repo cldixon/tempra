@@ -113,9 +113,11 @@ export interface RequestContext {
   note?: string | null;
   /**
    * The person (users row id) and agent behind the actor (tempra-dev:
-   * decisions/agents-act-for-a-person), kept in each event's meta as `by`.
+   * decisions/agents-act-for-a-person), kept in each event's meta as `by`. `surface: "chat"`
+   * marks words the person typed in the page panel a host draws in their chat (tempra-dev
+   * app/page-panel): made over the agent's connection, so the actor stays the agent's.
    */
-  by?: { person: string; agent?: string } | null;
+  by?: { person: string; agent?: string; surface?: "chat" } | null;
 }
 
 /**
@@ -982,9 +984,11 @@ export class LibraryStore {
     const meta: JsonObject = { ...(e.meta ?? {}) };
     if (ctx.note) meta.note = ctx.note;
     if (ctx.by?.person) {
-      meta.by = ctx.by.agent
-        ? { person: ctx.by.person, agent: ctx.by.agent }
-        : { person: ctx.by.person };
+      meta.by = {
+        person: ctx.by.person,
+        ...(ctx.by.agent ? { agent: ctx.by.agent } : {}),
+        ...(ctx.by.surface === "chat" ? { surface: "chat" } : {}),
+      };
     }
     const rows = this.sql.all<{ seq: number }>(
       `INSERT INTO events (ts, actor, request_id, op, path, prev_hash, hash, concept_id, meta)
@@ -4464,14 +4468,13 @@ export class LibraryStore {
           | { kind?: string; thread?: string; id?: string; mentions?: Mention[] }
           | undefined;
         if (!c?.thread || !c.kind) continue;
-        const by = meta.by as { person?: unknown; agent?: unknown } | undefined;
+        const by = meta.by as { person?: unknown; agent?: unknown; surface?: unknown } | undefined;
         if (by && typeof by.person === "string") {
-          bySeq.set(
-            e.seq,
-            typeof by.agent === "string"
-              ? { person: by.person, agent: by.agent }
-              : { person: by.person },
-          );
+          bySeq.set(e.seq, {
+            person: by.person,
+            ...(typeof by.agent === "string" ? { agent: by.agent } : {}),
+            ...(by.surface === "chat" ? { surface: "chat" as const } : {}),
+          });
         }
         if (c.id && Array.isArray(c.mentions) && c.mentions.length > 0) {
           mentioned.set(
@@ -5258,6 +5261,28 @@ export class LibraryStore {
     return held.payload;
   }
 
+  /**
+   * A grant for the page panel (MCP `show`; tempra-dev app/page-panel): what lets the panel, drawn
+   * in the person's chat, comment on and check one page as that person. Signed, so nothing is
+   * kept; good for an hour, as an upload link is.
+   */
+  signPanel(payload: PanelGrant, ttlSeconds = 3600): string {
+    return this.sign("panel:", payload, ttlSeconds);
+  }
+
+  /** Checks a page panel's grant: its signature, expiry and kind. */
+  openPanel(token: string): PanelGrant & { exp: number } {
+    const bad = new OkfError(
+      403,
+      "bad_panel",
+      "This page panel has expired. Ask the agent to show the page again.",
+    );
+    const payload = this.unsign<PanelGrant>("panel:", token, bad);
+    if (payload.k !== "panel" || typeof payload.path !== "string") throw bad;
+    if (typeof payload.person !== "string") throw bad;
+    return payload;
+  }
+
   private sign(domain: string, payload: object, ttlSeconds: number): string {
     const exp = Math.floor(this.clock().getTime() / 1000) + ttlSeconds;
     const body = b64url(new TextEncoder().encode(JSON.stringify({ ...payload, exp })));
@@ -5280,6 +5305,13 @@ export class LibraryStore {
     if (typeof payload?.exp !== "number" || payload.exp * 1000 < this.clock().getTime()) throw bad;
     return payload;
   }
+}
+
+/** What a page panel may do, and for whom: one page, one person (users row id). */
+export interface PanelGrant {
+  k: "panel";
+  path: string;
+  person: string;
 }
 
 export type DownloadPayload =

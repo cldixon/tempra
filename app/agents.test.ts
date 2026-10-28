@@ -101,6 +101,19 @@ describe("AgentName's words", () => {
     expect(actorText(actorView("human:ann", null, byId, "human:dev"))).toBe("ann");
   });
 
+  test("words typed in the chat's page panel are the person's, in their agent's chat", () => {
+    const chat = { person: "u1", agent: "agt_ann", surface: "chat" as const };
+    const theirs = actorView("claude-ai/connector", chat, byId, "human:dev");
+    expect(actorText(theirs)).toBe("@ann, in Claude");
+    expect(theirs.agent).toBe(false);
+    expect(actorText(actorView("claude-ai/connector", chat, byId, "human:ann"))).toBe(
+      "You, in Claude",
+    );
+    expect(actorLabel("claude-ai/connector", chat, { agt_ann: "Claude for @ann" })).toBe(
+      "@ann, in Claude",
+    );
+  });
+
   test("the component draws the name, then whom it acts for", () => {
     const html = (who: { name: string; for: string | null }) => {
       const { host, destroy } = draw(AgentName, { who });

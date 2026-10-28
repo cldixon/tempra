@@ -4167,6 +4167,230 @@ async function uploadPanel(token: string): Promise<string[]> {
   return problems;
 }
 
+/**
+ * The page panel (tempra-dev app/page-panel): an agent writes a page with an image, a diagram and
+ * a link, then `show`s it with an ask; the gate's host (scripts/panel-host.ts) draws the panel
+ * under the CSP its `_meta.ui` declares, passing its tool calls on over MCP as a host does. The
+ * person reads it (the image from its signed link, the diagram drawn, Inter loaded), comments on
+ * a passage (their words, marked as typed in the chat), asks the agent about a passage in the
+ * chat, is sent to Tempra to check it, and follows a link to another page in place.
+ */
+async function pagePanel(token: string): Promise<string[]> {
+  /** Selects the first `n` characters of an element's first text, as a person dragging would. */
+  const selectStart = (n: number) =>
+    `(p) => { const r = document.createRange(); r.setStart(p.firstChild, 0); r.setEnd(p.firstChild, ${n}); const s = document.getSelection(); s.removeAllRanges(); s.addRange(r); }`;
+  const client = new Client({ name: "gate", version: "1.0.0" });
+  await client.connect(
+    new StreamableHTTPClientTransport(new URL(`${base}/mcp`), {
+      requestInit: { headers: { Authorization: `Bearer ${token}` } },
+    }),
+  );
+  const text = (r: unknown) =>
+    ((r as { content?: { type: string; text?: string }[] }).content ?? [])
+      .map((c) => c.text ?? "")
+      .join("\n");
+  let html: string;
+  let csp: { connectDomains?: string[]; resourceDomains?: string[] };
+  let result: Record<string, unknown>;
+  const args = {
+    path: "gate-page/margin.md",
+    ask: "Does the definition match what we agreed?",
+    focus: "revenue minus the cost of goods",
+  };
+  try {
+    const png = greyPng(60, 40, 120);
+    const prep = await client.callTool({
+      name: "prepare_upload",
+      arguments: { path: "gate-page/margin-chart.png" },
+    });
+    const url = (prep.structuredContent as { upload: { url: string } }).upload.url;
+    const put = await fetch(url, {
+      method: "PUT",
+      body: png,
+      headers: { "Content-Type": "image/png" },
+    });
+    if (!put.ok) return [`the page's image: ${put.status} ${await put.text()}`];
+    const costs = await client.callTool({
+      name: "write",
+      arguments: {
+        path: "gate-page/costs.md",
+        content:
+          "---\ntype: Metric\ntitle: Costs\ndescription: What goes into cost.\n---\nCosts are what we pay to make what we sell.\n",
+        note: "gate: a page to link to",
+      },
+    });
+    if (costs.isError) return [`writing costs.md: ${text(costs)}`];
+    const page = await client.callTool({
+      name: "write",
+      arguments: {
+        path: args.path,
+        content: [
+          "---",
+          "type: Metric",
+          "title: Margin",
+          "description: Gross margin, as we report it.",
+          "status: draft",
+          "---",
+          "Margin is revenue minus the cost of goods, over revenue. See [costs](/gate-page/costs.md).",
+          "",
+          '![A grey chart](/gate-page/margin-chart.png "Margin by month")',
+          "",
+          "```mermaid",
+          "flowchart LR",
+          "  R[Revenue] --> M[Margin]",
+          "  C[Costs] --> M",
+          "```",
+          "",
+          "## Caveats",
+          "",
+          "Returns are taken out of revenue before margin is worked out.",
+          "",
+        ].join("\n"),
+        note: "gate: a page to show",
+      },
+    });
+    if (page.isError) return [`writing margin.md: ${text(page)}`];
+    const read = await client.readResource({ uri: "ui://tempra/page" });
+    const content = read.contents[0] as {
+      text?: string;
+      _meta?: { ui?: { csp?: { connectDomains?: string[]; resourceDomains?: string[] } } };
+    };
+    html = content.text ?? "";
+    csp = content._meta?.ui?.csp ?? {};
+    if (!csp.resourceDomains?.includes(base)) {
+      return [`the page panel declares resource domains ${JSON.stringify(csp.resourceDomains)}`];
+    }
+    result = (await client.callTool({ name: "show", arguments: args })) as Record<string, unknown>;
+    if (result.isError) return [`show: ${text(result)}`];
+  } catch (e) {
+    await client.close();
+    return [String(e)];
+  }
+  const hostJs = await Bun.build({
+    entrypoints: [join(import.meta.dir, "panel-host.ts")],
+    target: "browser",
+    minify: true,
+  });
+  if (!hostJs.success || !hostJs.outputs[0]) return [`panel host: ${hostJs.logs.join("; ")}`];
+  const hostCode = await hostJs.outputs[0].text();
+  const b = await openBrowser();
+  if (typeof b === "string") return [b];
+  const { page, step, problems } = b;
+  const panel = page.frameLocator('iframe[title="Page panel"]');
+  const shots = process.env.GATE_SCREENSHOTS;
+  const shoot = (name: string) =>
+    shots ? page.screenshot({ path: `${shots}/${name}.png`, fullPage: true }) : Promise.resolve();
+  const calls: string[] = [];
+  try {
+    // The host passes the panel's tool calls on, as the person's chat does, over this connection.
+    await page.exposeFunction(
+      "gateCallTool",
+      async (params: { name: string; arguments?: object }) => {
+        calls.push(params.name);
+        return await client.callTool({ name: params.name, arguments: { ...params.arguments } });
+      },
+    );
+    await step("the host draws the page: title, ask, body, image, diagram, Inter", async () => {
+      await page.setViewportSize({ width: 900, height: 1400 });
+      await page.setContent("<!doctype html><html><body></body></html>");
+      await page.addScriptTag({ content: hostCode, type: "module" });
+      await page.waitForFunction('typeof window.startPanel === "function"');
+      const frame = { title: "Page panel", width: 760, height: 1300, tools: true };
+      const call = [html, csp, args, result, frame].map((v) => JSON.stringify(v)).join(", ");
+      await page.evaluate(`window.startPanel(${call})`);
+      await panel.getByRole("heading", { name: "Margin", level: 1 }).waitFor({ timeout: 15_000 });
+      await panel.locator(".pp-ask", { hasText: "Does the definition match" }).waitFor();
+      await panel.locator(".prose", { hasText: "Margin is revenue minus" }).first().waitFor();
+      await panel.locator(".pp-byline .chip", { hasText: "Draft" }).waitFor();
+      // The image loads from its signed link under the panel's CSP.
+      const img = panel.locator('.prose img[alt="A grey chart"]');
+      await img.waitFor({ timeout: 10_000 });
+      // Script strings: this file has no DOM types, and the panel's frame is another origin.
+      let loaded = false;
+      for (let i = 0; i < 50 && !loaded; i++) {
+        loaded = (await img.evaluate("(i) => i.complete && i.naturalWidth > 0")) === true;
+        if (!loaded) await page.waitForTimeout(200);
+      }
+      if (!loaded) throw new Error("the page's image did not load in the panel");
+      await panel.locator(".prose .diagram-svg svg").first().waitFor({ timeout: 15_000 });
+      await shoot("page-panel");
+    });
+    await step("Read the whole page shows it all; the focus is highlighted", async () => {
+      const more = panel.getByRole("button", { name: "Read the whole page" });
+      if (await more.count()) await more.click();
+      await panel.locator(".prose h2", { hasText: "Caveats" }).waitFor();
+      const inter = await panel
+        .locator("body")
+        .evaluate(
+          `async () => { await document.fonts.ready; return [...document.fonts].some((f) => f.family.includes("Inter") && f.status === "loaded"); }`,
+        );
+      if (!inter) throw new Error("Inter did not load in the panel");
+    });
+    await step("the person comments on a passage, as themselves; the agent is told", async () => {
+      await panel
+        .locator(".prose p", { hasText: "Returns are taken out" })
+        .evaluate(selectStart("Returns are taken out of revenue".length));
+      await panel.getByRole("button", { name: "Comment", exact: true }).click({ timeout: 5000 });
+      await panel.locator("#pp-draft").fill("Say whether this is net of refunds too.");
+      await panel.locator("form.comment-form button.primary").click();
+      await panel
+        .locator(".pp-status", { hasText: "Comment posted." })
+        .waitFor({ timeout: 10_000 });
+      await panel.locator(".pp-side .said", { hasText: "net of refunds" }).waitFor();
+      const told = await page.evaluate<string[]>("window.panelContext");
+      if (
+        !told.some(
+          (m) => m.includes("the person commented on") && m.includes("Returns are taken out"),
+        )
+      ) {
+        throw new Error(`the model was told ${JSON.stringify(told)}`);
+      }
+      const threads = text(
+        await client.callTool({ name: "comments", arguments: { path: args.path } }),
+      );
+      if (!threads.includes("net of refunds") || !threads.includes("the person, in the chat")) {
+        throw new Error(`the thread reads ${clip(threads, 300)}`);
+      }
+      await shoot("page-panel-comment");
+    });
+    await step("the person asks the agent about a passage, in the chat", async () => {
+      await panel
+        .locator(".prose p", { hasText: "Margin is revenue minus" })
+        .first()
+        .evaluate(selectStart("Margin is revenue".length));
+      await panel.getByRole("button", { name: "Ask in chat" }).click({ timeout: 5000 });
+      await panel.locator("#pp-draft").fill("Why over revenue and not cost?");
+      await panel.getByRole("button", { name: "Send to chat" }).click();
+      await panel.locator(".pp-status", { hasText: "Sent to the chat." }).waitFor();
+      const said = await page.evaluate<string[]>("window.panelMessages");
+      if (!said.some((m) => m.includes("> Margin is revenue") && m.includes("Why over revenue"))) {
+        throw new Error(`the chat heard ${JSON.stringify(said)}`);
+      }
+    });
+    await step("checking it opens its review in Tempra", async () => {
+      await panel.getByRole("button", { name: "Check in Tempra" }).click();
+      const review = JSON.stringify(`${base}/dev/mcp/${args.path}?review=1`);
+      await page.waitForFunction(`window.panelLinks.includes(${review})`, undefined, {
+        timeout: 5000,
+      });
+    });
+    await step("a link to another page opens it in place; Back returns", async () => {
+      await panel.locator(".prose a", { hasText: "costs" }).click();
+      await panel.getByRole("heading", { name: "Costs", level: 1 }).waitFor({ timeout: 10_000 });
+      await shoot("page-panel-linked");
+      await panel.getByRole("button", { name: "Back" }).click();
+      await panel.getByRole("heading", { name: "Margin", level: 1 }).waitFor();
+      if (!calls.includes("page_act") || !calls.includes("show")) {
+        throw new Error(`the panel called ${JSON.stringify(calls)}`);
+      }
+    });
+  } finally {
+    await b.close();
+    await client.close();
+  }
+  return problems;
+}
+
 /** Runs the daily maintainers as the app's Export now does, and reads the export from R2. */
 async function nightlyExport(owner: string, slug: string, originals: number): Promise<string[]> {
   const lib = `${base}/${owner}/${slug}`;
@@ -4898,6 +5122,12 @@ try {
   );
   for (const p of panel) console.log(`  - ${p}`);
   if (panel.length > 0) failed = true;
+  const shown = await pagePanel(mcpToken).catch((e) => [String(e)]);
+  console.log(
+    `${shown.length === 0 ? "PASS" : "FAIL"} the page panel: an MCP host draws a page; the person comments, asks in the chat and follows a link`,
+  );
+  for (const p of shown) console.log(`  - ${p}`);
+  if (shown.length > 0) failed = true;
   if (!mcpOk) failed = true;
   // Several agents at once over MCP: a stale edit refused, turns on one concept, parallel
   // writes; every write must reach the change feed. Patient, since the gate's earlier steps

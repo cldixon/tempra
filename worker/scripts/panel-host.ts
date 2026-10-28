@@ -9,6 +9,16 @@ import { AppBridge, PostMessageTransport } from "@modelcontextprotocol/ext-apps/
 
 interface Csp {
   connectDomains?: string[];
+  resourceDomains?: string[];
+}
+
+/** How the host frames a panel, and whether it passes the panel's tool calls on (the page panel). */
+interface Frame {
+  title?: string;
+  width?: number;
+  height?: number;
+  /** Tool calls go to the gate (Playwright's `gateCallTool`), which makes them over MCP. */
+  tools?: boolean;
 }
 
 declare global {
@@ -18,27 +28,37 @@ declare global {
       csp: Csp,
       args: Record<string, unknown>,
       result: Record<string, unknown>,
+      frame?: Frame,
     ): Promise<void>;
     panelMessages: string[];
+    /** Links panels asked the host to open. */
+    panelLinks: string[];
+    /** What panels told the model (`ui/update-model-context`). */
+    panelContext: string[];
+    gateCallTool?(params: unknown): Promise<unknown>;
   }
 }
 
 window.panelMessages = [];
+window.panelLinks = [];
+window.panelContext = [];
 
-window.startPanel = async (html, csp, args, result) => {
+window.startPanel = async (html, csp, args, result, frame = {}) => {
+  const resources = (csp.resourceDomains ?? []).join(" ");
   // What a host enforces: nothing but the panel itself and the domains it declares.
   const policy = [
     "default-src 'none'",
     "script-src 'unsafe-inline'",
     "style-src 'unsafe-inline'",
-    "img-src data:",
+    `img-src data: ${resources}`.trim(),
+    `font-src ${resources || "'none'"}`,
     `connect-src ${(csp.connectDomains ?? []).join(" ") || "'none'"}`,
   ].join("; ");
   const iframe = document.createElement("iframe");
   iframe.sandbox.add("allow-scripts");
-  iframe.title = "Upload panel";
-  iframe.width = "480";
-  iframe.height = "360";
+  iframe.title = frame.title ?? "Upload panel";
+  iframe.width = String(frame.width ?? 480);
+  iframe.height = String(frame.height ?? 360);
   iframe.srcdoc = html.replace(
     "<head>",
     `<head><meta http-equiv="Content-Security-Policy" content="${policy}">`,
@@ -49,14 +69,36 @@ window.startPanel = async (html, csp, args, result) => {
   const bridge = new AppBridge(
     null,
     { name: "tempra gate host", version: "1.0.0" },
-    { message: { text: {} }, openLinks: {} },
+    {
+      message: { text: {} },
+      openLinks: {},
+      updateModelContext: { text: {} },
+      ...(frame.tools ? { serverTools: {} } : {}),
+    },
   );
+  if (frame.tools) {
+    bridge.oncalltool = async (params) => {
+      if (!window.gateCallTool) throw new Error("no tool calls in this host");
+      return (await window.gateCallTool(params)) as Awaited<
+        ReturnType<NonNullable<typeof bridge.oncalltool>>
+      >;
+    };
+  }
+  bridge.onupdatemodelcontext = async (params) => {
+    for (const c of (params.content ?? []) as { type: string; text?: string }[]) {
+      if (c.type === "text" && c.text) window.panelContext.push(c.text);
+    }
+    return {};
+  };
   bridge.onmessage = async (params) => {
     const blocks = (params.content ?? []) as { type: string; text?: string }[];
     for (const c of blocks) if (c.type === "text" && c.text) window.panelMessages.push(c.text);
     return {};
   };
-  bridge.onopenlink = async () => ({});
+  bridge.onopenlink = async (params) => {
+    window.panelLinks.push(params.url);
+    return {};
+  };
   bridge.oninitialized = () => {
     void bridge.sendToolInput({ arguments: args }).then(() => bridge.sendToolResult(result));
   };

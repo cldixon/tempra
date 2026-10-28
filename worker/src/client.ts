@@ -40,6 +40,8 @@ export const LIBRARY_METHODS = [
   "openDownload",
   "signUpload",
   "openUpload",
+  "signPanel",
+  "openPanel",
   "dump",
   "pruneUsage",
   "maintenance",
