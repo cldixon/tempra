@@ -68,7 +68,6 @@ describe("MCP server", () => {
       "edit",
       "grep",
       "move",
-      "page_act",
       "prepare_upload",
       "read",
       "show",

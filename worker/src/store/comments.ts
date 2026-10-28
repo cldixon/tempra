@@ -47,8 +47,6 @@ export type ThreadStatus = "open" | "resolved";
 export interface ActionBy {
   person: string;
   agent?: string;
-  /** Typed by the person in the page panel in their chat, over the agent's connection. */
-  surface?: "chat";
 }
 
 export interface CommentView {

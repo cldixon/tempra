@@ -19,17 +19,6 @@ export interface Contributor {
 export interface ActedBy {
   person: string;
   agent?: string;
-  /**
-   * Typed by the person in the page panel in their chat (tempra-dev app/page-panel), sent over
-   * their agent's connection: the words are the person's, named "@ann, in Claude".
-   */
-  surface?: "chat";
-}
-
-/** "Claude for @ann" as the person in that chat: "@ann, in Claude". */
-export function inChat(agentLabel: string): string {
-  const m = / for (@\S+)$/.exec(agentLabel);
-  return m ? `${m[1]}, in ${agentLabel.slice(0, m.index)}` : `${agentLabel}, from the chat`;
 }
 
 /** Apps whose slug does not read as their name word by word. */
@@ -86,13 +75,13 @@ export function actorLabel(
   names: Record<string, string>,
 ): string {
   const named = by?.agent ? names[by.agent] : undefined;
-  if (named) return by?.surface === "chat" ? inChat(named) : named;
+  if (named) return named;
   return actor.startsWith("human:") ? who(actor) : actorAgentName(actor);
 }
 
 /** An ActorView as one line of text: "Claude Code for @dev", "You", "ann". */
-export const actorText = (v: Pick<ActorView, "name" | "for" | "via">) =>
-  v.for ? `${v.name} for ${v.for}` : v.via ? `${v.name}, ${v.via}` : v.name;
+export const actorText = (v: Pick<ActorView, "name" | "for">) =>
+  v.for ? `${v.name} for ${v.for}` : v.name;
 
 /** Who acted, as a byline or a row draws them: "Claude Code for @cl_dixon", "You", "ann". */
 export interface ActorView {
@@ -100,8 +89,6 @@ export interface ActorView {
   name: string;
   /** For an agent, whom it acts for ("@cl_dixon"); null for a person. */
   for: string | null;
-  /** For a person who wrote in the chat's page panel, where: "in Claude". */
-  via?: string;
   agent: boolean;
   /** The signed-in person themselves (not their agents). */
   you: boolean;
@@ -125,14 +112,6 @@ export function actorView(
   me: string | null,
 ): ActorView {
   const c = by?.agent ? agents[by.agent] : undefined;
-  if (by?.surface === "chat") {
-    // The person's words, sent from the chat through their agent: named as the person.
-    const handle = c?.person ?? null;
-    const you = me !== null && handle !== null && me === `human:${handle}`;
-    const app = c?.agent?.name ? readableName(c.agent.name) : actorAgentName(actor);
-    const name = you ? "You" : handle ? `@${handle}` : "Someone";
-    return { name, for: null, via: `in ${app}`, agent: false, you, mark: handle ?? app };
-  }
   const human = actor.startsWith("human:") && !by?.agent;
   if (human) {
     const you = me !== null && actor === me;

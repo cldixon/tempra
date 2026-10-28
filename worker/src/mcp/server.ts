@@ -54,7 +54,7 @@ import {
 } from "../store/store";
 import { requireOwner } from "../tenancy";
 import { kindOf, prepareUpload } from "../uploads";
-import { pagePayload, type ShowOptions, shownText } from "./page";
+import { pagePayload, pageUrl } from "./page";
 
 export interface McpContext {
   /** The ledger actor, access and tool tier: the same in every library the caller reaches. */
@@ -130,7 +130,7 @@ How to work:
 6. Never write index.md or log.md (the server synthesizes them). Never set \`generated\` (the server stamps it) or \`verified\` (not yours to claim). Set \`status\` and \`stale_after\` honestly. Timestamps are full ISO 8601 datetimes with an offset (\`stale_after: 2026-12-31T00:00:00Z\`); a plain date is flagged.
 7. Use \`work\` to find what needs doing: open comments, stale concepts, broken links, lint, hotlinked images (\`external_image\`), and structure (a directory's index.md made poor by its concepts: missing, long or title-repeating descriptions, duplicate titles, concepts nothing links to, a directory with one concept, none, or too many); \`work\` with kind stale_soon lists what goes stale within 14 days. Only a new \`stale_after\` resets a concept's clock; other edits leave it stale.
 8. Comments are how people ask you for changes. Before editing a concept, read its open threads with \`comments\`; make the change a comment asks for, then answer it with \`comment\` (reply, and resolve what you fixed). Ask with a reply when unsure; never resolve a thread you did not address. A concept with open threads cannot be deleted until they are resolved.
-9. To have the person read a page (they ask to see it, or you want it reviewed after you wrote it), \`show\` it: a chat that shows apps draws it in a panel, with \`ask\` (what you want from them), \`focus\` (a passage) and \`since\` (\`previous\` marks what your last write changed). They can comment there (their words, marked as typed in the chat) or ask you about a passage; you are told in the chat's context. Do not \`show\` what you only read for yourself.`;
+9. When the person asks to see a page, or you want them to read one (e.g. one you just wrote), \`show\` it: a chat that shows apps draws it in a panel as the Tempra app does. Do not \`show\` what you only read for yourself.`;
 
 const text = (t: string): CallToolResult => ({ content: [{ type: "text", text: t }] });
 
@@ -149,14 +149,14 @@ const panelMeta = (origin: string) => ({
 });
 
 /**
- * The page panel (tempra-dev: app/page-panel): `show` draws a page in the chat with the app's
- * reader, its comments and the person's actions on it. It loads Inter and the page's images from
- * this deployment (signed image links; the fonts are static assets), so it declares the origin
- * for resources too; it fetches nothing else, and acts only through `page_act`.
+ * The page panel (tempra-dev: app/page-panel): `show` draws one page in the chat with the app's
+ * reader and the design package, read only. It loads Inter and the page's images from this
+ * deployment (signed image links; the fonts are static assets), so it declares the origin for
+ * resources; it calls nothing.
  */
 export const PAGE_PANEL_URI = "ui://tempra/page";
 const pagePanelMeta = (origin: string) => ({
-  ui: { csp: { connectDomains: [origin], resourceDomains: [origin] }, prefersBorder: true },
+  ui: { csp: { resourceDomains: [origin] }, prefersBorder: true },
 });
 /** The panel's document, its fonts at this deployment's own `/_design/` URLs. */
 export const pagePanelHtml = (origin: string) =>
@@ -984,103 +984,25 @@ export function buildServer(ctx: McpContext): McpServer {
     {
       title: "Show a page to the person",
       description:
-        'Show a concept to the person you work for, drawn as the app draws it, in a panel in the chat (a chat that shows apps; elsewhere they get a link). Use it when they ask to see a page, or when you want them to read or review one: after you wrote or changed it (`since: "previous"` draws what your last write changed, `since: "checked"` what changed since they last checked it, or a seq), or to point them at a passage (`focus`, text copied from the body). `ask` is one or two sentences of what you want from them, shown above the page ("Does the Limits section match what we agreed?"). In the panel they can read it with its figures and sources, see and answer its comment threads, comment on a passage or the page (recorded as typed by them in the chat), or select a passage and ask you about it in the chat; checking it stays in Tempra, which the panel opens. Writes nothing. Their comments reach you in the chat\'s context; read and answer them with `comments` and `comment`.',
+        "Show one concept to the person you work for, drawn as the Tempra app draws it, in a panel in the chat (in a chat that shows apps; elsewhere give them the link this returns). Use it when they ask to see a page, or when you want them to read one, e.g. after you wrote it. It is for reading only. Writes nothing.",
       _meta: { ui: { resourceUri: PAGE_PANEL_URI } },
       inputSchema: {
         path: z.string().describe("The concept, e.g. `v2/limits.md`."),
-        ask: z
-          .string()
-          .max(500)
-          .optional()
-          .describe("What you want from the person, in a sentence or two, shown above the page."),
-        focus: z
-          .string()
-          .max(500)
-          .optional()
-          .describe("A passage to show first: text copied from the body, as `read` shows it."),
-        since: z
-          .union([z.number().int(), z.enum(["previous", "checked"])])
-          .optional()
-          .describe(
-            "Draw what changed in the text: since a seq, since the `previous` version, or since the person last `checked` it.",
-          ),
         ...libArg,
       },
       annotations: readOnly,
     },
-    guarded(async ({ path, ask, focus, since, library }) => {
+    guarded(async ({ path, library }) => {
       const { token, lib } = pick(library);
-      const opts: ShowOptions = { ask, focus, since, asker: ctx.by?.agent ?? null };
-      const person = ctx.by?.person ?? null;
-      const payload = await pagePayload(lib, token, ctx.origin, path, opts, person, ctx.agentNames);
-      const result = text(shownText(payload, true));
-      // The panel's data: the host hands it to the panel and keeps it out of the model's context.
-      result.structuredContent = { page: payload };
-      return result;
-    }),
-  );
-
-  server.registerTool(
-    "page_act",
-    {
-      title: "Act from the page panel",
-      description:
-        "Only the page panel `show` draws calls this, for the person reading it: never call it yourself (comment with `comment`). It opens, replies to, resolves or reopens a comment thread with the words the person typed in the panel, with the panel's grant, recorded as typed by them in the chat.",
-      _meta: { ui: { resourceUri: PAGE_PANEL_URI, visibility: ["app"] } },
-      inputSchema: {
-        grant: z.string().describe("The panel's grant, from `show`."),
-        action: z.enum(["open", "reply", "resolve", "reopen"]),
-        thread: z.string().optional().describe("reply, resolve, reopen: the thread id."),
-        quote: z.string().optional().describe("open: the passage, as the reader selected it."),
-        from: z.number().int().optional().describe("open: where the quote starts in the text."),
-        body: z.string().optional(),
-        since: z.union([z.number().int(), z.enum(["previous", "checked"])]).optional(),
-        ...libArg,
-      },
-      annotations: writes,
-    },
-    guarded(async ({ grant, action, thread, quote, from, body, since, library }) => {
-      const { token, lib } = pick(library);
-      const held = await lib.openPanel(grant);
-      // The grant is for this connection's person, on one page.
-      if (!ctx.by?.person || held.person !== ctx.by.person) {
-        throw new OkfError(403, "bad_panel", "This panel was shown to someone else.");
-      }
-      // The call comes over the agent's connection, so the actor stays the agent's; `surface`
-      // says the person typed it in the chat (tempra-dev app/mcp-app-questions, 1).
-      const req: RequestContext = {
-        actor: ctx.actor,
-        request_id: crypto.randomUUID(),
-        note: null,
-        by: { ...ctx.by, surface: "chat" },
-      };
-      const path = held.path;
-      checkComment(token, path);
-      if (action === "open") {
-        const said = (body ?? "").trim();
-        if (!said) throw new OkfError(400, "bad_request", "A comment needs words.");
-        const anchor = quote ? { quote, ...(from === undefined ? {} : { from }) } : null;
-        const act: CommentAction = { kind: "open", path, body: said, anchor };
-        await (ctx.comment ? ctx.comment(token, req, act) : lib.comment(req, act));
-      } else {
-        if (!thread) throw new OkfError(400, "bad_request", `\`${action}\` needs the thread.`);
-        const t = await lib.thread(thread);
-        if (t.path !== path)
-          throw new OkfError(403, "bad_panel", "That thread is on another page.");
-        const act: CommentAction = { kind: action, thread, body: body ?? "" };
-        await (ctx.comment ? ctx.comment(token, req, act) : lib.comment(req, act));
-      }
-      const payload = await pagePayload(
-        lib,
-        token,
-        ctx.origin,
-        path,
-        { since },
-        ctx.by.person,
-        ctx.agentNames,
+      const page = await pagePayload(lib, token, ctx.origin, path, ctx.agentNames);
+      const result = text(
+        [
+          `Showing "${page.concept.title}" (${page.concept.path}) to the person in the chat, as the app draws it.`,
+          `If it does not show, give them the link: ${pageUrl(ctx.origin, page)}`,
+        ].join("\n"),
       );
-      const result = text(`Done: ${action} on ${path}.`);
-      result.structuredContent = { page: payload };
+      // The panel's data: the host hands it to the panel and keeps it out of the model's context.
+      result.structuredContent = { page };
       return result;
     }),
   );
@@ -2052,9 +1974,7 @@ export function buildServer(ctx: McpContext): McpServer {
             const text = body ? `\n  ${body.replace(/\n/g, "\n  ")}` : "";
             const named = a.comment ? mentions.get(a.comment) : undefined;
             const to = named ? ` (mentioned ${named.join(", ")})` : "";
-            const agent = (a.by?.agent && names.get(a.by.agent)) ?? a.actor;
-            // Words the person typed in the page panel are theirs, sent through their agent.
-            const who = a.by?.surface === "chat" ? `the person, in the chat with ${agent}` : agent;
+            const who = (a.by?.agent && names.get(a.by.agent)) ?? a.actor;
             return `- ${who}${verb} at ${a.ts}${to}${text ? ":" : "."}${text}`;
           });
           return [head, ...quote, ...said].join("\n");
@@ -2176,8 +2096,7 @@ export function buildServer(ctx: McpContext): McpServer {
     PAGE_PANEL_URI,
     {
       title: "Show a page",
-      description:
-        "The panel `show` draws in the chat: a page as the app shows it, its comments, and the person's actions on it.",
+      description: "The panel `show` draws in the chat: one page as the app shows it, to read.",
       mimeType: MCP_APP_MIME,
       _meta: pagePanelMeta(ctx.origin),
     },

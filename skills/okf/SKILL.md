@@ -153,9 +153,7 @@ Comments are how people ask you for changes. A thread sits on a concept, often o
 
 ## Showing a page to the person
 
-`show` draws a concept for the person, as the app draws it, in a panel in the chat (in a chat that shows apps; elsewhere they get its link). Use it when they ask to see a page, or when you want them to read or review one: after you wrote or changed it (`since: "previous"` marks what your last write changed in the text), to point at a passage (`focus`, copied from the body), with `ask` saying in a sentence what you want from them. Do not `show` pages you only read for yourself.
-
-In the panel the person can comment on a passage or the page and answer threads (their words, recorded as typed by them in the chat), or select a passage and ask you about it, which arrives as their next message. When they comment, you are told in the chat's context: read the thread with `comments` and answer it with `comment` when they ask you to. Checking a page stays in Tempra; the panel opens it there.
+`show` draws one concept for the person, as the Tempra app draws it, in a panel in the chat (in a chat that shows apps; elsewhere give them the link it returns). Use it when they ask to see a page, or when you want them to read one, such as one you just wrote. It is for reading only. Do not `show` pages you only read for yourself.
 
 ## When to split a concept
 

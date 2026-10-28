@@ -168,7 +168,7 @@ export function generatePanel(): string {
 /** The panels' stylesheet: the tokens and panel.css, no webfonts. */
 export const panelCss: string = ${JSON.stringify(`${css}\n`)};
 
-/** The page panel's stylesheet: Inter at \`/_design/\` names, tokens, base, prose, reader, comments, panel. */
+/** The page panel's stylesheet: Inter at \`/_design/\` names, tokens, base, prose, reader, panel. */
 export const pagePanelCss: string = ${JSON.stringify(generatePagePanel())};
 `;
 }
@@ -176,18 +176,10 @@ export const pagePanelCss: string = ${JSON.stringify(generatePagePanel())};
 /**
  * The page panel's stylesheet (tempra-dev app/page-panel): it reads as the app does, so it has
  * Inter (at the app's `/_design/` names, which the Worker points at its own origin when it serves
- * the panel), the tokens, base, prose, reader and comments CSS, and panel.css.
+ * the panel), the tokens, base, prose and reader CSS, and panel.css.
  */
 export function generatePagePanel(): string {
-  let css = [
-    "fonts.css",
-    "tokens.css",
-    "base.css",
-    "prose.css",
-    "reader.css",
-    "comments.css",
-    "panel.css",
-  ]
+  let css = ["fonts.css", "tokens.css", "base.css", "prose.css", "reader.css", "panel.css"]
     .map((f) => readFileSync(join(ROOT, "src", f), "utf8").trim())
     .join("\n\n");
   for (const file of readdirSync(join(ROOT, "fonts")).filter((f) => f.endsWith(".woff2"))) {

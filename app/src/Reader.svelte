@@ -38,7 +38,6 @@
     highlights,
     onMark,
     onComment,
-    onAsk,
     figureView,
   }: {
     prepared: Prepared;
@@ -54,8 +53,6 @@
     onMark?(id: string | null): void;
     /** Offers Comment on selected text (text offsets). */
     onComment?(range: { from: number; to: number }): void;
-    /** Offers Ask in chat on selected text (the page panel in a chat, tempra-dev app/page-panel). */
-    onAsk?(range: { from: number; to: number }): void;
     /** What the full-screen view of a figure shows beyond the figure (title, an image's facts). */
     figureView?: FigureView;
   } = $props();
@@ -138,7 +135,7 @@
   $effect(() => {
     const comment = onComment;
     const text = prepared.text.text;
-    if (!comment && !onAsk) return;
+    if (!comment) return;
     let wait: ReturnType<typeof setTimeout> | undefined;
     const follow = () => {
       clearTimeout(wait);
@@ -160,7 +157,7 @@
       const el = root;
       const sel = document.getSelection();
       const at = el ? selectionAt(el, sel) : null;
-      if (!comment || !at || !text.slice(at.from, at.to).trim()) return;
+      if (!at || !text.slice(at.from, at.to).trim()) return;
       e.preventDefault();
       clearTimeout(wait);
       tools = null;
@@ -253,9 +250,9 @@
       {@render card(content)}
     </Floating>
   {/if}
-  {#if tools && (onComment || onAsk)}
+  {#if tools && onComment}
     <Floating rect={tools.rect} class="selection-tools">
-      <div role="toolbar" aria-label="Selection">{#if onComment}
+      <div role="toolbar" aria-label="Selection">
         <!-- Pressing the button must not take the selection away first. -->
         <button
           type="button"
@@ -266,21 +263,11 @@
             const range = tools?.range;
             if (!range) return;
             tools = null;
-            onComment?.(range);
+            onComment(range);
             // The draft highlight takes over from the browser's selection.
             document.getSelection()?.removeAllRanges();
           }}>Comment</button
-        >{/if}{#if onAsk}<button
-          type="button"
-          onmousedown={(e) => e.preventDefault()}
-          onclick={() => {
-            const range = tools?.range;
-            if (!range) return;
-            tools = null;
-            onAsk?.(range);
-            document.getSelection()?.removeAllRanges();
-          }}>Ask in chat</button
-        >{/if}
+        >
       </div>
     </Floating>
   {/if}

@@ -9,16 +9,15 @@ import { AppBridge, PostMessageTransport } from "@modelcontextprotocol/ext-apps/
 
 interface Csp {
   connectDomains?: string[];
+  /** Where images and fonts may load from (the page panel's signed images and Inter). */
   resourceDomains?: string[];
 }
 
-/** How the host frames a panel, and whether it passes the panel's tool calls on (the page panel). */
+/** How the host frames a panel. */
 interface Frame {
   title?: string;
   width?: number;
   height?: number;
-  /** Tool calls go to the gate (Playwright's `gateCallTool`), which makes them over MCP. */
-  tools?: boolean;
 }
 
 declare global {
@@ -31,17 +30,10 @@ declare global {
       frame?: Frame,
     ): Promise<void>;
     panelMessages: string[];
-    /** Links panels asked the host to open. */
-    panelLinks: string[];
-    /** What panels told the model (`ui/update-model-context`). */
-    panelContext: string[];
-    gateCallTool?(params: unknown): Promise<unknown>;
   }
 }
 
 window.panelMessages = [];
-window.panelLinks = [];
-window.panelContext = [];
 
 window.startPanel = async (html, csp, args, result, frame = {}) => {
   const resources = (csp.resourceDomains ?? []).join(" ");
@@ -69,36 +61,14 @@ window.startPanel = async (html, csp, args, result, frame = {}) => {
   const bridge = new AppBridge(
     null,
     { name: "tempra gate host", version: "1.0.0" },
-    {
-      message: { text: {} },
-      openLinks: {},
-      updateModelContext: { text: {} },
-      ...(frame.tools ? { serverTools: {} } : {}),
-    },
+    { message: { text: {} }, openLinks: {} },
   );
-  if (frame.tools) {
-    bridge.oncalltool = async (params) => {
-      if (!window.gateCallTool) throw new Error("no tool calls in this host");
-      return (await window.gateCallTool(params)) as Awaited<
-        ReturnType<NonNullable<typeof bridge.oncalltool>>
-      >;
-    };
-  }
-  bridge.onupdatemodelcontext = async (params) => {
-    for (const c of (params.content ?? []) as { type: string; text?: string }[]) {
-      if (c.type === "text" && c.text) window.panelContext.push(c.text);
-    }
-    return {};
-  };
   bridge.onmessage = async (params) => {
     const blocks = (params.content ?? []) as { type: string; text?: string }[];
     for (const c of blocks) if (c.type === "text" && c.text) window.panelMessages.push(c.text);
     return {};
   };
-  bridge.onopenlink = async (params) => {
-    window.panelLinks.push(params.url);
-    return {};
-  };
+  bridge.onopenlink = async () => ({});
   bridge.oninitialized = () => {
     void bridge.sendToolInput({ arguments: args }).then(() => bridge.sendToolResult(result));
   };

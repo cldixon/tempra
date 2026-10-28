@@ -4168,32 +4168,17 @@ async function uploadPanel(token: string): Promise<string[]> {
 }
 
 /**
- * The page panel (tempra-dev app/page-panel): an agent writes a page with an image, a diagram and
- * a link, then `show`s it with an ask; the gate's host (scripts/panel-host.ts) draws the panel
- * under the CSP its `_meta.ui` declares, passing its tool calls on over MCP as a host does. The
- * person reads it (the image from its signed link, the diagram drawn, Inter loaded), comments on
- * a passage (their words, marked as typed in the chat), asks the agent about a passage in the
- * chat, is sent to Tempra to check it, and follows a link to another page in place.
+ * The page panel (tempra-dev app/page-panel): an agent writes a page with an image, a diagram, a
+ * footnote and links, then `show`s it; the gate's host (scripts/panel-host.ts) draws the panel
+ * under the CSP its `_meta.ui` declares. The page reads as the app draws it: the title, the
+ * byline, the image from its signed link, the diagram drawn, Inter loaded, the sources; nothing to
+ * press, and no link to another library page.
  */
 async function pagePanel(token: string): Promise<string[]> {
   // Run in the panel's frame (another origin), so with Playwright's element handles; this file has
   // no DOM types, so the page's objects are typed loosely here.
   // biome-ignore lint/suspicious/noExplicitAny: the panel's DOM, untyped in this file.
   type Dom = any;
-  /**
-   * Selects the first `n` characters of an element's text, as a person dragging would. Playwright
-   * sends the function's source, so `n` comes as its argument.
-   */
-  const selectStart = (p: Dom, n: number) => {
-    const d = p.ownerDocument;
-    const t = d.createTreeWalker(p, 4).nextNode();
-    const r = d.createRange();
-    r.setStart(t, 0);
-    r.setEnd(t, n);
-    const s = d.getSelection();
-    s.removeAllRanges();
-    s.addRange(r);
-  };
   const client = new Client({ name: "gate", version: "1.0.0" });
   await client.connect(
     new StreamableHTTPClientTransport(new URL(`${base}/mcp`), {
@@ -4204,14 +4189,10 @@ async function pagePanel(token: string): Promise<string[]> {
     ((r as { content?: { type: string; text?: string }[] }).content ?? [])
       .map((c) => c.text ?? "")
       .join("\n");
+  const args = { path: "gate-page/margin.md" };
   let html: string;
-  let csp: { connectDomains?: string[]; resourceDomains?: string[] };
+  let csp: { resourceDomains?: string[] };
   let result: Record<string, unknown>;
-  const args = {
-    path: "gate-page/margin.md",
-    ask: "Does the definition match what we agreed?",
-    focus: "revenue minus the cost of goods",
-  };
   try {
     const png = greyPng(60, 40, 120);
     const prep = await client.callTool({
@@ -4225,16 +4206,6 @@ async function pagePanel(token: string): Promise<string[]> {
       headers: { "Content-Type": "image/png" },
     });
     if (!put.ok) return [`the page's image: ${put.status} ${await put.text()}`];
-    const costs = await client.callTool({
-      name: "write",
-      arguments: {
-        path: "gate-page/costs.md",
-        content:
-          "---\ntype: Metric\ntitle: Costs\ndescription: What goes into cost.\n---\nCosts are what we pay to make what we sell.\n",
-        note: "gate: a page to link to",
-      },
-    });
-    if (costs.isError) return [`writing costs.md: ${text(costs)}`];
     const page = await client.callTool({
       name: "write",
       arguments: {
@@ -4245,8 +4216,12 @@ async function pagePanel(token: string): Promise<string[]> {
           "title: Margin",
           "description: Gross margin, as we report it.",
           "status: draft",
+          "sources:",
+          "  - id: book",
+          "    title: The finance book",
+          "    resource: https://example.com/book",
           "---",
-          "Margin is revenue minus the cost of goods, over revenue. See [costs](/gate-page/costs.md).",
+          "Margin is revenue minus the cost of goods, over revenue.[^book] See [costs](/gate-page/costs.md) and [the web](https://example.com/).",
           "",
           '![A grey chart](/gate-page/margin-chart.png "Margin by month")',
           "",
@@ -4256,10 +4231,6 @@ async function pagePanel(token: string): Promise<string[]> {
           "  C[Costs] --> M",
           "```",
           "",
-          "## Caveats",
-          "",
-          "Returns are taken out of revenue before margin is worked out.",
-          "",
         ].join("\n"),
         note: "gate: a page to show",
       },
@@ -4268,7 +4239,7 @@ async function pagePanel(token: string): Promise<string[]> {
     const read = await client.readResource({ uri: "ui://tempra/page" });
     const content = read.contents[0] as {
       text?: string;
-      _meta?: { ui?: { csp?: { connectDomains?: string[]; resourceDomains?: string[] } } };
+      _meta?: { ui?: { csp?: { resourceDomains?: string[] } } };
     };
     html = content.text ?? "";
     csp = content._meta?.ui?.csp ?? {};
@@ -4277,9 +4248,8 @@ async function pagePanel(token: string): Promise<string[]> {
     }
     result = (await client.callTool({ name: "show", arguments: args })) as Record<string, unknown>;
     if (result.isError) return [`show: ${text(result)}`];
-  } catch (e) {
+  } finally {
     await client.close();
-    return [String(e)];
   }
   const hostJs = await Bun.build({
     entrypoints: [join(import.meta.dir, "panel-host.ts")],
@@ -4293,34 +4263,23 @@ async function pagePanel(token: string): Promise<string[]> {
   const { page, step, problems } = b;
   const panel = page.frameLocator('iframe[title="Page panel"]');
   const shots = process.env.GATE_SCREENSHOTS;
-  const shoot = (name: string) =>
-    shots ? page.screenshot({ path: `${shots}/${name}.png`, fullPage: true }) : Promise.resolve();
-  const calls: string[] = [];
   try {
-    // The host passes the panel's tool calls on, as the person's chat does, over this connection.
-    await page.exposeFunction(
-      "gateCallTool",
-      async (params: { name: string; arguments?: object }) => {
-        calls.push(params.name);
-        return await client.callTool({ name: params.name, arguments: { ...params.arguments } });
-      },
-    );
-    await step("the host draws the page: title, ask, body, image, diagram, Inter", async () => {
-      await page.setViewportSize({ width: 900, height: 1400 });
+    await step("the host draws the page as the app does: head, image, diagram, Inter", async () => {
+      await page.setViewportSize({ width: 900, height: 1000 });
       await page.setContent("<!doctype html><html><body></body></html>");
       await page.addScriptTag({ content: hostCode, type: "module" });
       await page.waitForFunction('typeof window.startPanel === "function"');
-      const frame = { title: "Page panel", width: 760, height: 1300, tools: true };
+      const frame = { title: "Page panel", width: 760, height: 900 };
       const call = [html, csp, args, result, frame].map((v) => JSON.stringify(v)).join(", ");
       await page.evaluate(`window.startPanel(${call})`);
       await panel.getByRole("heading", { name: "Margin", level: 1 }).waitFor({ timeout: 15_000 });
-      await panel.locator(".pp-ask", { hasText: "Does the definition match" }).waitFor();
-      await panel.locator(".prose", { hasText: "Margin is revenue minus" }).first().waitFor();
+      await panel.locator(".pp-byline", { hasText: "for @dev" }).waitFor();
       await panel.locator(".pp-byline .chip", { hasText: "Draft" }).waitFor();
+      await panel.locator(".prose", { hasText: "Margin is revenue minus" }).first().waitFor();
+      await panel.locator(".pp-sources li", { hasText: "The finance book" }).waitFor();
       // The image loads from its signed link under the panel's CSP.
       const img = panel.locator('.prose img[alt="A grey chart"]');
       await img.waitFor({ timeout: 10_000 });
-      // Script strings: this file has no DOM types, and the panel's frame is another origin.
       let loaded = false;
       for (let i = 0; i < 50 && !loaded; i++) {
         loaded = await img.evaluate((i: Dom) => i.complete && i.naturalWidth > 0);
@@ -4328,80 +4287,27 @@ async function pagePanel(token: string): Promise<string[]> {
       }
       if (!loaded) throw new Error("the page's image did not load in the panel");
       await panel.locator(".prose .diagram-svg svg").first().waitFor({ timeout: 15_000 });
-      await shoot("page-panel");
-    });
-    await step("Read the whole page shows it all; the focus is highlighted", async () => {
-      const more = panel.getByRole("button", { name: "Read the whole page" });
-      if (await more.count()) await more.click();
-      await panel.locator(".prose h2", { hasText: "Caveats" }).waitFor();
       const inter = await panel.locator("body").evaluate(async (b: Dom) => {
         const d = b.ownerDocument;
         await d.fonts.ready;
         return [...d.fonts].some((f: Dom) => f.family.includes("Inter") && f.status === "loaded");
       });
       if (!inter) throw new Error("Inter did not load in the panel");
+      if (shots) await page.screenshot({ path: `${shots}/page-panel.png`, fullPage: true });
     });
-    await step("the person comments on a passage, as themselves; the agent is told", async () => {
-      await panel
-        .locator(".prose p", { hasText: "Returns are taken out" })
-        .evaluate(selectStart, "Returns are taken out of revenue".length);
-      await panel.getByRole("button", { name: "Comment", exact: true }).click({ timeout: 5000 });
-      await panel.locator("#pp-draft").fill("Say whether this is net of refunds too.");
-      await panel.locator("form.comment-form button.primary").click();
-      await panel
-        .locator(".pp-status", { hasText: "Comment posted." })
-        .waitFor({ timeout: 10_000 });
-      await panel.locator(".pp-side .said", { hasText: "net of refunds" }).waitFor();
-      const told = await page.evaluate<string[]>("window.panelContext");
-      if (
-        !told.some(
-          (m) => m.includes("the person commented on") && m.includes("Returns are taken out"),
-        )
-      ) {
-        throw new Error(`the model was told ${JSON.stringify(told)}`);
-      }
-      const threads = text(
-        await client.callTool({ name: "comments", arguments: { path: args.path } }),
-      );
-      if (!threads.includes("net of refunds") || !threads.includes("the person, in the chat")) {
-        throw new Error(`the thread reads ${clip(threads, 300)}`);
-      }
-      await shoot("page-panel-comment");
-    });
-    await step("the person asks the agent about a passage, in the chat", async () => {
-      await panel
-        .locator(".prose p", { hasText: "Margin is revenue minus" })
-        .first()
-        .evaluate(selectStart, "Margin is revenue".length);
-      await panel.getByRole("button", { name: "Ask in chat" }).click({ timeout: 5000 });
-      await panel.locator("#pp-draft").fill("Why over revenue and not cost?");
-      await panel.getByRole("button", { name: "Send to chat" }).click();
-      await panel.locator(".pp-status", { hasText: "Sent to the chat." }).waitFor();
-      const said = await page.evaluate<string[]>("window.panelMessages");
-      if (!said.some((m) => m.includes("> Margin is revenue") && m.includes("Why over revenue"))) {
-        throw new Error(`the chat heard ${JSON.stringify(said)}`);
-      }
-    });
-    await step("checking it opens its review in Tempra", async () => {
-      await panel.getByRole("button", { name: "Check in Tempra" }).click();
-      const review = JSON.stringify(`${base}/dev/mcp/${args.path}?review=1`);
-      await page.waitForFunction(`window.panelLinks.includes(${review})`, undefined, {
-        timeout: 5000,
-      });
-    });
-    await step("a link to another page opens it in place; Back returns", async () => {
-      await panel.locator(".prose a", { hasText: "costs" }).click();
-      await panel.getByRole("heading", { name: "Costs", level: 1 }).waitFor({ timeout: 10_000 });
-      await shoot("page-panel-linked");
-      await panel.getByRole("button", { name: "Back" }).click();
-      await panel.getByRole("heading", { name: "Margin", level: 1 }).waitFor();
-      if (!calls.includes("page_act") || !calls.includes("show")) {
-        throw new Error(`the panel called ${JSON.stringify(calls)}`);
-      }
-    });
+    await step(
+      "read only: no controls but the figures' own, no link to another library page",
+      async () => {
+        const controls = await panel.locator("textarea, input, button:not(figure button)").count();
+        if (controls > 0) throw new Error(`the panel has ${controls} controls`);
+        if ((await panel.locator('.prose a[href*="costs"]').count()) > 0) {
+          throw new Error("a link to another library page is followed in the panel");
+        }
+        await panel.locator('.prose a[href="https://example.com/"]').waitFor();
+      },
+    );
   } finally {
     await b.close();
-    await client.close();
   }
   return problems;
 }
@@ -5139,7 +5045,7 @@ try {
   if (panel.length > 0) failed = true;
   const shown = await pagePanel(mcpToken).catch((e) => [String(e)]);
   console.log(
-    `${shown.length === 0 ? "PASS" : "FAIL"} the page panel: an MCP host draws a page; the person comments, asks in the chat and follows a link`,
+    `${shown.length === 0 ? "PASS" : "FAIL"} the page panel: an MCP host draws one page as the app does, read only`,
   );
   for (const p of shown) console.log(`  - ${p}`);
   if (shown.length > 0) failed = true;
