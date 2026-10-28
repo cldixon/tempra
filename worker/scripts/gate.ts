@@ -4180,8 +4180,11 @@ async function pagePanel(token: string): Promise<string[]> {
   // no DOM types, so the page's objects are typed loosely here.
   // biome-ignore lint/suspicious/noExplicitAny: the panel's DOM, untyped in this file.
   type Dom = any;
-  /** Selects the first `n` characters of an element's text, as a person dragging would. */
-  const selectStart = (n: number) => (p: Dom) => {
+  /**
+   * Selects the first `n` characters of an element's text, as a person dragging would. Playwright
+   * sends the function's source, so `n` comes as its argument.
+   */
+  const selectStart = (p: Dom, n: number) => {
     const d = p.ownerDocument;
     const t = d.createTreeWalker(p, 4).nextNode();
     const r = d.createRange();
@@ -4341,7 +4344,7 @@ async function pagePanel(token: string): Promise<string[]> {
     await step("the person comments on a passage, as themselves; the agent is told", async () => {
       await panel
         .locator(".prose p", { hasText: "Returns are taken out" })
-        .evaluate(selectStart("Returns are taken out of revenue".length));
+        .evaluate(selectStart, "Returns are taken out of revenue".length);
       await panel.getByRole("button", { name: "Comment", exact: true }).click({ timeout: 5000 });
       await panel.locator("#pp-draft").fill("Say whether this is net of refunds too.");
       await panel.locator("form.comment-form button.primary").click();
@@ -4369,7 +4372,7 @@ async function pagePanel(token: string): Promise<string[]> {
       await panel
         .locator(".prose p", { hasText: "Margin is revenue minus" })
         .first()
-        .evaluate(selectStart("Margin is revenue".length));
+        .evaluate(selectStart, "Margin is revenue".length);
       await panel.getByRole("button", { name: "Ask in chat" }).click({ timeout: 5000 });
       await panel.locator("#pp-draft").fill("Why over revenue and not cost?");
       await panel.getByRole("button", { name: "Send to chat" }).click();
