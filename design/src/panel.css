@@ -140,3 +140,64 @@
   height: 6px;
   margin-top: 8px;
 }
+
+/* ---------- The page panel (tempra-dev app/page-panel): one page shown in the chat by `show` ----------
+ * Unlike the upload panel it reads as Tempra does, not as the host: Inter, the reader's prose and
+ * the base pills. Its stylesheet is fonts, tokens, base, prose, reader and this file (build.ts,
+ * dist/panel.ts `pagePanelCss`); the host's light or dark comes in as data-theme. */
+
+.page-body {
+  margin: 0;
+  padding: 20px 20px 24px;
+  background: var(--tempra-color-bg);
+}
+
+.page-panel .pp-head {
+  margin-bottom: 24px;
+}
+
+.page-panel .pp-where {
+  margin: 0 0 12px;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+}
+
+.page-panel .pp-title {
+  margin: 0 0 8px;
+  font-family: var(--tempra-font-display);
+  font-variation-settings: var(--tempra-font-display-settings);
+  font-size: var(--tempra-text-page);
+  font-weight: var(--tempra-weight-medium);
+  line-height: var(--tempra-leading-tight);
+  letter-spacing: -0.01em;
+}
+
+.page-panel .pp-description {
+  margin: 0;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-reader);
+}
+
+.page-panel .pp-byline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin: 12px 0 0;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-ui);
+}
+
+.page-panel .prose {
+  max-width: var(--tempra-measure-reader);
+}
+
+.page-panel .pp-sources {
+  margin-top: 2em;
+  padding-top: 1em;
+  border-top: 1px solid var(--tempra-color-border);
+}
+
+.page-panel .pp-sources h2 {
+  margin-top: 0;
+}

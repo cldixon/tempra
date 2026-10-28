@@ -1,7 +1,7 @@
 import { McpServer, ResourceTemplate } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-import { uploadPanel } from "@tempra/app/panels";
+import { pagePanel, uploadPanel } from "@tempra/app/panels";
 import { z } from "zod";
 import type { TokenInfo } from "../auth";
 import { chartForRender, libraryText } from "../chart-data";
@@ -54,6 +54,7 @@ import {
 } from "../store/store";
 import { requireOwner } from "../tenancy";
 import { kindOf, prepareUpload } from "../uploads";
+import { pagePayload, pageUrl } from "./page";
 
 export interface McpContext {
   /** The ledger actor, access and tool tier: the same in every library the caller reaches. */
@@ -128,7 +129,8 @@ How to work:
 5. Put a one-line \`note\` on every write. Read the \`lint\` in every write result and fix what it reports (figure and diagram lint too: \`image_*\`, \`figure_invalid\`, \`diagram_invalid\`, \`diagram_unrendered\`, \`svg_invalid\`, \`svg_unsafe\`, \`chart_invalid\` mean fix the image or the fence; a fence's lint names it by its number in \`read\`'s Figures list, the number \`render\` and \`read\` take); the result's notes say what else to know (ignored fields, the stored form, open comments). A concept with no frontmatter, invalid YAML or no \`type\` is refused. Keep concepts under 100 KB; split big ones into linked concepts.
 6. Never write index.md or log.md (the server synthesizes them). Never set \`generated\` (the server stamps it) or \`verified\` (not yours to claim). Set \`status\` and \`stale_after\` honestly. Timestamps are full ISO 8601 datetimes with an offset (\`stale_after: 2026-12-31T00:00:00Z\`); a plain date is flagged.
 7. Use \`work\` to find what needs doing: open comments, stale concepts, broken links, lint, hotlinked images (\`external_image\`), and structure (a directory's index.md made poor by its concepts: missing, long or title-repeating descriptions, duplicate titles, concepts nothing links to, a directory with one concept, none, or too many); \`work\` with kind stale_soon lists what goes stale within 14 days. Only a new \`stale_after\` resets a concept's clock; other edits leave it stale.
-8. Comments are how people ask you for changes. Before editing a concept, read its open threads with \`comments\`; make the change a comment asks for, then answer it with \`comment\` (reply, and resolve what you fixed). Ask with a reply when unsure; never resolve a thread you did not address. A concept with open threads cannot be deleted until they are resolved.`;
+8. Comments are how people ask you for changes. Before editing a concept, read its open threads with \`comments\`; make the change a comment asks for, then answer it with \`comment\` (reply, and resolve what you fixed). Ask with a reply when unsure; never resolve a thread you did not address. A concept with open threads cannot be deleted until they are resolved.
+9. When the person asks to see a page, or you want them to read one (e.g. one you just wrote), \`show\` it: a chat that shows apps draws it in a panel as the Tempra app does. Do not \`show\` what you only read for yourself.`;
 
 const text = (t: string): CallToolResult => ({ content: [{ type: "text", text: t }] });
 
@@ -145,6 +147,20 @@ export const MCP_APP_MIME = "text/html;profile=mcp-app";
 const panelMeta = (origin: string) => ({
   ui: { csp: { connectDomains: [origin] }, prefersBorder: true },
 });
+
+/**
+ * The page panel (tempra-dev: app/page-panel): `show` draws one page in the chat with the app's
+ * reader and the design package, read only. It loads Inter and the page's images from this
+ * deployment (signed image links; the fonts are static assets), so it declares the origin for
+ * resources; it calls nothing.
+ */
+export const PAGE_PANEL_URI = "ui://tempra/page";
+const pagePanelMeta = (origin: string) => ({
+  ui: { csp: { resourceDomains: [origin] }, prefersBorder: true },
+});
+/** The panel's document, its fonts at this deployment's own `/_design/` URLs. */
+export const pagePanelHtml = (origin: string) =>
+  pagePanel.replaceAll('url("/_design/', `url("${origin}/_design/`);
 const line = (t: string) => ({ type: "text" as const, text: t });
 
 /** SVG text `read` returns as is (models read it well enough until TEMPRA-165 rasterizes it). */
@@ -961,6 +977,34 @@ export function buildServer(ctx: McpContext): McpServer {
         return result;
       },
     ),
+  );
+
+  server.registerTool(
+    "show",
+    {
+      title: "Show a page to the person",
+      description:
+        "Show one concept to the person you work for, drawn as the Tempra app draws it, in a panel in the chat (in a chat that shows apps; elsewhere give them the link this returns). Use it when they ask to see a page, or when you want them to read one, e.g. after you wrote it. It is for reading only. Writes nothing.",
+      _meta: { ui: { resourceUri: PAGE_PANEL_URI } },
+      inputSchema: {
+        path: z.string().describe("The concept, e.g. `v2/limits.md`."),
+        ...libArg,
+      },
+      annotations: readOnly,
+    },
+    guarded(async ({ path, library }) => {
+      const { token, lib } = pick(library);
+      const page = await pagePayload(lib, token, ctx.origin, path, ctx.agentNames);
+      const result = text(
+        [
+          `Showing "${page.concept.title}" (${page.concept.path}) to the person in the chat, as the app draws it.`,
+          `If it does not show, give them the link: ${pageUrl(ctx.origin, page)}`,
+        ].join("\n"),
+      );
+      // The panel's data: the host hands it to the panel and keeps it out of the model's context.
+      result.structuredContent = { page };
+      return result;
+    }),
   );
 
   server.registerTool(
@@ -2042,6 +2086,27 @@ export function buildServer(ctx: McpContext): McpServer {
           mimeType: MCP_APP_MIME,
           text: uploadPanel,
           _meta: panelMeta(ctx.origin),
+        },
+      ],
+    }),
+  );
+
+  server.registerResource(
+    "page_panel",
+    PAGE_PANEL_URI,
+    {
+      title: "Show a page",
+      description: "The panel `show` draws in the chat: one page as the app shows it, to read.",
+      mimeType: MCP_APP_MIME,
+      _meta: pagePanelMeta(ctx.origin),
+    },
+    async (uri) => ({
+      contents: [
+        {
+          uri: uri.href,
+          mimeType: MCP_APP_MIME,
+          text: pagePanelHtml(ctx.origin),
+          _meta: pagePanelMeta(ctx.origin),
         },
       ],
     }),

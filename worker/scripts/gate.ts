@@ -4195,6 +4195,151 @@ async function uploadPanel(token: string): Promise<string[]> {
   return problems;
 }
 
+/**
+ * The page panel (tempra-dev app/page-panel): an agent writes a page with an image, a diagram, a
+ * footnote and links, then `show`s it; the gate's host (scripts/panel-host.ts) draws the panel
+ * under the CSP its `_meta.ui` declares. The page reads as the app draws it: the title, the
+ * byline, the image from its signed link, the diagram drawn, Inter loaded, the sources; nothing to
+ * press, and no link to another library page.
+ */
+async function pagePanel(token: string): Promise<string[]> {
+  // Run in the panel's frame (another origin), so with Playwright's element handles; this file has
+  // no DOM types, so the page's objects are typed loosely here.
+  // biome-ignore lint/suspicious/noExplicitAny: the panel's DOM, untyped in this file.
+  type Dom = any;
+  const client = new Client({ name: "gate", version: "1.0.0" });
+  await client.connect(
+    new StreamableHTTPClientTransport(new URL(`${base}/mcp`), {
+      requestInit: { headers: { Authorization: `Bearer ${token}` } },
+    }),
+  );
+  const text = (r: unknown) =>
+    ((r as { content?: { type: string; text?: string }[] }).content ?? [])
+      .map((c) => c.text ?? "")
+      .join("\n");
+  const args = { path: "gate-page/margin.md" };
+  let html: string;
+  let csp: { resourceDomains?: string[] };
+  let result: Record<string, unknown>;
+  try {
+    const png = greyPng(60, 40, 120);
+    const prep = await client.callTool({
+      name: "prepare_upload",
+      arguments: { path: "gate-page/margin-chart.png" },
+    });
+    const url = (prep.structuredContent as { upload: { url: string } }).upload.url;
+    const put = await fetch(url, {
+      method: "PUT",
+      body: png,
+      headers: { "Content-Type": "image/png" },
+    });
+    if (!put.ok) return [`the page's image: ${put.status} ${await put.text()}`];
+    const page = await client.callTool({
+      name: "write",
+      arguments: {
+        path: args.path,
+        content: [
+          "---",
+          "type: Metric",
+          "title: Margin",
+          "description: Gross margin, as we report it.",
+          "status: draft",
+          "sources:",
+          "  - id: book",
+          "    title: The finance book",
+          "    resource: https://example.com/book",
+          "---",
+          "Margin is revenue minus the cost of goods, over revenue.[^book] See [costs](/gate-page/costs.md) and [the web](https://example.com/).",
+          "",
+          '![A grey chart](/gate-page/margin-chart.png "Margin by month")',
+          "",
+          "```mermaid",
+          "flowchart LR",
+          "  R[Revenue] --> M[Margin]",
+          "  C[Costs] --> M",
+          "```",
+          "",
+        ].join("\n"),
+        note: "gate: a page to show",
+      },
+    });
+    if (page.isError) return [`writing margin.md: ${text(page)}`];
+    const read = await client.readResource({ uri: "ui://tempra/page" });
+    const content = read.contents[0] as {
+      text?: string;
+      _meta?: { ui?: { csp?: { resourceDomains?: string[] } } };
+    };
+    html = content.text ?? "";
+    csp = content._meta?.ui?.csp ?? {};
+    if (!csp.resourceDomains?.includes(base)) {
+      return [`the page panel declares resource domains ${JSON.stringify(csp.resourceDomains)}`];
+    }
+    result = (await client.callTool({ name: "show", arguments: args })) as Record<string, unknown>;
+    if (result.isError) return [`show: ${text(result)}`];
+  } finally {
+    await client.close();
+  }
+  const hostJs = await Bun.build({
+    entrypoints: [join(import.meta.dir, "panel-host.ts")],
+    target: "browser",
+    minify: true,
+  });
+  if (!hostJs.success || !hostJs.outputs[0]) return [`panel host: ${hostJs.logs.join("; ")}`];
+  const hostCode = await hostJs.outputs[0].text();
+  const b = await openBrowser();
+  if (typeof b === "string") return [b];
+  const { page, step, problems } = b;
+  const panel = page.frameLocator('iframe[title="Page panel"]');
+  const shots = process.env.GATE_SCREENSHOTS;
+  try {
+    await step("the host draws the page as the app does: head, image, diagram, Inter", async () => {
+      await page.setViewportSize({ width: 900, height: 1000 });
+      await page.setContent("<!doctype html><html><body></body></html>");
+      await page.addScriptTag({ content: hostCode, type: "module" });
+      await page.waitForFunction('typeof window.startPanel === "function"');
+      const frame = { title: "Page panel", width: 760, height: 900 };
+      const call = [html, csp, args, result, frame].map((v) => JSON.stringify(v)).join(", ");
+      await page.evaluate(`window.startPanel(${call})`);
+      await panel.getByRole("heading", { name: "Margin", level: 1 }).waitFor({ timeout: 15_000 });
+      await panel.locator(".pp-byline", { hasText: "for @dev" }).waitFor();
+      await panel.locator(".pp-byline .chip", { hasText: "Draft" }).waitFor();
+      await panel.locator(".prose", { hasText: "Margin is revenue minus" }).first().waitFor();
+      await panel.locator(".pp-sources li", { hasText: "The finance book" }).waitFor();
+      // The image loads from its signed link under the panel's CSP.
+      const img = panel.locator('.prose img[alt="A grey chart"]');
+      await img.waitFor({ timeout: 10_000 });
+      let loaded = false;
+      for (let i = 0; i < 50 && !loaded; i++) {
+        loaded = await img.evaluate((i: Dom) => i.complete && i.naturalWidth > 0);
+        if (!loaded) await page.waitForTimeout(200);
+      }
+      if (!loaded) throw new Error("the page's image did not load in the panel");
+      await panel.locator(".prose .diagram-svg svg").first().waitFor({ timeout: 15_000 });
+      const inter = await panel.locator("body").evaluate(async (b: Dom) => {
+        const d = b.ownerDocument;
+        await d.fonts.ready;
+        return [...d.fonts].some((f: Dom) => f.family.includes("Inter") && f.status === "loaded");
+      });
+      if (!inter) throw new Error("Inter did not load in the panel");
+      if (shots) await page.screenshot({ path: `${shots}/page-panel.png`, fullPage: true });
+    });
+    await step(
+      "read only: no controls but the figures' own, no link to another library page",
+      async () => {
+        const controls = await panel.locator("textarea, input, button:not(figure button)").count();
+        if (controls > 0) throw new Error(`the panel has ${controls} controls`);
+        if ((await panel.locator('.prose a[href*="costs"]').count()) > 0) {
+          throw new Error("a link to another library page is followed in the panel");
+        }
+        await panel.locator('.prose a[href="https://example.com/"]').waitFor();
+      },
+    );
+  } finally {
+    await b.close();
+  }
+  return problems;
+}
+
 /** Runs the daily maintainers as the app's Export now does, and reads the export from R2. */
 async function nightlyExport(owner: string, slug: string, originals: number): Promise<string[]> {
   const lib = `${base}/${owner}/${slug}`;
@@ -4932,6 +5077,12 @@ try {
   );
   for (const p of panel) console.log(`  - ${p}`);
   if (panel.length > 0) failed = true;
+  const shown = await pagePanel(mcpToken).catch((e) => [String(e)]);
+  console.log(
+    `${shown.length === 0 ? "PASS" : "FAIL"} the page panel: an MCP host draws one page as the app does, read only`,
+  );
+  for (const p of shown) console.log(`  - ${p}`);
+  if (shown.length > 0) failed = true;
   if (!mcpOk) failed = true;
   // Several agents at once over MCP: a stale edit refused, turns on one concept, parallel
   // writes; every write must reach the change feed. Patient, since the gate's earlier steps

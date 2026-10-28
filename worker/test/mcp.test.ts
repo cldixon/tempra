@@ -70,6 +70,7 @@ describe("MCP server", () => {
       "move",
       "prepare_upload",
       "read",
+      "show",
       "start",
       "transform",
       "write",
@@ -498,9 +499,10 @@ describe("MCP server", () => {
     const { client, call } = await connect(app);
     await call("write", { path: "t/a.md", content: doc("A", "a\n") });
     const list = await client.listResources();
-    // The library's files, then the upload panel (TEMPRA-200).
+    // The panels (the upload panel, TEMPRA-200; the page panel), then the library's files.
     expect(list.resources.map((r) => [r.uri, r.title])).toEqual([
       ["ui://tempra/upload", "Upload a file"],
+      ["ui://tempra/page", "Show a page"],
       ["okf://owner/demo/t/a.md", "A"],
     ]);
     const res = await client.readResource({ uri: "okf://owner/demo/t/a.md" });
