@@ -124,10 +124,10 @@ describe("the tree's rules (Tree.svelte, tree.ts)", () => {
     await settle(10);
     const rows = [...t.host.querySelectorAll(".tree-row")].map((r) => r.textContent);
     expect(rows).toEqual([
-      "A, 1 page1",
+      "A",
       "One",
-      "B, 3 pages3",
-      "C, 1 page1",
+      "B",
+      "C",
       "Deepstale",
       "Apple22 open comments",
       "Zebra",
@@ -144,7 +144,7 @@ describe("the tree's rules (Tree.svelte, tree.ts)", () => {
     b?.click();
     flushSync();
     expect(b?.getAttribute("aria-expanded")).toBe("false");
-    expect(b?.closest(".tree-row")?.textContent).toBe("B, 3 pages322 open commentsstale");
+    expect(b?.closest(".tree-row")?.textContent).toBe("B22 open commentsstale");
     expect(localStorage.getItem("tempra:tree-closed:dev/dev")).toBe('["b"]');
     t.destroy();
   });

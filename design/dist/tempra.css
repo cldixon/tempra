@@ -2972,13 +2972,6 @@ button.tree-name {
   cursor: pointer;
 }
 
-.tree-count {
-  flex: none;
-  color: var(--tempra-color-muted);
-  font-size: var(--tempra-text-label);
-  font-variant-numeric: tabular-nums;
-}
-
 .tree-row > a {
   flex: 1;
   min-width: 0;
