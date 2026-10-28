@@ -2,13 +2,13 @@
  * A `vega-lite` fence drawn in the reader (TEMPRA-207; tempra-dev: app/diagrams): its data made
  * inline from the library (@tempra/editor `inlineChartData`, the same rule as the server: inline
  * or a file in this library, nothing else fetched), compiled by Vega-Lite and drawn by Vega as an
- * SVG string at the figure's width, themed with the reader's greys for the page's scheme. Vega's
- * expressions run in its interpreter, never `new Function` (the shell's CSP has no
- * 'unsafe-eval'), and its loader loads nothing. The SVG is sanitized as an SVG fence is (links
+ * SVG string at the figure's width, themed for the page's scheme (greys for axes and text, the
+ * chart series for its categories, TEMPRA-217). Vega's expressions run in its interpreter, never
+ * `new Function` (the shell's CSP has no 'unsafe-eval'), and its loader loads nothing. The SVG is sanitized as an SVG fence is (links
  * and images an encoding might add go, ids are prefixed per figure) and brought in through the
  * CSSOM (./svgdom.ts). Loaded on demand: Vega is a chunk of its own.
  */
-import { peleThemes } from "@tempra/design/pele";
+import { chartSeries, peleThemes } from "@tempra/design/pele";
 import {
   chartConfig,
   inlineChartData,
@@ -66,7 +66,7 @@ export async function chartFigure(
   }
   const spec = await inlineChartData(parsed.spec, ctx.path, ctx.read);
   const { spec: vega } = compile(sizedChart(spec, ctx.width) as never, {
-    config: chartConfig(peleThemes[scheme(doc)]) as never,
+    config: chartConfig(peleThemes[scheme(doc)], chartSeries[scheme(doc)]) as never,
   });
   const view = new View(parse(vega, undefined, { ast: true }), {
     renderer: "none",

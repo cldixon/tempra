@@ -7,6 +7,7 @@
 import { describe, expect, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { chartSeries } from "@tempra/design/pele";
 import { chartSvg } from "../render/src/chart";
 import { cacheKey } from "../render/src/render";
 import { fakeRenderer, type RenderRequest } from "../src/render";
@@ -267,5 +268,31 @@ describe("Vega-Lite fences (TEMPRA-207)", () => {
     ).rejects.toThrow("not made inline");
     await expect(chartSvg(JSON.stringify({ mark: "bra" }), "light", 0)).rejects.toThrow();
     expect(cacheKey("h", "light", 680, "svg", "vega-lite")).toContain("/vl-");
+  });
+
+  test("series in the chart colours of each scheme, weekdays level on a wide chart (TEMPRA-217)", async () => {
+    const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
+    const spec = JSON.stringify({
+      data: {
+        values: ["p50", "p99"].flatMap((q, i) =>
+          days.map((day, j) => ({ day, q, ms: 10 * i + j })),
+        ),
+      },
+      mark: "line",
+      encoding: {
+        x: { field: "day", type: "nominal", sort: days },
+        y: { field: "ms", type: "quantitative" },
+        color: { field: "q", type: "nominal" },
+      },
+    });
+    for (const theme of ["light", "dark"] as const) {
+      const svg = await chartSvg(spec, theme, 1360);
+      const [one, two] = chartSeries[theme] as [string, string];
+      expect(svg).toContain(`stroke="${one}"`);
+      expect(svg).toContain(`stroke="${two}"`);
+      // Vega draws a turned label with rotate(); the weekdays are not turned.
+      expect(svg).not.toMatch(/rotate\((?:270|-90|90|315|-45)\)[^>]*>(?:<[^>]*>)*(?:Mon|Tue)/);
+      for (const d of days) expect(svg).toContain(`>${d}<`);
+    }
   });
 });

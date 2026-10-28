@@ -176,6 +176,22 @@
   /* Color: the change dot (the only colour before the palette) */
   --tempra-color-agent: light-dark(#e8722a, #f0884a);
 
+  /* Color: chart series (TEMPRA-217). The agreed exception to "no colour until the palette"
+     besides the change dot, for a Vega-Lite chart's series and categories only: greys cannot tell
+     two lines apart. Axes, grid and text stay grey. Eight hues in a fixed order, each stepped for
+     its scheme, checked against the page (--tempra-color-bg) with the dataviz validator: adjacent
+     pairs apart under protanopia and deuteranopia, every pair apart to normal vision; three light
+     steps sit under 3:1 on white, so a chart keeps its legend (design/contrast.test.ts). The
+     palette (TEMPRA-1) may replace them. */
+  --tempra-chart-1: light-dark(#2a78d6, #3987e5); /* blue */
+  --tempra-chart-2: light-dark(#eb6834, #d95926); /* orange */
+  --tempra-chart-3: light-dark(#1baf7a, #199e70); /* aqua */
+  --tempra-chart-4: light-dark(#eda100, #c98500); /* yellow */
+  --tempra-chart-5: light-dark(#e87ba4, #d55181); /* magenta */
+  --tempra-chart-6: light-dark(#008300, #008300); /* green */
+  --tempra-chart-7: light-dark(#6250d6, #9085e9); /* violet */
+  --tempra-chart-8: light-dark(#e34948, #e66767); /* red */
+
   /* Color: a dimmed page behind a sheet or a full-screen view */
   --tempra-color-scrim: light-dark(rgb(20 20 22 / 0.2), rgb(0 0 0 / 0.5));
 
@@ -1417,6 +1433,9 @@ details > summary {
   border-radius: var(--tempra-radius-box);
 }
 
+/* The font is set here, on the figure's container, not on the svg: an SVG fence's text with no
+   font-family of its own inherits the reader's Inter, and an author's font-family on the root or
+   on a text element still wins (TEMPRA-216). */
 .prose .diagram-svg {
   overflow-x: auto;
   overscroll-behavior-x: contain;
@@ -1654,6 +1673,7 @@ details > summary {
   border-radius: var(--tempra-radius-card);
   background: var(--tempra-color-bg);
   box-shadow: var(--tempra-shadow);
+  font-family: var(--tempra-font-text);
   font-size: var(--tempra-text-ui);
 }
 

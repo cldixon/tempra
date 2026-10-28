@@ -292,16 +292,23 @@ export async function inlineChartData(
 
 /**
  * The reader's look for a chart, as a Vega-Lite `config`, from the diagram theme's resolved values
- * (`@tempra/design/pele`'s `peleThemes[scheme]`): the page's ground, ink and rules, Inter, and the
- * series greys as the categories (no colour until TEMPRA-1). An author's own `config` wins.
+ * (`@tempra/design/pele`'s `peleThemes[scheme]`): the page's ground, ink and rules (greys, for
+ * axes, grid and text), Inter, and `series` (`chartSeries[scheme]`, the chart colours, TEMPRA-217)
+ * as the categories in their fixed order; without them, the diagram theme's series greys. The x
+ * axis's labels stay level, thinned rather than drawn over each other when they would collide.
+ * An author's own `config` wins.
  */
-export function chartConfig(theme: Record<string, string>): Record<string, unknown> {
+export function chartConfig(
+  theme: Record<string, string>,
+  series: readonly string[] = [],
+): Record<string, unknown> {
   const v = (k: string, d: string) => theme[`--pele-${k}`] ?? d;
   const fg = v("fg", "#1a1a1b");
   const muted = v("muted", "#616165");
   const border = v("border", "#d2d2ce");
   const font = v("font", "sans-serif");
-  const series = [1, 2, 3, 4, 5, 6, 7, 8].map((n) => v(`series-${n}`, fg));
+  const greys = [1, 2, 3, 4, 5, 6, 7, 8].map((n) => v(`series-${n}`, fg));
+  const category = series.length > 0 ? [...series] : greys;
   const axis = {
     domainColor: muted,
     gridColor: border,
@@ -318,12 +325,14 @@ export function chartConfig(theme: Record<string, string>): Record<string, unkno
     background: v("bg", "#ffffff"),
     font,
     view: { stroke: "transparent" },
-    mark: { color: fg },
+    mark: { color: category[0] },
     axis,
+    axisX: { labelAngle: 0, labelOverlap: true },
     legend: { labelColor: muted, titleColor: fg, labelFont: font, titleFont: font },
     title: { color: fg, subtitleColor: muted, font, fontWeight: 600 },
     header: { labelColor: muted, titleColor: fg, labelFont: font, titleFont: font },
-    range: { category: series, ordinal: series, ramp: [series[3], fg] },
+    // Magnitude stays a grey ramp, from the strong rule to the ink.
+    range: { category, ordinal: category, ramp: [greys[3], fg] },
   };
 }
 

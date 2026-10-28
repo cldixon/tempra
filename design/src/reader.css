@@ -143,6 +143,9 @@
   border-radius: var(--tempra-radius-box);
 }
 
+/* The font is set here, on the figure's container, not on the svg: an SVG fence's text with no
+   font-family of its own inherits the reader's Inter, and an author's font-family on the root or
+   on a text element still wins (TEMPRA-216). */
 .prose .diagram-svg {
   overflow-x: auto;
   overscroll-behavior-x: contain;
@@ -380,6 +383,7 @@
   border-radius: var(--tempra-radius-card);
   background: var(--tempra-color-bg);
   box-shadow: var(--tempra-shadow);
+  font-family: var(--tempra-font-text);
   font-size: var(--tempra-text-ui);
 }
 

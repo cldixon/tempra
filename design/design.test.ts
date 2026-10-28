@@ -43,3 +43,16 @@ test("every font the stylesheets name exists: in the package for the site, serve
   expect(served.sort()).toEqual(Object.keys(fonts).sort());
   expect(css).not.toContain("../fonts/");
 });
+
+test("an SVG figure's text inherits the reader's font from its container, never forced on the svg (TEMPRA-216)", () => {
+  const reader = readFileSync(join(import.meta.dir, "src", "reader.css"), "utf8");
+  const block = (selector: string) =>
+    new RegExp(`(?:^|\\n)${selector.replace(/[.*]/g, "\\$&")}\\s*\\{([^}]*)\\}`).exec(
+      reader,
+    )?.[1] ?? "";
+  expect(block(".prose .diagram-svg")).toContain("font-family: var(--tempra-font-text);");
+  expect(block(".lightbox-diagram")).toContain("font-family: var(--tempra-font-text);");
+  // On the svg itself it would override an author's font-family on the root.
+  expect(block(".prose .diagram-svg svg")).not.toContain("font-family");
+  expect(block(".lightbox-diagram svg")).not.toContain("font-family");
+});
