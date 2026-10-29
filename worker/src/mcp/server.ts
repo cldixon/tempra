@@ -150,17 +150,22 @@ const panelMeta = (origin: string) => ({
 
 /**
  * The page panel (tempra-dev: app/page-panel): `show` draws one page in the chat with the app's
- * reader and the design package, read only. It loads Inter and the page's images from this
- * deployment (signed image links; the fonts are static assets), so it declares the origin for
- * resources; it calls nothing.
+ * reader and the design package, read only. It loads Inter, Pele (for diagrams) and the page's
+ * images from this deployment (signed image links; the fonts and Pele are static assets), so it
+ * declares the origin for resources, which hosts allow for scripts too; it calls nothing.
  */
 export const PAGE_PANEL_URI = "ui://tempra/page";
 const pagePanelMeta = (origin: string) => ({
   ui: { csp: { resourceDomains: [origin] }, prefersBorder: true },
 });
-/** The panel's document, its fonts at this deployment's own `/_design/` URLs. */
+/**
+ * The panel's document, its fonts at this deployment's own `/_design/` URLs and Pele at its
+ * `/_app/` chunk (app/build.ts leaves `__TEMPRA_ORIGIN__` for the origin).
+ */
 export const pagePanelHtml = (origin: string) =>
-  pagePanel.replaceAll('url("/_design/', `url("${origin}/_design/`);
+  pagePanel
+    .replaceAll('url("/_design/', `url("${origin}/_design/`)
+    .replaceAll("__TEMPRA_ORIGIN__/_app/", `${origin}/_app/`);
 const line = (t: string) => ({ type: "text" as const, text: t });
 
 /** SVG text `read` returns as is (models read it well enough until TEMPRA-165 rasterizes it). */

@@ -63,6 +63,9 @@ describe("the page panel", () => {
     // Inter from this deployment, never from a relative URL the host's frame cannot resolve.
     expect(content?.text).toContain('url("http://localhost/_design/inter-latin-opsz-normal.');
     expect(content?.text).not.toContain('url("/_design/');
+    // Pele from this deployment's own chunk, the placeholder filled in.
+    expect(content?.text).toMatch(/http:\/\/localhost\/_app\/pele-[\w-]+\.js/);
+    expect(content?.text).not.toContain("__TEMPRA_ORIGIN__");
     expect(content?.text.match(/<\/script>/g)?.length).toBe(1);
   });
 

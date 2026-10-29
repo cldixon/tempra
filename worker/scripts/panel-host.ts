@@ -9,7 +9,7 @@ import { AppBridge, PostMessageTransport } from "@modelcontextprotocol/ext-apps/
 
 interface Csp {
   connectDomains?: string[];
-  /** Where images and fonts may load from (the page panel's signed images and Inter). */
+  /** Where images, fonts and scripts may load from (the page panel's signed images, Inter, Pele). */
   resourceDomains?: string[];
 }
 
@@ -40,7 +40,7 @@ window.startPanel = async (html, csp, args, result, frame = {}) => {
   // What a host enforces: nothing but the panel itself and the domains it declares.
   const policy = [
     "default-src 'none'",
-    "script-src 'unsafe-inline'",
+    `script-src 'unsafe-inline' ${resources}`.trim(),
     "style-src 'unsafe-inline'",
     `img-src data: ${resources}`.trim(),
     `font-src ${resources || "'none'"}`,

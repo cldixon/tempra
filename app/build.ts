@@ -11,7 +11,14 @@
  * `--watch` rebuilds on every change to src/ or to the design package's output, for `bun run dev`
  * beside the Worker's `cf dev` (which serves dist/public/ as it changes).
  */
-import { mkdirSync, readFileSync, rmSync, watch as watchFiles, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  watch as watchFiles,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { css as designCss, fonts as designFonts, href as designHref } from "@tempra/design";
@@ -27,12 +34,14 @@ export const PUBLIC = join(ROOT, "dist", "public");
 /**
  * Headers for the static assets (Workers static assets read `_headers`): the bundle and the
  * design files are at content-hashed URLs, so a new file gets a new URL and each can be cached
- * for good; the icon's URL never changes. The design files answer any origin: the page panel
- * (tempra-dev app/page-panel) loads Inter from a host's frame, and fonts need CORS.
+ * for good; the icon's URL never changes. The bundle and the design files answer any origin: the
+ * page panel (tempra-dev app/page-panel) loads Pele and Inter from a host's frame, and module
+ * scripts and fonts need CORS.
  */
 export const HEADERS = `/_app/*
   Cache-Control: public, max-age=31536000, immutable
   X-Content-Type-Options: nosniff
+  Access-Control-Allow-Origin: *
 /_design/*
   Cache-Control: public, max-age=31536000, immutable
   X-Content-Type-Options: nosniff
@@ -143,8 +152,9 @@ const PAGE_PANEL_STUBS: Record<string, string> = {
 
 /**
  * The page panel (tempra-dev app/page-panel) with Vite and the Svelte plugin, as one module: the
- * app's reader and its components, Pele inlined for diagrams, no chunks (the host loads one
- * document).
+ * app's reader and its components, no chunks (the host loads one document). Pele, about half the
+ * panel inlined, is imported from the app's own chunk on the deployment when a page has a diagram:
+ * buildApp() has written it, and the Worker puts its origin for `__TEMPRA_ORIGIN__`.
  */
 async function bundlePagePanel(): Promise<string> {
   const result = (await build({
@@ -159,6 +169,12 @@ async function bundlePagePanel(): Promise<string> {
         name: "page-panel-stubs",
         enforce: "pre",
         resolveId(id, importer) {
+          // Pele is the app's own chunk, loaded from the deployment; the Worker writes in its origin.
+          if (importer?.includes("/reader/") && id === "./pele") {
+            const file = readdirSync(join(PUBLIC, "_app")).find((f) => /^pele-[\w-]+\.js$/.test(f));
+            if (!file) throw new Error("No Pele chunk in dist/public/_app.");
+            return { id: `__TEMPRA_ORIGIN__/_app/${file}`, external: true };
+          }
           if (importer?.includes("/reader/") && id in PAGE_PANEL_STUBS) return `\0stub:${id}`;
           return null;
         },
@@ -227,6 +243,11 @@ export async function buildApp(): Promise<void> {
           format: "es",
           entryFileNames: "app.[hash].js",
           chunkFileNames: "[name]-[hash].js",
+          // Vite's preload helper in a chunk of its own, not the entry: the page panel loads the Pele
+          // chunk from the deployment (tempra-dev app/page-panel), and it must not bring the app.
+          codeSplitting: {
+            groups: [{ name: "preload", test: /vite\/preload-helper|preload-helper/ }],
+          },
         },
       },
     },
