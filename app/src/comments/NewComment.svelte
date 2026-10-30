@@ -32,8 +32,11 @@
   });
   function submit(e: SubmitEvent) {
     e.preventDefault();
+    send();
+  }
+  function send() {
     const body = text.trim();
-    if (!body) return;
+    if (!body || action.busy) return;
     const draft = props.draft;
     void action.run(async () => {
       // No path: a thread on the library itself (TEMPRA-222).
@@ -59,6 +62,7 @@
     value={text}
     onValue={(v) => (text = v)}
     people={people.current}
+    onSend={send}
     onkeydown={(e) => {
       if (e.key === "Escape") {
         e.stopPropagation();

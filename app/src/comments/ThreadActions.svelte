@@ -24,7 +24,7 @@
   function act(kind: "reply" | "resolve" | "reopen", e?: Event) {
     e?.preventDefault();
     const body = reply.trim();
-    if (kind === "reply" && !body) return;
+    if ((kind === "reply" && !body) || action.busy) return;
     void action.run(async () => {
       const suffix = kind === "reply" ? "" : `/${kind}`;
       await post(
@@ -46,6 +46,7 @@
         value={reply}
         onValue={(v) => (reply = v)}
         people={people.current}
+        onSend={() => act("reply")}
         placeholder="Reply…"
       />{/if}{#if action.error}<div class="notice">{action.error}</div>{/if}<div class="actions"
       >{#if t.status === "open"}<button type="button" disabled={action.busy} onclick={() => act("resolve")}>Resolve</button

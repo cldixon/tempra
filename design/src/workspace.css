@@ -177,6 +177,13 @@ body.ground {
   color: var(--tempra-color-bg);
 }
 
+/* Tempra's own agent, @tempra (TEMPRA-223): its letter on the agent colour, the one place the
+   colour fills a mark; other agents stay on ink. */
+.avatar-mark.agent.tempra {
+  background: var(--tempra-color-agent);
+  color: var(--tempra-color-on-agent);
+}
+
 /* A dialog (a concept's properties, its agent notes, all its versions): a card in the top layer. */
 .dialog {
   width: min(32rem, calc(100vw - 32px));

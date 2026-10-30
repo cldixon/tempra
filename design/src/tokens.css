@@ -39,6 +39,17 @@
      the name of a file an agent is at now, and its static mark under reduced motion. At least
      4.5:1 on every surface, as text is (design/contrast.test.ts). */
   --tempra-color-agent-ink: light-dark(#9e4a1a, #f0884a);
+  /* A letter on the agent colour: Tempra's own agent's round mark (TEMPRA-223). Dark in both
+     schemes, at least 4.5:1 on the colour (design/contrast.test.ts). */
+  --tempra-color-on-agent: light-dark(#1a1a1b, #1a1a1b);
+
+  /* Color: commented text in a concept's body (TEMPRA-223), greys only: an open thread's quote on
+     a soft fill over a solid mid-grey underline, the thread in focus on a deeper fill with an ink
+     underline. Text keeps at least 4.5:1 on both fills, and the underline 3:1 on the soft fill
+     and the page (design/contrast.test.ts). */
+  --tempra-color-comment: light-dark(#efefeb, #2a2a2e);
+  --tempra-color-comment-active: light-dark(#dcdcd6, #38383c);
+  --tempra-color-comment-line: light-dark(#7e7e82, #808084);
 
   /* Color: chart series (TEMPRA-217). The agreed exception to "no colour until the palette"
      besides the change dot, for a Vega-Lite chart's series and categories only: greys cannot tell

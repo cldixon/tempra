@@ -32,7 +32,7 @@ import type { FigureView } from "./src/reader/lightbox";
 import Note from "./src/reader/Note.svelte";
 import { openFigureContext } from "./src/reader/open-figure";
 import { type BodyOptions, prepare } from "./src/reader/prepare";
-import { hoveredOf } from "./src/reader/reading";
+import { blockMarks, type Highlight, hoveredOf, placeMark } from "./src/reader/reading";
 import { Urls } from "./src/urls";
 
 const FIXTURES = join(import.meta.dir, "..", "fixtures");
@@ -1311,5 +1311,118 @@ describe("the reader's overlays", () => {
     } finally {
       Object.assign(g, saved);
     }
+  });
+});
+
+// Commented text has a mark beside its block (TEMPRA-223): outside the counted text, so the
+// reader's counting is untouched, one per block with open threads, opening the first.
+describe("comment marks beside blocks (TEMPRA-223)", () => {
+  const MD =
+    "# Title\n\nFirst paragraph with a quote.\n\n- one item\n- two items\n\nLast paragraph, quoted twice.";
+
+  /** Highlights on the text of `md`: [quote, id] pairs, by where each quote starts. */
+  const marksOn = (p: ReturnType<typeof prepare>, quotes: [string, string][]): Highlight[] =>
+    quotes.map(([q, id]) => {
+      const from = p.text.text.indexOf(q);
+      return { id, from, to: from + q.length };
+    });
+
+  test("one mark per block, its count and first thread; the draft is not a thread", () => {
+    const tree = stored(MD);
+    const p = prepare(tree, {});
+    const { host } = put(Body, { prepared: p, diff: null, hideFirst: false });
+    const hs = [
+      ...marksOn(p, [
+        ["quoted twice", "t3"],
+        ["Last paragraph", "t2"],
+        ["a quote", "t1"],
+        ["two items", "t4"],
+      ]),
+      { id: "draft", from: 2, to: 4, draft: true },
+    ];
+    const got = blockMarks(host, hs).map((m) => ({
+      first: m.first,
+      count: m.count,
+      tag: m.block.tagName,
+    }));
+    expect(got).toEqual([
+      { first: "t1", count: 1, tag: "P" },
+      { first: "t4", count: 1, tag: "UL" },
+      { first: "t2", count: 2, tag: "P" },
+    ]);
+  });
+
+  test("placed in the gutter beside the block when it fits, else under the block's end", () => {
+    const rect = (left: number, top: number, width: number, height: number) =>
+      ({ left, top, right: left + width, bottom: top + height, width, height }) as DOMRect;
+    const body = rect(100, 50, 600, 900);
+    const block = rect(100, 250, 578, 60);
+    expect(placeMark(block, body, 678, 82, 44)).toEqual({ x: 586, y: 200, end: false });
+    expect(placeMark(block, body, 678, 16, 44)).toEqual({ x: 578, y: 260, end: true });
+  });
+
+  test("the reader draws them outside the text, keeps its counting, and a mark opens its thread", () => {
+    for (const { file, body } of bodies().slice(0, 12)) {
+      const tree = stored(body);
+      const p = prepare(tree, {});
+      // A thread on every textblock long enough to quote.
+      const hs: Highlight[] = p.text.blocks
+        .filter((b) => b.to - b.from > 4)
+        .map((b, i) => ({ id: `t${i}`, from: b.from + 1, to: b.to - 1 }));
+      const opened: (string | null)[] = [];
+      const { host } = put(Reader, {
+        prepared: p,
+        diff: null,
+        hideFirst: false,
+        highlights: hs,
+        onMark: (id: string | null) => opened.push(id),
+      });
+      const prose = host.querySelector(".prose") as Element;
+      const layer = host.querySelector(".comment-marks");
+      if (hs.length === 0) continue;
+      // The layer is the body's, beside the text, never inside it.
+      expect({ file, layer: layer !== null }).toEqual({ file, layer: true });
+      expect(prose.contains(layer)).toBe(false);
+      // The text counts as docText does, every textblock at its offset.
+      const blocks = p.text.blocks;
+      const tbs = textblocks(prose);
+      const drawn = blocks.filter((b) =>
+        tbs.some((tb) => Number(tb.getAttribute("data-text")) === b.from),
+      );
+      expect(tbs.length).toBe(drawn.length);
+      for (const tb of tbs) {
+        const at = Number(tb.getAttribute("data-text"));
+        const b = blocks.find((x) => x.from === at);
+        expect({ file, text: readText(tb) }).toEqual({
+          file,
+          text: p.text.text.slice(b?.from, b?.to),
+        });
+      }
+      // One mark per block that holds a quote, named by its count; the first opens its thread.
+      const marks = Array.from(host.querySelectorAll<HTMLButtonElement>("button.comment-mark"));
+      const expected = blockMarks(prose, hs);
+      expect({ file, n: marks.length }).toEqual({ file, n: expected.length });
+      const one = marks[0];
+      const first = expected[0];
+      if (!one || !first) continue;
+      expect(one.getAttribute("aria-label")).toBe(
+        first.count === 1 ? "1 comment" : `${first.count} comments`,
+      );
+      expect(one.textContent?.trim()).toBe(String(first.count));
+      one.click();
+      expect(opened).toEqual([first.first]);
+    }
+  });
+
+  test("no open threads, no layer", () => {
+    const p = prepare(stored(MD), {});
+    const { host } = put(Reader, {
+      prepared: p,
+      diff: null,
+      hideFirst: false,
+      highlights: [{ id: "draft", from: 9, to: 14, draft: true }],
+      onMark: () => {},
+    });
+    expect(host.querySelector(".comment-marks")).toBeNull();
   });
 });

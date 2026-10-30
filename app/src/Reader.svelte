@@ -13,6 +13,7 @@
   import type { WordDiff } from "@tempra/editor";
   import type { Snippet } from "svelte";
   import Body from "./reader/Body.svelte";
+  import CommentMarks from "./reader/CommentMarks.svelte";
   import { offsetAtPoint, rangeOf, selectionAt } from "./reader/dom";
   import Floating from "./reader/Floating.svelte";
   import Lightbox from "./reader/Lightbox.svelte";
@@ -228,6 +229,10 @@
   >
     <Body {prepared} {diff} {hideFirst} />
   </div>
+  {#if root && onMark && highlights && highlights.some((h) => !h.draft)}
+    <!-- A mark beside each block with open threads, outside the counted text (TEMPRA-223). -->
+    <CommentMarks {root} {highlights} {prepared} {diff} {hideFirst} onOpen={(id) => onMark?.(id)} />
+  {/if}
   {#if shown !== null && prepared.figures[shown - 1]}
     <Lightbox
       figures={prepared.figures}

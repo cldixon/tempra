@@ -6,10 +6,15 @@
   import type { PanelName } from "./panel";
   import { storedFile } from "./tools";
 
-  /** ⋯: Copy page, the panels that are not Comments, the Markdown view, the page's link and file. */
+  /**
+   * ⋯: Copy page, the panels (Comments with its open count, TEMPRA-223; History, Properties), the
+   * Markdown view, the page's link and file.
+   */
   let props: {
     urls: Urls;
     path: string;
+    /** Open threads on the page, shown beside Comments. */
+    openCount: number;
     panel: PanelName | null;
     markdown: boolean;
     onPanel(name: PanelName): void;
@@ -26,7 +31,9 @@
     data-stay="true"
     onclick={() => page.copy(() => storedFile(props.urls, props.path))}
     ><Icon name="copy" /> <span aria-live="polite">{page.state === "copied" ? "Copied" : page.state === "failed" ? "Could not copy" : "Copy page"}</span></button
-  ><hr /><button type="button" class="menu-item" aria-pressed={props.panel === "history"} onclick={() => props.onPanel("history")}
+  ><hr /><button type="button" class="menu-item" aria-pressed={props.panel === "comments"} onclick={() => props.onPanel("comments")}
+    ><Icon name="comments" /> Comments{#if props.openCount > 0}<span class="menu-count">{props.openCount} open</span>{/if}</button
+  ><button type="button" class="menu-item" aria-pressed={props.panel === "history"} onclick={() => props.onPanel("history")}
     ><Icon name="history" /> History</button
   ><button type="button" class="menu-item" aria-pressed={props.panel === "properties"} onclick={() => props.onPanel("properties")}
     ><Icon name="properties" /> Properties</button

@@ -338,6 +338,7 @@
 {#snippet actions()}{#if live && !moved}<LiveChange {urls} {live} />{/if}<PageMenu
     {urls}
     path={c.path}
+    {openCount}
     {panel}
     {markdown}
     onPanel={togglePanel}

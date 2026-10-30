@@ -497,6 +497,38 @@ describe("what it may do", () => {
     expect(await thread(s, id)).toMatchObject({ kind: "request", status: "open" });
   });
 
+  test("it never resolves a thread it answered: the reply lands and the thread stays open", async () => {
+    const s = setup();
+    await seed(s);
+    enable(s);
+    const { jobs } = wire(s);
+    const { id, job } = await ask(s, jobs, "@tempra what is margin?");
+    const { model, sent } = scripted([
+      () => ({
+        content: [use("comment", { action: "resolve", body: "Margin is revenue less cost." })],
+      }),
+      () => ({
+        content: [use("comment", { action: "reply", body: "Margin is revenue less cost." })],
+      }),
+      end(),
+    ]);
+    const out = await runTurn(turnDeps(s, model), job as AgentJob);
+    expect(out.status).toBe("replied");
+    const refused = results(sent[1] as MessageCreateParamsNonStreaming)[0];
+    expect(refused?.error).toBe(true);
+    expect(JSON.stringify(refused)).toContain("never resolve");
+    const t = await thread(s, id);
+    expect(t.status).toBe("open");
+    expect(t.comments).toHaveLength(2);
+    expect(t.comments[1]?.body).toBe("Margin is revenue less cost.");
+  });
+
+  test("its system prompt says to reply and leave the thread open", () => {
+    expect(SYSTEM_PROMPT).toContain("leave the thread open");
+    expect(SYSTEM_PROMPT).toContain("You never resolve");
+    expect(SYSTEM_PROMPT).not.toMatch(/`resolve` with a body/);
+  });
+
   test("a small edit lands with a note and a link to its changes; a big one or a second page is refused", async () => {
     const s = setup();
     await seed(s);

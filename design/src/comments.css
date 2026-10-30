@@ -288,6 +288,65 @@ section.thread.open {
   }
 }
 
+/* A mark beside each block of a concept's body that holds open threads (TEMPRA-223): the comment
+   glyph and the count in muted grey, in the right gutter by the block's first line, or under the
+   block's end where there is no gutter (a phone). A layer over the body, outside its text, placed
+   by the app through --mark-x and --mark-y. Greys and lines only. */
+.body:has(> .comment-marks) {
+  position: relative;
+}
+
+.comment-marks {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.comment-mark {
+  position: absolute;
+  top: var(--mark-y, 0);
+  left: var(--mark-x, 0);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--tempra-color-border-strong);
+  border-radius: var(--tempra-radius-pill);
+  background: var(--tempra-color-bg);
+  color: var(--tempra-color-muted);
+  font-family: var(--tempra-font-text);
+  font-size: var(--tempra-text-meta);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+/* Beside the block's first line, centred on the reading leading. */
+.comment-mark:not(.end) {
+  margin-top: calc((var(--tempra-text-reader) * var(--tempra-leading-reader) - 24px) / 2);
+}
+
+/* No gutter: under the block's last line, its right edge at the block's. */
+.comment-mark.end {
+  transform: translate(-100%, -2px);
+}
+
+.comment-mark:hover {
+  border-color: var(--tempra-color-text);
+  color: var(--tempra-color-text);
+}
+
+/* On a phone, a touch target on the 44px area around it. */
+@media (max-width: 900px) {
+  .comment-mark::after {
+    content: "";
+    position: absolute;
+    inset: -10px;
+  }
+}
+
 /* A link in a comment's text: a page or a URL it names. */
 .comment a {
   color: inherit;

@@ -37,6 +37,74 @@ export function highlightRegistry(): { highlights: Registry; Highlight: Highligh
     : null;
 }
 
+/** A block of the body that holds open threads' quotes: its mark beside it (TEMPRA-223). */
+export interface BlockMark {
+  /** The block's first thread (by where its quote starts): the one the mark opens. */
+  first: string;
+  /** Open threads quoted in it. */
+  count: number;
+  /** The top-level block (a child of the body's root). */
+  block: Element;
+}
+
+/**
+ * The blocks that hold open threads' quotes, in document order, each with its count and first
+ * thread: a quote counts for the top-level block it starts in. The draft is not a thread.
+ */
+export function blockMarks(root: Element, marks: readonly Highlight[]): BlockMark[] {
+  const out = new Map<Element, BlockMark>();
+  const open = marks.filter((h) => !h.draft).sort((a, b) => a.from - b.from);
+  for (const h of open) {
+    const p = pointAt(root, h.from);
+    let el: Element | null = p
+      ? p.node.nodeType === 1
+        ? (p.node as Element)
+        : p.node.parentElement
+      : null;
+    while (el && el.parentElement !== root) el = el.parentElement;
+    if (!el) continue;
+    const m = out.get(el);
+    if (m) m.count++;
+    else out.set(el, { first: h.id, count: 1, block: el });
+  }
+  return [...out.values()];
+}
+
+/** A mark's place in the body's box: beside its block in the gutter, or under its end. */
+export interface MarkPlace {
+  x: number;
+  y: number;
+  /** No gutter: the mark ends at `x`, under the block's last line. */
+  end: boolean;
+}
+
+/**
+ * Where a block's mark goes, in px from the body's box (`body`): in the right gutter beside the
+ * block's first line when `room` (from the text's right edge to the page's) fits `width`, else
+ * under the block, ending at its right edge (a phone, a narrow column).
+ */
+export function placeMark(
+  block: DOMRect,
+  body: DOMRect,
+  textRight: number,
+  room: number,
+  width: number,
+): MarkPlace {
+  const gap = 8;
+  if (room >= width + gap) {
+    return {
+      x: Math.round(textRight - body.left + gap),
+      y: Math.round(block.top - body.top),
+      end: false,
+    };
+  }
+  return {
+    x: Math.round(block.right - body.left),
+    y: Math.round(block.bottom - body.top),
+    end: true,
+  };
+}
+
 /** The concept reader's text, for scrolling to a quote from outside it (the Comments panel). */
 function conceptRoot(): Element | null {
   return document.querySelector(".doc .body > .prose");
