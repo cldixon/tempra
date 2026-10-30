@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { moduleSource } from "./build";
+import { readdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { HEADERS, moduleSource, PUBLIC } from "./build";
+import { pagePanel } from "./dist/panels";
 import { actorView } from "./src/agents";
 import { initials } from "./src/chrome";
 import { versionHref } from "./src/concept/history";
@@ -154,6 +157,20 @@ test("the generated module names the bundle by its content hash", () => {
   expect(b).toContain('export const chunks: string[] = ["pele-abc.js"];');
   // Names only: the code is a static asset (TEMPRA-174), not a string in the Worker.
   expect(b).not.toContain('"y"');
+});
+
+test("the page panel loads Pele from the deployment, the app's chunk alone (tempra-dev app/page-panel)", () => {
+  const files = readdirSync(join(PUBLIC, "_app"));
+  const pele = files.find((f) => /^pele-[\w-]+\.js$/.test(f));
+  expect(pele).toBeDefined();
+  // The chunk never imports the app's entry, which would bring the whole app into the panel.
+  const code = readFileSync(join(PUBLIC, "_app", pele as string), "utf8");
+  expect(code).not.toMatch(/from\s*["'`]\.\/app\./);
+  // The panel imports it at the origin the Worker writes in, and carries no Pele of its own.
+  expect(pagePanel).toContain(`__TEMPRA_ORIGIN__/_app/${pele}`);
+  expect(pagePanel.length).toBeLessThan(900 * 1024);
+  // A host's frame is another origin: the bundle answers it, as the design files do.
+  expect(HEADERS).toMatch(/\/_app\/\*\n(?: {2}.*\n)*? {2}Access-Control-Allow-Origin: \*\n/);
 });
 
 describe("links followed in place (TEMPRA-129)", () => {
