@@ -159,9 +159,18 @@ CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(concept_id UNINDEXED, title, b
 CREATE TABLE IF NOT EXISTS fts_rows (concept_id TEXT PRIMARY KEY, fts_rowid INTEGER NOT NULL);
 
 CREATE TABLE IF NOT EXISTS cursors (maintainer TEXT PRIMARY KEY, seq INTEGER NOT NULL);
--- One row per day, concept and actor, so reads are counted with an upsert.
-CREATE TABLE IF NOT EXISTS access_log (day TEXT, concept_id TEXT, actor TEXT, reads INTEGER);
-CREATE UNIQUE INDEX IF NOT EXISTS access_log_key ON access_log(day, concept_id, actor);
+-- One row per day, concept, surface, reader kind and reader (in actor), so reads are counted
+-- with an upsert (TEMPRA-220). Its unique index, (concept_id, day, surface, kind, actor), is made
+-- by LibraryStore's addReadHistory, which also upgrades libraries from before (rows with '').
+CREATE TABLE IF NOT EXISTS access_log (
+  day TEXT, concept_id TEXT, actor TEXT, reads INTEGER,
+  surface TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL DEFAULT ''
+);
+-- The last read of each concept on each surface (TEMPRA-220), kept past the usage window.
+CREATE TABLE IF NOT EXISTS last_read (
+  concept_id TEXT NOT NULL, surface TEXT NOT NULL, at TEXT NOT NULL,
+  PRIMARY KEY (concept_id, surface)
+);
 CREATE TABLE IF NOT EXISTS flags (
   concept_id TEXT, kind TEXT, since_seq INTEGER, detail TEXT,
   PRIMARY KEY (concept_id, kind)

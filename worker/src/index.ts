@@ -4,7 +4,7 @@ import type { Deps } from "./app";
 import { d1Authenticate } from "./auth";
 import { d1BlobRefs } from "./blobrefs";
 import { makeClient, r2BlobStore, recordingBlobStore } from "./client";
-import { FEED_SOCKETS_PER_ACCOUNT, type PresenceCaller, presenceCaller } from "./feed";
+import { type Caller, callerOf, FEED_SOCKETS_PER_ACCOUNT } from "./feed";
 import { deleteVariants, imagesService, r2VariantCache } from "./images";
 import { type Library, refuseFeed } from "./library";
 import { DEFAULT_STORAGE_MB } from "./limits";
@@ -87,7 +87,7 @@ const depsFor = (env: Env): Deps => {
   authenticate ??= d1Authenticate(env.DB);
   // `caller` is the agent behind the calls, for presence on the feed (TEMPRA-219); null for a
   // person, and for the Worker's own calls (downloads, maintenance).
-  const client = (doId: string, caller: PresenceCaller | null = null) => {
+  const client = (doId: string, caller: Caller | null = null) => {
     const stub = libraryStub(env, doId);
     return makeClient(async (method, args, who) => {
       // A slow round trip is logged beside the object's own line (TEMPRA-190, timing.ts).
@@ -222,7 +222,7 @@ const depsFor = (env: Env): Deps => {
         return obj ? { body: obj.body, size: obj.size } : null;
       },
     },
-    library: (token) => client(token.library.do_id, presenceCaller(token)),
+    library: (token, surface) => client(token.library.do_id, callerOf(token, surface)),
     feed: async (doId, request, { prefix, account }) => {
       // A place under the account's cap first (feed-leases.ts), then the library's own cap.
       const lease = crypto.randomUUID();

@@ -138,8 +138,9 @@ export function createWorker(deps: (env: Cloudflare.Env) => Deps): {
           }
           return handleMcp(request, {
             ...caller,
-            open: (t) => notifying(d, t, d.library(t), (p) => ctx.waitUntil(p)),
-            comment: (t, req, action) => postComment(d, t, d.library(t), req, action),
+            // Reads over MCP are counted as MCP's (TEMPRA-220).
+            open: (t) => notifying(d, t, d.library(t, "mcp"), (p) => ctx.waitUntil(p)),
+            comment: (t, req, action) => postComment(d, t, d.library(t, "mcp"), req, action),
             about: (id) => d.accounts.about(id),
             agentNames: async (ids) =>
               new Map((await d.accounts.agents(ids)).map((a) => [a.id, agentName(a)])),

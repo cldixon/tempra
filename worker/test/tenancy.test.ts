@@ -273,10 +273,20 @@ describe("tenancy (v2 spec: Tenancy and authorization)", () => {
     expect(put.status).toBe(403);
     expect(await put.text()).toContain("read and comment");
 
+    // Reading a page counts a read (TEMPRA-220), which a read member does: no ledger event.
+    const opened = await as("/read/a.md", { method: "POST" });
+    expect(opened.status).toBe(200);
+    expect(
+      ((await opened.json()) as { reads: { week: { people: number } } }).reads.week.people,
+    ).toBe(1);
+    expect(s.store().headSeq()).toBe(seqAfterComment);
+
     // Every other state-changing route, REST and UI: nothing lands.
     const failures: string[] = [];
     for (const r of await libraryRoutes(s)) {
-      if (r.method === "GET" || r.path.includes("/comments")) continue;
+      if (r.method === "GET" || r.path.includes("/comments") || r.path.endsWith("/read/*")) {
+        continue;
+      }
       const path = fill(r.path);
       const got = await friend.app.request(path, {
         method: r.method,

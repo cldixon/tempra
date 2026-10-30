@@ -45,6 +45,7 @@ import {
 } from "../render";
 import type { CommentAction, CommentResult } from "../store/comments";
 import { OkfError } from "../store/errors";
+import { readsText } from "../store/reads";
 import {
   checkFacts,
   type LibraryHealth,
@@ -898,7 +899,7 @@ export function buildServer(ctx: McpContext): McpServer {
         const view = await withDimensions(
           picked.lib,
           ctx.blobs,
-          await picked.lib.read(args.path, { at: args.at, figures: true }),
+          await picked.lib.read(args.path, { at: args.at, figures: true, reads: true }),
         );
         if (view.kind === "derived") return text(view.markdown);
         if (view.kind === "attachment") {
@@ -955,6 +956,8 @@ export function buildServer(ctx: McpContext): McpServer {
             `hash: ${view.hash}`,
             `seq: ${view.seq}${args.at !== undefined ? ` (as of ${args.at})` : ""}`,
             `trust: ${view.trust_tier} · stale: ${view.stale ? "yes" : view.stale_soon ? "soon" : "no"} · status: ${status} · inbound links: ${view.inbound_links}`,
+            // How much the page is read and how recently (TEMPRA-220): counts only, never who.
+            ...(view.reads ? [readsText(view.reads, Date.now())] : []),
             ...(tier2 && view.open_comments > 0
               ? [
                   `Open comments: ${view.open_comments}. Read them with \`comments\` (path ${view.path}) before you edit.`,
@@ -1741,7 +1744,7 @@ export function buildServer(ctx: McpContext): McpServer {
       "query",
       {
         title: "Filter by frontmatter",
-        description: `${BEYOND}list concepts by frontmatter: type, tag, status, trust tier, staleness, directory. Faster and exact where grep over YAML is not.`,
+        description: `${BEYOND}list concepts by frontmatter: type, tag, status, trust tier, staleness, directory. Faster and exact where grep over YAML is not. Find hot or cold pages by their reads over 30 days: \`sort: "reads"\` (most read first), \`min_reads\`, \`max_reads\` (\`max_reads: 0\` for pages nobody read).`,
         inputSchema: {
           type: z.string().optional(),
           tag: z.string().optional(),
@@ -1749,6 +1752,12 @@ export function buildServer(ctx: McpContext): McpServer {
           trust: z.enum(["unverified", "machine-confirmed", "human-reviewed"]).optional(),
           stale: z.boolean().optional(),
           prefix: z.string().optional(),
+          sort: z
+            .enum(["path", "reads"])
+            .optional()
+            .describe("`reads`: most read over 30 days first. Default: by path."),
+          min_reads: z.number().int().optional().describe("At least this many reads in 30 days."),
+          max_reads: z.number().int().optional().describe("At most this many reads in 30 days."),
           limit: z.number().int().optional(),
           offset: z.number().int().optional(),
           ...libArg,
@@ -1759,7 +1768,7 @@ export function buildServer(ctx: McpContext): McpServer {
         const r = await pick(library).lib.concepts(args);
         const lines = r.items.map(
           (c) =>
-            `${c.path} · ${c.type || "(no type)"} · ${c.status}${c.status_set === false ? " (not set)" : ""} · ${c.trust_tier}${c.stale ? " · STALE" : ""} — ${c.title ?? ""}${c.description ? `: ${c.description}` : ""}`,
+            `${c.path} · ${c.type || "(no type)"} · ${c.status}${c.status_set === false ? " (not set)" : ""} · ${c.trust_tier}${c.stale ? " · STALE" : ""}${"reads" in c ? ` · ${c.reads} read${c.reads === 1 ? "" : "s"} in 30 days` : ""} — ${c.title ?? ""}${c.description ? `: ${c.description}` : ""}`,
         );
         lines.unshift(
           `${r.total} matching concept${r.total === 1 ? "" : "s"}${r.next_offset !== null ? ` (next offset ${r.next_offset})` : ""}:`,

@@ -1,10 +1,11 @@
 import { type DiagramExport, drawnDiagrams, isDrawnDiagram } from "./diagram-export";
-import type { PresenceCaller } from "./feed";
+import type { Caller } from "./feed";
 import { checkAttachment, formatOf, imageInfo } from "./media";
 import type { FigureFact } from "./okf/figures";
 import { sha256Hex } from "./okf/hash";
 import { normalizePath } from "./okf/paths";
 import { OkfError } from "./store/errors";
+import type { Reading } from "./store/reads";
 import type { BlobRef, ImageRef, ImportFile, LibraryStore, WriteOp } from "./store/store";
 import { writeTar } from "./util/tar";
 
@@ -15,6 +16,8 @@ export const LIBRARY_METHODS = [
   "revert",
   "read",
   "page",
+  // The app's read of the page it shows (TEMPRA-220): counted, never a write.
+  "viewed",
   "tree",
   "outline",
   "concepts",
@@ -71,16 +74,17 @@ export type CallResult =
   | { ok: false; status: number; code: string; message: string; extra: Record<string, unknown> };
 
 /**
- * One call to a library. `caller` is the agent making it, for presence (feed.ts, TEMPRA-219):
- * null for a person, whose reads say nothing.
+ * One call to a library. `caller` is who makes it (feed.ts `Caller`): an agent's reads are
+ * presence (TEMPRA-219), and every read is counted as its surface and reader kind (TEMPRA-220).
+ * Null for the Worker's own calls.
  */
 export type CallFn = (
   method: LibraryMethod,
   args: unknown[],
-  caller?: PresenceCaller | null,
+  caller?: Caller | null,
 ) => Promise<CallResult>;
 
-export function makeClient(call: CallFn, caller: PresenceCaller | null = null): LibraryClient {
+export function makeClient(call: CallFn, caller: Caller | null = null): LibraryClient {
   const client: Record<string, (...args: unknown[]) => Promise<unknown>> = {};
   for (const m of LIBRARY_METHODS) {
     client[m] = async (...args: unknown[]) => {
@@ -215,6 +219,8 @@ export async function callStore(
      * the write that adds them commits; a write it cannot record is refused, never committed.
      */
     references?: (hashes: string[]) => Promise<void>;
+    /** Who reads, for read history (TEMPRA-220); null for the Worker's own calls. */
+    reading?: Reading | null;
   } = {},
 ): Promise<CallResult> {
   try {
@@ -248,7 +254,7 @@ export async function callStore(
       }
     }
     const fn = store[method] as unknown as (...a: unknown[]) => unknown;
-    return { ok: true, value: fn.apply(store, args) };
+    return { ok: true, value: store.reading(opts.reading ?? null, () => fn.apply(store, args)) };
   } catch (e) {
     if (e instanceof OkfError) {
       return { ok: false, status: e.status, code: e.code, message: e.message, extra: e.extra };

@@ -101,6 +101,14 @@ import {
   type ThreadView,
 } from "./comments";
 import { notFound, OkfError } from "./errors";
+import {
+  READ_WEEK_DAYS,
+  type ReadHistory,
+  type Reading,
+  type ReadRow,
+  type ReadSurface,
+  readHistory,
+} from "./reads";
 import { DIAGRAM_RENDERS, LEDGER_COUNTS, migrate } from "./schema";
 import type { SqlHandle, SqlValue } from "./sql";
 
@@ -527,6 +535,8 @@ export type FileView =
        * reader reserves. `width` and `height` are absent when never worked out, null when unknown.
        */
       images?: Record<string, ImageRef>;
+      /** How much the page is read and how recently, when asked for (`reads`; TEMPRA-220). */
+      reads?: ReadHistory;
     }
   | {
       kind: "attachment";
@@ -575,6 +585,15 @@ export interface StoreOptions {
 
 /** Reads are counted over this window for internal sources' usage (spec: What the service derives). */
 export const USAGE_WINDOW_DAYS = 30;
+
+/** Reads of one concept by one reader on one day, counted in memory (TEMPRA-87, TEMPRA-220). */
+interface PendingRead {
+  id: string;
+  surface: string;
+  kind: string;
+  reader: string;
+  n: number;
+}
 
 /** Reads counted in memory before they are written to `access_log` (TEMPRA-87). */
 export const READ_FLUSH = 100;
@@ -727,9 +746,15 @@ export class LibraryStore {
   private readonly snapshots = new Map<number, Snapshot>();
   /** Missing-heading lint at head, by concept, for the seq it was worked out at (TEMPRA-86). */
   private anchorCache: { seq: number; lint: Map<string, LintWarning[]> } | null = null;
-  /** Reads counted in memory (TEMPRA-87), by day and concept, and how many in all. */
-  private readonly reads = new Map<string, Map<string, number>>();
+  /**
+   * Reads counted in memory (TEMPRA-87), by day, then by concept, surface, kind and reader
+   * (TEMPRA-220), and how many in all; with the latest read of each concept on each surface.
+   */
+  private readonly reads = new Map<string, Map<string, PendingRead>>();
+  private readonly lastReads = new Map<string, { id: string; surface: ReadSurface; at: string }>();
   private unflushed = 0;
+  /** The reader of the call in progress (TEMPRA-220), set by `reading`; null for unattributed. */
+  private reader: Reading | null = null;
   /** The write in progress: the seq it started from, and the files its content changes touched. */
   private touch: { before: number; ids: Set<string>; paths: Set<string> } | null = null;
   /** Committed writes since the kept lint's seq, in order: what each touched, from and to seq. */
@@ -753,6 +778,51 @@ export class LibraryStore {
     this.addBlobDimensions();
     this.sql.script(DIAGRAM_RENDERS);
     this.addExternalImageFlags();
+    this.addReadHistory();
+  }
+
+  /**
+   * Reads by surface, reader kind and reader, and the last read per surface (TEMPRA-220).
+   * Libraries from before get the columns, the wider unique index and `last_read` once; their
+   * counts stay, with '' for surface, kind and reader: in totals and usage_count, in no split.
+   */
+  private addReadHistory() {
+    if (this.sql.all("SELECT 1 FROM meta WHERE key = 'read_history'").length > 0) return;
+    this.sql.transaction(() => {
+      const cols = this.sql.all<{ name: string }>("PRAGMA table_info(access_log)");
+      if (!cols.some((c) => c.name === "surface")) {
+        this.sql.run("ALTER TABLE access_log ADD COLUMN surface TEXT NOT NULL DEFAULT ''");
+      }
+      if (!cols.some((c) => c.name === "kind")) {
+        this.sql.run("ALTER TABLE access_log ADD COLUMN kind TEXT NOT NULL DEFAULT ''");
+      }
+      this.sql.run("UPDATE access_log SET actor = '' WHERE actor IS NULL");
+      this.sql.run("DROP INDEX IF EXISTS access_log_key");
+      this.sql.run(
+        "CREATE UNIQUE INDEX IF NOT EXISTS access_log_reads ON access_log(concept_id, day, surface, kind, actor)",
+      );
+      this.sql.script(
+        `CREATE TABLE IF NOT EXISTS last_read (
+           concept_id TEXT NOT NULL, surface TEXT NOT NULL, at TEXT NOT NULL,
+           PRIMARY KEY (concept_id, surface)
+         );`,
+      );
+      this.sql.run("INSERT INTO meta (key, value) VALUES ('read_history', '1')");
+    });
+  }
+
+  /**
+   * Runs `fn` as `reader` reads (TEMPRA-220): the reads it counts carry its surface and kind.
+   * Store methods are synchronous, so nothing else runs in between.
+   */
+  reading<T>(reader: Reading | null, fn: () => T): T {
+    const before = this.reader;
+    this.reader = reader;
+    try {
+      return fn();
+    } finally {
+      this.reader = before;
+    }
   }
 
   /**
@@ -2983,17 +3053,46 @@ export class LibraryStore {
   /**
    * One more read of a concept's current version today (spec: usage-rollup maintainer), counted
    * in memory so a read does not write (TEMPRA-87). Flushed to `access_log` by the next write,
-   * every READ_FLUSH reads, before the usage pass, and by the Durable Object's alarm.
+   * every READ_FLUSH reads, before the usage pass, and by the Durable Object's alarm. It carries
+   * the call's reader (TEMPRA-220); the app's reads are not counted here but from the page it
+   * shows (`viewed`), so its prefetches and background re-checks never count.
    */
-  private countRead(id: string) {
-    const day = iso(this.clock()).slice(0, 10);
+  private countRead(id: string, shown = false) {
+    const r = this.reader;
+    if (r?.surface === "app" && !shown) return;
+    const now = iso(this.clock());
+    const day = now.slice(0, 10);
     let counts = this.reads.get(day);
     if (!counts) {
       counts = new Map();
       this.reads.set(day, counts);
     }
-    counts.set(id, (counts.get(id) ?? 0) + 1);
+    const surface = r?.surface ?? "";
+    const kind = r?.kind ?? "";
+    const reader = r?.reader ?? "";
+    const key = `${id}\u001f${surface}\u001f${kind}\u001f${reader}`;
+    const pending = counts.get(key);
+    if (pending) pending.n++;
+    else counts.set(key, { id, surface, kind, reader, n: 1 });
+    if (r) {
+      const k = `${id}\u001f${r.surface}`;
+      const kept = this.lastReads.get(k);
+      if (!kept || kept.at < now) this.lastReads.set(k, { id, surface: r.surface, at: now });
+    }
     if (++this.unflushed >= READ_FLUSH) this.flushReads();
+  }
+
+  /**
+   * The app's read of a page it shows (TEMPRA-220, `POST …/read/{path}`): one per page a person
+   * opens, at head. Answers the page's read history with it counted.
+   */
+  viewed(input: string): { path: string; reads: ReadHistory } {
+    const snap = this.snapshot();
+    const path = normalizePath(input) ?? "";
+    const e = snap.lookup(path);
+    if (!e || e.kind !== "concept") throw notFound(input);
+    this.countRead(e.concept_id, true);
+    return { path: e.path, reads: this.readHistoryOf(e.concept_id) };
   }
 
   /** Reads counted in memory and not yet in `access_log`. */
@@ -3001,24 +3100,37 @@ export class LibraryStore {
     return this.unflushed;
   }
 
-  /** Writes the reads counted in memory to `access_log`, in one transaction. */
+  /** Writes the reads counted in memory to `access_log` and `last_read`, in one transaction. */
   flushReads(): number {
     const n = this.unflushed;
     if (n === 0) return 0;
     this.sql.transaction(() => {
       for (const [day, counts] of this.reads) {
-        for (const [id, reads] of counts) {
+        for (const p of counts.values()) {
           this.sql.run(
-            `INSERT INTO access_log (day, concept_id, actor, reads) VALUES (?, ?, '', ?)
-             ON CONFLICT(day, concept_id, actor) DO UPDATE SET reads = reads + excluded.reads`,
+            `INSERT INTO access_log (day, concept_id, surface, kind, actor, reads) VALUES (?, ?, ?, ?, ?, ?)
+             ON CONFLICT(concept_id, day, surface, kind, actor) DO UPDATE SET reads = reads + excluded.reads`,
             day,
-            id,
-            reads,
+            p.id,
+            p.surface,
+            p.kind,
+            p.reader,
+            p.n,
           );
         }
       }
+      for (const l of this.lastReads.values()) {
+        this.sql.run(
+          `INSERT INTO last_read (concept_id, surface, at) VALUES (?, ?, ?)
+           ON CONFLICT(concept_id, surface) DO UPDATE SET at = MAX(at, excluded.at)`,
+          l.id,
+          l.surface,
+          l.at,
+        );
+      }
     });
     this.reads.clear();
+    this.lastReads.clear();
     this.unflushed = 0;
     return n;
   }
@@ -3027,7 +3139,10 @@ export class LibraryStore {
   private usageCount(id: string): number {
     const start = this.windowStart();
     let pending = 0;
-    for (const [day, counts] of this.reads) if (day >= start) pending += counts.get(id) ?? 0;
+    for (const [day, counts] of this.reads) {
+      if (day < start) continue;
+      for (const p of counts.values()) if (p.id === id) pending += p.n;
+    }
     return (
       (this.sql.all<{ n: number }>(
         "SELECT COALESCE(SUM(reads), 0) AS n FROM access_log WHERE concept_id = ? AND day >= ?",
@@ -3035,6 +3150,60 @@ export class LibraryStore {
         start,
       )[0]?.n ?? 0) + pending
     );
+  }
+
+  /** Every concept's reads over the usage window, flushed or not, for `concepts`' sort. */
+  private usageCounts(): Map<string, number> {
+    const start = this.windowStart();
+    const out = new Map<string, number>();
+    for (const r of this.sql.all<{ id: string; n: number }>(
+      "SELECT concept_id AS id, SUM(reads) AS n FROM access_log WHERE day >= ? GROUP BY concept_id",
+      start,
+    )) {
+      out.set(r.id, r.n);
+    }
+    for (const [day, counts] of this.reads) {
+      if (day < start) continue;
+      for (const p of counts.values()) out.set(p.id, (out.get(p.id) ?? 0) + p.n);
+    }
+    return out;
+  }
+
+  /**
+   * A concept's read history (TEMPRA-220): the last 7 and 30 days by surface and by agent or
+   * person, distinct readers as a count, and the last read per surface. Flushed or not.
+   */
+  private readHistoryOf(id: string): ReadHistory {
+    const month = this.windowStart();
+    const week = iso(new Date(this.clock().getTime() - (READ_WEEK_DAYS - 1) * 86_400_000)).slice(
+      0,
+      10,
+    );
+    const rows = this.sql.all<ReadRow>(
+      `SELECT day, surface, kind, actor AS reader, SUM(reads) AS reads FROM access_log
+       WHERE concept_id = ? AND day >= ? GROUP BY day, surface, kind, actor`,
+      id,
+      month,
+    );
+    for (const [day, counts] of this.reads) {
+      for (const p of counts.values()) {
+        if (p.id === id) {
+          rows.push({ day, surface: p.surface, kind: p.kind, reader: p.reader, reads: p.n });
+        }
+      }
+    }
+    const last: Record<string, string> = {};
+    for (const r of this.sql.all<{ surface: string; at: string }>(
+      "SELECT surface, at FROM last_read WHERE concept_id = ?",
+      id,
+    )) {
+      last[r.surface] = r.at;
+    }
+    for (const l of this.lastReads.values()) {
+      const kept = last[l.surface];
+      if (l.id === id && (!kept || kept < l.at)) last[l.surface] = l.at;
+    }
+    return readHistory(rows, last, { week, month });
   }
 
   private windowStart(): string {
@@ -3055,7 +3224,14 @@ export class LibraryStore {
   /** GET /files/{path}: a concept, an attachment's metadata, or a synthesized index.md / log.md. */
   read(
     input: string,
-    opts: { at?: number; computed?: boolean; figures?: boolean; images?: boolean } = {},
+    opts: {
+      at?: number;
+      computed?: boolean;
+      figures?: boolean;
+      images?: boolean;
+      /** The concept's read history (TEMPRA-220), for MCP `read`. */
+      reads?: boolean;
+    } = {},
   ): FileView {
     const snap = this.snapshot(opts.at);
     const path = normalizePath(input) ?? "";
@@ -3131,6 +3307,7 @@ export class LibraryStore {
       open_comments: atHead ? this.openThreadsOf(e.concept_id) : 0,
       ...(opts.figures ? { figures: this.figuresOf(snap, e, doc) } : {}),
       ...(opts.images ? { images: this.imagesOf(snap, e, doc) } : {}),
+      ...(opts.reads ? { reads: this.readHistoryOf(e.concept_id) } : {}),
     };
   }
 
@@ -3459,24 +3636,41 @@ export class LibraryStore {
       at?: number;
       limit?: number;
       offset?: number;
+      /** `reads`: most read first, over the usage window (TEMPRA-220); by path otherwise. */
+      sort?: "path" | "reads";
+      /** Reads over the usage window (30 days) at least or at most this many (TEMPRA-220). */
+      min_reads?: number;
+      max_reads?: number;
     } = {},
   ) {
     const snap = this.snapshot(q.at);
     const prefix = normalizeDir(q.prefix);
     const limit = Math.min(Math.max(q.limit ?? 100, 1), 1000);
     const offset = Math.max(q.offset ?? 0, 0);
+    // Reads only when asked about: one grouped query over the window.
+    const byReads = q.sort === "reads" || q.min_reads !== undefined || q.max_reads !== undefined;
+    const usage = byReads ? this.usageCounts() : null;
     const rows = snap
       .sorted()
       .filter((e) => e.kind === "concept" && underPrefix(e.path, prefix))
-      .map((e) => this.row(snap, e))
+      .map((e) => {
+        const row = this.row(snap, e);
+        return usage ? { ...row, reads: usage.get(e.concept_id) ?? 0 } : row;
+      })
       .filter(
         (r) =>
           (q.type === undefined || (r.type ?? "").toLowerCase() === q.type.trim().toLowerCase()) &&
           (q.tag === undefined || (r.tags ?? []).includes(q.tag)) &&
           (q.status === undefined || r.status === q.status) &&
           (q.trust === undefined || r.trust_tier === q.trust) &&
-          (q.stale === undefined || r.stale === q.stale),
+          (q.stale === undefined || r.stale === q.stale) &&
+          (q.min_reads === undefined || ("reads" in r && r.reads >= q.min_reads)) &&
+          (q.max_reads === undefined || ("reads" in r && r.reads <= q.max_reads)),
       );
+    if (q.sort === "reads") {
+      // Stable: equal counts keep their path order.
+      rows.sort((a, b) => ("reads" in b ? b.reads : 0) - ("reads" in a ? a.reads : 0));
+    }
     const items = rows.slice(offset, offset + limit);
     return {
       seq: snap.seq,
@@ -3596,12 +3790,15 @@ export class LibraryStore {
     const file = this.read(input, { at: opts.at, images: true });
     const head = this.headSeq();
     if (file.kind !== "concept") return { file, head };
+    const id = this.snapshot().lookup(file.path)?.concept_id;
     return {
       file,
       head,
       sources: this.sources(file.path, { at: opts.at }),
       links: this.links(file.path, { at: opts.at }),
       history: this.history(file.path),
+      // How much the page is read and how recently (TEMPRA-220); null once it is gone at head.
+      reads: id ? this.readHistoryOf(id) : null,
     };
   }
 
@@ -4801,6 +4998,8 @@ export class LibraryStore {
     this.flushReads();
     const before = this.sql.all<{ n: number }>("SELECT COUNT(*) AS n FROM access_log")[0]?.n ?? 0;
     this.sql.run("DELETE FROM access_log WHERE day < ?", this.windowStart());
+    // A last read is kept past the window (a cold page says when), while its concept exists.
+    this.sql.run("DELETE FROM last_read WHERE concept_id NOT IN (SELECT concept_id FROM paths)");
     const after = this.sql.all<{ n: number }>("SELECT COUNT(*) AS n FROM access_log")[0]?.n ?? 0;
     return before - after;
   }

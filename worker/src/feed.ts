@@ -6,6 +6,7 @@
  */
 import type { ActedBy } from "./agents";
 import { normalizeDir, underPrefix } from "./okf/paths";
+import type { ReaderKind, Reading, ReadSurface } from "./store/reads";
 import type { EventRow } from "./store/store";
 
 /** One event as the feed sends it. */
@@ -166,10 +167,17 @@ export function broadcast(
  */
 export type PresenceKind = "reading" | "searching" | "writing";
 
-/** Who a presence message is about: an agent's actor and, when known, its person and agent. */
-export interface PresenceCaller {
+/**
+ * Who makes a library call: the actor and, when known, its person and agent (presence,
+ * TEMPRA-219); where the call came from and whether the reader is an agent or a person (read
+ * history, TEMPRA-220). Every call a token or a session makes carries one; the Worker's own calls
+ * (downloads by a signed link, maintenance) carry none.
+ */
+export interface Caller {
   actor: string;
   by: ActedBy | null;
+  surface: ReadSurface;
+  reader: ReaderKind;
 }
 
 /**
@@ -188,21 +196,34 @@ export interface PresenceMessage {
 export const isPersonActor = (actor: string) => actor.startsWith("human:");
 
 /**
- * The caller a library call carries for presence: an agent's actor and who it acts for, or
- * null for a person (the app's session, a `human:` token), whose reads say nothing.
+ * The caller behind a token (a session's included): an agent, or a person (`human:` actors and
+ * the app's sessions), on `surface`: MCP when the /mcp route says so, else the app for a session
+ * and the REST API for a bearer token.
  */
-export function presenceCaller(t: {
-  actor: string;
-  created_by?: string | null;
-  agent?: string;
-}): PresenceCaller | null {
-  if (isPersonActor(t.actor)) return null;
+export function callerOf(
+  t: { id?: string; actor: string; created_by?: string | null; agent?: string },
+  surface?: ReadSurface,
+): Caller {
   const by: ActedBy | null = t.created_by
     ? t.agent
       ? { person: t.created_by, agent: t.agent }
       : { person: t.created_by }
     : null;
-  return { actor: t.actor, by };
+  return {
+    actor: t.actor,
+    by,
+    surface: surface ?? (t.id?.startsWith("session:") ? "app" : "api"),
+    reader: isPersonActor(t.actor) ? "person" : "agent",
+  };
+}
+
+/**
+ * The reader a call counts its reads as (TEMPRA-220): its surface and kind, and a key for
+ * distinct readers (the agent, else the person, else the actor), stored and never shown.
+ */
+export function readingOf(c: Caller): Reading {
+  const key = c.reader === "agent" ? `a:${c.by?.agent ?? c.actor}` : `p:${c.by?.person ?? c.actor}`;
+  return { surface: c.surface, kind: c.reader, reader: key };
 }
 
 /** The read methods that are presence, and what kind. */
@@ -256,13 +277,15 @@ export class Presence {
   constructor(private readonly throttleMs = PRESENCE_THROTTLE_MS) {}
 
   message(
-    caller: PresenceCaller | null | undefined,
+    caller: Caller | null | undefined,
     method: string,
     value: unknown,
     now = Date.now(),
   ): PresenceMessage | null {
     const kind = PRESENCE_METHODS[method];
-    if (!caller || !kind || isPersonActor(caller.actor)) return null;
+    if (!caller || !kind || caller.reader === "person" || isPersonActor(caller.actor)) {
+      return null;
+    }
     // Held back only when the last message for this agent and file said the same thing within
     // the throttle: a change of kind (a search, then a read of what it found; a read, a search,
     // a read again) always goes through, so the app never keeps showing a kind that is past.
