@@ -20,7 +20,10 @@ export interface CommentT {
 
 export interface Thread {
   id: string;
+  /** The page's path; "" for a thread on the library itself (TEMPRA-222). */
   path: string;
+  /** A request is a bigger ask left for people's agents (TEMPRA-222); a comment otherwise. */
+  kind?: "comment" | "request";
   status: "open" | "resolved";
   actor: string;
   created_seq: number;
@@ -73,6 +76,33 @@ export interface Draft {
   quote: string;
   from: number;
   to: number;
+}
+
+/** The path the threads API takes for the library's own threads (TEMPRA-222). */
+export const LIBRARY_THREADS = "/";
+
+/** A piece of a comment's text: words, or a link it names (a URL, or a page by its path). */
+export type CommentPart = { text: string } | { text: string; href: string };
+
+const LINKS = /(https?:\/\/[^\s<>"')\]]+[^\s<>"')\].,;:!?])|(?<![\w/.])(\/[\w./-]*[\w-]\.md)\b/g;
+
+/**
+ * A comment's text with its links (TEMPRA-222: the library's agent cites pages by URL, people by
+ * path): http(s) URLs as they are, `/dir/page.md` as the page in this library (`file`). Nothing
+ * else is markup: the text stays text.
+ */
+export function commentParts(body: string, file: (path: string) => string): CommentPart[] {
+  const out: CommentPart[] = [];
+  let at = 0;
+  for (const m of body.matchAll(LINKS)) {
+    const i = m.index ?? 0;
+    if (i > at) out.push({ text: body.slice(at, i) });
+    const [whole, url, path] = m;
+    out.push(url ? { text: url, href: url } : { text: whole, href: file((path ?? "").slice(1)) });
+    at = i + whole.length;
+  }
+  if (at < body.length) out.push({ text: body.slice(at) });
+  return out;
 }
 
 /**

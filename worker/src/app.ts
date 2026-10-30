@@ -22,7 +22,7 @@ import { registerInboxApi } from "./inbox-api";
 import { registerLegalRoutes } from "./legal";
 import { deleteLibrary } from "./lifecycle";
 import type { ManagedDeps } from "./managed/agent";
-import { type Notifications, notifying, postComment } from "./notify";
+import { managedAgents, type Notifications, notifying, postComment } from "./notify";
 import { messagePage, wantsPage } from "./oauth/pages";
 import { type GrantProps, registerAppRoutes } from "./oauth/routes";
 import { splitFrontmatter } from "./okf/concept";
@@ -1018,6 +1018,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     const ref = c.var.token.library;
     const accounts = c.var.deps.accounts;
     const owner = c.var.token.role === "owner";
+    const lib = c.var.deps.managed ? await accounts.library(ref.owner, ref.slug) : null;
     return c.json({
       owner: ref.owner,
       role: c.var.token.role,
@@ -1026,6 +1027,8 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
         role,
         created,
       })),
+      // The library's managed agents a comment can mention (TEMPRA-222): @tempra when it is on.
+      agents: (await managedAgents(c.var.deps, lib?.ownerId).catch(() => [])).map((a) => a.name),
       // Pending invitations are the owner's to see.
       ...(owner ? { invitations: await accounts.libraryInvitations(ref.id) } : {}),
     });

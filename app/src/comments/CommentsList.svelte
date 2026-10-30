@@ -1,5 +1,6 @@
 <script lang="ts">
   import { threadElementId } from "../concept/panel";
+  import { usePresence } from "../presence.svelte.ts";
   import type { Urls } from "../urls";
   import { type Draft, type Placed, panelOrder } from "./data";
   import NewComment from "./NewComment.svelte";
@@ -14,6 +15,7 @@
    */
   let props: {
     urls: Urls;
+    /** The page; "" for the library's own threads, on its home (TEMPRA-222). */
     path: string;
     placed: Placed[];
     /** The threads could not be loaded (a new comment can still be made). */
@@ -28,6 +30,9 @@
     onActive(id: string | null): void;
     onChanged(): void;
   } = $props();
+  const onLibrary = $derived(props.path === "");
+  // "Tempra is replying…" on the threads the library's agent is answering (TEMPRA-222).
+  const presence = usePresence(() => props.urls);
   const open = $derived(panelOrder(props.placed, "open"));
   const resolved = $derived(panelOrder(props.placed, "resolved"));
   let tab = $state<"open" | "resolved">("open");
@@ -86,13 +91,15 @@
       onDone={() => (composing = false)}
       onPosted={posted}
     />{/if}{#if tab === "open" && props.writable && !props.draft && !composing}<div class="new-thread-box"
-      ><button type="button" class="new-thread" onclick={() => (composing = true)}>Comment on the page…</button
-      ><p class="small muted">Or select text to comment on it</p></div
+      ><button type="button" class="new-thread" onclick={() => (composing = true)}
+        >{onLibrary ? "Comment on the library…" : "Comment on the page…"}</button
+      >{#if !onLibrary}<p class="small muted">Or select text to comment on it</p>{/if}</div
     >{/if}{#each threads as t (t.id)}<ThreadView
       urls={props.urls}
       thread={t}
       active={t.id === props.active}
       writable={props.writable}
+      replying={presence.replying.has(t.id)}
       onActive={props.onActive}
       onChanged={props.onChanged}
     />{/each}{#if props.loading}<p class="small muted">Loading…</p>{/if}{#if !props.loading && threads.length === 0 && !props.draft && !composing}<p

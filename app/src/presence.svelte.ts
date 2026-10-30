@@ -1,6 +1,6 @@
 import { untrack } from "svelte";
 import { feedOf } from "./live";
-import type { Presence } from "./presence";
+import type { Presence, Replying } from "./presence";
 import type { Urls } from "./urls";
 
 const libraryKey = (urls: Urls) => `${urls.owner}/${urls.slug}`;
@@ -13,6 +13,8 @@ const libraryKey = (urls: Urls) => `${urls.owner}/${urls.slug}`;
  */
 export function usePresence(urls: () => Urls) {
   let active = $state.raw<ReadonlyMap<string, Presence>>(new Map());
+  // The threads the library's agent is replying in (TEMPRA-222), for the Comments panel.
+  let replying = $state.raw<ReadonlyMap<string, Replying>>(new Map());
   const key = $derived(libraryKey(urls()));
   $effect(() => {
     void key;
@@ -20,6 +22,7 @@ export function usePresence(urls: () => Urls) {
     const sub = feed.subscribe({ events: () => {}, reset: () => {} });
     const read = () => {
       active = feed.presence.active();
+      replying = feed.presence.replying();
     };
     read();
     const stop = feed.presence.watch(read);
@@ -31,6 +34,9 @@ export function usePresence(urls: () => Urls) {
   return {
     get active() {
       return active;
+    },
+    get replying() {
+      return replying;
     },
   };
 }

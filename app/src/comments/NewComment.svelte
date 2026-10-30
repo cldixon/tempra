@@ -36,8 +36,9 @@
     if (!body) return;
     const draft = props.draft;
     void action.run(async () => {
+      // No path: a thread on the library itself (TEMPRA-222).
       const r = await post<{ thread: Thread }>(props.urls.api("comments"), {
-        path: props.path,
+        ...(props.path ? { path: props.path } : {}),
         body,
         anchor: draft ? { quote: draft.quote, from: draft.from } : null,
       });
@@ -69,7 +70,11 @@
       const to = e.relatedTarget instanceof Element ? e.relatedTarget : null;
       if (!e.currentTarget.value.trim() && !to?.closest(".comment-form")) props.onDone();
     }}
-    placeholder={props.draft ? "Comment on the selection" : "Comment on the page"}
+    placeholder={props.draft
+      ? "Comment on the selection"
+      : props.path
+        ? "Comment on the page"
+        : "Comment on the library"}
   />{#if action.error}<div class="notice">{action.error}</div>{/if}<div class="actions"
     ><button type="button" class="ghost" onclick={() => props.onDone()}>Cancel</button
     ><button class="primary" type="submit" disabled={action.busy || !text.trim()}>Comment</button></div

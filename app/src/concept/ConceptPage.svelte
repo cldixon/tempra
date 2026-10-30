@@ -24,6 +24,7 @@
   import { anchorId } from "../ui";
   import { dirOf, folderName, type Urls } from "../urls";
   import Byline from "./Byline.svelte";
+  import CheckActions from "./CheckActions.svelte";
   import CheckedLine from "./CheckedLine.svelte";
   import Contents from "./Contents.svelte";
   import { useCompare } from "./compare.svelte.ts";
@@ -401,18 +402,21 @@
         /><SourcesSection {urls} data={sources} {prepared} numbers={body.numbers} /></div
       ></article
     ><!-- What a person does on the page, floating at its bottom right; aside while a panel is
-         open (TEMPRA-172). --><PageActions
-      {urls}
-      path={c.path}
-      standing={s}
-      {name}
+         open (TEMPRA-172): Comment, then Check. -->{#snippet check()}<CheckActions
+        {urls}
+        path={c.path}
+        standing={s}
+        {name}
+        {current}
+        reviewing={compare?.kind === "review"}
+        {mayVerify}
+        onVerified={props.onVerified}
+      />{/snippet}<PageActions
       {openCount}
-      {current}
-      reviewing={compare?.kind === "review"}
-      {mayVerify}
+      waiting={current && s.verified !== null && s.since > 0}
       hidden={panel !== null}
       onComment={() => openPanel("comments")}
-      onVerified={props.onVerified}
+      more={check}
     /><!-- The page dimmed behind an overlaid panel; a tap on it closes the panel (P-4). -->{#if modal}<!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions --><div
         class="panel-scrim"
         aria-hidden="true"

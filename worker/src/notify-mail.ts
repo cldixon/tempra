@@ -37,15 +37,20 @@ const KIND_TEXT: Record<string, string> = {
 const who = (actor: string) => actor.replace(/^human:/, "@");
 
 /** Where an item leads in the app. */
-export function itemLink(origin: string, i: Pick<Item, "kind" | "place" | "path">): string {
+export function itemLink(
+  origin: string,
+  i: Pick<Item, "kind" | "place" | "path"> & { thread?: string | null },
+): string {
   if (i.kind === "invitation") return `${origin}/invitations`;
+  // A library thread (TEMPRA-222) opens on the library's home.
+  if (!i.path && i.thread) return `${origin}/${i.place}/#thread-${encodeURIComponent(i.thread)}`;
   if (!i.path) return `${origin}/${i.place}/`;
   const path = i.path.split("/").map(encodeURIComponent).join("/");
   return `${origin}/${i.place}/${path}#comments`;
 }
 
 function itemLine(i: Item): string {
-  const where = i.path ? ` on ${i.path}` : "";
+  const where = i.path ? ` on ${i.path}` : i.thread ? " on the library" : "";
   return `${who(i.actor)} ${KIND_TEXT[i.kind] ?? i.kind}${where} in ${i.place}`;
 }
 
