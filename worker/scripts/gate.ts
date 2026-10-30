@@ -3445,8 +3445,8 @@ async function browserRenders(
     // A closed folder holding one shimmers its own name instead; opened mid-shimmer, the pages
     // inside take it and the folder stops. All of it fades a few seconds after the agent stops,
     // and the person's own reads and searches mark nothing. With GATE_SCREENSHOTS, a still with
-    // the band held mid-row, and a recording of the tree (presence.webm, presence.gif) while the
-    // agent reads a page in a closed folder and the person opens it.
+    // the band held mid-row; with GATE_RECORD=1 too, a recording of the tree (presence.webm,
+    // presence.gif) while the agent reads a page in a closed folder and the person opens it.
     await step("presence: an agent's reads shimmer in the tree, its search does not", async () => {
       await page.goto(url);
       await main.locator(".body .prose").waitFor({ timeout: 15_000 });
@@ -3601,9 +3601,10 @@ async function browserRenders(
         // Gone a few seconds after the agent stopped (8 s after its last read).
         await marked.first().waitFor({ state: "detached", timeout: 15_000 });
 
-        // A recording for review: the tree while the agent reads a page outside a closed folder
-        // and one inside it, and the person opens the folder while it shimmers.
-        if (shots) {
+        // A recording for review, with GATE_RECORD=1 (it needs Playwright's ffmpeg, which CI's
+        // runners lack): the tree while the agent reads a page outside a closed folder and one
+        // inside it, and the person opens the folder while it shimmers.
+        if (shots && process.env.GATE_RECORD === "1") {
           const outside = pages.find((f) => !f.path.startsWith(`${top}/`));
           if (!outside) throw new Error("no page outside the folder to read");
           const videoDir = join(shots, "presence-video");
