@@ -18,11 +18,13 @@ import { d1Authenticate, type TokenInfo } from "../src/auth";
 import { d1BlobRefs } from "../src/blobrefs";
 import {
   type BlobStore,
+  type CallFn,
   callStore,
   type LibraryClient,
   makeClient,
   recordingBlobStore,
 } from "../src/client";
+import { Presence, type PresenceMessage, presenceCaller } from "../src/feed";
 import { d1Notifications } from "../src/notify";
 import { sha256Hex } from "../src/okf/hash";
 import type { RestoreRecord } from "../src/recovery";
@@ -241,18 +243,39 @@ export function setup() {
   /** Storage per library; tests lower it to see the limit. */
   const limits = { storageBytes: undefined as number | undefined };
   const stores = new Map<string, LibraryStore>();
-  const clients = new Map<string, LibraryClient>();
-  const clientFor = (doId: string) => {
-    let c = clients.get(doId);
+  const calls = new Map<string, CallFn>();
+  /**
+   * The presence each library's object would send its feed sockets (TEMPRA-219), as the Library
+   * DO makes it: after the call, throttled, for agents only.
+   */
+  const presence: { doId: string; message: PresenceMessage }[] = [];
+  const callFor = (doId: string) => {
+    let c = calls.get(doId);
     if (!c) {
       const store = new LibraryStore(bunSqlHandle());
       stores.set(doId, store);
-      c = makeClient((method, args) =>
-        callStore(store, blobs, method, args, {
+      const hub = new Presence();
+      c = async (method, args, caller) => {
+        const result = await callStore(store, blobs, method, args, {
           storageLimitBytes: limits.storageBytes,
           references: (hashes) => d1BlobRefs(d1).reference(doId, hashes, new Date()),
-        }),
-      );
+        });
+        const message = caller && result.ok ? hub.message(caller, method, result.value) : null;
+        if (message) presence.push({ doId, message });
+        return result;
+      };
+      calls.set(doId, c);
+    }
+    return c;
+  };
+  const clients = new Map<string, LibraryClient>();
+  /** The library's client without a caller (the Worker's own calls), or for a token's caller. */
+  const clientFor = (doId: string, token?: TokenInfo) => {
+    const caller = token ? presenceCaller(token) : null;
+    if (caller) return makeClient(callFor(doId), caller);
+    let c = clients.get(doId);
+    if (!c) {
+      c = makeClient(callFor(doId));
       clients.set(doId, c);
     }
     return c;
@@ -410,7 +433,7 @@ export function setup() {
     },
     meter: (e) => usage.push(e),
     blobs: recordingBlobStore(blobs, d1BlobRefs(d1)),
-    library: (token) => clientFor(token.library.do_id),
+    library: (token) => clientFor(token.library.do_id, token),
     libraryByDoId: async (doId) =>
       db.query("SELECT 1 FROM libraries WHERE do_id = ?").get(doId) ? clientFor(doId) : null,
   };
@@ -519,6 +542,8 @@ export function setup() {
     limits,
     stranger,
     sessionFor,
+    /** Presence the libraries' objects would have sent, in order (TEMPRA-219). */
+    presence,
     /** The cookie secret `app` sends. */
     ownerSession,
     /** Awaits what requests left running after their responses. */

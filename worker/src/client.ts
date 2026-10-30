@@ -1,4 +1,5 @@
 import { type DiagramExport, drawnDiagrams, isDrawnDiagram } from "./diagram-export";
+import type { PresenceCaller } from "./feed";
 import { checkAttachment, formatOf, imageInfo } from "./media";
 import type { FigureFact } from "./okf/figures";
 import { sha256Hex } from "./okf/hash";
@@ -69,13 +70,21 @@ export type CallResult =
   | { ok: true; value: unknown }
   | { ok: false; status: number; code: string; message: string; extra: Record<string, unknown> };
 
-export type CallFn = (method: LibraryMethod, args: unknown[]) => Promise<CallResult>;
+/**
+ * One call to a library. `caller` is the agent making it, for presence (feed.ts, TEMPRA-219):
+ * null for a person, whose reads say nothing.
+ */
+export type CallFn = (
+  method: LibraryMethod,
+  args: unknown[],
+  caller?: PresenceCaller | null,
+) => Promise<CallResult>;
 
-export function makeClient(call: CallFn): LibraryClient {
+export function makeClient(call: CallFn, caller: PresenceCaller | null = null): LibraryClient {
   const client: Record<string, (...args: unknown[]) => Promise<unknown>> = {};
   for (const m of LIBRARY_METHODS) {
     client[m] = async (...args: unknown[]) => {
-      const r = await call(m, args);
+      const r = await call(m, args, caller);
       if (r.ok) return r.value;
       throw new OkfError(r.status, r.code, r.message, r.extra);
     };
