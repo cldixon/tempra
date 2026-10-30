@@ -39,10 +39,6 @@
      the name of a file an agent is at now, and its static mark under reduced motion. At least
      4.5:1 on every surface, as text is (design/contrast.test.ts). */
   --tempra-color-agent-ink: light-dark(#9e4a1a, #f0884a);
-  /* The glow that moves behind that name with the ink (TEMPRA-219): a warm band across the row,
-     light enough in light mode and deep enough in dark that text, muted and the ink all stay at
-     least 4.5:1 on it (design/contrast.test.ts). */
-  --tempra-color-agent-glow: light-dark(#fbdcc4, #4a2610);
 
   /* Color: chart series (TEMPRA-217). The agreed exception to "no colour until the palette"
      besides the change dot, for a Vega-Lite chart's series and categories only: greys cannot tell

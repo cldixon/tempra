@@ -179,10 +179,6 @@
      the name of a file an agent is at now, and its static mark under reduced motion. At least
      4.5:1 on every surface, as text is (design/contrast.test.ts). */
   --tempra-color-agent-ink: light-dark(#9e4a1a, #f0884a);
-  /* The glow that moves behind that name with the ink (TEMPRA-219): a warm band across the row,
-     light enough in light mode and deep enough in dark that text, muted and the ink all stay at
-     least 4.5:1 on it (design/contrast.test.ts). */
-  --tempra-color-agent-glow: light-dark(#fbdcc4, #4a2610);
 
   /* Color: chart series (TEMPRA-217). The agreed exception to "no colour until the palette"
      besides the change dot, for a Vega-Lite chart's series and categories only: greys cannot tell
@@ -3027,31 +3023,17 @@ button.tree-name {
 
 /* Agents' presence (TEMPRA-219): a page an agent is reading or writing now, or a closed folder
    holding one (an open folder leaves it to its rows). The whole cue, with no words beside it (a
-   hover names the agent). A warm glow sweeps across the row while a band of the agent's ink
-   moves through the name with it, as a status line shimmers while a tool runs. The ink is the
-   name's own fill (background-clip), so nothing lies over the words; the glow is the row's
-   background, under them. Text, muted and the ink are all at least 4.5:1 on every surface and
-   on the glow (design/contrast.test.ts), so the name reads at every point of the sweep. After
-   the tree's rows above, whose hover and current-row backgrounds are shorthands: only the
-   image is set here, over their colour. */
-.tree-row.presence {
-  background-image: linear-gradient(
-    100deg,
-    transparent 0 20%,
-    var(--tempra-color-agent-glow) 50%,
-    transparent 80% 100%
-  );
-  background-size: 250% 100%;
-  background-position: 100% 0;
-  animation: tempra-shimmer var(--tempra-shimmer) linear infinite;
-}
-
+   hover names the agent): a band of the agent's ink moves through the name's letters, as a
+   status line shimmers while a tool runs, and nothing else about the row changes. The ink is the
+   name's own fill (background-clip), so nothing lies over or behind the words; text and the ink
+   are both at least 4.5:1 on every surface (design/contrast.test.ts), so the name reads at
+   every point of the sweep. */
 .tree-row.presence > a,
 .tree-row.presence > .tree-name {
   background-image: linear-gradient(
     100deg,
     currentcolor 0 25%,
-    var(--tempra-color-agent-ink) 42% 58%,
+    var(--tempra-color-agent-ink) 40% 60%,
     currentcolor 75% 100%
   );
   background-size: 250% 100%;
@@ -3071,17 +3053,8 @@ button.tree-name {
   }
 }
 
-/* Without motion the row stays still: warm all along, the name in the agent's ink. In forced
-   colours, plain. */
+/* Without motion the name stays still in the agent's ink. In forced colours, plain. */
 @media (prefers-reduced-motion: reduce) {
-  .tree-row.presence {
-    background-image: linear-gradient(
-      var(--tempra-color-agent-glow),
-      var(--tempra-color-agent-glow)
-    );
-    animation: none;
-  }
-
   .tree-row.presence > a,
   .tree-row.presence > .tree-name {
     background: none;
@@ -3091,7 +3064,6 @@ button.tree-name {
 }
 
 @media (forced-colors: active) {
-  .tree-row.presence,
   .tree-row.presence > a,
   .tree-row.presence > .tree-name {
     background-image: none;
