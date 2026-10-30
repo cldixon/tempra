@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
-import { searchMatch } from "../src/store/store";
+import { LibraryStore, searchMatch } from "../src/store/store";
 import { library, md } from "./changes";
+import { bunSqlHandle } from "./sqlite";
 
 /** A library with a few pages to search (TEMPRA-17). */
 function pages() {
@@ -109,5 +110,40 @@ describe("search (TEMPRA-17)", () => {
     expect(paths(reopened.search("stemmed"))).toEqual(["misc.md"]);
     // Opening again does nothing more.
     expect(paths(lib.fresh().search("stemmed"))).toEqual(["misc.md"]);
+  });
+
+  test("an upgrade that fails leaves the library open, its search unstemmed but working", () => {
+    const lib = pages();
+    lib.db.run("CREATE VIRTUAL TABLE fts_old USING fts5(concept_id UNINDEXED, title, body, tags)");
+    lib.db.run(
+      "INSERT INTO fts_old (concept_id, title, body, tags) SELECT concept_id, title, body, tags FROM fts",
+    );
+    lib.db.run("DROP TABLE fts");
+    lib.db.run("ALTER TABLE fts_old RENAME TO fts");
+    lib.db.run("DELETE FROM fts_rows");
+    lib.db.run("INSERT INTO fts_rows (concept_id, fts_rowid) SELECT concept_id, rowid FROM fts");
+    // A handle on which the rename fails, as a platform might refuse it.
+    const sql = bunSqlHandle(lib.db);
+    const failing = {
+      ...sql,
+      script: (q: string) => {
+        if (q.includes("RENAME TO fts")) throw new Error("no rename here");
+        sql.script(q);
+      },
+    };
+    const store = new LibraryStore(failing, {});
+    expect(paths(store.search("comments"))).toContain("comments.md");
+    const def = lib.db.query("SELECT sql FROM sqlite_master WHERE name = 'fts'").get() as {
+      sql: string;
+    };
+    expect(def.sql).not.toContain("porter");
+    // Nothing half done: no stray table, every row still mapped.
+    expect(
+      lib.db.query("SELECT name FROM sqlite_master WHERE name = 'fts_stemmed'").get(),
+    ).toBeNull();
+    const unmapped = lib.db
+      .query("SELECT COUNT(*) AS n FROM fts WHERE rowid NOT IN (SELECT fts_rowid FROM fts_rows)")
+      .get() as { n: number };
+    expect(unmapped.n).toBe(0);
   });
 });

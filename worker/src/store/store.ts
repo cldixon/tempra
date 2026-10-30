@@ -896,19 +896,25 @@ export class LibraryStore {
       "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'fts'",
     )[0]?.sql;
     if (!def || /porter/i.test(def)) return;
-    this.sql.transaction(() => {
-      this.sql.script(
-        "CREATE VIRTUAL TABLE fts_stemmed USING fts5(concept_id UNINDEXED, title, body, tags, tokenize = 'porter unicode61');",
-      );
-      this.sql.run(
-        "INSERT INTO fts_stemmed (concept_id, title, body, tags) SELECT concept_id, title, body, tags FROM fts",
-      );
-      this.sql.script("DROP TABLE fts; ALTER TABLE fts_stemmed RENAME TO fts;");
-      this.sql.run("DELETE FROM fts_rows");
-      this.sql.run(
-        "INSERT INTO fts_rows (concept_id, fts_rowid) SELECT concept_id, rowid FROM fts",
-      );
-    });
+    try {
+      this.sql.transaction(() => {
+        this.sql.script(
+          "CREATE VIRTUAL TABLE fts_stemmed USING fts5(concept_id UNINDEXED, title, body, tags, tokenize = 'porter unicode61');",
+        );
+        this.sql.run(
+          "INSERT INTO fts_stemmed (concept_id, title, body, tags) SELECT concept_id, title, body, tags FROM fts",
+        );
+        this.sql.script("DROP TABLE fts; ALTER TABLE fts_stemmed RENAME TO fts;");
+        this.sql.run("DELETE FROM fts_rows");
+        this.sql.run(
+          "INSERT INTO fts_rows (concept_id, fts_rowid) SELECT concept_id, rowid FROM fts",
+        );
+      });
+    } catch (e) {
+      // Rolled back: the library keeps its unstemmed search, which still works, rather than
+      // failing to open. Tried again the next time it opens.
+      console.error("search not stemmed", e);
+    }
   }
 
   /** Removes a concept's search row, by rowid (TEMPRA-87). */
