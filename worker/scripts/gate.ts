@@ -3439,6 +3439,146 @@ async function browserRenders(
         await wide();
       }
     });
+    // Agents' presence (TEMPRA-219): while a page is open, an agent searches the library and
+    // reads another page, then this one, over MCP. The tree's rows for what it found and read
+    // shimmer (a closed folder holding one shows the quieter mark), the byline says it is reading
+    // now, and all of it fades a few seconds after the agent stops; the person's own reads say
+    // nothing.
+    await step(
+      "presence: an agent reading and searching shows in the tree and the byline",
+      async () => {
+        await page.goto(url);
+        await main.locator(".body .prose").waitFor({ timeout: 15_000 });
+        // The page left open: the one with the oldest version, so no agent is editing it now
+        // (the byline then says only that); the agent reads it after the gate's own page.
+        const outline = (await page.evaluate(
+          `fetch("/api/v1/libraries/${owner}/${slug}/outline").then((r) => r.json())`,
+        )) as { files: { path: string; kind: string; title?: string | null; seq?: number }[] };
+        const other = outline.files
+          .filter(
+            (f) =>
+              f.kind === "concept" &&
+              f.path !== concept &&
+              !f.path.startsWith("gate") &&
+              /[A-Za-z]{4,}/.test(f.title ?? ""),
+          )
+          .sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0))[0];
+        if (!other) throw new Error("no other page to read");
+        // What the feed brings: its presence messages, said if a mark does not come.
+        const frames: string[] = [];
+        const listen = (ws: {
+          on(e: "framereceived", f: (d: { payload: unknown }) => void): void;
+        }) =>
+          ws.on("framereceived", (d) => {
+            const s = String(d.payload);
+            if (s.includes('"presence"')) frames.push(s);
+          });
+        page.on("websocket", listen);
+        // Every folder open, so every row the agent touches is drawn.
+        await page.evaluate(`localStorage.removeItem("tempra:tree-closed:${owner}/${slug}")`);
+        await page.goto(`${lib}/${enc(other.path)}`);
+        await main.locator(".body .prose").waitFor({ timeout: 15_000 });
+        await sidebar.locator(`a[data-path="${concept}"]`).waitFor({ timeout: 10_000 });
+        const marked = sidebar.locator("a.presence");
+        // Earlier steps' agent writes and reads fade first.
+        await marked.first().waitFor({ state: "detached", timeout: 20_000 });
+        // What a search will find, asked as the person (whose search is no presence).
+        const q =
+          (other.title ?? "")
+            .split(/[^A-Za-z]+/)
+            .filter((w) => w.length >= 4)
+            .sort((a, b) => b.length - a.length)[0] ?? "";
+        const found = (await page.evaluate(
+          `fetch("/api/v1/libraries/${owner}/${slug}/search?q=${encodeURIComponent(q)}").then((r) => r.json())`,
+        )) as { results: { path: string }[] };
+        // The server marks the top ten; the tree draws the ones that are rows (not a folder's
+        // generated index).
+        const rows = new Set(
+          await sidebar
+            .locator("a[data-path]")
+            .evaluateAll((els) => els.map((e) => e.getAttribute("data-path") ?? "")),
+        );
+        const hits = [...new Set(found.results.map((r) => r.path))]
+          .slice(0, 10)
+          .filter((p) => rows.has(p));
+        if (hits.length === 0) throw new Error(`a search for "${q}" found nothing`);
+        /** Waits for a row's mark, saying which and what the row shows when it does not come. */
+        const rowMarked = async (path: string, kind?: string) => {
+          const sel = `a.presence[data-path="${path}"]${kind ? `[data-presence="${kind}"]` : ""}`;
+          try {
+            await sidebar.locator(sel).waitFor({ timeout: 5000 });
+          } catch {
+            const row = sidebar.locator(`a[data-path="${path}"]`);
+            const has =
+              (await row.count()) > 0 ? await row.getAttribute("data-presence") : "no row";
+            throw new Error(
+              `${path}: not marked ${kind ?? ""} (it shows ${has}); presence on the feed: ${frames.join(" ")}`,
+            );
+          }
+        };
+        if ((await marked.count()) > 0) throw new Error("the person's own reads show as presence");
+        const client = new Client({ name: "gate-presence", version: "1.0.0" });
+        await client.connect(
+          new StreamableHTTPClientTransport(new URL(`${base}/mcp`), {
+            requestInit: { headers: { Authorization: `Bearer ${token}` } },
+          }),
+        );
+        try {
+          const call = async (name: string, args: Record<string, unknown>) => {
+            const r = await client.callTool({ name, arguments: args });
+            if (r.isError) throw new Error(`${name}: ${JSON.stringify(r.content).slice(0, 200)}`);
+          };
+          await call("search", { library: `${owner}/${slug}`, q });
+          await call("read", { library: `${owner}/${slug}`, path: concept });
+          await call("read", { library: `${owner}/${slug}`, path: other.path });
+        } finally {
+          await client.close();
+        }
+        // The pages it found shimmer; the ones it read after say reading.
+        for (const path of hits) await rowMarked(path);
+        for (const path of [concept, other.path]) await rowMarked(path, "reading");
+        const shimmer = await sidebar.locator(`a.presence[data-path="${other.path}"]`).evaluate(
+          (el) =>
+            (
+              globalThis as unknown as {
+                getComputedStyle(e: unknown): { animationName: string };
+              }
+            ).getComputedStyle(el).animationName,
+        );
+        if (shimmer !== "tempra-shimmer") throw new Error(`the row's animation is "${shimmer}"`);
+        // The open page's byline: the agent is reading it now.
+        const reading = byline.locator(".byline-presence");
+        await reading.waitFor({ timeout: 5000 }).catch(async () => {
+          throw new Error(`the byline does not say reading: "${await byline.innerText()}"`);
+        });
+        const said = (await reading.innerText()).replace(/\s+/g, " ").trim();
+        if (!/reading now$/.test(said)) throw new Error(`the byline says "${said}"`);
+        if (shots) {
+          await sidebar.screenshot({ path: `${shots}/presence-tree.png` });
+          await main.locator(".doc-head").screenshot({ path: `${shots}/presence-byline.png` });
+        }
+        // A closed folder holding a marked page shows the quieter mark.
+        const nestedHit = [other.path, ...hits].find((p) => p.includes("/"));
+        if (nestedHit) {
+          const top = nestedHit.split("/")[0] ?? "";
+          const row = sidebar
+            .locator(".tree-row.dir")
+            .filter({ has: page.locator(`button.tree-name[title="${folderName(top)}"]`) })
+            .first();
+          await row.locator("button.tree-name").click();
+          await row.locator(".presence-mark").waitFor({ timeout: 5000 });
+          if (shots) await sidebar.screenshot({ path: `${shots}/presence-folder.png` });
+          await row.locator("button.tree-name").click();
+        }
+        // Gone a few seconds after the agent stopped (about 8 s).
+        await marked.first().waitFor({ state: "detached", timeout: 15_000 });
+        await reading.waitFor({ state: "detached", timeout: 5000 });
+        if ((await sidebar.locator(".presence-mark").count()) > 0) {
+          throw new Error("a folder's presence mark outlived the agent");
+        }
+        page.off("websocket", listen);
+      },
+    );
     // View Markdown, in ⋯, shows the file as stored, frontmatter first, with line numbers, in
     // place of the page; Back to page returns.
     await step("the Markdown view shows the file as stored", async () => {
