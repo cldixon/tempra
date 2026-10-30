@@ -22,6 +22,30 @@ if (!worker) throw new Error("cloudflare.config.ts defines no worker.");
 
 export const WORKER_NAME = worker.name;
 
+/** Every Queue the Worker binds (SWEEP_QUEUE, AGENT_QUEUE), by name. */
+export function boundQueues(): string[] {
+  return Object.values(worker?.env ?? {})
+    .map((b) => b as { type?: string; name?: string })
+    .filter((b) => b.type === "queue" && !!b.name)
+    .map((b) => b.name as string);
+}
+
+/**
+ * Creates the Queues the Worker binds that do not exist yet, so a deployment's Queues come from
+ * cloudflare.config.ts like its other bindings: `bun run deploy` calls it before deploying, since
+ * a Worker that binds a missing Queue fails to deploy. Safe to repeat; it never deletes one.
+ */
+export async function ensureQueues(): Promise<void> {
+  const existing = new Set(
+    (JSON.parse(await cf(["queues", "list"])) as { queue_name: string }[]).map((q) => q.queue_name),
+  );
+  for (const name of boundQueues()) {
+    if (existing.has(name)) continue;
+    console.log(`Creating Queue ${name}`);
+    await cf(["queues", "create", "--queue-name", name]);
+  }
+}
+
 /** The account database (binding DB). */
 export function accountsDb(): { name: string; id: string } {
   const db = worker?.env?.DB as { type?: string; name?: string; id?: string } | undefined;

@@ -1,5 +1,6 @@
 /**
- * `bun run deploy`: applies D1 migrations to the account database, then runs `cf deploy`.
+ * `bun run deploy`: applies D1 migrations to the account database, creates the Queues the Worker
+ * binds that do not exist yet (scripts/cf.ts `ensureQueues`), then runs `cf deploy`.
  * cf takes the database by ID, read from cloudflare.config.ts. Extra arguments go to `cf deploy`;
  * with --dry-run nothing remote is touched, migrations included. `--mode staging` deploys the
  * staging Worker with its own resources (cloudflare.config.ts).
@@ -18,13 +19,15 @@ if (!args.includes("--mode")) args.push("--mode", "production");
 const i = args.indexOf("--mode");
 if (args[i + 1]) process.env.TEMPRA_MODE = args[i + 1];
 // Imported after TEMPRA_MODE is set: it reads the config for that deployment.
-const { accountsDb, applyMigrations, WORKER_DIR } = await import("./cf");
+const { accountsDb, applyMigrations, ensureQueues, WORKER_DIR } = await import("./cf");
 const { PROPAGATION_DELAYS_MS, workerNotYetVisible } = await import("./cf-retry");
 
 if (!args.includes("--dry-run")) {
   const db = accountsDb();
   console.log(`D1 migrations for ${db.name} (${db.id}):`);
   console.log((await applyMigrations()).trim());
+  // The Queues the Worker binds, made if missing (a Worker binding a missing Queue fails to deploy).
+  await ensureQueues();
 }
 /** Runs `cf deploy` once in `cwd`, streaming its output to the log; resolves to its exit code and output. */
 async function deployOnce(cwd: string): Promise<{ code: number; output: string }> {
