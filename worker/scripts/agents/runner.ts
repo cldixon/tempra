@@ -170,8 +170,11 @@ export class FeedWatch {
       ws.onmessage = (e) => {
         const m = JSON.parse(String(e.data)) as
           | { type: "hello"; head: number }
-          | { type: "events"; events: { seq: number }[] };
+          | { type: "events"; events: { seq: number }[] }
+          | { type: "presence" };
         if (m.type === "hello") return resolve();
+        // Agents' presence (TEMPRA-219) carries no events.
+        if (m.type !== "events") return;
         const now = performance.now();
         for (const ev of m.events) if (!this.arrived.has(ev.seq)) this.arrived.set(ev.seq, now);
         this.waiters = this.waiters.filter((w) => {

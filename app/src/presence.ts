@@ -1,0 +1,150 @@
+import type { ActedBy } from "./agents";
+import { isAgentChange } from "./changes";
+import type { FeedEvent } from "./live";
+import { ancestors } from "./tree";
+
+/*
+ * Agents' presence (TEMPRA-219, tempra-dev: app/live): what an agent is reading or writing in
+ * the library now. Reading comes as presence messages on the feed (worker/src/feed.ts); writing
+ * from the agents' own events on it; a search marks nothing. Kept per library, the most recent
+ * per file, each fading PRESENCE_TTL_MS after it came; nothing is stored or asked for.
+ */
+
+export type PresenceKind = "reading" | "writing";
+
+/** A presence message as the feed sends it. */
+export interface PresenceMessage {
+  type: "presence";
+  kind: "reading";
+  actor: string;
+  by: ActedBy | null;
+  paths: string[];
+}
+
+/** What an agent was last seen doing to a file, and when it came (ms since the epoch). */
+export interface Presence {
+  kind: PresenceKind;
+  actor: string;
+  by: ActedBy | null;
+  at: number;
+}
+
+/**
+ * How long a file stays marked after its last presence. The server sends at most one message
+ * per agent and file every 3 s, so an agent still at it keeps the mark.
+ */
+export const PRESENCE_TTL_MS = 8000;
+
+/** The presence of one library: path to its most recent, until each fades. */
+export class PresenceStore {
+  private entries = new Map<string, Presence>();
+  private watchers = new Set<() => void>();
+  private timer: ReturnType<typeof setTimeout> | undefined;
+
+  constructor(
+    private now: () => number = Date.now,
+    private ttl = PRESENCE_TTL_MS,
+  ) {}
+
+  /** A presence message from the feed. */
+  add(m: PresenceMessage) {
+    if (m.actor.startsWith("human:") || m.paths.length === 0) return;
+    const at = this.now();
+    for (const path of m.paths) {
+      this.entries.set(path, { kind: m.kind, actor: m.actor, by: m.by ?? null, at });
+    }
+    this.changed();
+  }
+
+  /** Events as they arrive live: an agent's write to a file is writing presence on it. */
+  events(events: FeedEvent[]) {
+    const at = this.now();
+    let any = false;
+    for (const e of events) {
+      if (!isAgentChange(e)) continue;
+      // A move leaves its old path: the file is at its new one.
+      if (e.from_path) this.entries.delete(e.from_path);
+      this.entries.set(e.path, { kind: "writing", actor: e.actor, by: e.by ?? null, at });
+      any = true;
+    }
+    if (any) this.changed();
+  }
+
+  /** The files marked now, each with its most recent presence. */
+  active(): ReadonlyMap<string, Presence> {
+    this.prune();
+    return new Map(this.entries);
+  }
+
+  /** Calls `fn` whenever what is marked changes (added, or faded), until it returns. */
+  watch(fn: () => void): () => void {
+    this.watchers.add(fn);
+    return () => this.watchers.delete(fn);
+  }
+
+  private prune(): boolean {
+    const now = this.now();
+    let gone = false;
+    for (const [path, p] of this.entries) {
+      if (now - p.at >= this.ttl) {
+        this.entries.delete(path);
+        gone = true;
+      }
+    }
+    return gone;
+  }
+
+  private changed() {
+    for (const fn of this.watchers) fn();
+    this.schedule();
+  }
+
+  /** Wakes when the oldest mark is due to fade, so the watchers hear it go. */
+  private schedule() {
+    clearTimeout(this.timer);
+    this.timer = undefined;
+    if (this.entries.size === 0) return;
+    const oldest = Math.min(...[...this.entries.values()].map((p) => p.at));
+    const wait = Math.max(0, oldest + this.ttl - this.now());
+    this.timer = setTimeout(() => {
+      this.timer = undefined;
+      if (this.prune()) for (const fn of this.watchers) fn();
+      this.schedule();
+    }, wait + 20);
+  }
+}
+
+/**
+ * The folders that hold a marked file, at any depth, each with the most recent presence inside:
+ * what a closed folder's name shimmers for (an open one leaves it to its rows).
+ */
+export function activeFolders(active: ReadonlyMap<string, Presence>): Map<string, Presence> {
+  const out = new Map<string, Presence>();
+  for (const [path, p] of active) {
+    for (const d of ancestors(path)) {
+      const seen = out.get(d);
+      if (!seen || p.at > seen.at) out.set(d, p);
+    }
+  }
+  return out;
+}
+
+/** The words for a presence, for a screen reader beside the tree's row. */
+export const presenceWords: Record<PresenceKind, string> = {
+  reading: "an agent is reading",
+  writing: "an agent is writing",
+};
+
+/** The same for a closed folder holding such a file. */
+export const presenceWordsInside: Record<PresenceKind, string> = {
+  reading: "an agent is reading in here",
+  writing: "an agent is writing in here",
+};
+
+/**
+ * A marked row's tooltip, naming the agent as the app names it (`actorText`): "Claude Code for
+ * @dev is reading" ("… is reading in here" on a closed folder). The shimmer is the cue; this is
+ * what a hover adds.
+ */
+export const presenceTitle = (who: string, kind: PresenceKind, inside = false) =>
+  `${who} is ${kind}${inside ? " in here" : ""}`;

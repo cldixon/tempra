@@ -1,5 +1,6 @@
 import type { ActedBy } from "./agents";
 import { api } from "./api";
+import { type PresenceMessage, PresenceStore } from "./presence";
 import type { Urls } from "./urls";
 
 /** One committed ledger event, as the change feed sends it (worker/src/feed.ts). */
@@ -18,9 +19,11 @@ export interface FeedEvent {
   by?: ActedBy | null;
 }
 
+/** What the socket sends; presence (TEMPRA-219) carries no head and moves no cursor. */
 export type Message =
   | { type: "hello"; head: number }
-  | { type: "events"; head: number; events: FeedEvent[] };
+  | { type: "events"; head: number; events: FeedEvent[] }
+  | PresenceMessage;
 
 /** What a page hears: new events in order, or that the ledger was rolled back (a restore). */
 export interface Listener {
@@ -95,6 +98,11 @@ export class LibraryFeed {
   private timers = new Set<ReturnType<typeof setTimeout>>();
   status: FeedStatus = "live";
   private watchers = new Set<(s: FeedStatus) => void>();
+  /**
+   * What agents are reading, searching and writing now (TEMPRA-219): from the socket's presence
+   * messages and its live events, never from a catch-up (those are past).
+   */
+  readonly presence = new PresenceStore();
 
   constructor(
     private urls: Urls,
@@ -227,6 +235,11 @@ export class LibraryFeed {
 
   /** A message from the socket. */
   receive(m: Message) {
+    if (m.type === "presence") {
+      this.presence.add(m);
+      return;
+    }
+    if (m.type === "events") this.presence.events(m.events);
     if (this.last !== null && m.head < this.last) {
       // The ledger went back (a restore): start again from where it is now.
       this.last = m.head;

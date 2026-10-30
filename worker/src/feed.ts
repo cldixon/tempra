@@ -1,7 +1,7 @@
 /**
  * The change feed (tempra-dev: app/live): every committed ledger event, pushed to the library's
- * open WebSockets. Free of Worker APIs; the Library DO holds the sockets (hibernation API) and
- * calls these.
+ * open WebSockets, and agents' presence: what they read now (TEMPRA-219). Free of Worker APIs;
+ * the Library DO holds the sockets (hibernation API) and calls these.
  */
 import type { ActedBy } from "./agents";
 import { normalizeDir, underPrefix } from "./okf/paths";
@@ -26,10 +26,14 @@ export interface FeedEvent {
   by: ActedBy | null;
 }
 
-/** What the feed sends: on connect, the head; after each write, its events. */
+/**
+ * What the feed sends: on connect, the head; after each write, its events; after an agent's
+ * read, its presence (TEMPRA-219), which carries no head and moves no cursor.
+ */
 export type FeedMessage =
   | { type: "hello"; head: number }
-  | { type: "events"; head: number; events: FeedEvent[] };
+  | { type: "events"; head: number; events: FeedEvent[] }
+  | PresenceMessage;
 
 /** An open feed socket and the path prefix it asked for ("" for the whole library). */
 export interface FeedSocket {
@@ -143,6 +147,136 @@ export function broadcast(
     const message: FeedMessage = { type: "events", head, events: mine };
     try {
       s.send(JSON.stringify(message));
+      sent++;
+    } catch {
+      // Closed or closing: nothing to do.
+    }
+  }
+  return sent;
+}
+
+// ---------------------------------------------------------------- presence (TEMPRA-219)
+
+/**
+ * What an agent is doing to a file now: reading it (`read`, `GET …/files`, `GET …/page`) or
+ * writing it. Reading is a presence message; writing needs none, since its events are on the
+ * feed already and the app marks the files an agent's events name. A search marks nothing (the
+ * product owner's call on TEMPRA-219): a page it found shows only once the agent reads it.
+ */
+export type PresenceKind = "reading" | "writing";
+
+/** Who a presence message is about: an agent's actor and, when known, its person and agent. */
+export interface PresenceCaller {
+  actor: string;
+  by: ActedBy | null;
+}
+
+/**
+ * A presence message: one agent, what it is doing, the files it read in one call. Nothing of it
+ * is stored, and a socket that misses one misses nothing it needs: the mark fades in seconds.
+ */
+export interface PresenceMessage {
+  type: "presence";
+  kind: "reading";
+  actor: string;
+  by: ActedBy | null;
+  paths: string[];
+}
+
+/** Whether an actor is a person (`human:<handle>`): people's reads are never presence. */
+export const isPersonActor = (actor: string) => actor.startsWith("human:");
+
+/**
+ * The caller a library call carries for presence: an agent's actor and who it acts for, or
+ * null for a person (the app's session, a `human:` token), whose reads say nothing.
+ */
+export function presenceCaller(t: {
+  actor: string;
+  created_by?: string | null;
+  agent?: string;
+}): PresenceCaller | null {
+  if (isPersonActor(t.actor)) return null;
+  const by: ActedBy | null = t.created_by
+    ? t.agent
+      ? { person: t.created_by, agent: t.agent }
+      : { person: t.created_by }
+    : null;
+  return { actor: t.actor, by };
+}
+
+/** The least time between two presence messages for one agent and file. */
+export const PRESENCE_THROTTLE_MS = 3000;
+
+/**
+ * The file a read method's result names: a read file (a concept or an attachment; not the
+ * library's generated index or log, which are no row in the tree) or a page's file. Any other
+ * method, `search` included, names none.
+ */
+export function presencePaths(method: string, value: unknown): string[] {
+  if (!value || typeof value !== "object") return [];
+  const fileOf = (v: unknown) => {
+    const f = v as { kind?: unknown; path?: unknown } | null;
+    return f && (f.kind === "concept" || f.kind === "attachment") && typeof f.path === "string"
+      ? [f.path]
+      : [];
+  };
+  if (method === "read") return fileOf(value);
+  if (method === "page") return fileOf((value as { file?: unknown }).file);
+  return [];
+}
+
+/**
+ * Presence for one library, kept in its Durable Object's memory (nothing is stored): from a read
+ * call's caller and result, the message to send, throttled per agent and file, or null.
+ * Hibernation forgets the throttle, which only lets one message through sooner.
+ */
+export class Presence {
+  /** Per agent and file, when its last message went. */
+  private last = new Map<string, number>();
+
+  constructor(private readonly throttleMs = PRESENCE_THROTTLE_MS) {}
+
+  message(
+    caller: PresenceCaller | null | undefined,
+    method: string,
+    value: unknown,
+    now = Date.now(),
+  ): PresenceMessage | null {
+    if (!caller || isPersonActor(caller.actor)) return null;
+    const paths = presencePaths(method, value).filter((p) => {
+      const key = `${caller.actor}|${p}`;
+      const at = this.last.get(key);
+      if (at !== undefined && now - at < this.throttleMs) return false;
+      this.last.set(key, now);
+      return true;
+    });
+    if (this.last.size > 2000) this.prune(now);
+    if (paths.length === 0) return null;
+    return { type: "presence", kind: "reading", actor: caller.actor, by: caller.by, paths };
+  }
+
+  private prune(now: number) {
+    for (const [k, at] of this.last) if (now - at >= this.throttleMs) this.last.delete(k);
+  }
+}
+
+/**
+ * Sends a presence message to each socket, with only the files under its prefix; a socket with
+ * none is skipped. A socket past its age is skipped too, left for the next write's broadcast
+ * to close.
+ */
+export function broadcastPresence(
+  sockets: readonly FeedSocket[],
+  message: PresenceMessage,
+  now = Date.now(),
+) {
+  let sent = 0;
+  for (const s of sockets) {
+    if (now - s.opened > FEED_MAX_AGE_MS) continue;
+    const paths = message.paths.filter((p) => underPrefix(p, s.prefix));
+    if (paths.length === 0) continue;
+    try {
+      s.send(JSON.stringify({ ...message, paths }));
       sent++;
     } catch {
       // Closed or closing: nothing to do.

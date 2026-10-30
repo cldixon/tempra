@@ -3,12 +3,15 @@ import { d1BlobRefs } from "./blobrefs";
 import { type CallResult, callStore, type LibraryMethod, r2BlobStore } from "./client";
 import {
   broadcast,
+  broadcastPresence,
   FEED_FULL,
   FEED_SOCKETS_PER_LIBRARY,
   type FeedMessage,
   type FeedSocket,
   feedEvent,
   feedPrefix,
+  Presence,
+  type PresenceCaller,
   WRITE_METHODS,
 } from "./feed";
 import { DEFAULT_STORAGE_MB } from "./limits";
@@ -48,6 +51,8 @@ export class Library extends DurableObject<Env> {
   /** When the object started, and how many calls it has served: the first is the cold one. */
   private readonly started = Date.now();
   private calls = 0;
+  /** Agents' presence on the feed (TEMPRA-219): only its throttle, in memory. */
+  private readonly presence = new Presence();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -66,8 +71,16 @@ export class Library extends DurableObject<Env> {
     return this.opened;
   }
 
-  /** The single RPC entry point: runs a store method and returns its result or error as data. */
-  async call(method: LibraryMethod, args: unknown[]): Promise<CallResult> {
+  /**
+   * The single RPC entry point: runs a store method and returns its result or error as data.
+   * `caller` is the agent making it, when it is one: its reads are presence on the feed
+   * (TEMPRA-219).
+   */
+  async call(
+    method: LibraryMethod,
+    args: unknown[],
+    caller?: PresenceCaller | null,
+  ): Promise<CallResult> {
     if (this.restarting) return RESTARTING;
     // Where the time goes (TEMPRA-190): the first call after a start, and any slow one, is logged.
     const t0 = Date.now();
@@ -75,6 +88,14 @@ export class Library extends DurableObject<Env> {
     if (!this.alarmChecked) await this.ensureAlarm();
     const t1 = Date.now();
     const result = await this.run(method, args);
+    // After the call, never inside a write's transaction; a failure here never fails the read.
+    if (caller && result.ok) {
+      try {
+        this.sendPresence(caller, method, result.value);
+      } catch (e) {
+        console.error("presence not sent", e);
+      }
+    }
     const t2 = Date.now();
     if (worthLogging(cold, t2 - t0)) {
       try {
@@ -181,7 +202,23 @@ export class Library extends DurableObject<Env> {
     const head = this.store.headSeq();
     if (head <= before) return;
     const { events } = this.store.events({ since: before, limit: 1000 });
-    const feed: FeedSocket[] = sockets.map((ws) => {
+    broadcast(this.feedSockets(sockets), head, events.map(feedEvent));
+  }
+
+  /**
+   * An agent's read, as presence to every open feed socket (TEMPRA-219): throttled in memory per
+   * agent and file, filtered by each socket's prefix, never stored. A search sends none.
+   */
+  private sendPresence(caller: PresenceCaller, method: LibraryMethod, value: unknown) {
+    const sockets = this.ctx.getWebSockets();
+    if (sockets.length === 0) return;
+    const message = this.presence.message(caller, method, value);
+    if (message) broadcastPresence(this.feedSockets(sockets), message);
+  }
+
+  /** The feed's view of the object's sockets: each one's prefix and age, from its attachment. */
+  private feedSockets(sockets: WebSocket[]): FeedSocket[] {
+    return sockets.map((ws) => {
       const a = ws.deserializeAttachment() as { prefix?: string; opened?: number } | null;
       return {
         prefix: a?.prefix ?? "",
@@ -191,7 +228,6 @@ export class Library extends DurableObject<Env> {
         close: (code, reason) => ws.close(code, reason),
       };
     });
-    broadcast(feed, head, events.map(feedEvent));
   }
 
   /** The account leases of the open feed sockets, for the per-account cap (feed-leases.ts). */
