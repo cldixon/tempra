@@ -154,7 +154,8 @@ CREATE TABLE IF NOT EXISTS sources (
   cited       INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS sources_concept ON sources(concept_id);
-CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(concept_id UNINDEXED, title, body, tags);
+-- Stemmed (TEMPRA-17): "comments" finds "comment"; LibraryStore's stemSearch upgrades older libraries.
+CREATE VIRTUAL TABLE IF NOT EXISTS fts USING fts5(concept_id UNINDEXED, title, body, tags, tokenize = 'porter unicode61');
 -- Each concept's row in fts, so a write replaces it by rowid instead of scanning fts (TEMPRA-87).
 CREATE TABLE IF NOT EXISTS fts_rows (concept_id TEXT PRIMARY KEY, fts_rowid INTEGER NOT NULL);
 

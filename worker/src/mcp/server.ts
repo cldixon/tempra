@@ -1754,9 +1754,13 @@ export function buildServer(ctx: McpContext): McpServer {
       "search",
       {
         title: "Ranked search",
-        description: `${BEYOND}ranked full-text search over titles, bodies and tags, with snippets. Use it to find concepts by meaning words when you do not know the path; use grep for exact strings.`,
+        description: `${BEYOND}ranked full-text search over titles, bodies and tags, with snippets. Any of the words matches, and pages with more of them, rarer ones or ones in the title rank first (BM25); words are stemmed, so comments finds comment. Use it to find concepts by meaning words when you do not know the path; use grep for exact strings.`,
         inputSchema: {
-          q: z.string().describe("Words to search for; a trailing * matches a prefix."),
+          q: z
+            .string()
+            .describe(
+              'Words to search for, any of which may match; "a quoted phrase" must match as a phrase, and a trailing * matches a prefix.',
+            ),
           prefix: z.string().optional(),
           limit: z.number().int().optional(),
           ...libArg,

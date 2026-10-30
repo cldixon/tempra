@@ -141,8 +141,9 @@ describe("MCP trial 2026-10-06", () => {
     expect(hit?.snippet).toContain("**markdown**");
     expect(hit?.snippet).not.toContain("****");
     expect(hit?.snippet).not.toContain("/decisions");
-    // A link target is not text: searching for it finds nothing.
-    expect(s.search("decisions").results).toEqual([]);
+    // A link target is not text: a word only in it finds nothing. (Not `decisions`: stemmed
+    // search, TEMPRA-17, finds the link's own text, "the decision".)
+    expect(s.search("structured").results).toEqual([]);
 
     // A library indexed before (markdown in the index) is reindexed once when opened.
     sql.run("UPDATE fts SET body = 'stale markdown **x**'");
