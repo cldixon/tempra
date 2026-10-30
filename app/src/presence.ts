@@ -114,10 +114,18 @@ export class PresenceStore {
   }
 }
 
-/** The folders that hold a marked file, at any depth: what a folder's quieter mark follows. */
-export function activeFolders(active: ReadonlyMap<string, Presence>): Set<string> {
-  const out = new Set<string>();
-  for (const path of active.keys()) for (const d of ancestors(path)) out.add(d);
+/**
+ * The folders that hold a marked file, at any depth, each with the most recent presence inside:
+ * what a closed folder's name shimmers for (an open one leaves it to its rows).
+ */
+export function activeFolders(active: ReadonlyMap<string, Presence>): Map<string, Presence> {
+  const out = new Map<string, Presence>();
+  for (const [path, p] of active) {
+    for (const d of ancestors(path)) {
+      const seen = out.get(d);
+      if (!seen || p.at > seen.at) out.set(d, p);
+    }
+  }
   return out;
 }
 
@@ -127,8 +135,16 @@ export const presenceWords: Record<PresenceKind, string> = {
   writing: "an agent is writing",
 };
 
+/** The same for a closed folder holding such a file. */
+export const presenceWordsInside: Record<PresenceKind, string> = {
+  reading: "an agent is reading in here",
+  writing: "an agent is writing in here",
+};
+
 /**
  * A marked row's tooltip, naming the agent as the app names it (`actorText`): "Claude Code for
- * @dev is reading". The shimmer is the cue; this is what a hover adds.
+ * @dev is reading" ("… is reading in here" on a closed folder). The shimmer is the cue; this is
+ * what a hover adds.
  */
-export const presenceTitle = (who: string, kind: PresenceKind) => `${who} is ${kind}`;
+export const presenceTitle = (who: string, kind: PresenceKind, inside = false) =>
+  `${who} is ${kind}${inside ? " in here" : ""}`;

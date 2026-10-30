@@ -47,7 +47,12 @@ describe("the presence store (presence.ts)", () => {
     now = 3000;
     p.add(reading(["two.md"]));
     expect(p.active().get("two.md")).toMatchObject({ kind: "reading", at: 3000 });
-    expect([...activeFolders(p.active())].sort()).toEqual(["a", "a/b"]);
+    expect([...activeFolders(p.active()).keys()].sort()).toEqual(["a", "a/b"]);
+    // A folder holds the most recent presence inside it, for its tooltip.
+    now = 4000;
+    p.events([write(2, "a/other.md")]);
+    expect(activeFolders(p.active()).get("a")).toMatchObject({ kind: "writing", at: 4000 });
+    expect(activeFolders(p.active()).get("a/b")).toMatchObject({ kind: "reading", at: 1000 });
   });
 
   test("an agent's write is writing; a person's, a comment or a delete is not", () => {
@@ -167,7 +172,7 @@ describe("the tree shows presence (Tree.svelte)", () => {
     t.destroy();
   });
 
-  test("a closed folder holding a marked file shows the quieter mark; an open one does not", async () => {
+  test("a closed folder shimmers its name; opened, the shimmer moves down to what holds it", async () => {
     const urls = new Urls("dev", "presence-folder");
     const t = draw(Tree, {
       urls,
@@ -178,13 +183,49 @@ describe("the tree shows presence (Tree.svelte)", () => {
       onRetry: () => {},
     });
     await settle(10);
+    /** A folder's row by its name, and whether it shimmers. */
+    const folder = (name: string) =>
+      t.host.querySelector<HTMLButtonElement>(
+        `button.tree-name[aria-expanded]:is([title="${name}"], [title^="${name}: "])`,
+      );
+    const shimmers = (el: Element | null | undefined) =>
+      el?.closest(".tree-row")?.classList.contains("presence") ?? false;
+    const page = () => t.host.querySelector('a[data-path="guides/deep/more.md"]');
+    // Close Deep, then Guides: the page being read is two closed folders down.
+    folder("Deep")?.click();
+    flushSync();
+    folder("Guides")?.click();
+    flushSync();
     feedOf(urls).receive(reading(["guides/deep/more.md"]));
     flushSync();
+    // No ring, dot or circle: the closed folder's own name shimmers, as a page's would.
     expect(t.host.querySelector(".presence-mark")).toBeNull();
-    t.host.querySelector<HTMLButtonElement>('button.tree-name[title="Guides"]')?.click();
+    expect(shimmers(folder("Guides"))).toBe(true);
+    expect(folder("Guides")?.dataset.presence).toBe("reading");
+    expect(folder("Guides")?.textContent).toBe("Guides");
+    expect(folder("Guides")?.getAttribute("title")).toBe(
+      "Guides: Claude Code for @dev is reading in here",
+    );
+    expect(
+      folder("Guides")?.closest(".tree-row")?.querySelector(".visually-hidden")?.textContent,
+    ).toBe("an agent is reading in here");
+    // Opened mid-shimmer: it stops, and the closed folder below that holds the page takes it.
+    folder("Guides")?.click();
     flushSync();
-    const guides = t.host.querySelector('button.tree-name[title="Guides"]')?.closest(".tree-row");
-    expect(guides?.querySelector(".presence-mark")).not.toBeNull();
+    expect(shimmers(folder("Guides"))).toBe(false);
+    expect(folder("Guides")?.getAttribute("title")).toBe("Guides");
+    expect(shimmers(folder("Deep"))).toBe(true);
+    expect(page()).toBeNull();
+    // Opened again: the page itself shimmers, and no open folder does.
+    folder("Deep")?.click();
+    flushSync();
+    expect(shimmers(folder("Deep"))).toBe(false);
+    expect(page()?.classList.contains("presence")).toBe(true);
+    expect(t.host.querySelectorAll(".tree-row.dir.presence")).toHaveLength(0);
+    // Closed again while it lasts: back on the folder.
+    folder("Guides")?.click();
+    flushSync();
+    expect(shimmers(folder("Guides"))).toBe(true);
     t.destroy();
   });
 });

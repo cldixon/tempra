@@ -3,7 +3,13 @@
   import { actorText } from "./agents";
   import { useActors } from "./agents.svelte.ts";
   import Icon from "./Icon.svelte";
-  import { activeFolders, type Presence, presenceTitle, presenceWords } from "./presence";
+  import {
+    activeFolders,
+    type Presence,
+    presenceTitle,
+    presenceWords,
+    presenceWordsInside,
+  } from "./presence";
   import { usePresence } from "./presence.svelte.ts";
   import {
     ancestors,
@@ -27,8 +33,10 @@
    * up the marks of what is inside it. Change is not marked here (TEMPRA-173): Activity is where
    * a person looks for it. What an agent is doing now is (TEMPRA-219): the name of a file it is
    * reading or writing shimmers, with no words beside it (a hover names the agent, "Claude Code
-   * for @dev is reading"), and a closed folder holding one shows a quieter mark, each fading a
-   * few seconds after the agent moves on. A search marks nothing.
+   * for @dev is reading"), fading a few seconds after the agent moves on. A closed folder holding
+   * one shimmers its own name instead; opened, the shimmer moves at once to the rows inside that
+   * hold it (a page, or a closed folder deeper down), and an open folder never shimmers itself.
+   * A search marks nothing.
    */
   let props: {
     urls: Urls;
@@ -49,8 +57,8 @@
   const busyFolders = $derived(activeFolders(presence.active));
   // Who is at a marked row, for its tooltip, named as the app names agents (TEMPRA-131).
   const actors = useActors(() => props.urls);
-  const rowTitle = (label: string, p: Presence | undefined) =>
-    p ? `${label}: ${presenceTitle(actorText(actors.view(p.actor, p.by)), p.kind)}` : label;
+  const rowTitle = (label: string, p: Presence | undefined, inside = false) =>
+    p ? `${label}: ${presenceTitle(actorText(actors.view(p.actor, p.by)), p.kind, inside)}` : label;
 
   // The open file's folders are revealed when it opens (and may be collapsed after); so is a
   // folder whose address was opened (`dir`, on its way to the home).
@@ -139,29 +147,31 @@
   {:else}
     {#each dirs[dir] ?? [] as e (e.path)}
       {#if e.kind === "dir"}
+        {@const inHere = isOpen(e.path) ? undefined : busyFolders.get(e.path)}
         <li>
-          <!-- A folder is a group, not a page (TEMPRA-138): its whole row opens and closes it. -->
-          <div class={isOpen(e.path) ? "tree-row dir open" : "tree-row dir"}
+          <!-- A folder is a group, not a page (TEMPRA-138): its whole row opens and closes it.
+               Only a closed folder shimmers for what is inside it; an open one leaves it to its
+               rows (TEMPRA-219). -->
+          <div
+            class={`tree-row dir${isOpen(e.path) ? " open" : ""}${inHere ? " presence" : ""}`}
             ><span class="tree-chevron" aria-hidden="true"><Icon name="chevron" /></span><button
               type="button"
               class="tree-name"
               aria-expanded={isOpen(e.path)}
-              title={folderName(e.path)}
+              title={rowTitle(folderName(e.path), inHere, true)}
+              data-presence={inHere?.kind}
               {@attach reveal(e.path)}
               onclick={() => toggle(e.path)}
               >{folderName(e.path)}</button
-            >{#if !isOpen(e.path)}{#if busyFolders.has(e.path)}<span
-                  class="presence-mark"
-                  title="An agent is working in here"
-                  ><span class="visually-hidden">an agent is working in here</span></span
-                >{/if}{@render rolledUp(e.path)}{/if}</div
+            >{#if inHere}<span class="visually-hidden">{presenceWordsInside[inHere.kind]}</span
+              >{/if}{#if !isOpen(e.path)}{@render rolledUp(e.path)}{/if}</div
           >{#if isOpen(e.path)}<ul>{@render rows(e.path)}</ul>{/if}</li
         >
       {:else}
         {@const here = presence.active.get(e.path)}
         {@const busy = here?.kind}
         <li>
-          <div class={e.kind === "attachment" ? "tree-row file" : "tree-row"}
+          <div class={`tree-row${e.kind === "attachment" ? " file" : ""}${busy ? " presence" : ""}`}
             ><span class="tree-leaf"
               >{#if e.kind === "attachment"}<Icon name="file" size={14} />{/if}</span
             ><a
