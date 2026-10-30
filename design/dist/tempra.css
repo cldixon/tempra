@@ -2800,12 +2800,12 @@ a.button.pill-button {
   }
 }
 
-/* Agents' presence (TEMPRA-219): the name of a file an agent is reading, found in a search or
-   writing now, and the byline's "reading now". A highlight in the agent's ink moves across the
-   words, as a status line shimmers while a tool runs; the words keep their own colour around it,
-   and every part of them stays at least 4.5:1 (the ink is held to it, design/contrast.test.ts).
-   The highlight is the text's own fill (background-clip), so nothing lies over the words. */
-.presence-text,
+/* Agents' presence (TEMPRA-219): the name of a file an agent is reading or writing now, in the
+   tree; the whole cue, with no words beside it (a hover names the agent). A highlight in the
+   agent's ink moves across the name, as a status line shimmers while a tool runs; the words keep
+   their own colour around it, and every part of them stays at least 4.5:1 (the ink is held to
+   it, design/contrast.test.ts). The highlight is the text's own fill (background-clip), so
+   nothing lies over the words. */
 .tree-row > a.presence {
   background-image: linear-gradient(
     100deg,
@@ -2830,9 +2830,8 @@ a.button.pill-button {
   }
 }
 
-/* Without motion, or in forced colours: the words stay still, in the agent's ink. */
+/* Without motion the name stays still, in the agent's ink; in forced colours, plain. */
 @media (prefers-reduced-motion: reduce) {
-  .presence-text,
   .tree-row > a.presence {
     animation: none;
     background: none;
@@ -2841,7 +2840,6 @@ a.button.pill-button {
 }
 
 @media (forced-colors: active) {
-  .presence-text,
   .tree-row > a.presence {
     animation: none;
     background: none;
@@ -3756,12 +3754,6 @@ ul.events {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: var(--tempra-color-text);
-}
-
-/* An agent reading the page now (TEMPRA-219): its name, then "reading now" shimmering
-   (.presence-text, workspace.css). */
-.byline-presence {
   color: var(--tempra-color-text);
 }
 

@@ -4,18 +4,18 @@ import type { FeedEvent } from "./live";
 import { ancestors } from "./tree";
 
 /*
- * Agents' presence (TEMPRA-219, tempra-dev: app/live): what an agent is reading, searching or
- * writing in the library now. Reading and searching come as presence messages on the feed
- * (worker/src/feed.ts); writing from the agents' own events on it. Kept per library, the most
- * recent per file, each fading PRESENCE_TTL_MS after it came; nothing is stored or asked for.
+ * Agents' presence (TEMPRA-219, tempra-dev: app/live): what an agent is reading or writing in
+ * the library now. Reading comes as presence messages on the feed (worker/src/feed.ts); writing
+ * from the agents' own events on it; a search marks nothing. Kept per library, the most recent
+ * per file, each fading PRESENCE_TTL_MS after it came; nothing is stored or asked for.
  */
 
-export type PresenceKind = "reading" | "searching" | "writing";
+export type PresenceKind = "reading" | "writing";
 
 /** A presence message as the feed sends it. */
 export interface PresenceMessage {
   type: "presence";
-  kind: Exclude<PresenceKind, "writing">;
+  kind: "reading";
   actor: string;
   by: ActedBy | null;
   paths: string[];
@@ -31,7 +31,7 @@ export interface Presence {
 
 /**
  * How long a file stays marked after its last presence. The server sends at most one message
- * per agent, kind and file every 3 s, so an agent still at it keeps the mark.
+ * per agent and file every 3 s, so an agent still at it keeps the mark.
  */
 export const PRESENCE_TTL_MS = 8000;
 
@@ -124,6 +124,11 @@ export function activeFolders(active: ReadonlyMap<string, Presence>): Set<string
 /** The words for a presence, for a screen reader beside the tree's row. */
 export const presenceWords: Record<PresenceKind, string> = {
   reading: "an agent is reading",
-  searching: "found in an agent's search",
   writing: "an agent is writing",
 };
+
+/**
+ * A marked row's tooltip, naming the agent as the app names it (`actorText`): "Claude Code for
+ * @dev is reading". The shimmer is the cue; this is what a hover adds.
+ */
+export const presenceTitle = (who: string, kind: PresenceKind) => `${who} is ${kind}`;

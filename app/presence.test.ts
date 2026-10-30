@@ -1,8 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { flushSync } from "svelte";
-import { actorView } from "./src/agents";
-import Byline from "./src/concept/Byline.svelte";
-import type { Concept, HistoryEvent } from "./src/concept/data";
 import { type FeedEvent, feedOf, LibraryFeed } from "./src/live";
 import { activeFolders, type PresenceMessage, PresenceStore } from "./src/presence";
 import Tree from "./src/Tree.svelte";
@@ -10,14 +7,16 @@ import type { OutlineFile } from "./src/tree";
 import { Urls } from "./src/urls";
 import { draw, settle } from "./test/dom";
 
-// Agents' presence (TEMPRA-219): what an agent reads, searches and writes now, from the feed, in
-// the tree and the byline, fading after a few seconds.
+// Agents' presence (TEMPRA-219): what an agent reads and writes now, from the feed, as a shimmer
+// on the tree's rows (no words beside it; a hover names the agent), fading after a few seconds.
+
+const BY = { person: "u1", agent: "agt_1" };
 
 const reading = (paths: string[], actor = "claude-code/dev"): PresenceMessage => ({
   type: "presence",
   kind: "reading",
   actor,
-  by: { person: "u1", agent: "agt_1" },
+  by: BY,
   paths,
 });
 
@@ -32,6 +31,7 @@ const write = (seq: number, path: string, actor = "claude-code/dev"): FeedEvent 
   hash: "h",
   note: null,
   from_path: null,
+  by: BY,
 });
 
 describe("the presence store (presence.ts)", () => {
@@ -42,8 +42,11 @@ describe("the presence store (presence.ts)", () => {
     p.add(reading(["three.md"], "human:dev"));
     expect([...p.active().keys()]).toEqual(["a/b/one.md", "two.md"]);
     now = 2000;
-    p.add({ ...reading(["two.md"]), kind: "searching" });
-    expect(p.active().get("two.md")).toMatchObject({ kind: "searching", at: 2000 });
+    p.events([write(1, "two.md")]);
+    expect(p.active().get("two.md")).toMatchObject({ kind: "writing", at: 2000 });
+    now = 3000;
+    p.add(reading(["two.md"]));
+    expect(p.active().get("two.md")).toMatchObject({ kind: "reading", at: 3000 });
     expect([...activeFolders(p.active())].sort()).toEqual(["a", "a/b"]);
   });
 
@@ -97,12 +100,31 @@ class NoSocket {
   send() {}
 }
 const realSocket = globalThis.WebSocket;
+const realFetch = globalThis.fetch;
 beforeEach(() => {
   globalThis.WebSocket = NoSocket as unknown as typeof WebSocket;
   localStorage.clear();
+  // The library's agents, so a hover names the agent for its person.
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const body = String(input).includes("/agents")
+      ? {
+          contributors: [
+            {
+              person: "dev",
+              agent: { id: "agt_1", name: "Claude Code", platform: null, client: null },
+              actor: "claude-code/dev",
+              requests: 1,
+              last_ts: "2026-10-30T00:00:00Z",
+            },
+          ],
+        }
+      : {};
+    return new Response(JSON.stringify(body), { headers: { "Content-Type": "application/json" } });
+  }) as typeof fetch;
 });
 afterEach(() => {
   globalThis.WebSocket = realSocket;
+  globalThis.fetch = realFetch;
 });
 
 const OUTLINE: OutlineFile[] = [
@@ -112,7 +134,7 @@ const OUTLINE: OutlineFile[] = [
 ];
 
 describe("the tree shows presence (Tree.svelte)", () => {
-  test("a marked file's name shimmers; a closed folder holding one shows the quieter mark", async () => {
+  test("a marked name shimmers with no words shown; a hover names the agent", async () => {
     const urls = new Urls("dev", "presence-tree");
     const t = draw(Tree, {
       urls,
@@ -129,76 +151,40 @@ describe("the tree shows presence (Tree.svelte)", () => {
     const row = t.host.querySelector<HTMLAnchorElement>('a[data-path="guides/deep/more.md"]');
     expect(row?.classList.contains("presence")).toBe(true);
     expect(row?.dataset.presence).toBe("reading");
-    expect(row?.closest(".tree-row")?.textContent).toBe("Morean agent is reading");
-    expect(t.host.querySelector('a[data-path="top.md"]')?.classList.contains("presence")).toBe(
-      false,
-    );
-    // Open folders leave it to their rows; closed, a folder says something is going on inside.
+    // The name alone is shown; the words are for screen readers only.
+    expect(row?.textContent).toBe("More");
+    const hidden = row?.closest(".tree-row")?.querySelector(".visually-hidden");
+    expect(hidden?.textContent).toBe("an agent is reading");
+    expect(row?.getAttribute("title")).toBe("More: Claude Code for @dev is reading");
+    const top = t.host.querySelector<HTMLAnchorElement>('a[data-path="top.md"]');
+    expect(top?.classList.contains("presence")).toBe(false);
+    expect(top?.getAttribute("title")).toBe("Top");
+    // A write shimmers too, and says so on hover.
+    feedOf(urls).receive({ type: "events", head: 9, events: [write(9, "top.md")] });
+    flushSync();
+    expect(top?.dataset.presence).toBe("writing");
+    expect(top?.getAttribute("title")).toBe("Top: Claude Code for @dev is writing");
+    t.destroy();
+  });
+
+  test("a closed folder holding a marked file shows the quieter mark; an open one does not", async () => {
+    const urls = new Urls("dev", "presence-folder");
+    const t = draw(Tree, {
+      urls,
+      file: null,
+      dir: null,
+      files: OUTLINE,
+      failed: false,
+      onRetry: () => {},
+    });
+    await settle(10);
+    feedOf(urls).receive(reading(["guides/deep/more.md"]));
+    flushSync();
     expect(t.host.querySelector(".presence-mark")).toBeNull();
     t.host.querySelector<HTMLButtonElement>('button.tree-name[title="Guides"]')?.click();
     flushSync();
     const guides = t.host.querySelector('button.tree-name[title="Guides"]')?.closest(".tree-row");
     expect(guides?.querySelector(".presence-mark")).not.toBeNull();
     t.destroy();
-  });
-});
-
-const concept = {
-  kind: "concept",
-  path: "top.md",
-  hash: "h2",
-  seq: 2,
-  markdown: "",
-  frontmatter: {},
-  stale: false,
-} as unknown as Concept;
-const history: HistoryEvent[] = [
-  {
-    seq: 2,
-    ts: "2026-10-01T00:00:00Z",
-    actor: "human:dev",
-    op: "put",
-    path: "top.md",
-    hash: "h2",
-    meta: null,
-  },
-];
-const name = (actor: string, by?: { person: string; agent?: string } | null) =>
-  actorView(actor, by ?? null, {}, null);
-
-describe("the byline shows an agent reading (Byline.svelte)", () => {
-  test("named, then reading now; only on the latest version", () => {
-    const props = { concept, history, name, live: null, current: true };
-    const b = draw(Byline, { ...props, reading: { actor: "claude-code/dev", by: null } });
-    const clause = b.host.querySelector(".byline-presence");
-    expect(clause?.textContent).toBe("Claude Code is reading now");
-    expect(clause?.querySelector(".presence-text")?.textContent).toBe("is reading now");
-    b.destroy();
-    const old = draw(Byline, {
-      ...props,
-      current: false,
-      reading: { actor: "claude-code/dev", by: null },
-    });
-    expect(old.host.querySelector(".byline-presence")).toBeNull();
-    old.destroy();
-    const none = draw(Byline, { ...props, reading: null });
-    expect(none.host.querySelector(".byline-presence")).toBeNull();
-    none.destroy();
-  });
-
-  test("the agent that wrote the version on screen is named once", () => {
-    const own: HistoryEvent[] = [
-      { ...(history[0] as HistoryEvent), actor: "claude-code/dev", ts: "2026-10-01T00:00:00Z" },
-    ];
-    const b = draw(Byline, {
-      concept,
-      history: own,
-      name,
-      live: null,
-      current: true,
-      reading: { actor: "claude-code/dev", by: null },
-    });
-    expect(b.host.querySelector(".byline-presence")?.textContent).toBe("reading now");
-    b.destroy();
   });
 });

@@ -73,8 +73,8 @@ export class Library extends DurableObject<Env> {
 
   /**
    * The single RPC entry point: runs a store method and returns its result or error as data.
-   * `caller` is the agent making it, when it is one: its reads and searches are presence on the
-   * feed (TEMPRA-219).
+   * `caller` is the agent making it, when it is one: its reads are presence on the feed
+   * (TEMPRA-219).
    */
   async call(
     method: LibraryMethod,
@@ -206,9 +206,8 @@ export class Library extends DurableObject<Env> {
   }
 
   /**
-   * An agent's read or search, as presence to every open feed socket (TEMPRA-219): throttled in
-   * memory per agent and file while the kind stays the same, filtered by each socket's prefix,
-   * never stored.
+   * An agent's read, as presence to every open feed socket (TEMPRA-219): throttled in memory per
+   * agent and file, filtered by each socket's prefix, never stored. A search sends none.
    */
   private sendPresence(caller: PresenceCaller, method: LibraryMethod, value: unknown) {
     const sockets = this.ctx.getWebSockets();

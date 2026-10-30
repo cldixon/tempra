@@ -276,12 +276,6 @@
   color: var(--tempra-color-text);
 }
 
-/* An agent reading the page now (TEMPRA-219): its name, then "reading now" shimmering
-   (.presence-text, workspace.css). */
-.byline-presence {
-  color: var(--tempra-color-text);
-}
-
 /* ---------- History: the versions, newest first ---------- */
 
 .versions {

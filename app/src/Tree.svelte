@@ -1,7 +1,9 @@
 <script lang="ts">
   import { untrack } from "svelte";
+  import { actorText } from "./agents";
+  import { useActors } from "./agents.svelte.ts";
   import Icon from "./Icon.svelte";
-  import { activeFolders, presenceWords } from "./presence";
+  import { activeFolders, type Presence, presenceTitle, presenceWords } from "./presence";
   import { usePresence } from "./presence.svelte.ts";
   import {
     ancestors,
@@ -24,8 +26,9 @@
    * remembered on this browser, and the open file is revealed and marked. A closed folder rolls
    * up the marks of what is inside it. Change is not marked here (TEMPRA-173): Activity is where
    * a person looks for it. What an agent is doing now is (TEMPRA-219): the name of a file it is
-   * reading, found in a search or writing shimmers, and a closed folder holding one shows a
-   * quieter mark, each fading a few seconds after the agent moves on.
+   * reading or writing shimmers, with no words beside it (a hover names the agent, "Claude Code
+   * for @dev is reading"), and a closed folder holding one shows a quieter mark, each fading a
+   * few seconds after the agent moves on. A search marks nothing.
    */
   let props: {
     urls: Urls;
@@ -44,6 +47,10 @@
   const inside = $derived(props.files ? insideDirs(props.files) : new Map<string, OutlineFile[]>());
   const presence = usePresence(() => props.urls);
   const busyFolders = $derived(activeFolders(presence.active));
+  // Who is at a marked row, for its tooltip, named as the app names agents (TEMPRA-131).
+  const actors = useActors(() => props.urls);
+  const rowTitle = (label: string, p: Presence | undefined) =>
+    p ? `${label}: ${presenceTitle(actorText(actors.view(p.actor, p.by)), p.kind)}` : label;
 
   // The open file's folders are revealed when it opens (and may be collapsed after); so is a
   // folder whose address was opened (`dir`, on its way to the home).
@@ -151,14 +158,15 @@
           >{#if isOpen(e.path)}<ul>{@render rows(e.path)}</ul>{/if}</li
         >
       {:else}
-        {@const busy = presence.active.get(e.path)?.kind}
+        {@const here = presence.active.get(e.path)}
+        {@const busy = here?.kind}
         <li>
           <div class={e.kind === "attachment" ? "tree-row file" : "tree-row"}
             ><span class="tree-leaf"
               >{#if e.kind === "attachment"}<Icon name="file" size={14} />{/if}</span
             ><a
               href={props.urls.file(e.path)}
-              title={fileLabel(e)}
+              title={rowTitle(fileLabel(e), here)}
               class={busy ? "presence" : undefined}
               data-path={e.path}
               data-presence={busy}
