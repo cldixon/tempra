@@ -49,6 +49,16 @@ describe("text contrast (WCAG AA)", () => {
     }
   }
 
+  // Agents' presence (TEMPRA-219): the highlight that moves across a name, and its static mark
+  // under reduced motion, is in the words, so it is held to text's contrast too.
+  for (const surface of surfaces) {
+    for (const [mode, i] of Object.entries(scheme)) {
+      test(`color-agent-ink on ${surface}, ${mode}: at least 4.5:1`, () => {
+        expect(contrast(pair("color-agent-ink")[i], pair(surface)[i])).toBeGreaterThanOrEqual(4.5);
+      });
+    }
+  }
+
   test("the focus ring is the text colour", () => {
     expect(tokens).toMatch(/--tempra-focus-ring:[^;]*var\(--tempra-color-text\)/);
   });

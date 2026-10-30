@@ -1035,6 +1035,65 @@ a.button.pill-button {
   }
 }
 
+/* Agents' presence (TEMPRA-219): the name of a file an agent is reading, found in a search or
+   writing now, and the byline's "reading now". A highlight in the agent's ink moves across the
+   words, as a status line shimmers while a tool runs; the words keep their own colour around it,
+   and every part of them stays at least 4.5:1 (the ink is held to it, design/contrast.test.ts).
+   The highlight is the text's own fill (background-clip), so nothing lies over the words. */
+.presence-text,
+.tree-row > a.presence {
+  background-image: linear-gradient(
+    100deg,
+    currentcolor 0 38%,
+    var(--tempra-color-agent-ink) 50%,
+    currentcolor 62% 100%
+  );
+  background-size: 250% 100%;
+  background-position: 100% 0;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  animation: tempra-shimmer var(--tempra-shimmer) linear infinite;
+}
+
+@keyframes tempra-shimmer {
+  from {
+    background-position: 100% 0;
+  }
+
+  to {
+    background-position: 0 0;
+  }
+}
+
+/* Without motion, or in forced colours: the words stay still, in the agent's ink. */
+@media (prefers-reduced-motion: reduce) {
+  .presence-text,
+  .tree-row > a.presence {
+    animation: none;
+    background: none;
+    -webkit-text-fill-color: var(--tempra-color-agent-ink);
+  }
+}
+
+@media (forced-colors: active) {
+  .presence-text,
+  .tree-row > a.presence {
+    animation: none;
+    background: none;
+    -webkit-text-fill-color: currentcolor;
+  }
+}
+
+/* A folder with an agent at work inside (shown while it is closed): a quieter mark than the
+   shimmer, a still ring in the agent's colour. */
+.presence-mark {
+  flex: none;
+  width: var(--tempra-dot);
+  height: var(--tempra-dot);
+  border: 1.5px solid var(--tempra-color-agent);
+  border-radius: 50%;
+}
+
 .lib-tile,
 .wordmark-tile {
   display: grid;

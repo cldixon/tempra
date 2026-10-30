@@ -14,6 +14,7 @@
   import { attachmentSource } from "../images";
   import { here } from "../location.svelte.ts";
   import PageBar from "../PageBar.svelte";
+  import { usePresence } from "../presence.svelte.ts";
   import Reader from "../Reader.svelte";
   import { type BodyOptions, prepare } from "../reader/prepare";
   import { pushRecent } from "../recent";
@@ -86,6 +87,12 @@
   );
   const status = $derived(typeof fm.status === "string" ? fm.status : null);
   const current = $derived(urls.at === undefined || urls.at >= props.head);
+  // An agent reading this page now (TEMPRA-219), for the byline.
+  const presence = usePresence(() => props.urls);
+  const reading = $derived.by(() => {
+    const p = presence.active.get(c.path);
+    return p?.kind === "reading" ? p : null;
+  });
   // The Markdown view is in the URL (`?view=markdown`), so back and a shared link keep it.
   const markdown = $derived(here.url.searchParams.get("view") === "markdown");
   function setMarkdown(on: boolean) {
@@ -352,6 +359,7 @@
             {live}
             {current}
             {status}
+            {reading}
           />{#if current}<CheckedLine {urls} path={c.path} standing={s} {name} />{/if}{#if hasContents}<details
               class="toc-inline"
               bind:this={inlineContents}
