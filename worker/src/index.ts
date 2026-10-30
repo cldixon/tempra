@@ -9,6 +9,11 @@ import { deleteVariants, imagesService, r2VariantCache } from "./images";
 import { type Library, refuseFeed } from "./library";
 import { DEFAULT_STORAGE_MB } from "./limits";
 import { exportsPrefix, listExports } from "./maintain";
+import type { AgentJob, ManagedDeps } from "./managed/agent";
+import { d1AgentBudget } from "./managed/budget";
+import { anthropicModel, handleAgentMessage } from "./managed/consumer";
+import { fakeModel } from "./managed/fake";
+import type { ModelClient } from "./managed/turn";
 import { d1Notifications } from "./notify";
 import { devMailer, flushMail } from "./notify-mail";
 import { listRestores, RESTORE_ID, restoresPrefix } from "./recovery";
@@ -78,6 +83,28 @@ function sweepQueue(env: Env): SweepQueue {
   };
 }
 
+/** The managed agent's Queue and its "replying" presence (TEMPRA-222). */
+function managedDeps(env: Env): ManagedDeps {
+  const q = env.AGENT_QUEUE as Queue<AgentJob>;
+  return {
+    enqueue: async (job) => {
+      await q.send(job);
+    },
+    announce: async (doId, message) => {
+      await libraryStub(env, doId).announce(message);
+    },
+  };
+}
+
+/**
+ * The model the agent runs on: Claude with the deployment's key, a scripted stand-in in local dev
+ * when `.dev.vars` asks for one (never where DEV_SIGNIN is off), else none.
+ */
+function agentModel(env: Env): ModelClient | null {
+  if (env.AGENT_MODEL === "fake" && env.DEV_SIGNIN === "1") return fakeModel();
+  return env.ANTHROPIC_API_KEY ? anthropicModel(env.ANTHROPIC_API_KEY) : null;
+}
+
 const storageLimitBytes = (env: Env) =>
   (Number(env.LIBRARY_STORAGE_MB) || DEFAULT_STORAGE_MB) * 1048576;
 
@@ -113,6 +140,7 @@ const depsFor = (env: Env): Deps => {
     sessions: d1Sessions(env.DB),
     mailer: mailerFor(env),
     notifications: d1Notifications(env.DB),
+    managed: managedDeps(env),
     async rateLimit(kind, key) {
       const limiter =
         // Renders share WRITE_LIMITER's 60 a minute under their own `render:` keys (TEMPRA-166).
@@ -314,10 +342,27 @@ export default {
   },
 
   /**
-   * The blob sweep's fan-out (TEMPRA-81): dispatch pages, library recounts, the one-time bucket
-   * listing and the drift scan, each message on its own, retried on failure.
+   * Two queues, told apart by name: the managed agent's turns (TEMPRA-222), and the blob sweep's
+   * fan-out (TEMPRA-81): dispatch pages, library recounts, the one-time bucket listing and the
+   * drift scan, each message on its own, retried on failure.
    */
-  async queue(batch, env) {
+  async queue(batch, env, ctx) {
+    if (batch.queue.startsWith("tempra-agent")) {
+      const d = depsFor(env);
+      const turn = {
+        ...d,
+        model: agentModel(env),
+        budget: d1AgentBudget(env.DB),
+        origin: env.APP_ORIGIN,
+        waitUntil: (p: Promise<unknown>) => ctx.waitUntil(p),
+      };
+      for (const msg of batch.messages) {
+        const next = await handleAgentMessage(turn, msg.body, msg.attempts);
+        if (next === "retry") msg.retry();
+        else msg.ack();
+      }
+      return;
+    }
     const deps = {
       refs: d1BlobRefs(env.DB),
       queue: sweepQueue(env),
@@ -344,4 +389,4 @@ export default {
       }
     }
   },
-} satisfies ExportedHandler<Env, SweepMessage>;
+} satisfies ExportedHandler<Env, SweepMessage | AgentJob>;

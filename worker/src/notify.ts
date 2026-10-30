@@ -2,6 +2,14 @@ import { bytesToHex, randomBytes } from "@noble/hashes/utils.js";
 import type { Accounts, LibraryRef } from "./accounts";
 import type { TokenInfo } from "./auth";
 import type { LibraryClient } from "./client";
+import {
+  AGENT_ACTOR,
+  agentEnabled,
+  type ManagedAgent,
+  type ManagedDeps,
+  replying,
+  TEMPRA,
+} from "./managed/agent";
 import { lintRenders, mergeImportLint, mergeOpLint, type RenderLintDeps } from "./render-lint";
 import type { CommentAction, CommentResult, Mention } from "./store/comments";
 import type { ImportResult, OpResult, RenderJob, RequestContext, WriteNotice } from "./store/store";
@@ -411,12 +419,16 @@ export async function libraryPeople(
 }
 
 /**
- * A library's managed agents, by the name a comment mentions them with. None exist yet: the
- * managed agent (TEMPRA-69) adds itself here, and its comment trigger reads `{agent}` mentions
- * from the comment's meta.
+ * A library's managed agents, by the name a comment mentions them with (TEMPRA-222): @tempra,
+ * when the agent is on for the library's owner (limits.ts `agent_daily_usd`) and the Worker can
+ * queue its turns. `ownerId` is the owner's users id (the first of `libraryPeople`).
  */
-export function managedAgents(_ref: Pick<LibraryRef, "id">): { id: string; name: string }[] {
-  return [];
+export async function managedAgents(
+  d: Pick<NotifyDeps, "accounts" | "managed">,
+  ownerId: string | undefined,
+): Promise<ManagedAgent[]> {
+  if (!d.managed || !ownerId) return [];
+  return agentEnabled(await d.accounts.limits(ownerId)) ? [TEMPRA] : [];
 }
 
 /** `@handle`, not inside an email address or a path: after a start, space or punctuation. */
@@ -456,6 +468,8 @@ export function resolveMentions(
 export interface NotifyDeps {
   accounts: Accounts;
   notifications?: Notifications | null;
+  /** The managed agent's queue (TEMPRA-222); without it, @tempra is plain text. */
+  managed?: ManagedDeps | null;
 }
 
 /** `s` on one line, cut to `n` characters. */
@@ -479,7 +493,9 @@ export async function postComment(
 ): Promise<CommentResult> {
   const people = await libraryPeople(d.accounts, token.library);
   const body = typeof action.body === "string" ? action.body : "";
-  const mentions = body ? resolveMentions(body, people, managedAgents(token.library)) : [];
+  // The owner comes first in `people` when the library is found.
+  const agents = await managedAgents(d, people[0]?.id).catch(() => []);
+  const mentions = body ? resolveMentions(body, people, agents) : [];
   const res = await lib.comment(ctx, { ...action, mentions });
   try {
     await fanOut(d, token, ctx, action, res, people, mentions);
@@ -490,7 +506,52 @@ export async function postComment(
   } catch (e) {
     console.error(JSON.stringify({ notify_failed: res.request_id, error: String(e) }));
   }
+  try {
+    await askAgent(d, token, ctx, action, res, agents, mentions);
+  } catch (e) {
+    console.error(JSON.stringify({ agent_not_asked: res.request_id, error: String(e) }));
+  }
   return res;
+}
+
+/**
+ * The managed agent's trigger (TEMPRA-222; tempra-dev: agents/managed-agent, How a mention runs):
+ * a comment that mentions @tempra, or a reply in a thread the agent has answered, sends one turn
+ * to its queue, and the thread shows "Tempra is replying…" at once. Never for the agent's own
+ * comments, a resolve or reopen, or a comment no person stands behind; only while the agent is on
+ * for the library's owner (`agents` is empty otherwise).
+ */
+async function askAgent(
+  d: NotifyDeps,
+  token: TokenInfo,
+  ctx: RequestContext,
+  action: CommentAction,
+  res: CommentResult,
+  agents: ManagedAgent[],
+  mentions: Mention[],
+) {
+  if (!d.managed || agents.length === 0) return;
+  if (action.kind !== "open" && action.kind !== "reply") return;
+  if (ctx.actor === AGENT_ACTOR) return;
+  const asker = ctx.by?.person;
+  if (!asker) return;
+  const named = mentions.some((m) => "agent" in m && m.agent === TEMPRA.id);
+  const answered = res.thread.comments.some((c) => c.actor === AGENT_ACTOR);
+  if (!named && !answered) return;
+  const last = res.thread.comments[res.thread.comments.length - 1];
+  await d.managed.enqueue({
+    type: "agent_turn",
+    library: token.library.id,
+    do_id: token.library.do_id,
+    thread: res.thread.id,
+    comment: last?.id ?? null,
+    seq: res.seq,
+    asker,
+  });
+  // The agent's identity for whom it acts is made on its turn; the person is known now.
+  await d.managed
+    .announce?.(token.library.do_id, replying(res.thread.id, res.thread.path, { person: asker }))
+    .catch(() => {});
 }
 
 async function fanOut(

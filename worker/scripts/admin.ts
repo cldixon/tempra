@@ -14,7 +14,7 @@
  *       Refuses the account's sessions and tokens without deleting anything.
  *   bun run admin users [--remote]
  *       Lists accounts with their handles and libraries.
- *   bun run admin limits --email <email> [--set libraries=10,tokens=100] [--reset] [--remote]
+ *   bun run admin limits --email <email> [--set libraries=10,tokens=100,agent_daily_usd=5] [--reset] [--remote]
  *       Shows an account's limits, or overrides them (v2 spec: Limits; defaults in limits.ts).
  *   bun run admin invite --email <email> [--remote]      Lets an email sign up when SIGNUP=invite.
  *   bun run admin uninvite --email <email> [--remote]    Withdraws an invite (accounts stay).

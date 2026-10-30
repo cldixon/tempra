@@ -9,9 +9,15 @@ export interface Limits {
   libraries: number;
   /** Active (unrevoked, unexpired) bearer tokens across the account's libraries. */
   tokens: number;
+  /**
+   * The library's managed agent, @tempra (TEMPRA-222): what it may spend a day, in whole US
+   * dollars at list price, answering in the libraries this account owns. 0, the default, is off;
+   * the operator turns it on with `bun run admin limits --email … --set agent_daily_usd=5`.
+   */
+  agent_daily_usd: number;
 }
 
-export const DEFAULT_LIMITS: Limits = { libraries: 10, tokens: 50 };
+export const DEFAULT_LIMITS: Limits = { libraries: 10, tokens: 50, agent_daily_usd: 0 };
 
 /**
  * Per-minute rate limits are per deployment, in the Rate Limiting bindings (cloudflare.config.ts):

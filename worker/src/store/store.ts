@@ -99,6 +99,7 @@ import {
   type ThreadAction,
   type ThreadStatus,
   type ThreadView,
+  threadKind,
 } from "./comments";
 import { notFound, OkfError } from "./errors";
 import {
@@ -809,6 +810,22 @@ export class LibraryStore {
     this.sql.script(DIAGRAM_RENDERS);
     this.addExternalImageFlags();
     this.addReadHistory();
+    this.addThreadKinds();
+  }
+
+  /**
+   * Threads have a kind (TEMPRA-222): 'comment', or 'request' for a bigger ask left for people's
+   * agents. Libraries from before get the column once, every thread a comment.
+   */
+  private addThreadKinds() {
+    if (this.sql.all("SELECT 1 FROM meta WHERE key = 'thread_kinds'").length > 0) return;
+    this.sql.transaction(() => {
+      const cols = this.sql.all<{ name: string }>("PRAGMA table_info(threads)");
+      if (!cols.some((c) => c.name === "kind")) {
+        this.sql.run("ALTER TABLE threads ADD COLUMN kind TEXT NOT NULL DEFAULT 'comment'");
+      }
+      this.sql.run("INSERT INTO meta (key, value) VALUES ('thread_kinds', '1')");
+    });
   }
 
   /**
@@ -4366,14 +4383,16 @@ export class LibraryStore {
         });
       }
     }
-    if (want("comment")) {
+    if (want("comment") || want("request")) {
       // One concept's page asks for its own threads only (the partial index, by concept).
       const onlyId =
         only === undefined ? null : (snap.lookup(only)?.concept_id ?? "(no such concept)");
-      // Open threads on concepts that exist, from the partial index on open threads.
+      // Open threads on concepts that exist and the library's own (TEMPRA-222), from the
+      // partial index on open threads; a request is its own kind of item.
       const threads = this.sql.all<{
         id: string;
         concept_id: string;
+        kind: string;
         actor: string;
         anchor: string | null;
         replies: number;
@@ -4381,32 +4400,39 @@ export class LibraryStore {
         ts: string;
         body: string;
       }>(
-        `SELECT t.id, t.concept_id, t.actor, t.anchor, t.replies, t.last_actor, e.ts,
+        `SELECT t.id, t.concept_id, t.kind, t.actor, t.anchor, t.replies, t.last_actor, e.ts,
                 (SELECT body FROM comments c WHERE c.thread_id = t.id ORDER BY c.seq LIMIT 1) AS body
-         FROM threads t JOIN paths p ON p.concept_id = t.concept_id
+         FROM threads t LEFT JOIN paths p ON p.concept_id = t.concept_id
          JOIN events e ON e.seq = t.last_seq
-         WHERE t.status = 'open' AND (? IS NULL OR t.concept_id = ?)`,
+         WHERE t.status = 'open' AND (p.concept_id IS NOT NULL OR t.concept_id = '')
+           AND (? IS NULL OR t.concept_id = ?)`,
         onlyId,
         onlyId,
       );
       for (const t of threads) {
-        const e = snap.byId.get(t.concept_id);
-        if (!e || !mine(e.path)) continue;
+        const request = t.kind === "request";
+        if (!want(request ? "request" : "comment")) continue;
+        const onLibrary = t.concept_id === LIBRARY_THREAD;
+        const e = onLibrary ? null : snap.byId.get(t.concept_id);
+        if (!onLibrary && !e) continue;
+        const path = e?.path ?? "";
+        if (!mine(path)) continue;
         const quote = t.anchor ? (JSON.parse(t.anchor) as StoredAnchor).quote : null;
         const said = clip(t.body ?? "", 160);
-        const on = quote ? ` on “${clip(quote, 80)}”` : "";
+        const on = quote ? ` on “${clip(quote, 80)}”` : onLibrary ? " on the library" : "";
         const replies =
           t.replies > 0
             ? ` (${t.replies} ${t.replies === 1 ? "reply" : "replies"}, last by ${t.last_actor})`
             : "";
         items.push({
-          kind: "comment",
-          path: e.path,
+          kind: request ? "request" : "comment",
+          path,
           since: t.ts,
-          detail: `${t.actor} commented${on}: ${said}${replies}`,
-          suggested_action:
-            "Read the thread with `comments`, make the change it asks for, then reply with `comment` and resolve it. If you only have a question, reply without resolving; if the last reply is yours, wait for an answer.",
-          inbound_links: this.inboundCount(e.concept_id),
+          detail: `${t.actor} ${request ? "asked" : "commented"}${on}: ${said}${replies}`,
+          suggested_action: request
+            ? "A request: someone asked for more than a quick answer or a small edit. Read the thread with `comments`, do the work it asks for with the write tools, then reply with `comment` saying what you did, and resolve it. Ask with a reply if it is unclear."
+            : "Read the thread with `comments`, make the change it asks for, then reply with `comment` and resolve it. If you only have a question, reply without resolving; if the last reply is yours, wait for an answer.",
+          inbound_links: e ? this.inboundCount(e.concept_id) : 0,
           thread: t.id,
         });
       }
@@ -4478,13 +4504,13 @@ export class LibraryStore {
          WHERE f.kind = 'structure' AND (f.concept_id LIKE 'dir:%' OR p.kind = 'concept')`,
       )[0]?.n ?? 0,
     );
-    add(
-      "comment",
-      this.sql.all<{ n: number }>(
-        `SELECT COUNT(*) AS n FROM threads t JOIN paths p ON p.concept_id = t.concept_id
-         JOIN events e ON e.seq = t.last_seq WHERE t.status = 'open'`,
-      )[0]?.n ?? 0,
-    );
+    for (const r of this.sql.all<{ kind: string; n: number }>(
+      `SELECT t.kind, COUNT(*) AS n FROM threads t LEFT JOIN paths p ON p.concept_id = t.concept_id
+       JOIN events e ON e.seq = t.last_seq
+       WHERE t.status = 'open' AND (p.concept_id IS NOT NULL OR t.concept_id = '') GROUP BY t.kind`,
+    )) {
+      add(r.kind === "request" ? "request" : "comment", r.n);
+    }
     const total = Object.values(counts).reduce((a, b) => a + b, 0);
     return { counts, total, stale_soon: stale?.soon ?? 0 };
   }
@@ -4548,12 +4574,17 @@ export class LibraryStore {
   }
 
   private openThread(w: WriteState, a: Extract<CommentAction, { kind: "open" }>): string {
-    const p = normalizePath(a.path);
+    const kind = threadKind(a.thread_kind) ?? "comment";
+    const onLibrary = (a.path ?? "").trim() === "" || a.path?.trim() === "/";
+    const p = onLibrary ? null : normalizePath(a.path ?? "");
     const row = p ? this.lookupRow(p) : undefined;
-    if (row?.kind !== "concept") throw notFound(a.path);
+    if (!onLibrary && row?.kind !== "concept") throw notFound(a.path ?? "");
     const body = commentBody(a.body, true) as string;
     let anchor: StoredAnchor | null = null;
-    if (a.anchor) {
+    if (a.anchor && onLibrary) {
+      throw new OkfError(400, "bad_anchor", "A thread on the library quotes nothing.");
+    }
+    if (a.anchor && row) {
       const raw = a.anchor.from;
       // The app sends the document's text and where it saw it; an agent, markdown as read.
       const quote = checkQuote(
@@ -4590,12 +4621,13 @@ export class LibraryStore {
     }
     const id = crypto.randomUUID();
     const commentId = crypto.randomUUID();
+    // A library thread's events are on no file: path and concept_id '' (TEMPRA-222).
     const seq = this.appendEvent(w.ctx, w.now, {
       op: "comment",
-      path: row.path,
-      prev_hash: row.hash,
-      hash: row.hash,
-      concept_id: row.concept_id,
+      path: row?.path ?? "",
+      prev_hash: row?.hash ?? null,
+      hash: row?.hash ?? null,
+      concept_id: row?.concept_id ?? LIBRARY_THREAD,
       meta: {
         comment: {
           kind: "open",
@@ -4603,15 +4635,17 @@ export class LibraryStore {
           id: commentId,
           body,
           anchor: anchor as unknown as JsonObject | null,
+          ...(kind !== "comment" ? { thread_kind: kind } : {}),
           ...mentionsMeta(a.mentions),
         },
       },
     });
     this.sql.run(
-      `INSERT INTO threads (id, concept_id, actor, anchor, status, created_seq, last_seq, last_actor)
-       VALUES (?, ?, ?, ?, 'open', ?, ?, ?)`,
+      `INSERT INTO threads (id, concept_id, kind, actor, anchor, status, created_seq, last_seq, last_actor)
+       VALUES (?, ?, ?, ?, ?, 'open', ?, ?, ?)`,
       id,
-      row.concept_id,
+      row?.concept_id ?? LIBRARY_THREAD,
+      kind,
       w.ctx.actor,
       anchor ? JSON.stringify(anchor) : null,
       seq,
@@ -4627,15 +4661,19 @@ export class LibraryStore {
       "SELECT id, concept_id, status FROM threads WHERE id = ?",
       a.thread,
     )[0];
-    const row = t
-      ? this.sql.all<PathRow>(
-          "SELECT path, concept_id, hash, kind, last_seq AS seq, created_seq FROM paths WHERE concept_id = ?",
-          t.concept_id,
-        )[0]
-      : undefined;
+    // A library thread is on no file (TEMPRA-222).
+    const row: { path: string; hash: string | null; concept_id: string } | undefined = !t
+      ? undefined
+      : t.concept_id === LIBRARY_THREAD
+        ? { path: "", hash: null, concept_id: LIBRARY_THREAD }
+        : this.sql.all<PathRow>(
+            "SELECT path, concept_id, hash, kind, last_seq AS seq, created_seq FROM paths WHERE concept_id = ?",
+            t.concept_id,
+          )[0];
     // A thread on a deleted concept is kept (a revert brings both back) but takes no actions.
     if (!t || !row) throw new OkfError(404, "not_found", `No comment thread ${a.thread}.`);
     const body = commentBody(a.body, a.kind === "reply");
+    const kind = a.kind === "reply" ? threadKind(a.thread_kind) : undefined;
     if (a.kind === "resolve" && t.status === "resolved") {
       throw new OkfError(409, "already_resolved", "The thread is already resolved.");
     }
@@ -4654,10 +4692,12 @@ export class LibraryStore {
           kind: a.kind,
           thread: t.id,
           ...(commentId ? { id: commentId, body, ...mentionsMeta(a.mentions) } : {}),
+          ...(kind ? { thread_kind: kind } : {}),
         },
       },
     });
     if (commentId && body) this.addComment(commentId, t.id, w, body, seq);
+    if (kind) this.sql.run("UPDATE threads SET kind = ? WHERE id = ?", kind, t.id);
     if (a.kind === "resolve") {
       this.sql.run(
         "UPDATE threads SET status = 'resolved', resolved_by = ?, resolved_seq = ? WHERE id = ?",
@@ -4715,20 +4755,24 @@ export class LibraryStore {
         "op = 'comment' AND json_extract(meta, '$.comment.thread') = ? AND json_extract(meta, '$.comment.body') IS NOT NULL",
         thread,
       ),
-      writers: t ? persons("op NOT IN ('comment', 'move') AND concept_id = ?", t.concept_id) : [],
+      writers:
+        t && t.concept_id !== LIBRARY_THREAD
+          ? persons("op NOT IN ('comment', 'move') AND concept_id = ?", t.concept_id)
+          : [],
     };
   }
 
   /** A concept's text at head, which anchors quote. */
-  private textOf(e: Entry) {
+  private textOf(e: { hash: string }) {
     return docText(this.record(e.hash).doc);
   }
 
+  /** Threads on concepts that exist, and the library's own (TEMPRA-222), with their paths. */
   private threadRows(where: string, params: SqlValue[], tail = "") {
     return this.sql.all<ThreadRow>(
-      `SELECT t.*, p.path, p.hash, p.kind, p.last_seq AS seq FROM threads t
-       JOIN paths p ON p.concept_id = t.concept_id
-       WHERE ${where} ${tail}`,
+      `SELECT t.*, COALESCE(p.path, '') AS path, p.hash FROM threads t
+       LEFT JOIN paths p ON p.concept_id = t.concept_id
+       WHERE (p.concept_id IS NOT NULL OR t.concept_id = '') AND ${where} ${tail}`,
       ...params,
     );
   }
@@ -4805,10 +4849,10 @@ export class LibraryStore {
     return rows.map((r) => {
       const anchor = r.anchor ? (JSON.parse(r.anchor) as StoredAnchor) : null;
       let located: { from: number; to: number } | null = null;
-      if (anchor) {
+      if (anchor && r.hash) {
         let text = texts.get(r.concept_id);
         if (text === undefined) {
-          text = this.textOf(r);
+          text = this.textOf({ hash: r.hash });
           texts.set(r.concept_id, text);
         }
         located = locate(text, anchor);
@@ -4816,6 +4860,7 @@ export class LibraryStore {
       return {
         id: r.id,
         path: r.path,
+        kind: r.kind === "request" ? "request" : "comment",
         status: r.status,
         actor: r.actor,
         created_seq: r.created_seq,
@@ -4847,7 +4892,11 @@ export class LibraryStore {
     const where: string[] = ["t.last_seq < ?"];
     const params: SqlValue[] = [opts.before ?? Number.MAX_SAFE_INTEGER];
     let path: string | null = null;
-    if (opts.path !== undefined) {
+    if (opts.path === "" || opts.path === "/") {
+      // The library's own threads, on no page (TEMPRA-222).
+      path = "";
+      where.push("t.concept_id = ''");
+    } else if (opts.path !== undefined) {
       const p = normalizePath(opts.path);
       const row = p ? this.lookupRow(p) : undefined;
       if (!row) throw notFound(opts.path);
@@ -5064,6 +5113,8 @@ export class LibraryStore {
         lint: n("lint"),
         structure: n("structure"),
         comment: n("comment"),
+        // Only once there are requests (TEMPRA-222), as summaries kept before them had none.
+        ...(n("request") > 0 ? { request: n("request") } : {}),
         external_image: n("external_image"),
       },
       unverified: {
@@ -5310,8 +5361,8 @@ export class LibraryStore {
       health: this.health(),
       open_comments:
         this.sql.all<{ n: number }>(
-          `SELECT COUNT(*) AS n FROM threads t JOIN paths p ON p.concept_id = t.concept_id
-           WHERE t.status = 'open'`,
+          `SELECT COUNT(*) AS n FROM threads t LEFT JOIN paths p ON p.concept_id = t.concept_id
+           WHERE t.status = 'open' AND (p.concept_id IS NOT NULL OR t.concept_id = '')`,
         )[0]?.n ?? 0,
     };
   }
@@ -5618,6 +5669,8 @@ export interface LibraryHealth {
     lint: number;
     structure: number;
     comment: number;
+    /** Open requests (TEMPRA-222); absent from summaries kept before them. */
+    request?: number;
     /** Pages with hotlinked images (TEMPRA-163); absent from summaries kept before it. */
     external_image?: number;
   };
@@ -5731,8 +5784,15 @@ function equalBytes(a: string, b: string): boolean {
 
 type WriteMode = "write" | "import";
 
-/** A threads row joined with its concept's current path. */
-interface ThreadRow extends Entry {
+/** A thread's concept_id on the library itself (TEMPRA-222): no page, its events on no file. */
+const LIBRARY_THREAD = "";
+
+/** A threads row joined with its concept's current path ("" and no hash for a library thread). */
+interface ThreadRow {
+  path: string;
+  concept_id: string;
+  hash: string | null;
+  kind: string;
   id: string;
   actor: string;
   anchor: string | null;

@@ -12,6 +12,7 @@ import {
   feedEvent,
   feedPrefix,
   Presence,
+  type PresenceMessage,
   readingOf,
   WRITE_METHODS,
 } from "./feed";
@@ -270,6 +271,17 @@ export class Library extends DurableObject<Env> {
   async blobRefs(): Promise<string[]> {
     if (this.restarting) throw new Error("The library is restarting.");
     return this.store.blobHashes();
+  }
+
+  /**
+   * The managed agent is working on a reply (TEMPRA-222): a `replying` presence message to every
+   * open feed socket, by its prefix; nothing is stored.
+   */
+  async announce(message: PresenceMessage): Promise<number> {
+    if (message.type !== "presence" || message.kind !== "replying") return 0;
+    const sockets = this.ctx.getWebSockets();
+    if (sockets.length === 0) return 0;
+    return broadcastPresence(this.feedSockets(sockets), message);
   }
 
   /** For /healthz: proves the namespace answers without touching any library's state. */

@@ -182,14 +182,26 @@ export interface Caller {
 /**
  * A presence message: one agent, what it is doing, the files it read in one call. Nothing of it
  * is stored, and a socket that misses one misses nothing it needs: the mark fades in seconds.
+ * `replying` (TEMPRA-222) is the library's managed agent working on a reply in `thread`, whose
+ * page is `paths[0]` ("" for a library thread); sent again while the turn runs, it fades unless
+ * renewed, and the reply landing on the feed clears it.
  */
-export interface PresenceMessage {
-  type: "presence";
-  kind: "reading";
-  actor: string;
-  by: ActedBy | null;
-  paths: string[];
-}
+export type PresenceMessage =
+  | {
+      type: "presence";
+      kind: "reading";
+      actor: string;
+      by: ActedBy | null;
+      paths: string[];
+    }
+  | {
+      type: "presence";
+      kind: "replying";
+      actor: string;
+      by: ActedBy | null;
+      paths: string[];
+      thread: string;
+    };
 
 /** Whether an actor is a person (`human:<handle>`): people's reads are never presence. */
 export const isPersonActor = (actor: string) => actor.startsWith("human:");

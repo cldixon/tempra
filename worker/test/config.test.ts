@@ -80,6 +80,39 @@ describe("each deployment has its own sweep queue", () => {
   });
 });
 
+// TEMPRA-222: the managed agent's queue, beside the sweep's, one per deployment.
+describe("each deployment has its own agent queue", () => {
+  async function agentQueue(mode: string) {
+    const worker = (await (
+      await config({ isPreview: false, mode } as never)
+    ).worker) as {
+      env: Record<string, { name?: string }>;
+      triggers: { type: string; name?: string; maxBatchSize?: number; maxRetries?: number }[];
+    };
+    const consumer = worker.triggers.find(
+      (t) => t.type === "queue" && t.name === worker.env.AGENT_QUEUE?.name,
+    );
+    return {
+      producer: worker.env.AGENT_QUEUE?.name,
+      consumer: consumer?.name,
+      batch: consumer?.maxBatchSize,
+      retries: consumer?.maxRetries,
+    };
+  }
+
+  test("production, staging and previews", async () => {
+    expect(await agentQueue("production")).toEqual({
+      producer: "tempra-agent",
+      consumer: "tempra-agent",
+      batch: 1,
+      retries: 1,
+    });
+    expect((await agentQueue("staging")).producer).toBe("tempra-agent-staging");
+    expect((await agentQueue("staging")).consumer).toBe("tempra-agent-staging");
+    expect(previewDeployment("7").agentQueue).toBe("tempra-agent-pr-7");
+  });
+});
+
 // TEMPRA-125: the landing page asks people to Request access while production is invite-only.
 describe("the landing page's calls to action match production's SIGNUP", () => {
   test("invite in production: Request access and Sign in, never Sign up", async () => {

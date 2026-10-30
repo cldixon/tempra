@@ -1031,6 +1031,7 @@ export function d1Accounts(db: D1Database): Accounts {
         db.prepare("DELETE FROM library_invitations WHERE user = ?").bind(user.id),
         db.prepare("DELETE FROM agents WHERE user = ?").bind(user.id),
         db.prepare("DELETE FROM notifications WHERE user = ?").bind(user.id),
+        db.prepare("DELETE FROM agent_usage WHERE user = ?").bind(user.id),
         db.prepare("DELETE FROM library_seen WHERE user = ?").bind(user.id),
         db.prepare("DELETE FROM notification_prefs WHERE user = ?").bind(user.id),
         db.prepare("DELETE FROM grant_libraries WHERE user = ?").bind(user.id),
