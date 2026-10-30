@@ -2943,10 +2943,15 @@ async function browserRenders(
         if ((await page.getByText("A sentence written under a draft.").count()) > 0) {
           throw new Error("the new version swapped in under the draft");
         }
-        await comments
-          .locator("form.comment-form")
-          .getByRole("button", { name: "Comment", exact: true })
-          .click();
+        // Enter sends (TEMPRA-223): Shift+Enter first adds a line and sends nothing.
+        await box.press("End");
+        await box.press("Shift+Enter");
+        await page.waitForTimeout(300);
+        if ((await box.inputValue()) !== "Gate: please check this sentence.\n") {
+          throw new Error(`Shift+Enter in the box: ${JSON.stringify(await box.inputValue())}`);
+        }
+        await box.press("Backspace");
+        await box.press("Enter");
         await highlight("tempra-comment-draft", true);
         // Posted: the new version comes in when asked, the comment staying on its quote.
         await showNewVersion();
@@ -2987,6 +2992,22 @@ async function browserRenders(
           timeout: 5000,
         });
         await highlight("tempra-comment-active", true, 5000);
+        // An open thread's quote, and its block's mark beside the text (TEMPRA-223), as they
+        // look in light and dark.
+        const blockMark = main.locator(".body > .comment-marks").getByRole("button", {
+          name: "1 comment",
+          exact: true,
+        });
+        await blockMark.waitFor({ timeout: 5000 });
+        if (shots) {
+          const quoteAt = await pointOn("tempra-comment");
+          if (quoteAt) await page.mouse.move(quoteAt.x, quoteAt.y + 200);
+          await page.screenshot({ path: `${shots}/comment-open.png` });
+          await page.emulateMedia({ colorScheme: "dark" });
+          await page.waitForTimeout(200);
+          await page.screenshot({ path: `${shots}/comment-open-dark.png` });
+          await page.emulateMedia({ colorScheme: "light" });
+        }
         const at = await pointOn("tempra-comment");
         if (!at) throw new Error("the thread's quote is not drawn");
         await page.mouse.click(at.x, at.y);
@@ -2994,6 +3015,32 @@ async function browserRenders(
           timeout: 5000,
         });
         await highlight("tempra-comment-active", false, 5000);
+        if (shots) {
+          await page.screenshot({ path: `${shots}/comment-active.png` });
+          await page.emulateMedia({ colorScheme: "dark" });
+          await page.waitForTimeout(200);
+          await page.screenshot({ path: `${shots}/comment-active-dark.png` });
+          await page.emulateMedia({ colorScheme: "light" });
+        }
+        // The mark opens the panel on its block's first thread, from the keyboard too; Comments
+        // in ⋯ opens it as well (TEMPRA-223).
+        await page.getByRole("button", { name: "Close comments" }).click();
+        await comments.waitFor({ state: "detached", timeout: 5000 });
+        await blockMark.focus();
+        await page.keyboard.press("Enter");
+        await comments.locator(`section.thread.open[id="panel-thread-${thread}"]`).waitFor({
+          timeout: 5000,
+        });
+        await page.getByRole("button", { name: "Close comments" }).click();
+        await comments.waitFor({ state: "detached", timeout: 5000 });
+        await sheetBar.getByRole("button", { name: "More", exact: true }).click();
+        const moreComments = page.locator(".menu-list").getByRole("button", { name: /^Comments/ });
+        if (!/1 open/.test(await moreComments.innerText())) {
+          throw new Error(`⋯'s Comments reads ${JSON.stringify(await moreComments.innerText())}`);
+        }
+        await moreComments.click();
+        await comments.waitFor({ timeout: 5000 });
+        await comments.locator(`[id="panel-thread-${thread}"]`).waitFor({ timeout: 5000 });
         await markStay();
         await page.waitForTimeout(300);
         // An agent writes a new paragraph above it (TEMPRA-22): the commented block keeps its
@@ -3344,6 +3391,8 @@ async function browserRenders(
       await expectFocus(".menu-list button.menu-item:first-of-type", "Down on ⋯");
       if (!(await focused()).includes("Copy page")) throw new Error(`Down: ${await focused()}`);
       await page.keyboard.press("ArrowDown");
+      if (!(await focused()).includes("Comments")) throw new Error(`Down: ${await focused()}`);
+      await page.keyboard.press("ArrowDown");
       if (!(await focused()).includes("History")) throw new Error(`Down: ${await focused()}`);
       await page.keyboard.press("ArrowDown");
       if (!(await focused()).includes("Properties")) throw new Error(`Down: ${await focused()}`);
@@ -3351,6 +3400,7 @@ async function browserRenders(
       if (!(await focused()).includes("Download")) throw new Error(`End: ${await focused()}`);
       await page.keyboard.press("Home");
       if (!(await focused()).includes("Copy page")) throw new Error(`Home: ${await focused()}`);
+      await page.keyboard.press("ArrowDown");
       await page.keyboard.press("ArrowDown");
       if (!(await focused()).includes("History")) throw new Error(`Down: ${await focused()}`);
       await page.keyboard.press("Enter");
@@ -4507,10 +4557,13 @@ async function uploadLink(owner: string, slug: string, token: string): Promise<s
  * The library's managed agent, @tempra (TEMPRA-222), end to end on the scripted stand-in model
  * (AGENT_MODEL=fake in the gate's .dev.vars; no network): the seeded account has it on. A mention
  * on a page goes through the agent's queue: the Comments panel says "Tempra is replying…", then
- * shows its reply; a library thread from the home's "+" asking for a new page is answered and
- * marked a request, which MCP `work` lists. The home's Comments panel passes axe.
+ * shows its reply, by Tempra's own round mark on the agent colour, and the thread stays open
+ * (TEMPRA-223: people resolve threads); a library thread from the home's "+" asking for a new
+ * page, sent with Enter, is answered and marked a request, which MCP `work` lists. The home's
+ * Comments panel passes axe.
  */
 async function managedAgent(owner: string, slug: string, token: string): Promise<string[]> {
+  const shots = process.env.GATE_SCREENSHOTS;
   const lib = `${base}/api/v1/libraries/${owner}/${slug}`;
   const headers = { Authorization: `Bearer ${token}` };
   const members = (await (await fetch(`${lib}/members`, { headers })).json()) as {
@@ -4528,28 +4581,94 @@ async function managedAgent(owner: string, slug: string, token: string): Promise
   if (typeof b === "string") return [b];
   const { page, step, problems } = b;
   const comments = page.locator("#panel-comments");
-  /** Comment from the page's actions: the +, Comment, the box at the panel's top, the text. */
-  const comment = async (box: string, text: string) => {
+  /**
+   * Comment from the page's actions: the +, Comment, the box at the panel's top, the text, sent
+   * by the Comment button or by Enter (TEMPRA-223).
+   */
+  const comment = async (box: string, text: string, send: "click" | "enter") => {
     await page.locator(".page-actions .page-fab").click();
     await page
       .locator(".page-actions-list")
       .getByRole("button", { name: /^Comment/ })
       .click();
     await comments.getByRole("button", { name: box }).click();
-    await comments.locator(".comment-form textarea").fill(text);
-    await comments.locator(".comment-form").getByRole("button", { name: "Comment" }).click();
+    const field = comments.locator(".comment-form textarea");
+    await field.fill(text);
+    if (send === "enter") await field.press("Enter");
+    else await comments.locator(".comment-form").getByRole("button", { name: "Comment" }).click();
   };
   try {
     await step("a mention on a page: Tempra is replying…, then its reply", async () => {
       await b.signInAs("dev@localhost", `/${owner}/${slug}/${concept}`);
       await page.locator(".doc-title").waitFor({ timeout: 15_000 });
-      await comment("Comment on the page…", "@tempra what does this page say?");
+      await comment("Comment on the page…", "@tempra what does this page say?", "click");
       await comments
         .locator(".thread-replying", { hasText: "Tempra is replying…" })
         .first()
         .waitFor({ timeout: 15_000 });
       await comments.getByText("A stand-in answer").waitFor({ timeout: 30_000 });
       await comments.locator(".thread-replying").waitFor({ state: "detached", timeout: 10_000 });
+    });
+    await step("its reply is by Tempra's own mark, and the thread stays open", async () => {
+      // Its comment carries Tempra's round mark: a T on the agent colour (TEMPRA-223).
+      const said = comments.locator(".said", { hasText: "A stand-in answer" });
+      const mark = said.locator(".said-by .avatar-mark.agent.tempra");
+      await mark.waitFor({ timeout: 5000 });
+      if (
+        (await mark.innerText()).trim() !== "T" ||
+        (await mark.getAttribute("aria-hidden")) !== "true"
+      ) {
+        throw new Error(`Tempra's mark reads ${JSON.stringify(await mark.innerText())}`);
+      }
+      // Its fill is the agent colour, read against the token itself (a script string: this file
+      // has no DOM types).
+      const [fill, agentColour] = await page.evaluate<string[]>(`(() => {
+        const el = document.querySelector("#panel-comments .avatar-mark.agent.tempra");
+        const probe = document.createElement("span");
+        el.after(probe);
+        probe.style.backgroundColor = "var(--tempra-color-agent)";
+        const fill = getComputedStyle(el).backgroundColor;
+        const want = getComputedStyle(probe).backgroundColor;
+        probe.remove();
+        return [fill, want];
+      })()`);
+      const plain = await page.evaluate<string>(`(() => {
+        const el = document.querySelector("#panel-comments .avatar-mark");
+        const probe = document.createElement("span");
+        probe.className = "avatar-mark agent";
+        el.after(probe);
+        const c = getComputedStyle(probe).backgroundColor;
+        probe.remove();
+        return c;
+      })()`);
+      if (!fill || fill !== agentColour || fill === plain) {
+        throw new Error(`Tempra's mark is filled ${fill}, not the agent colour (${agentColour})`);
+      }
+      // The person's own comment has their mark beside it too.
+      await comments.locator(".said .avatar-mark:not(.agent)").first().waitFor({ timeout: 5000 });
+      if (shots) {
+        await page.screenshot({ path: `${shots}/tempra-reply.png` });
+        await page.emulateMedia({ colorScheme: "dark" });
+        await page.waitForTimeout(200);
+        await page.screenshot({ path: `${shots}/tempra-reply-dark.png` });
+        await page.emulateMedia({ colorScheme: "light" });
+      }
+      // It replied and did not resolve: the thread is still under Open, and open in the API.
+      await page.waitForTimeout(1500);
+      const card = comments.locator("section.thread.open", { hasText: "A stand-in answer" });
+      await card.waitFor({ timeout: 5000 });
+      if (await card.evaluate((el) => el.classList.contains("resolved"))) {
+        throw new Error("the agent's thread was resolved");
+      }
+      await card.getByRole("button", { name: "Resolve" }).waitFor({ timeout: 5000 });
+      const open = (await (
+        await fetch(`${lib}/comments?path=${encodeURIComponent(concept)}&status=open`, { headers })
+      ).json()) as { threads: { comments: { body: string }[] }[] };
+      if (
+        !open.threads.some((t) => t.comments.some((c) => c.body.startsWith("A stand-in answer")))
+      ) {
+        throw new Error("the agent's thread is not open");
+      }
     });
     await step("a library thread from the home's +: answered and marked a request", async () => {
       await page.goto(`${base}/${owner}/${slug}/`);
@@ -4561,7 +4680,11 @@ async function managedAgent(owner: string, slug: string, token: string): Promise
         throw new Error(`the home's actions read ${JSON.stringify(items)}`);
       }
       await page.keyboard.press("Escape");
-      await comment("Comment on the library…", "@tempra request: a new page on onboarding");
+      await comment(
+        "Comment on the library…",
+        "@tempra request: a new page on onboarding",
+        "enter",
+      );
       await comments
         .locator(".thread-replying", { hasText: "Tempra is replying…" })
         .first()
