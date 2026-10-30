@@ -59,6 +59,35 @@ describe("text contrast (WCAG AA)", () => {
     }
   }
 
+  // Tempra's own agent's round mark (TEMPRA-223): its letter on the agent colour.
+  for (const [mode, i] of Object.entries(scheme)) {
+    test(`color-on-agent on color-agent, ${mode}: at least 4.5:1`, () => {
+      expect(contrast(pair("color-on-agent")[i], pair("color-agent")[i])).toBeGreaterThanOrEqual(
+        4.5,
+      );
+    });
+  }
+
+  // Commented text (TEMPRA-223): the body's text on an open quote's fill and on the active one's,
+  // and the open quote's underline seen at 3:1 (non-text contrast) on its fill and on the page.
+  for (const [mode, i] of Object.entries(scheme)) {
+    for (const fill of ["color-comment", "color-comment-active"]) {
+      test(`color-text on ${fill}, ${mode}: at least 4.5:1`, () => {
+        expect(contrast(pair("color-text")[i], pair(fill)[i])).toBeGreaterThanOrEqual(4.5);
+      });
+    }
+    for (const under of ["color-comment", "color-bg"]) {
+      test(`color-comment-line on ${under}, ${mode}: at least 3:1`, () => {
+        expect(contrast(pair("color-comment-line")[i], pair(under)[i])).toBeGreaterThanOrEqual(3);
+      });
+    }
+    test(`color-text on color-comment-active as an underline, ${mode}: at least 3:1`, () => {
+      expect(
+        contrast(pair("color-text")[i], pair("color-comment-active")[i]),
+      ).toBeGreaterThanOrEqual(3);
+    });
+  }
+
   test("the focus ring is the text colour", () => {
     expect(tokens).toMatch(/--tempra-focus-ring:[^;]*var\(--tempra-color-text\)/);
   });

@@ -43,28 +43,33 @@
 }
 
 /*
- * Comments (TEMPRA-13). A thread's quote is underlined in the body (dotted); the one whose thread
- * is open in the Comments panel is filled grey and underlined solid; a comment being written
- * fills its text with the selection grey. Drawn as
- * highlights, so the body's DOM never changes for them.
+ * Comments (TEMPRA-13, TEMPRA-223). An open thread's quote sits on a soft grey fill over a solid
+ * mid-grey underline, so it reads as marked at a glance in light and dark (a 1px dotted underline
+ * in the text colour read as nothing, and the hover grey as the page); the one whose thread is
+ * active in the Comments panel takes a deeper fill and a 2px underline in ink; a comment being
+ * written fills its text with the selection grey. Drawn as highlights, so the body's DOM never
+ * changes for them.
  */
 ::highlight(tempra-comment) {
+  background-color: var(--tempra-color-comment);
   text-decoration-line: underline;
-  text-decoration-style: dotted;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 0.22em;
+  text-decoration-style: solid;
+  text-decoration-color: var(--tempra-color-comment-line);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 0.2em;
 }
 
 ::highlight(tempra-comment-active) {
-  background-color: var(--tempra-color-hover);
+  background-color: var(--tempra-color-comment-active);
   text-decoration-line: underline;
   text-decoration-style: solid;
-  text-decoration-thickness: 1px;
-  text-underline-offset: 0.22em;
+  text-decoration-color: var(--tempra-color-text);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 0.2em;
 }
 
 ::highlight(tempra-comment-draft) {
-  background-color: var(--tempra-color-selected);
+  background-color: var(--tempra-color-selection);
 }
 
 /* The selection toolbar: a pill above the selected text. */

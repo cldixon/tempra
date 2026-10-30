@@ -95,7 +95,16 @@ export interface ActorView {
   /** What their round mark's initials come from: the agent's name, or the person's handle
    * (never "You"). */
   mark: string;
+  /** Tempra's own agent, @tempra (TEMPRA-222): its mark is filled with the agent colour. */
+  tempra: boolean;
 }
+
+/** The managed agent's actor, as the Worker's `AGENT_ACTOR` (TEMPRA-222). */
+export const TEMPRA_ACTOR = "tempra/agent";
+
+/** An agent's one letter in its round mark (TEMPRA-223): the first of its name ("Claude" is C). */
+export const agentInitial = (name: string) =>
+  (Array.from(name.trim().replace(/^[^\p{L}\p{N}]+/u, ""))[0] ?? "?").toUpperCase();
 
 /** Each agent's contributor entry by its id. */
 export function agentsById(contributors: Contributor[]): Record<string, Contributor> {
@@ -115,11 +124,25 @@ export function actorView(
   const human = actor.startsWith("human:") && !by?.agent;
   if (human) {
     const you = me !== null && actor === me;
-    return { name: you ? "You" : who(actor), for: null, agent: false, you, mark: who(actor) };
+    return {
+      name: you ? "You" : who(actor),
+      for: null,
+      agent: false,
+      you,
+      mark: who(actor),
+      tempra: false,
+    };
   }
   // An agent the list does not know yet is named from its actor ("claude-code/local" is Claude
   // Code); `by.person` is an id, never shown as a handle.
   const person = c?.person ?? null;
   const name = c?.agent?.name ? readableName(c.agent.name) : actorAgentName(actor);
-  return { name, for: person ? `@${person}` : null, agent: true, you: false, mark: name };
+  return {
+    name,
+    for: person ? `@${person}` : null,
+    agent: true,
+    you: false,
+    mark: name,
+    tempra: actor === TEMPRA_ACTOR,
+  };
 }

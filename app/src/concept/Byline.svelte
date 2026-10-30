@@ -77,7 +77,7 @@
   <div class="byline"><StatusPills status={props.status ?? null} stale={props.concept.stale} /></div>
 {:else}
   <div class="byline"
-    ><Avatar name={who.mark} agent={who.agent} /><span class="byline-name"><AgentName {who} /></span
+    ><Avatar name={who.mark} agent={who.agent} tempra={who.tempra} /><span class="byline-name"><AgentName {who} /></span
     >{#if editing && writer}{@render sep()}<span class="byline-live" role="status"
         ><span class="change-dot live" aria-hidden="true"></span>{same ? "editing now" : `${actorText(writer)} is editing now`}</span
       >{/if}{@render sep()}<span class="muted">edited <Moment ts={author.ts} /></span
