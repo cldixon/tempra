@@ -319,7 +319,8 @@ describe("a turn", () => {
         (p) => p.message.actor === AGENT_ACTOR && p.message.paths.includes("metrics/churn.md"),
       ),
     ).toBe(true);
-    expect(announced.filter((a) => a.message.thread === id).length).toBeGreaterThanOrEqual(2);
+    // At the comment, at the turn's start, before its second call; not after its reply landed.
+    expect(announced.filter((a) => a.message.thread === id)).toHaveLength(3);
     // It is the asker's agent on its own platform.
     const agents = (await (await s.app.request(`${API}/agents`)).json()) as {
       agents: { name: string }[];

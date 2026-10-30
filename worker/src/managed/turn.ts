@@ -456,7 +456,8 @@ export async function runTurn(
         if (!replied) await say(SAY.outOfBudget);
         return { status: "out_of_budget" };
       }
-      if (calls > 0) await announce();
+      // Said again while it works, never once its reply has landed (that clears it).
+      if (calls > 0 && !replied) await announce();
       calls++;
       const res = await d.model.create({
         model: MODEL,
