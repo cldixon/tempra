@@ -155,6 +155,8 @@ Comments are how people ask you for changes. A thread sits on a concept, often o
 
 `show` draws one concept for the person, as the Tempra app draws it, in a panel in the chat (in a chat that shows apps; elsewhere give them the link it returns). Use it when they ask to see a page, or when you want them to read one, such as one you just wrote. It is for reading only. Do not `show` pages you only read for yourself.
 
+When you tell the person about a page, link it by its URL in the app, never its bare path: `read` gives a page's `url`, a write's result names each written page's (and the library's Activity), `search` gives one per result, and `start` gives the library's URL (a page opens at its path after it).
+
 ## When to split a concept
 
 Split when a concept covers more than one idea, mixes definitions with procedures, or approaches the 100 KB cap (the server refuses larger ones). Write each part as its own concept and link them from a short overview. Prefer several focused concepts that link to each other over one long page.

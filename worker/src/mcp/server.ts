@@ -53,6 +53,7 @@ import {
   type WriteResult,
 } from "../store/store";
 import { requireOwner } from "../tenancy";
+import { Urls } from "../ui/urls";
 import { kindOf, prepareUpload } from "../uploads";
 import { pagePayload, pageUrl } from "./page";
 
@@ -130,7 +131,8 @@ How to work:
 6. Never write index.md or log.md (the server synthesizes them). Never set \`generated\` (the server stamps it) or \`verified\` (not yours to claim). Set \`status\` and \`stale_after\` honestly. Timestamps are full ISO 8601 datetimes with an offset (\`stale_after: 2026-12-31T00:00:00Z\`); a plain date is flagged.
 7. Use \`work\` to find what needs doing: open comments, stale concepts, broken links, lint, hotlinked images (\`external_image\`), and structure (a directory's index.md made poor by its concepts: missing, long or title-repeating descriptions, duplicate titles, concepts nothing links to, a directory with one concept, none, or too many); \`work\` with kind stale_soon lists what goes stale within 14 days. Only a new \`stale_after\` resets a concept's clock; other edits leave it stale.
 8. Comments are how people ask you for changes. Before editing a concept, read its open threads with \`comments\`; make the change a comment asks for, then answer it with \`comment\` (reply, and resolve what you fixed). Ask with a reply when unsure; never resolve a thread you did not address. A concept with open threads cannot be deleted until they are resolved.
-9. When the person asks to see a page, or you want them to read one (e.g. one you just wrote), \`show\` it: a chat that shows apps draws it in a panel as the Tempra app does. Do not \`show\` what you only read for yourself.`;
+9. When the person asks to see a page, or you want them to read one (e.g. one you just wrote), \`show\` it: a chat that shows apps draws it in a panel as the Tempra app does. Do not \`show\` what you only read for yourself.
+10. When you tell the person about a page, link it by its URL, never its bare path: \`read\` gives a page's \`url\`, a write's result names each written page's, \`search\` gives one per result, and \`start\` gives the library's (a page opens at its path after it).`;
 
 const text = (t: string): CallToolResult => ({ content: [{ type: "text", text: t }] });
 
@@ -271,11 +273,36 @@ function lintText(lint: LintWarning[]): string {
   return ["Lint (fix these):", ...lint.map((l) => `- ${l.code}: ${l.message}`)].join("\n");
 }
 
-function writeText(verb: string, res: WriteResult): string {
+/** Where a library's pages open in the app, from this deployment's origin (TEMPRA-5). */
+interface AppLinks {
+  library: string;
+  activity: string;
+  page: (path: string, at?: number) => string;
+  folder: (dir: string) => string;
+}
+
+/** The app's URLs for one library, on this origin, so previews and staging link to themselves. */
+export function appLinks(origin: string, owner: string, slug: string): AppLinks {
+  const urls = new Urls(owner, slug);
+  return {
+    library: `${origin}${urls.base}`,
+    activity: `${origin}${urls.base}-/activity`,
+    page: (path, at) => `${origin}${new Urls(owner, slug, at).file(path)}`,
+    folder: (dir) => `${origin}${urls.tree(dir)}`,
+  };
+}
+
+/**
+ * A write's result. With `links` (TEMPRA-5), each file that still exists carries its page's URL
+ * in the app, and the request names the library's Activity, so the agent can hand the person a
+ * link rather than a path.
+ */
+function writeText(verb: string, res: WriteResult, links?: AppLinks): string {
   const lines = res.results.map((r) => {
     const what = r.from ? `${r.from} → ${r.path}` : r.path;
     if (r.hash === null) return `${verb} ${what} (${r.op}, seq ${r.seq}).`;
-    return `${verb} ${what} (${r.op}, seq ${r.seq}): hash ${r.hash}`;
+    const url = links ? ` · ${links.page(r.path)}` : "";
+    return `${verb} ${what} (${r.op}, seq ${r.seq}): hash ${r.hash}${url}`;
   });
   const seqs = res.results.map((r) => r.seq);
   const range =
@@ -295,7 +322,7 @@ function writeText(verb: string, res: WriteResult): string {
   );
   return [
     ...lines,
-    `Request ${res.request_id}${range}.`,
+    `Request ${res.request_id}${range}.${links ? ` Activity: ${links.activity}` : ""}`,
     lintText(lint),
     ...(notices.length > 0 ? ["Notes:", ...notices] : []),
     ...diffs,
@@ -371,6 +398,9 @@ export function buildServer(ctx: McpContext): McpServer {
     }
     return { token: found, lib: ctx.open(found) };
   };
+
+  const linksFor = (token: TokenInfo) =>
+    appLinks(ctx.origin, token.library.owner, token.library.slug);
 
   const request = (note?: string): RequestContext => ({
     actor: ctx.actor,
@@ -579,6 +609,7 @@ export function buildServer(ctx: McpContext): McpServer {
     const lines = [
       `# Library ${token.library.owner}/${token.library.slug} (seq ${summary.seq})`,
       "",
+      `In the app: ${linksFor(token).library} (a page opens at its path after it; link it when you tell the person about a page)`,
       ...(about?.title ? [`Title: ${about.title}`] : []),
       ...(about?.description ? [`Description: ${about.description}`] : []),
       `Concepts: ${summary.concepts} · attachments: ${summary.attachments} · open work items: ${summary.open_work} (${summary.open_comments} of them comment threads)${summary.stale_soon > 0 ? ` · stale soon: ${summary.stale_soon} (\`work\` kind stale_soon)` : ""}`,
@@ -700,10 +731,15 @@ export function buildServer(ctx: McpContext): McpServer {
       annotations: readOnly,
     },
     guarded(async ({ dir, library }) => {
-      const { lib } = pick(library);
+      const { token, lib } = pick(library);
       const d = normalizePath(dir ?? "") ?? "";
       const view = await lib.read(d ? `${d}/index.md` : "index.md");
-      return text(view.kind === "derived" ? view.markdown : "");
+      const links = linksFor(token);
+      return text(
+        view.kind === "derived"
+          ? `In the app: ${d ? links.folder(d) : links.library} (each page at its path under ${links.library})\n\n${view.markdown}`
+          : "",
+      );
     }),
   );
 
@@ -915,6 +951,7 @@ export function buildServer(ctx: McpContext): McpServer {
           const facts = text(
             [
               `path: ${view.path}`,
+              `url: ${linksFor(picked.token).page(view.path)}`,
               `hash: ${view.hash}`,
               `seq: ${view.seq}`,
               `size: ${view.size} bytes · media: ${view.media ?? "unknown"}`,
@@ -952,6 +989,7 @@ export function buildServer(ctx: McpContext): McpServer {
         const result = text(
           [
             `path: ${view.path}`,
+            `url: ${linksFor(picked.token).page(view.path, args.at)}`,
             `hash: ${view.hash}`,
             `seq: ${view.seq}${args.at !== undefined ? ` (as of ${args.at})` : ""}`,
             `trust: ${view.trust_tier} · stale: ${view.stale ? "yes" : view.stale_soon ? "soon" : "no"} · status: ${status} · inbound links: ${view.inbound_links}`,
@@ -1034,7 +1072,7 @@ export function buildServer(ctx: McpContext): McpServer {
       const { token, lib } = pick(library);
       checkWrite(token, path);
       const res = await lib.apply(request(note), [{ op: "write", path, content, if_match }]);
-      return text(writeText("Wrote", res));
+      return text(writeText("Wrote", res, linksFor(token)));
     }),
   );
 
@@ -1057,7 +1095,7 @@ export function buildServer(ctx: McpContext): McpServer {
       const { token, lib } = pick(library);
       checkWrite(token, path);
       const res = await lib.apply(request(note), [{ op: "edit", path, edits, if_match }]);
-      return text(writeText("Edited", res));
+      return text(writeText("Edited", res, linksFor(token)));
     }),
   );
 
@@ -1105,7 +1143,7 @@ export function buildServer(ctx: McpContext): McpServer {
       const { token, lib } = pick(library);
       checkWrite(token, from, to);
       const res = await lib.apply(request(note), [{ op: "move", path: from, to }]);
-      return text(writeText("Moved", res));
+      return text(writeText("Moved", res, linksFor(token)));
     }),
   );
 
@@ -1127,7 +1165,7 @@ export function buildServer(ctx: McpContext): McpServer {
       const { token, lib } = pick(library);
       checkWrite(token, path);
       const res = await lib.apply(request(note), [{ op: "delete", path, if_match }]);
-      return text(writeText("Deleted", res));
+      return text(writeText("Deleted", res, linksFor(token)));
     }),
   );
 
@@ -1164,7 +1202,7 @@ export function buildServer(ctx: McpContext): McpServer {
       });
       checkWrite(token, ...ops.flatMap((o) => (o.to ? [o.path, o.to] : [o.path])));
       const res = await lib.apply(request(note), wire);
-      return text(writeText("Applied", res));
+      return text(writeText("Applied", res, linksFor(token)));
     }),
   );
 
@@ -1233,7 +1271,7 @@ export function buildServer(ctx: McpContext): McpServer {
       ]);
       return text(
         [
-          writeText("Stored", res),
+          writeText("Stored", res, linksFor(token)),
           `Fetched ${got.bytes.byteLength} bytes from ${got.source.final_url ?? got.source.url} as ${got.blob.media ?? "unknown"}. Cite the original in the concept's \`sources\` too.`,
         ].join("\n"),
       );
@@ -1534,7 +1572,7 @@ export function buildServer(ctx: McpContext): McpServer {
       const dims = blob.width && blob.height ? `${blob.width}×${blob.height}, ` : "";
       return text(
         [
-          writeText("Stored", res),
+          writeText("Stored", res, linksFor(picked.token)),
           `Made /${to} from /${from} (${op}): ${dims}${sizeText(blob.size)}, ${blob.media ?? made.media}.`,
         ].join("\n"),
       );
@@ -1726,12 +1764,16 @@ export function buildServer(ctx: McpContext): McpServer {
         annotations: readOnly,
       },
       guarded(async ({ q, prefix, limit, library }) => {
-        const { lib } = pick(library);
+        const { token, lib } = pick(library);
         const r = await lib.search(q, { prefix, limit });
         if (r.results.length === 0) return text("No results.");
+        const links = linksFor(token);
         return text(
           r.results
-            .map((x) => `${x.path} — ${x.title}\n  ${x.snippet.replace(/\s+/g, " ").trim()}`)
+            .map(
+              (x) =>
+                `${x.path} — ${x.title}\n  ${links.page(x.path)}\n  ${x.snippet.replace(/\s+/g, " ").trim()}`,
+            )
             .join("\n"),
         );
       }),
@@ -1756,13 +1798,14 @@ export function buildServer(ctx: McpContext): McpServer {
         annotations: readOnly,
       },
       guarded(async ({ library, ...args }) => {
-        const r = await pick(library).lib.concepts(args);
+        const { token, lib } = pick(library);
+        const r = await lib.concepts(args);
         const lines = r.items.map(
           (c) =>
             `${c.path} · ${c.type || "(no type)"} · ${c.status}${c.status_set === false ? " (not set)" : ""} · ${c.trust_tier}${c.stale ? " · STALE" : ""} — ${c.title ?? ""}${c.description ? `: ${c.description}` : ""}`,
         );
         lines.unshift(
-          `${r.total} matching concept${r.total === 1 ? "" : "s"}${r.next_offset !== null ? ` (next offset ${r.next_offset})` : ""}:`,
+          `${r.total} matching concept${r.total === 1 ? "" : "s"}${r.next_offset !== null ? ` (next offset ${r.next_offset})` : ""} (each opens in the app at its path under ${linksFor(token).library}):`,
         );
         if (r.types) {
           lines.push(
@@ -1898,13 +1941,17 @@ export function buildServer(ctx: McpContext): McpServer {
             );
           }
           checkWrite(token);
-          return text(writeText("Reverted", await lib.revert(request(note), { request_id })));
+          return text(
+            writeText("Reverted", await lib.revert(request(note), { request_id }), linksFor(token)),
+          );
         }
         if (!path || to_seq === undefined) {
           throw new OkfError(400, "bad_revert", "Pass path and to_seq, or request_id.");
         }
         checkWrite(token, path);
-        return text(writeText("Reverted", await lib.revert(request(note), { path, to_seq })));
+        return text(
+          writeText("Reverted", await lib.revert(request(note), { path, to_seq }), linksFor(token)),
+        );
       }),
     );
 
@@ -2066,7 +2113,7 @@ export function buildServer(ctx: McpContext): McpServer {
         guarded(async ({ path, library }) => {
           const { token, lib } = pick(library);
           checkWrite(token, path);
-          return text(writeText("Verified", await lib.verify(request(), path)));
+          return text(writeText("Verified", await lib.verify(request(), path), linksFor(token)));
         }),
       );
     }

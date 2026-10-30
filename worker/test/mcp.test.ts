@@ -159,6 +159,40 @@ describe("MCP server", () => {
     expect(skill).not.toMatch(/base64|sha256|checksum/i);
   });
 
+  test("results link each page in the app, so agents hand people URLs (TEMPRA-5)", async () => {
+    const { app } = setup();
+    const { call } = await connect(app);
+    const base = "http://localhost/owner/demo/";
+
+    expect((await call("start")).text).toContain(`In the app: ${base} `);
+
+    let r = await call("write", {
+      path: "notes/a b.md",
+      content: doc("Alpha", "Alpha and omega.\n"),
+      note: "a page with a space",
+    });
+    // The written page's URL, its path encoded, and the library's Activity.
+    expect(r.text).toMatch(new RegExp(`hash \\w+ · ${base}notes/a%20b\\.md`));
+    expect(r.text).toContain(`Activity: ${base}-/activity`);
+
+    r = await call("read", { path: "notes/a b.md" });
+    expect(r.text).toContain(`url: ${base}notes/a%20b.md\n`);
+    const seq = Number(/seq: (\d+)/.exec(r.text)?.[1]);
+    // A version reads at its own address.
+    r = await call("read", { path: "notes/a b.md", at: seq });
+    expect(r.text).toContain(`url: ${base}notes/a%20b.md?at=${seq}\n`);
+
+    r = await call("search", { q: "omega" });
+    expect(r.text).toContain(`\n  ${base}notes/a%20b.md\n`);
+    expect((await call("query", {})).text).toContain(`at its path under ${base}`);
+
+    // A deleted page has no page to link.
+    r = await call("read", { path: "notes/a b.md" });
+    r = await call("delete", { path: "notes/a b.md", if_match: hashOf(r.text) });
+    expect(r.text).not.toContain(`${base}notes/`);
+    expect(r.text).toContain(`Activity: ${base}-/activity`);
+  });
+
   test("the file-equivalent workflow", async () => {
     const { app } = setup();
     const { call } = await connect(app);
@@ -202,7 +236,7 @@ describe("MCP server", () => {
       "metrics/revenue.md:8: Money received. See [orders](/tables/orders.md).",
     );
     expect((await call("browse", { dir: "metrics" })).text).toBe(
-      "# Concepts\n\n* [Revenue](revenue.md) - About Revenue.\n",
+      "In the app: http://localhost/owner/demo/metrics/ (each page at its path under http://localhost/owner/demo/)\n\n# Concepts\n\n* [Revenue](revenue.md) - About Revenue.\n",
     );
 
     r = await call("move", { from: "tables", to: "data/tables", note: "reorganize" });
