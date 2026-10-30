@@ -131,7 +131,7 @@ How to work:
 5. Put a one-line \`note\` on every write. Read the \`lint\` in every write result and fix what it reports (figure and diagram lint too: \`image_*\`, \`figure_invalid\`, \`diagram_invalid\`, \`diagram_unrendered\`, \`svg_invalid\`, \`svg_unsafe\`, \`chart_invalid\` mean fix the image or the fence; a fence's lint names it by its number in \`read\`'s Figures list, the number \`render\` and \`read\` take); the result's notes say what else to know (ignored fields, the stored form, open comments). A concept with no frontmatter, invalid YAML or no \`type\` is refused. Keep concepts under 100 KB; split big ones into linked concepts.
 6. Never write index.md or log.md (the server synthesizes them). Never set \`generated\` (the server stamps it) or \`verified\` (not yours to claim). Set \`status\` and \`stale_after\` honestly. Timestamps are full ISO 8601 datetimes with an offset (\`stale_after: 2026-12-31T00:00:00Z\`); a plain date is flagged.
 7. Use \`work\` to find what needs doing: open comments, stale concepts, broken links, lint, hotlinked images (\`external_image\`), and structure (a directory's index.md made poor by its concepts: missing, long or title-repeating descriptions, duplicate titles, concepts nothing links to, a directory with one concept, none, or too many); \`work\` with kind stale_soon lists what goes stale within 14 days. Only a new \`stale_after\` resets a concept's clock; other edits leave it stale.
-8. Comments are how people ask you for changes. Before editing a concept, read its open threads with \`comments\`; make the change a comment asks for, then answer it with \`comment\` (reply, and resolve what you fixed). Ask with a reply when unsure; never resolve a thread you did not address. A concept with open threads cannot be deleted until they are resolved.
+8. Comments are how people ask you for changes. Before editing a concept, read its open threads with \`comments\`; make the change a comment asks for, then answer it with \`comment\` (reply, and resolve what you fixed). Ask with a reply when unsure; never resolve a thread you did not address. A concept with open threads cannot be deleted until they are resolved. A thread may be on the whole library rather than a page (no path). A thread marked a \`request\` (\`work\` lists it as a \`request\` item) is a bigger ask someone left for people's agents: do the work it asks for, reply with what you did, then resolve it.
 9. When the person asks to see a page, or you want them to read one (e.g. one you just wrote), \`show\` it: a chat that shows apps draws it in a panel as the Tempra app does. Do not \`show\` what you only read for yourself.
 10. When you tell the person about a page, link it by its URL, never its bare path: \`read\` gives a page's \`url\`, a write's result names each written page's, \`search\` gives one per result, and \`start\` gives the library's (a page opens at its path after it).`;
 
@@ -218,6 +218,7 @@ export function healthLines(h: LibraryHealth): string[] {
     ["external_image", "hotlinked images"],
     ["structure", "structure"],
     ["comment", "open comments"],
+    ["request", "requests"],
   ];
   const counts = names
     .filter(([k]) => (h.counts[k] ?? 0) > 0)
@@ -1972,11 +1973,12 @@ export function buildServer(ctx: McpContext): McpServer {
       "work",
       {
         title: "Maintenance queue",
-        description: `${BEYOND}what needs doing in this library: open comment threads (requests from people), stale concepts (past stale_after), broken links, lint, hotlinked images (\`external_image\`, one item per page: \`attach\` each with \`source_url\`, \`edit\` the image to the attached path, cite the original in \`sources\`), and structure (what makes a directory's index.md poor: descriptions missing, too long or repeating the title, duplicate titles, concepts nothing links to, directories with one concept, none or too many; reported on the concept or on the directory's index.md, and never fixed for you), ranked by how many concepts link in. Each item has a suggested action; fix it through the normal write tools, and answer comments with \`comment\`. \`kind: "stale_soon"\` looks ahead instead: concepts within 14 days of stale_after, to refresh before they go stale; only moving stale_after resets the clock.`,
+        description: `${BEYOND}what needs doing in this library: open comment threads (requests from people; a thread with no path is on the library itself), requests (\`request\`: threads marked as a bigger ask, left for people's agents to do, then reply and resolve), stale concepts (past stale_after), broken links, lint, hotlinked images (\`external_image\`, one item per page: \`attach\` each with \`source_url\`, \`edit\` the image to the attached path, cite the original in \`sources\`), and structure (what makes a directory's index.md poor: descriptions missing, too long or repeating the title, duplicate titles, concepts nothing links to, directories with one concept, none or too many; reported on the concept or on the directory's index.md, and never fixed for you), ranked by how many concepts link in. Each item has a suggested action; fix it through the normal write tools, and answer comments with \`comment\`. \`kind: "stale_soon"\` looks ahead instead: concepts within 14 days of stale_after, to refresh before they go stale; only moving stale_after resets the clock.`,
         inputSchema: {
           kind: z
             .enum([
               "comment",
+              "request",
               "stale",
               "stale_soon",
               "broken_link",
@@ -1995,7 +1997,7 @@ export function buildServer(ctx: McpContext): McpServer {
         if (w.items.length === 0) return text("Nothing to do.");
         const lines = w.items.map(
           (i) =>
-            `[${i.kind}] ${i.path} (since ${i.since}, ${i.inbound_links} inbound)${i.thread ? ` · thread ${i.thread}` : ""}\n  ${i.detail}\n  → ${i.suggested_action}`,
+            `[${i.kind}] ${i.path || "(the library)"} (since ${i.since}, ${i.inbound_links} inbound)${i.thread ? ` · thread ${i.thread}` : ""}\n  ${i.detail}\n  → ${i.suggested_action}`,
         );
         return text([`${w.total} open item${w.total === 1 ? "" : "s"}:`, ...lines].join("\n"));
       }),
@@ -2005,9 +2007,12 @@ export function buildServer(ctx: McpContext): McpServer {
       "comments",
       {
         title: "Read comment threads",
-        description: `${BEYOND}comment threads: requests and questions people (and agents) left on concepts, each with the quoted text it is about, every reply, and its thread id. Pass \`path\` for one concept's threads (read them before editing it), or omit it for the library's. \`status\` is open (default), resolved or all. An outdated thread's quote is no longer in the body.`,
+        description: `${BEYOND}comment threads: requests and questions people (and agents) left on concepts or on the library itself, each with the quoted text it is about, every reply, its kind (comment, or request: a bigger ask left for people's agents) and its thread id. Pass \`path\` for one concept's threads (read them before editing it), an empty \`path\` for the threads on the library itself (on no page), or omit it for all of them. \`status\` is open (default), resolved or all. An outdated thread's quote is no longer in the body.`,
         inputSchema: {
-          path: z.string().optional().describe("A concept, e.g. `metrics/margin.md`."),
+          path: z
+            .string()
+            .optional()
+            .describe("A concept, e.g. `metrics/margin.md`; empty for the library's own threads."),
           status: z.enum(["open", "resolved", "all"]).optional(),
           limit: z.number().int().optional().describe("Threads per page (default 50)."),
           before: z.number().int().optional().describe("The `next` cursor from the previous page."),
@@ -2027,7 +2032,7 @@ export function buildServer(ctx: McpContext): McpServer {
             ? await ctx.agentNames(ids).catch(() => new Map<string, string>())
             : new Map<string, string>();
         const out = r.threads.map((t) => {
-          const head = `## Thread ${t.id} · ${t.path} · ${t.status}${t.outdated ? " · outdated (the quote is no longer in the body)" : ""}`;
+          const head = `## Thread ${t.id} · ${t.path || "the library"} · ${t.kind === "request" ? "request · " : ""}${t.status}${t.outdated ? " · outdated (the quote is no longer in the body)" : ""}`;
           const quote = t.anchor ? [`> ${t.anchor.quote.replace(/\n/g, "\n> ")}`] : [];
           // Every action in order: who said what, and when it was resolved and reopened.
           const bodies = new Map(t.comments.map((c) => [c.id, c.body]));
@@ -2053,11 +2058,18 @@ export function buildServer(ctx: McpContext): McpServer {
       "comment",
       {
         title: "Comment, reply or resolve",
-        description: `${BEYOND}answer a comment thread or start one. \`reply\` adds to a thread; \`resolve\` closes it (with an optional closing reply, e.g. what you changed); \`reopen\` opens it again; \`open\` starts a thread on a concept, optionally on a \`quote\` copied from its body as \`read\` shows it (matched by the text it reads as, markup aside; it must occur once; quote more of the sentence if it repeats). Resolve only what you actually addressed. Write \`@handle\` in a body to address someone who can reach the library: it reaches their inbox. Comments never change the concept; edit it with the write tools.`,
+        description: `${BEYOND}answer a comment thread or start one. \`reply\` adds to a thread; \`resolve\` closes it (with an optional closing reply, e.g. what you changed); \`reopen\` opens it again; \`open\` starts a thread on a concept, optionally on a \`quote\` copied from its body as \`read\` shows it (matched by the text it reads as, markup aside; it must occur once; quote more of the sentence if it repeats), or with no \`path\` on the library itself. \`kind: "request"\` with \`open\` or \`reply\` marks the thread a request, a bigger ask left open for people's agents (\`work\` lists it as a \`request\`); \`kind: "comment"\` makes it a plain thread again. Resolve only what you actually addressed. Write \`@handle\` in a body to address someone who can reach the library: it reaches their inbox. Comments never change the concept; edit it with the write tools.`,
         inputSchema: {
           action: z.enum(["reply", "resolve", "reopen", "open"]),
           thread: z.string().optional().describe("reply, resolve, reopen: the thread id."),
-          path: z.string().optional().describe("open: the concept to comment on."),
+          path: z
+            .string()
+            .optional()
+            .describe("open: the concept to comment on; omit it for a thread on the library."),
+          kind: z
+            .enum(["comment", "request"])
+            .optional()
+            .describe("open, reply: mark the thread a request (or a comment again)."),
           quote: z
             .string()
             .optional()
@@ -2072,27 +2084,39 @@ export function buildServer(ctx: McpContext): McpServer {
         },
         annotations: writes,
       },
-      guarded(async ({ action, thread, path, quote, body, library }) => {
+      guarded(async ({ action, thread, path, quote, body, kind, library }) => {
         const { token, lib } = pick(library);
+        const on = (p: string) => p || "the library";
         if (action === "open") {
-          if (!path) throw new OkfError(400, "bad_request", "`open` needs the concept's `path`.");
-          checkComment(token, path);
+          checkComment(token, path ?? "");
           const r = await post(token, lib, {
             kind: "open",
-            path,
+            path: path ?? "",
             body: body ?? "",
             anchor: quote ? { quote } : null,
+            ...(kind ? { thread_kind: kind } : {}),
           });
-          return text(`Opened thread ${r.thread.id} on ${r.thread.path} (seq ${r.seq}).`);
+          return text(
+            `Opened ${r.thread.kind === "request" ? "request" : "thread"} ${r.thread.id} on ${on(r.thread.path)} (seq ${r.seq}).`,
+          );
         }
         if (!thread)
           throw new OkfError(400, "bad_request", `\`${action}\` needs the \`thread\` id.`);
+        if (kind && action !== "reply") {
+          throw new OkfError(400, "bad_request", "`kind` goes with `open` or `reply`.");
+        }
         const t = await lib.thread(thread);
         checkComment(token, t.path);
-        const r = await post(token, lib, { kind: action, thread, body: body ?? "" });
+        const r = await post(
+          token,
+          lib,
+          action === "reply"
+            ? { kind: "reply", thread, body: body ?? "", ...(kind ? { thread_kind: kind } : {}) }
+            : { kind: action, thread, body: body ?? "" },
+        );
         const verb = { reply: "Replied to", resolve: "Resolved", reopen: "Reopened" }[action];
         return text(
-          `${verb} thread ${thread} on ${r.thread.path} (seq ${r.seq}); it is ${r.thread.status}.`,
+          `${verb} ${r.thread.kind === "request" ? "request" : "thread"} ${thread} on ${on(r.thread.path)} (seq ${r.seq}); it is ${r.thread.status}.`,
         );
       }),
     );

@@ -219,13 +219,11 @@ function commentClauses(events: LedgerEvent[], titleOf: TitleOf): Part[][] {
     threads.set(id, t);
   }
   if (threads.size === 0) return [];
-  const on = (t: { path: string; seq: number }): Part => ({
-    concept: t.path,
-    title: titleOf(t.path),
-    seq: t.seq,
-    gone: false,
-    words: null,
-  });
+  // A library thread (TEMPRA-222) is on no page.
+  const on = (t: { path: string; seq: number }): Part =>
+    t.path
+      ? { concept: t.path, title: titleOf(t.path), seq: t.seq, gone: false, words: null }
+      : "the library";
   const list = [...threads.values()];
   if (list.length > 2) {
     const paths = [...new Set(list.map((t) => t.path))];

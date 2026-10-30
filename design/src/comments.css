@@ -46,8 +46,10 @@
   color: var(--tempra-color-text);
 }
 
-/* A thread whose quote is gone from the body: said in words, as a small outlined label. */
-.thread-outdated {
+/* A thread whose quote is gone from the body, and a request (TEMPRA-222, left for people's
+   agents): said in words, as a small outlined label. */
+.thread-outdated,
+.thread-request {
   align-self: flex-start;
   padding: 0 8px;
   border: 1px solid var(--tempra-color-border);
@@ -257,4 +259,39 @@ section.thread.open {
   .thread.collapsed {
     min-height: var(--tempra-touch);
   }
+}
+
+/* The library's agent working on a reply in this thread (TEMPRA-222): one quiet grey line with a
+   grey dot that breathes; no colour. */
+.thread-replying {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+}
+
+.thread-replying::before {
+  content: "";
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--tempra-color-faint);
+  animation: tempra-pulse var(--tempra-pulse) ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .thread-replying::before {
+    animation: none;
+  }
+}
+
+/* A link in a comment's text: a page or a URL it names. */
+.comment a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
 }

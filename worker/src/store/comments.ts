@@ -21,10 +21,27 @@ export interface StoredAnchor extends QuoteSelector {
  */
 export type Mention = { user: string; handle: string } | { agent: string; name: string };
 
+/**
+ * What a thread is (TEMPRA-222): a comment, or a request, a bigger ask the library's managed agent
+ * (or anyone) left open for people's own agents to do, listed in `work` as a `request` item.
+ */
+export type ThreadKind = "comment" | "request";
+
+/** A thread kind as sent, checked; undefined when none was sent. */
+export function threadKind(raw: unknown): ThreadKind | undefined {
+  if (raw === undefined || raw === null || raw === "") return undefined;
+  if (raw === "comment" || raw === "request") return raw;
+  throw new OkfError(400, "bad_kind", "A thread's kind is comment or request.");
+}
+
 export type CommentAction = (
   | {
       kind: "open";
-      path: string;
+      /**
+       * The concept to comment on; empty (or absent) for a library thread, on the library itself
+       * rather than a page (TEMPRA-222), which takes no anchor.
+       */
+      path?: string | null;
       body: string;
       /**
        * What is quoted. With `from` (the app), the document's text and where in it the quote
@@ -32,8 +49,16 @@ export type CommentAction = (
        * matched by the text it reads as.
        */
       anchor?: { quote: string; from?: number } | null;
+      /** The thread's kind; a comment unless said. */
+      thread_kind?: ThreadKind;
     }
-  | { kind: "reply"; thread: string; body: string }
+  | {
+      kind: "reply";
+      thread: string;
+      body: string;
+      /** Marks the thread a request (or a comment again) with the reply. */
+      thread_kind?: ThreadKind;
+    }
   | { kind: "resolve"; thread: string; body?: string | null }
   | { kind: "reopen"; thread: string; body?: string | null }
 ) & {
@@ -63,7 +88,10 @@ export interface CommentView {
 
 export interface ThreadView {
   id: string;
+  /** The concept's path; "" for a library thread (TEMPRA-222). */
   path: string;
+  /** A comment, or a request left for people's agents (TEMPRA-222). */
+  kind: ThreadKind;
   status: ThreadStatus;
   /** Who opened it. */
   actor: string;

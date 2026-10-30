@@ -15,6 +15,8 @@ export interface FeedEvent {
   hash: string | null;
   note: string | null;
   from_path: string | null;
+  /** For a comment: what was done, to which thread (absent in tests that make events by hand). */
+  comment?: { kind: string; thread: string } | null;
   /** The person and agent behind the actor, by id; absent on events from before it was kept. */
   by?: ActedBy | null;
 }

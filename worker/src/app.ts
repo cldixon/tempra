@@ -21,7 +21,8 @@ import type { Images } from "./images";
 import { registerInboxApi } from "./inbox-api";
 import { registerLegalRoutes } from "./legal";
 import { deleteLibrary } from "./lifecycle";
-import { type Notifications, notifying, postComment } from "./notify";
+import type { ManagedDeps } from "./managed/agent";
+import { managedAgents, type Notifications, notifying, postComment } from "./notify";
 import { messagePage, wantsPage } from "./oauth/pages";
 import { type GrantProps, registerAppRoutes } from "./oauth/routes";
 import { splitFrontmatter } from "./okf/concept";
@@ -32,6 +33,7 @@ import type { RestoreOutcome, RestoreRecord } from "./recovery";
 import type { PosterFrame, RenderContext, RenderDiagram } from "./render";
 import { readCookie, SESSION_COOKIE, type Sessions } from "./session";
 import { type Mailer, registerSignInRoutes } from "./signin";
+import { threadKind } from "./store/comments";
 import { OkfError } from "./store/errors";
 import type { ReadSurface } from "./store/reads";
 import {
@@ -116,6 +118,8 @@ export interface Deps extends UsageDeps {
   ) => Promise<Response>;
   /** The inbox, read cursors and mail settings in D1 (notify.ts); absent, nobody is notified. */
   notifications?: Notifications | null;
+  /** The managed agent's queue and its "replying" presence (TEMPRA-222); absent, @tempra is plain text. */
+  managed?: ManagedDeps | null;
   /**
    * Draws a Mermaid source to SVG (and PNG) through the render Worker (render.ts, TEMPRA-165);
    * absent, or with no RENDER binding, it answers "render unavailable".
@@ -928,16 +932,20 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     ),
   );
 
+  // A post with no `path` (or an empty one) opens a thread on the library itself (TEMPRA-222).
   app.post(`${BASE}/comments`, async (c) => {
     const body = await json<{
-      path?: string;
+      path?: string | null;
       body?: string;
       anchor?: { quote?: string; from?: number } | null;
+      kind?: string;
     }>(c);
-    if (typeof body.path !== "string") {
-      throw new OkfError(400, "bad_request", "Give the concept's `path`.");
+    if (body.path !== undefined && body.path !== null && typeof body.path !== "string") {
+      throw new OkfError(400, "bad_request", "A concept's `path` is a string.");
     }
-    requireComment(c, body.path);
+    const path = body.path ?? "";
+    const kind = threadKind(body.kind);
+    requireComment(c, path);
     const anchor = body.anchor
       ? {
           quote: String(body.anchor.quote ?? ""),
@@ -946,9 +954,10 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
       : null;
     const res = await postComment(c.var.deps, c.var.token, c.var.lib, requestContext(c), {
       kind: "open",
-      path: body.path,
+      path,
       body: String(body.body ?? ""),
       anchor,
+      ...(kind ? { thread_kind: kind } : {}),
     });
     return c.json(res, 201);
   });
@@ -964,19 +973,25 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     requireComment(c, path);
     // The body is optional for resolve and reopen: no JSON at all is fine.
     const sent = (await c.req.text()).trim();
-    let raw: { body?: unknown } = {};
+    let raw: { body?: unknown; kind?: unknown } = {};
     try {
       raw = sent ? JSON.parse(sent) : {};
     } catch {
       throw new OkfError(400, "bad_json", "The request body must be JSON.");
     }
     const text = typeof raw.body === "string" ? raw.body : "";
+    // A reply may mark the thread a request, or a comment again (TEMPRA-222).
+    const threadAs = kind === "reply" ? threadKind(raw.kind) : undefined;
     return c.json(
-      await postComment(c.var.deps, c.var.token, c.var.lib, requestContext(c), {
-        kind,
-        thread: id,
-        body: text,
-      }),
+      await postComment(
+        c.var.deps,
+        c.var.token,
+        c.var.lib,
+        requestContext(c),
+        kind === "reply"
+          ? { kind, thread: id, body: text, ...(threadAs ? { thread_kind: threadAs } : {}) }
+          : { kind, thread: id, body: text },
+      ),
     );
   };
   app.post(`${BASE}/comments/:thread`, act("reply"));
@@ -1003,6 +1018,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     const ref = c.var.token.library;
     const accounts = c.var.deps.accounts;
     const owner = c.var.token.role === "owner";
+    const lib = c.var.deps.managed ? await accounts.library(ref.owner, ref.slug) : null;
     return c.json({
       owner: ref.owner,
       role: c.var.token.role,
@@ -1011,6 +1027,8 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
         role,
         created,
       })),
+      // The library's managed agents a comment can mention (TEMPRA-222): @tempra when it is on.
+      agents: (await managedAgents(c.var.deps, lib?.ownerId).catch(() => [])).map((a) => a.name),
       // Pending invitations are the owner's to see.
       ...(owner ? { invitations: await accounts.libraryInvitations(ref.id) } : {}),
     });

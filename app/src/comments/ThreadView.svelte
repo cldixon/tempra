@@ -8,7 +8,7 @@
   import { revealOffset } from "../reader/reading";
   import { clip } from "../ui";
   import type { Urls } from "../urls";
-  import type { CommentT, Placed } from "./data";
+  import { type CommentT, commentParts, type Placed } from "./data";
   import ThreadActions from "./ThreadActions.svelte";
 
   /*
@@ -22,6 +22,8 @@
     thread: Placed;
     active: boolean;
     writable: boolean;
+    /** The library's agent is working on a reply here (TEMPRA-222). */
+    replying?: boolean;
     onActive(id: string | null): void;
     onChanged(): void;
   } = $props();
@@ -49,11 +51,14 @@
 
 <!-- Who said it: their mark and name, an agent with whom it acts for (AgentName). -->
 {#snippet by(who: ActorView)}<Avatar name={who.mark} agent={who.agent} /><AgentName {who} />{/snippet}
-<!-- A thread whose quote is no longer in the body, said where it shows. -->
+<!-- A thread whose quote is no longer in the body, said where it shows; a request (TEMPRA-222). -->
 {#snippet outdatedMark()}<span class="thread-outdated" title="The quoted text is no longer on the page">Outdated</span>{/snippet}
+{#snippet marks()}{#if t.kind === "request"}<span class="thread-request" title="Left for people's agents to do">Request</span>{/if}{#if outdated}{@render outdatedMark()}{/if}{/snippet}
+<!-- A comment's words, with the links it names (a URL, or a page by its path). -->
+{#snippet words(body: string)}{#each commentParts(body, (p) => props.urls.file(p)) as part, i (i)}{#if "href" in part}<a href={part.href}>{part.text}</a>{:else}{part.text}{/if}{/each}{/snippet}
 {#snippet comment(c: CommentT)}<div class="said"
     ><div class="said-by">{@render by(name(c.actor, c.by))} <Moment ts={c.ts} /></div
-    ><p class="comment">{c.body}</p></div
+    ><p class="comment">{@render words(c.body)}</p></div
   >{/snippet}
 {#if !props.active}
   <button
@@ -65,13 +70,13 @@
       expanding = true;
       select();
     }}
-    >{#if outdated}{@render outdatedMark()}{/if}{#if t.anchor}<span class="quote thread-quote">{clip(t.anchor.quote, 120)}</span>{/if}<span
+    >{@render marks()}{#if t.anchor}<span class="quote thread-quote">{clip(t.anchor.quote, 120)}</span>{/if}<span
       class="thread-meta"
       >{#if first}{@render by(name(first.actor, first.by))}{/if}<span class="thread-words">{first ? clip(first.body, 80) : ""}</span
       >{#if t.replies > 0}<span class="thread-replies">{t.replies + 1}</span>{/if}{#if first}<Moment
           ts={t.comments[t.comments.length - 1]?.ts ?? first.ts}
         />{/if}</span
-    ></button
+    >{#if props.replying}<span class="thread-replying">Tempra is replying…</span>{/if}</button
   >
 {:else}
   <section
@@ -80,7 +85,7 @@
     id={threadElementId(t.id)}
     class={t.status === "open" ? "thread open" : "thread open resolved"}
     aria-label="Comment thread"
-    >{#if outdated}{@render outdatedMark()}{/if}{#if t.anchor}<blockquote class="quote thread-quote"
+    >{@render marks()}{#if t.anchor}<blockquote class="quote thread-quote"
         >{#if t.at}<a
             href={`#thread-${t.id}`}
             onclick={(e) => {
@@ -90,7 +95,14 @@
           >{:else}{clip(t.anchor.quote, 300)}{/if}</blockquote
       >{/if}<!-- The thread's comments and its resolves and reopens, in order. -->{#if !t.actions}{#each t.comments as c (c.id)}{@render comment(c)}{/each}{:else}{#each t.actions as a (a.seq)}{@const c = a.comment ? t.comments.find((x) => x.id === a.comment) : undefined}{#if a.kind === "resolve" || a.kind === "reopen"}<div
             ><p class="said-change">{a.kind === "resolve" ? "Resolved" : "Reopened"} by {actorText(name(a.actor, a.by))} <Moment ts={a.ts} /></p
-            >{#if c}<p class="comment">{c.body}</p>{/if}</div
-          >{:else if c}{@render comment(c)}{/if}{/each}{/if}<ThreadActions {...props} /></section
+            >{#if c}<p class="comment">{@render words(c.body)}</p>{/if}</div
+          >{:else if c}{@render comment(c)}{/if}{/each}{/if}{#if props.replying}<p class="thread-replying" role="status">Tempra is replying…</p>{/if}<ThreadActions
+      urls={props.urls}
+      thread={props.thread}
+      active={props.active}
+      writable={props.writable}
+      onActive={props.onActive}
+      onChanged={props.onChanged}
+    /></section
   >
 {/if}

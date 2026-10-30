@@ -39,7 +39,7 @@ import { readTar, writeTar } from "../src/util/tar";
 import { compareBundle } from "../test/compare";
 import { BUNDLES, loadBundle } from "../test/fixtures";
 import { formatReport, runAgents } from "./agents";
-import { WORKER_DIR } from "./cf";
+import { d1Sql, WORKER_DIR } from "./cf";
 import { mcpSmoke } from "./mcp-smoke";
 import { seed } from "./seed";
 
@@ -79,7 +79,7 @@ for (const f of ["cloudflare.config.ts", "wrangler.config.ts", "package.json", "
 for (const d of ["src", "migrations", "node_modules"]) {
   symlinkSync(join(WORKER_DIR, d), join(project, d));
 }
-writeFileSync(join(project, ".dev.vars"), "DEV_SIGNIN=1\nSIGNUP=open\n");
+writeFileSync(join(project, ".dev.vars"), "DEV_SIGNIN=1\nSIGNUP=open\nAGENT_MODEL=fake\n");
 const state = join(project, ".wrangler/state");
 
 console.log(`project: ${project}`);
@@ -95,6 +95,13 @@ for (let i = 1; i <= 3; i++) {
     await seed({ slug: "agents", actor: `claude-code/agent-${i}`, persistTo: state }),
   );
 }
+
+// The managed agent on for the seeded account (TEMPRA-222), on the scripted stand-in model that
+// the gate's .dev.vars names, before cf dev opens the database.
+await d1Sql(`UPDATE users SET limits = '{"agent_daily_usd":5}' WHERE id = 'user_dev'`, {
+  local: true,
+  persistTo: state,
+});
 
 // Its own process group, so stopping it stops wrangler and workerd beneath it too (they share
 // its stderr, which ends only when all of them have).
@@ -4497,6 +4504,102 @@ async function uploadLink(owner: string, slug: string, token: string): Promise<s
 }
 
 /**
+ * The library's managed agent, @tempra (TEMPRA-222), end to end on the scripted stand-in model
+ * (AGENT_MODEL=fake in the gate's .dev.vars; no network): the seeded account has it on. A mention
+ * on a page goes through the agent's queue: the Comments panel says "Tempra is replying…", then
+ * shows its reply; a library thread from the home's "+" asking for a new page is answered and
+ * marked a request, which MCP `work` lists. The home's Comments panel passes axe.
+ */
+async function managedAgent(owner: string, slug: string, token: string): Promise<string[]> {
+  const lib = `${base}/api/v1/libraries/${owner}/${slug}`;
+  const headers = { Authorization: `Bearer ${token}` };
+  const members = (await (await fetch(`${lib}/members`, { headers })).json()) as {
+    agents?: string[];
+  };
+  if (!members.agents?.includes("tempra")) {
+    return [`the members list offers no @tempra: ${JSON.stringify(members.agents)}`];
+  }
+  const outline = (await (await fetch(`${lib}/outline`, { headers })).json()) as {
+    files: { path: string; kind: string }[];
+  };
+  const concept = outline.files.find((f) => f.kind === "concept")?.path;
+  if (!concept) return ["no concept to comment on"];
+  const b = await openBrowser();
+  if (typeof b === "string") return [b];
+  const { page, step, problems } = b;
+  const comments = page.locator("#panel-comments");
+  /** Comment from the page's actions: the +, Comment, the box at the panel's top, the text. */
+  const comment = async (box: string, text: string) => {
+    await page.locator(".page-actions .page-fab").click();
+    await page
+      .locator(".page-actions-list")
+      .getByRole("button", { name: /^Comment/ })
+      .click();
+    await comments.getByRole("button", { name: box }).click();
+    await comments.locator(".comment-form textarea").fill(text);
+    await comments.locator(".comment-form").getByRole("button", { name: "Comment" }).click();
+  };
+  try {
+    await step("a mention on a page: Tempra is replying…, then its reply", async () => {
+      await b.signInAs("dev@localhost", `/${owner}/${slug}/${concept}`);
+      await page.locator(".doc-title").waitFor({ timeout: 15_000 });
+      await comment("Comment on the page…", "@tempra what does this page say?");
+      await comments
+        .locator(".thread-replying", { hasText: "Tempra is replying…" })
+        .first()
+        .waitFor({ timeout: 15_000 });
+      await comments.getByText("A stand-in answer").waitFor({ timeout: 30_000 });
+      await comments.locator(".thread-replying").waitFor({ state: "detached", timeout: 10_000 });
+    });
+    await step("a library thread from the home's +: answered and marked a request", async () => {
+      await page.goto(`${base}/${owner}/${slug}/`);
+      await page.locator(".home-head .view-title").waitFor({ timeout: 15_000 });
+      // The home's actions hold Comment alone.
+      await page.locator(".page-actions .page-fab").click();
+      const items = await page.locator(".page-actions-list .menu-item").allInnerTexts();
+      if (items.length !== 1 || !/^Comment/.test(items[0] ?? "")) {
+        throw new Error(`the home's actions read ${JSON.stringify(items)}`);
+      }
+      await page.keyboard.press("Escape");
+      await comment("Comment on the library…", "@tempra request: a new page on onboarding");
+      await comments
+        .locator(".thread-replying", { hasText: "Tempra is replying…" })
+        .first()
+        .waitFor({ timeout: 15_000 });
+      await comments.getByText("marked this thread a request").waitFor({ timeout: 30_000 });
+      await comments.locator(".thread-request", { hasText: "Request" }).first().waitFor();
+    });
+    await step("the request is listed by MCP work", async () => {
+      const client = new Client({ name: "gate-agent", version: "1.0.0" });
+      await client.connect(
+        new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers } }),
+      );
+      const r = await client.callTool({
+        name: "work",
+        arguments: { library: `${owner}/${slug}`, kind: "request" },
+      });
+      const text = (r.content as { type: string; text?: string }[]).map((c) => c.text).join("\n");
+      await client.close();
+      if (!text.includes("[request] (the library)") || !text.includes("a new page on onboarding")) {
+        throw new Error(`work lists: ${text.slice(0, 400)}`);
+      }
+    });
+    await step("the home's Comments panel passes axe, light and dark", async () => {
+      const url = `${base}/${owner}/${slug}/?panel=comments`;
+      const ready = () => comments.getByRole("heading", { name: "Comments" }).waitFor();
+      const found = await axePages(page, [
+        { name: "home's comments", url, ready },
+        { name: "home's comments (dark)", url, ready, dark: true },
+      ]);
+      if (found.length > 0) throw new Error(found.join("; "));
+    });
+  } finally {
+    await b.close();
+  }
+  return problems;
+}
+
+/**
  * The upload panel (TEMPRA-200): reads the panel and calls prepare_upload over MCP as an agent's
  * host does, then drives the panel in Chromium from a host made of ext-apps' AppBridge
  * (scripts/panel-host.ts), in a sandboxed iframe under the CSP its `_meta.ui` declares: the
@@ -5453,6 +5556,14 @@ try {
   );
   for (const p of uploads) console.log(`  - ${p}`);
   if (uploads.length > 0) failed = true;
+  const agent = first
+    ? await managedAgent(first.owner, first.slug, first.token).catch((e) => [String(e)])
+    : ["no library"];
+  console.log(
+    `${agent.length === 0 ? "PASS" : "FAIL"} @tempra answers a mention live, files a request from the home, and work lists it`,
+  );
+  for (const p of agent) console.log(`  - ${p}`);
+  if (agent.length > 0) failed = true;
   // A failure outside a step (signing up, the OAuth connection) is the flow's failure, not the
   // gate's: the checks after it still run.
   const fresh = await freshAccountConnects().catch((e) => [String(e)]);

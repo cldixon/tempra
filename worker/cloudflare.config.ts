@@ -24,6 +24,8 @@ export interface Deployment {
   kv: string;
   /** The blob sweep's Queue (TEMPRA-81): recounts, the bucket listing and the drift scan. */
   queue: string;
+  /** The managed agent's Queue (TEMPRA-222): one message per turn of @tempra. */
+  agentQueue: string;
   /** The address sign-in links and the digest come from (Cloudflare Email Service). */
   mailFrom: string;
   /** Analytics Engine dataset for metering; tempra_usage unless set. */
@@ -46,6 +48,7 @@ const PRODUCTION: Deployment = {
   r2: "tempra-blobs",
   kv: "9e57232de5b940e4b2319f31da509f42",
   queue: "tempra-sweep",
+  agentQueue: "tempra-agent",
   // mail.tempra.dev is onboarded for Cloudflare Email Sending.
   mailFrom: "noreply@mail.tempra.dev",
 };
@@ -58,6 +61,7 @@ const STAGING: Deployment = {
   r2: "tempra-blobs-staging",
   kv: "b63bffc9b65743a99783013effb89324",
   queue: "tempra-sweep-staging",
+  agentQueue: "tempra-agent-staging",
   mailFrom: "noreply@mail.tempra.dev",
   // Staging's traffic and counters stay out of production's (TEMPRA-76). Datasets are created on
   // first write and namespaces are only ids, so neither needs a resource made.
@@ -80,6 +84,7 @@ export function previewDeployment(pr: string, ids: { d1?: string; kv?: string } 
     r2: `tempra-blobs-pr-${pr}`,
     kv: ids.kv ?? "",
     queue: `tempra-sweep-pr-${pr}`,
+    agentQueue: `tempra-agent-pr-${pr}`,
     mailFrom: "noreply@mail.tempra.dev",
     // Previews are short-lived; the daily sweep and digest run on staging and production only,
     // and their traffic stays out of the usage data.
@@ -167,6 +172,16 @@ export default defineConfig(({ mode }) => {
         // retries leaves its state in D1 (a library uncounted or pending, a listing or scan
         // cursor), and the next day's cron sends it again.
         triggers.queue({ name: d.queue, maxBatchSize: 10, maxRetries: 3, retryDelay: 60 }),
+        // The managed agent's turns (TEMPRA-222), one at a time and at once: a person waits on
+        // each. A failed turn is retried once, then says in its thread that it could not answer.
+        // No dead-letter queue.
+        triggers.queue({
+          name: d.agentQueue,
+          maxBatchSize: 1,
+          maxBatchTimeout: 0,
+          maxRetries: 1,
+          retryDelay: 5,
+        }),
       ],
 
       // One SQLite-backed Durable Object per library (spec: Backend architecture). Declared as an
@@ -191,6 +206,9 @@ export default defineConfig(({ mode }) => {
 
         // The blob sweep's Queue: this Worker sends and consumes (src/index.ts queue()).
         SWEEP_QUEUE: bindings.queue({ name: d.queue }),
+        // The managed agent's Queue (TEMPRA-222): comments that ask @tempra send, the Worker
+        // consumes (src/index.ts queue(), by the batch's queue name).
+        AGENT_QUEUE: bindings.queue({ name: d.agentQueue }),
 
         // Cloudflare Images (TEMPRA-153, images.ts): attachments scaled for models and readers,
         // cached in BLOBS under variants/. No resource to create; the account needs the Images
@@ -244,8 +262,8 @@ export default defineConfig(({ mode }) => {
         // answers "render unavailable" without it.
         ...(local ? {} : { RENDER: bindings.worker({ worker: d.render, exportName: "Renderer" }) }),
 
-        // Secrets (typed in src/env.d.ts): OPERATOR_EMAIL. For local dev, copy .dev.vars.sample to
-        // .dev.vars.
+        // Secrets (typed in src/env.d.ts): OPERATOR_EMAIL, ANTHROPIC_API_KEY (the managed agent's
+        // model, TEMPRA-222). For local dev, copy .dev.vars.sample to .dev.vars.
       },
     },
   };

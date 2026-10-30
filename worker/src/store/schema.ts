@@ -178,9 +178,13 @@ CREATE TABLE IF NOT EXISTS flags (
 );
 CREATE INDEX IF NOT EXISTS flags_kind ON flags(kind);
 
+-- A thread's concept_id is '' for a library thread (TEMPRA-222): on the library itself, not a
+-- page, its events' path and concept_id '' too. kind is 'comment' or 'request' (a bigger ask the
+-- managed agent left for people's agents); LibraryStore's addThreadKinds upgrades older libraries.
 CREATE TABLE IF NOT EXISTS threads (
   id           TEXT PRIMARY KEY,
   concept_id   TEXT NOT NULL,
+  kind         TEXT NOT NULL DEFAULT 'comment',
   actor        TEXT NOT NULL,
   anchor       TEXT,
   status       TEXT NOT NULL,
