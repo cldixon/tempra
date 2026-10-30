@@ -126,8 +126,8 @@ These tools have no equivalent in a folder of files. Use them instead of greppin
 | Need | Tool |
 | --- | --- |
 | What others changed recently | `log` |
-| What needs fixing (open comments, stale, broken links, lint, hotlinked images, structure); what goes stale within 14 days (`kind: stale_soon`) | `work` |
-| Requests and questions people left on a concept | `comments`, then `comment` |
+| What needs fixing (open comments, requests, stale, broken links, lint, hotlinked images, structure); what goes stale within 14 days (`kind: stale_soon`) | `work` |
+| Requests and questions people left on a concept or on the library | `comments`, then `comment` |
 | Find by meaning, ranked | `search` |
 | Filter by type, tag, status, trust, staleness | `query` |
 | What links here, and what this links to | `links` |
@@ -141,13 +141,14 @@ A good maintenance session: `start`, `log` to see what changed, `work` to pick a
 
 ## Comments
 
-Comments are how people ask you for changes. A thread sits on a concept, often on a quoted sentence, and stays open until someone resolves it. Comments are not content: they never change the concept or its hash, `log.md` and exported bundles leave them out, and the ledger (`history`, the nightly backup) keeps them.
+Comments are how people ask you for changes. A thread sits on a concept, often on a quoted sentence, or on the library itself (no path; people start those from the library's home), and stays open until someone resolves it. Comments are not content: they never change the concept or its hash, `log.md` and exported bundles leave them out, and the ledger (`history`, the nightly backup) keeps them.
 
 - `read` says when a concept has open comments. Read them with `comments` (pass `path`) before you edit it.
 - Make the change the thread asks for with the normal write tools, then `comment` with `reply` saying what you did, and `resolve` (a resolve can carry that closing reply).
 - Unsure what is meant? `reply` with a question and leave the thread open. If the last reply is yours, wait for an answer.
 - Resolve only what you addressed. `reopen` a thread you resolved by mistake.
-- You can start a thread too (`comment` with `open`, a `path` and optionally a `quote` copied from the body as `read` shows it; it is matched by the text it reads as, markup aside), to ask a person something you cannot decide. Write `@handle` in a comment to address a person who can reach the library: it lands in their inbox (and their mail, if they have it on); `comments` shows who each comment mentioned.
+- You can start a thread too (`comment` with `open`, a `path` and optionally a `quote` copied from the body as `read` shows it; it is matched by the text it reads as, markup aside; with no `path`, on the library itself), to ask a person something you cannot decide. Write `@handle` in a comment to address a person who can reach the library: it lands in their inbox (and their mail, if they have it on); `comments` shows who each comment mentioned. `comments` with an empty `path` lists the library's own threads.
+- A **request** is a thread marked as a bigger ask (a new page, a restructure, research) for people's agents: `work` lists it as a `request` item, and `comments` says `request`. Do the work it asks for, `reply` with what you did, and resolve it. Mark a thread a request yourself with `kind: "request"` on `comment` `open` or `reply` (and `kind: "comment"` to unmark it). Tempra's own agent, @tempra, answers people in threads when they mention it, makes only small edits, and files bigger asks as requests; it never resolves a request.
 - An outdated thread's quote is gone from the body; it may already be fixed. Check, then answer it.
 - A concept with open threads cannot be deleted (409 `open_comments`): answer and resolve them first.
 
