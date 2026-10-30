@@ -1790,7 +1790,7 @@ export function buildServer(ctx: McpContext): McpServer {
       "query",
       {
         title: "Filter by frontmatter",
-        description: `${BEYOND}list concepts by frontmatter: type, tag, status, trust tier, staleness, directory. Faster and exact where grep over YAML is not. Find hot or cold pages by their reads over 30 days: \`sort: "reads"\` (most read first), \`min_reads\`, \`max_reads\` (\`max_reads: 0\` for pages nobody read).`,
+        description: `${BEYOND}list concepts by frontmatter: type, tag, status, trust tier, staleness, directory. Faster and exact where grep over YAML is not. Find hot or cold pages by their reads over 30 days (each reader once a day): \`sort: "reads"\` (most read first), \`min_reads\`, \`max_reads\` (\`max_reads: 0\` for pages nobody read).`,
         inputSchema: {
           type: z.string().optional(),
           tag: z.string().optional(),

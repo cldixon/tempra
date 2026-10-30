@@ -3214,19 +3214,41 @@ export class LibraryStore {
     );
   }
 
-  /** Every concept's reads over the usage window, flushed or not, for `concepts`' sort. */
+  /**
+   * Every concept's reads over the usage window, flushed or not, for `concepts`' sort: as the
+   * read history counts them, each reader once per page and day, and reads from before
+   * TEMPRA-220 (no reader) as they were.
+   */
   private usageCounts(): Map<string, number> {
     const start = this.windowStart();
     const out = new Map<string, number>();
-    for (const r of this.sql.all<{ id: string; n: number }>(
-      "SELECT concept_id AS id, SUM(reads) AS n FROM access_log WHERE day >= ? GROUP BY concept_id",
+    const seen = new Set<string>();
+    const add = (id: string, day: string, kind: string, reader: string, n: number) => {
+      if (!reader) {
+        out.set(id, (out.get(id) ?? 0) + n);
+        return;
+      }
+      const key = `${id}|${day}|${kind}|${reader}`;
+      if (seen.has(key)) return;
+      seen.add(key);
+      out.set(id, (out.get(id) ?? 0) + 1);
+    };
+    for (const r of this.sql.all<{
+      id: string;
+      day: string;
+      kind: string;
+      reader: string;
+      n: number;
+    }>(
+      `SELECT concept_id AS id, day, kind, actor AS reader, SUM(reads) AS n FROM access_log
+       WHERE day >= ? GROUP BY concept_id, day, kind, actor`,
       start,
     )) {
-      out.set(r.id, r.n);
+      add(r.id, r.day, r.kind, r.reader, r.n);
     }
     for (const [day, counts] of this.reads) {
       if (day < start) continue;
-      for (const p of counts.values()) out.set(p.id, (out.get(p.id) ?? 0) + p.n);
+      for (const p of counts.values()) add(p.id, day, p.kind, p.reader, p.n);
     }
     return out;
   }
@@ -3844,8 +3866,21 @@ export class LibraryStore {
    * sources, links and versions, found by the concept's own path however it was asked for. The
    * app made five requests for these; the separate routes stay for agents and the API.
    */
-  page(input: string, opts: { at?: number } = {}) {
-    const file = this.read(input, { at: opts.at, images: true });
+  page(
+    input: string,
+    opts: {
+      at?: number;
+      /**
+       * Shown to the person an agent works for (MCP `show`, the page panel): their read, not the
+       * agent's (TEMPRA-220).
+       */
+      shown?: boolean;
+    } = {},
+  ) {
+    const r = this.reader;
+    const asPerson: Reading | null =
+      opts.shown && r?.person ? { surface: r.surface, kind: "person", reader: r.person } : r;
+    const file = this.reading(asPerson, () => this.read(input, { at: opts.at, images: true }));
     const head = this.headSeq();
     if (file.kind !== "concept") return { file, head };
     const id = this.snapshot().lookup(file.path)?.concept_id;

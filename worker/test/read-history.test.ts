@@ -2,7 +2,8 @@ import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { agoText, type ReadHistory, type Reading, readsText } from "../src/store/reads";
+import { callerOf, readingOf } from "../src/feed";
+import { agoText, type ReadHistory, type Reading, readerKey, readsText } from "../src/store/reads";
 import type { SqlHandle } from "../src/store/sql";
 import { LibraryStore } from "../src/store/store";
 import { DAY, md } from "./changes";
@@ -70,13 +71,15 @@ describe("read history in the store", () => {
     store.reading(agentMcp, () => store.read("p.md"));
     clock.t += 10 * DAY;
 
+    // Each reader once a day: agt_1 twice over MCP is one read, and the person over MCP and in
+    // the app is one read, on both surfaces.
     const h = historyOf(store, "p.md");
-    expect(h.week).toEqual({ total: 5, agents: 3, people: 2, mcp: 3, app: 1, api: 1, readers: 3 });
+    expect(h.week).toEqual({ total: 3, agents: 2, people: 1, mcp: 2, app: 1, api: 1, readers: 3 });
     expect(h.month).toEqual({
-      total: 6,
-      agents: 4,
-      people: 2,
-      mcp: 4,
+      total: 4,
+      agents: 3,
+      people: 1,
+      mcp: 3,
       app: 1,
       api: 1,
       readers: 3,
@@ -94,7 +97,48 @@ describe("read history in the store", () => {
     // Worker's own, a store test's) still counts, in totals only, as reads did before.
     const computed = store.read("p.md", { computed: true });
     expect(computed.kind === "concept" && computed.markdown).toContain("usage_count: 6");
-    expect(historyOf(store, "p.md").month).toMatchObject({ total: 7, agents: 4, people: 2 });
+    expect(historyOf(store, "p.md").month).toMatchObject({ total: 5, agents: 3, people: 1 });
+  });
+
+  test("a reader counts once per page and day; the last read still moves", () => {
+    const { store, clock } = library();
+    for (let i = 0; i < 5; i++) store.reading(agentMcp, () => store.read("p.md"));
+    for (let i = 0; i < 3; i++) {
+      clock.t += 60_000;
+      store.reading(personApp, () => store.viewed("p.md"));
+    }
+    let h = historyOf(store, "p.md");
+    expect(h.week).toMatchObject({ total: 2, agents: 1, people: 1, mcp: 1, app: 1, readers: 2 });
+    expect(h.last.app).toBe("2026-10-20T12:03:00Z");
+    // The next day they count again; still two readers.
+    clock.t += DAY;
+    store.reading(agentMcp, () => store.read("p.md"));
+    store.reading(personApp, () => store.viewed("p.md"));
+    store.flushReads();
+    h = historyOf(store, "p.md");
+    expect(h.week).toMatchObject({ total: 4, agents: 2, people: 2, readers: 2 });
+    // The raw count stays for usage_count, as before.
+    const computed = store.read("p.md", { computed: true });
+    expect(computed.kind === "concept" && computed.markdown).toContain("usage_count: 10");
+  });
+
+  test("a page an agent shows its person (MCP show) is the person's read", () => {
+    const { store } = library();
+    const forPerson: Reading = { ...agentMcp, person: "p:user_1" };
+    store.reading(forPerson, () => store.page("p.md", { shown: true }));
+    expect(historyOf(store, "p.md").week).toMatchObject({
+      total: 1,
+      agents: 0,
+      people: 1,
+      mcp: 1,
+    });
+    // Their own open the same day adds the app, not a read.
+    store.reading(personApp, () => store.viewed("p.md"));
+    expect(historyOf(store, "p.md").week).toMatchObject({ total: 1, people: 1, mcp: 1, app: 1 });
+    // The agent's own page read, or one with no person known, stays the agent's.
+    store.reading(forPerson, () => store.page("q.md"));
+    store.reading(agentMcp, () => store.page("q.md", { shown: true }));
+    expect(historyOf(store, "q.md").week).toMatchObject({ total: 1, agents: 1, people: 0 });
   });
 
   test("the app's reads count only from the page it shows, never from its GETs", () => {
@@ -201,7 +245,10 @@ describe("read history in the store", () => {
   test("concepts sort by reads and filter by bounds over 30 days", () => {
     const { store } = library();
     store.apply(ctx(), [{ op: "write", path: "r.md", content: md("T r", "Rare.\n") }]);
-    for (let i = 0; i < 3; i++) store.reading(agentMcp, () => store.read("q.md"));
+    // Three readers of q (one of them twice: still once that day), one of r.
+    for (const r of [agentMcp, agentMcp, otherAgentApi, personApp]) {
+      store.reading(r, () => (r === personApp ? store.viewed("q.md") : store.read("q.md")));
+    }
     store.reading(agentMcp, () => store.read("r.md"));
     const hot = store.concepts({ sort: "reads" });
     expect(hot.items.map((c) => [c.path, "reads" in c ? c.reads : null])).toEqual([
@@ -212,6 +259,32 @@ describe("read history in the store", () => {
     expect(store.concepts({ max_reads: 0 }).items.map((c) => c.path)).toEqual(["p.md"]);
     expect(store.concepts({ min_reads: 1 }).items.map((c) => c.path)).toEqual(["q.md", "r.md"]);
     expect(store.concepts({}).items.every((c) => !("reads" in c))).toBe(true);
+  });
+
+  test("reader keys are hashed: no raw person or actor id is stored", () => {
+    const agent = readingOf(
+      callerOf({ actor: "claude-code/dev", created_by: "user_1", agent: "agt_1" }, "mcp"),
+    );
+    const session = readingOf(
+      callerOf({ id: "session:user_1", actor: "human:dev", created_by: "user_1" }),
+    );
+    for (const key of [agent.reader, agent.person, session.reader]) {
+      expect(key).toMatch(/^[0-9a-f]{32}$/);
+    }
+    expect(JSON.stringify([agent, session])).not.toMatch(/user_1|agt_1|claude-code|human:/);
+    expect(agent).toMatchObject({ surface: "mcp", kind: "agent", reader: readerKey("a:agt_1") });
+    // The person an agent acts for is the same key as the person's own session.
+    expect(agent.person).toBe(session.reader);
+    expect(session).toMatchObject({ surface: "app", kind: "person" });
+    // Stored as such.
+    const { store, db } = library();
+    store.reading(agent, () => store.read("p.md"));
+    store.reading(session, () => store.viewed("p.md"));
+    store.flushReads();
+    const stored = db.query("SELECT actor FROM access_log ORDER BY actor").all() as {
+      actor: string;
+    }[];
+    expect(stored.map((r) => r.actor).sort()).toEqual([agent.reader, session.reader].sort());
   });
 
   test("the reads line agents read", () => {
@@ -271,11 +344,12 @@ describe("read history over MCP and REST", () => {
     const call = await connect(s.app);
     await call("read", { path: "a.md" });
     const second = await call("read", { path: "a.md" });
-    expect(second).toContain("reads: 2 in 7 days (2 by agents · mcp 2), 2 in 30 days by 1 reader");
+    // Read twice the same day: one read.
+    expect(second).toContain("reads: 1 in 7 days (1 by agents · mcp 1), 1 in 30 days by 1 reader");
     expect(second).toContain("last read just now (mcp)");
     // A person's human: token over MCP is a person, over MCP.
     const mine = await connect(s.app, "human");
-    expect(await mine("read", { path: "a.md" })).toContain("(2 by agents, 1 by people · mcp 3)");
+    expect(await mine("read", { path: "a.md" })).toContain("(1 by agents, 1 by people · mcp 2)");
     // Never who.
     const line = second.split("\n").find((l) => l.startsWith("reads:")) ?? "";
     expect(line).not.toMatch(/claude-code|human:|agt|user_/);
@@ -287,9 +361,12 @@ describe("read history over MCP and REST", () => {
     const r = await pageReads(s, "writer");
     expect(r.week).toMatchObject({ total: 1, agents: 1, api: 1 });
     expect(r.last.api).not.toBeNull();
-    // GET …/files with a token counts too.
+    // GET …/files with a token counts too: the same agent again that day adds nothing; another
+    // reader adds one.
     await s.req("/files/a.md", { token: "writer" });
-    expect((await pageReads(s)).week.api).toBe(2);
+    expect((await pageReads(s)).week.api).toBe(1);
+    await s.req("/files/a.md", { token: "reader" });
+    expect((await pageReads(s)).week).toMatchObject({ total: 2, agents: 2, api: 2, readers: 2 });
   });
 
   test("a person's app reads count once per page opened, not per prefetch or re-check", async () => {
@@ -321,6 +398,9 @@ describe("read history over MCP and REST", () => {
     });
     expect(body.reads.last.app).not.toBeNull();
     expect((await pageReads(s)).week.app).toBe(1);
+    // Opened again the same day: no more reads.
+    await s.app.request(`${API}/read/a.md`, { method: "POST", headers: { Origin: ORIGIN } });
+    expect((await pageReads(s)).week).toMatchObject({ total: 1, people: 1, app: 1 });
     // Not a ledger event.
     const events = (await (await s.req("/history/a.md")).json()) as { events: { op: string }[] };
     expect(events.events.map((e) => e.op)).toEqual(["put"]);
@@ -351,11 +431,42 @@ describe("read history over MCP and REST", () => {
     const call = await connect(s.app);
     await call("read", { path: "b.md" });
     await call("read", { path: "b.md" });
+    await (await connect(s.app, "reader"))("read", { path: "b.md" });
     const hot = await call("query", { sort: "reads" });
     expect(hot.indexOf("b.md")).toBeLessThan(hot.indexOf("a.md"));
+    // Two readers, one of them twice: two reads.
     expect(hot).toContain("b.md · Note · stable (not set) · unverified · 2 reads in 30 days");
     const cold = await call("query", { max_reads: 0 });
     expect(cold).toContain("1 matching concept:");
     expect(cold).toContain("a.md · Note");
+  });
+
+  test("MCP show is the person's read, and counts with their own app read once", async () => {
+    const s = setup();
+    const other = await s.stranger();
+    const api = `/api/v1/libraries/${other.user.handle}/demo`;
+    const put = await s.anon.request(`${api}/files/x.md`, {
+      method: "PUT",
+      headers: { Authorization: `Bearer ${other.writer}`, "Content-Type": "text/markdown" },
+      body: "---\ntype: Note\ntitle: X\n---\nText.\n",
+    });
+    expect(put.status).toBe(200);
+    const agent = await connect(s.app, other.writer);
+    expect(await agent("show", { path: "x.md" })).not.toContain("Error");
+    const reads = async () =>
+      ((await (await other.app.request(`${api}/page/x.md`)).json()) as { reads: ReadHistory })
+        .reads;
+    expect((await reads()).week).toMatchObject({ total: 1, agents: 0, people: 1, mcp: 1 });
+    await other.app.request(`${api}/read/x.md`, { method: "POST", headers: { Origin: ORIGIN } });
+    expect((await reads()).week).toMatchObject({
+      total: 1,
+      people: 1,
+      mcp: 1,
+      app: 1,
+      readers: 1,
+    });
+    // The agent's own read is the agent's.
+    await agent("read", { path: "x.md" });
+    expect((await reads()).week).toMatchObject({ total: 2, agents: 1, people: 1, readers: 2 });
   });
 });

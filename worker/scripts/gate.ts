@@ -3675,7 +3675,12 @@ async function browserRenders(
       "read history: Properties and MCP read report reads; hovering counts none",
       async () => {
         type Counts = { total: number; agents: number; people: number; mcp: number; app: number };
-        type Reads = { week: Counts; month: Counts; last_read: string | null };
+        type Reads = {
+          week: Counts;
+          month: Counts;
+          last: { mcp: string | null; app: string | null };
+          last_read: string | null;
+        };
         const api = `/api/v1/libraries/${owner}/${slug}`;
         /** A page's reads, as the app's own GET sees them (a session's GET counts nothing). */
         const readsOf = async (p: string) =>
@@ -3730,6 +3735,7 @@ async function browserRenders(
           return text.split("\n").find((l) => l.startsWith("reads: ")) ?? "";
         };
         try {
+          const started = Date.now();
           const first = await mcpRead();
           if (!first) throw new Error("MCP read has no reads line");
           // The person opens it, from the tree (loaded ahead already).
@@ -3737,24 +3743,46 @@ async function browserRenders(
           await page.waitForURL((u) => decodeURIComponent(u.pathname).endsWith(`/${target}`));
           await main.locator(".body .prose").waitFor({ timeout: 15_000 });
           const was = before.get(target) as Reads;
-          const want = { total: was.week.total + 2, agents: was.week.agents + 1 };
-          // Counted once for the person, however many requests the page made.
+          // Each reader counts once per page and day (TEMPRA-220): the gate's one person and its
+          // agent may have read this page earlier today, so the counts are what they would be
+          // with both of them among today's readers.
+          const recent = (at: string | null | undefined) =>
+            !!at && Date.parse(at) >= started - 2000;
           const deadline = Date.now() + 10_000;
           let got = await readsOf(target);
-          while (got.week.people < was.week.people + 1 && Date.now() < deadline) {
+          while (!recent(got.last.app) && Date.now() < deadline) {
             await page.waitForTimeout(200);
             got = await readsOf(target);
           }
-          if (
-            got.week.total !== want.total ||
-            got.week.agents !== want.agents ||
-            got.week.people !== was.week.people + 1 ||
-            got.week.app !== was.week.app + 1 ||
-            got.week.mcp !== was.week.mcp + 1
-          ) {
-            throw new Error(
-              `reads after an agent's read and one open: ${JSON.stringify(got.week)}, before ${JSON.stringify(was.week)}`,
-            );
+          const counted = (r: Reads, where: string) => {
+            const w = r.week;
+            if (
+              !recent(r.last.app) ||
+              !recent(r.last.mcp) ||
+              w.people !== Math.max(was.week.people, 1) ||
+              w.agents < Math.max(was.week.agents, 1) ||
+              w.agents > was.week.agents + 1 ||
+              w.total !== w.agents + w.people ||
+              w.app < 1 ||
+              w.mcp < 1
+            ) {
+              throw new Error(
+                `reads ${where}: ${JSON.stringify(r)}, before ${JSON.stringify(was.week)}`,
+              );
+            }
+          };
+          counted(got, "after an agent's read and one open");
+          // Opened again the same day: no more reads.
+          await page.goto(url);
+          await main.locator(".body .prose").waitFor({ timeout: 15_000 });
+          await sidebar.locator(`a[data-path="${target}"]`).click();
+          await page.waitForURL((u) => decodeURIComponent(u.pathname).endsWith(`/${target}`));
+          await main.locator(".body .prose").waitFor({ timeout: 15_000 });
+          await page.waitForTimeout(500);
+          const again = await readsOf(target);
+          counted(again, "after opening it again");
+          if (again.week.total !== got.week.total) {
+            throw new Error(`opening it again counted: ${got.week.total} then ${again.week.total}`);
           }
           // Properties, in people's words.
           await more("Properties");
@@ -3764,10 +3792,11 @@ async function browserRenders(
               .locator(".fact")
               .filter({ has: page.locator("dt", { hasText: new RegExp(`^${name}$`) }) })
               .locator("dd");
-          const times = `${want.total} time${want.total === 1 ? "" : "s"} this week`;
-          const by = want.agents === want.total ? ", all by agents" : `, ${want.agents} by agents`;
+          const w = again.week;
+          const times = `${w.total} time${w.total === 1 ? "" : "s"} this week`;
+          const by = w.agents === w.total ? ", all by agents" : `, ${w.agents} by agents`;
           await fact("Read")
-            .filter({ hasText: `${times}${by}` })
+            .filter({ hasText: new RegExp(`^${times}${by}$`) })
             .waitFor({ timeout: 5000 })
             .catch(async () => {
               throw new Error(`Properties' Read says "${await fact("Read").innerText()}"`);
@@ -3781,11 +3810,13 @@ async function browserRenders(
           }
           if (shots) await properties().screenshot({ path: `${shots}/properties-reads.png` });
           await page.getByRole("button", { name: "Close properties" }).click();
-          // MCP read reports both, by surface and by kind.
+          // MCP read reports both, by surface and by kind; the agent reading again that day adds
+          // nothing.
           const line = await mcpRead();
-          const agentsNow = want.agents + 1;
           if (
-            !line.startsWith(`reads: ${want.total + 1} in 7 days (${agentsNow} by agents, `) ||
+            !line.startsWith(
+              `reads: ${w.total} in 7 days (${w.agents} by agents, ${w.people} by people · `,
+            ) ||
             !/ · mcp \d+, app \d+/.test(line) ||
             !/; last read .*just now \(mcp\)/.test(line) ||
             !/; last read .*just now \(app\)/.test(line)

@@ -3,6 +3,7 @@
  * recently, by surface and by agent or person, never by whom. Counted in memory and flushed in
  * batches as TEMPRA-87 counts reads (store.ts), so a read never writes. Free of Worker APIs.
  */
+import { sha256Hex } from "../okf/hash";
 
 /** Where a read came from: MCP, the app (a person's session), or the REST API with a token. */
 export type ReadSurface = "mcp" | "app" | "api";
@@ -12,18 +13,33 @@ export const READ_SURFACES: readonly ReadSurface[] = ["mcp", "app", "api"];
 export type ReaderKind = "agent" | "person";
 
 /**
- * The reader behind a library call, as the Worker says (feed.ts `readingOf`). `reader` is a key
- * for counting distinct readers (an agent's id, a person's id); it is stored and never shown.
+ * The reader behind a library call, as the Worker says (feed.ts `readingOf`). `reader` is a
+ * hashed key (`readerKey`) for counting a reader once a day and distinct readers; it is stored
+ * and never shown. `person` is the hashed key of the person an agent acts for, so a page an agent
+ * shows the person (MCP `show`) counts as the person's read.
  */
 export interface Reading {
   surface: ReadSurface;
   kind: ReaderKind;
   reader: string;
+  person?: string;
+}
+
+/**
+ * A reader's stored key: a SHA-256 of who it is (`a:<agent>` or `p:<person>`), so the read log
+ * keeps no raw person or actor id. Synchronous (okf/hash.ts, not WebCrypto).
+ */
+export function readerKey(who: string): string {
+  return sha256Hex(`tempra-reader:${who}`).slice(0, 32);
 }
 
 /** Reads over one window: in all, by agents and people, by surface, and how many readers. */
 export interface ReadCounts {
-  /** Every read, those from before TEMPRA-220 (no surface or kind) included. */
+  /**
+   * Reads, each reader counted once per page and day (a person opening it again that day, or an
+   * agent reading it again, adds nothing); those from before TEMPRA-220, with no reader, as
+   * they were counted.
+   */
   total: number;
   agents: number;
   people: number;
@@ -65,19 +81,38 @@ const empty = (): ReadCounts => ({
   readers: 0,
 });
 
-/** Counts rows from `start` (a YYYY-MM-DD day) on. */
+/**
+ * Counts rows from `start` (a YYYY-MM-DD day) on, each reader once per day: in all, by kind and
+ * on each surface it read on that day (so the surfaces can add up to more than the total when a
+ * reader used two). Rows with no reader (from before TEMPRA-220) count in the total only.
+ */
 export function tallyReads(rows: ReadRow[], start: string): ReadCounts {
   const out = empty();
+  const days = new Set<string>();
+  const onSurface = new Set<string>();
   const readers = new Set<string>();
   for (const r of rows) {
     if (r.day < start || r.reads <= 0) continue;
-    out.total += r.reads;
-    if (r.kind === "agent") out.agents += r.reads;
-    else if (r.kind === "person") out.people += r.reads;
-    if (r.surface === "mcp" || r.surface === "app" || r.surface === "api") {
-      out[r.surface] += r.reads;
+    if (!r.reader) {
+      out.total += r.reads;
+      continue;
     }
-    if (r.reader) readers.add(`${r.kind}|${r.reader}`);
+    const who = `${r.kind}|${r.reader}`;
+    readers.add(who);
+    const day = `${r.day}|${who}`;
+    if (!days.has(day)) {
+      days.add(day);
+      out.total++;
+      if (r.kind === "agent") out.agents++;
+      else if (r.kind === "person") out.people++;
+    }
+    if (r.surface === "mcp" || r.surface === "app" || r.surface === "api") {
+      const key = `${r.surface}|${day}`;
+      if (!onSurface.has(key)) {
+        onSurface.add(key);
+        out[r.surface]++;
+      }
+    }
   }
   out.readers = readers.size;
   return out;

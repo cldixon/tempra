@@ -5,7 +5,7 @@
  */
 import type { ActedBy } from "./agents";
 import { normalizeDir, underPrefix } from "./okf/paths";
-import type { ReaderKind, Reading, ReadSurface } from "./store/reads";
+import { type ReaderKind, type Reading, type ReadSurface, readerKey } from "./store/reads";
 import type { EventRow } from "./store/store";
 
 /** One event as the feed sends it. */
@@ -217,12 +217,17 @@ export function callerOf(
 }
 
 /**
- * The reader a call counts its reads as (TEMPRA-220): its surface and kind, and a key for
- * distinct readers (the agent, else the person, else the actor), stored and never shown.
+ * The reader a call counts its reads as (TEMPRA-220): its surface and kind, a key for the reader
+ * (the agent, else the person, else the actor) and for the person it acts for, both hashed
+ * (`readerKey`): stored, never shown, and no raw id in the read log.
  */
 export function readingOf(c: Caller): Reading {
-  const key = c.reader === "agent" ? `a:${c.by?.agent ?? c.actor}` : `p:${c.by?.person ?? c.actor}`;
-  return { surface: c.surface, kind: c.reader, reader: key };
+  const person = c.by?.person ? readerKey(`p:${c.by.person}`) : undefined;
+  const reader =
+    c.reader === "agent"
+      ? readerKey(`a:${c.by?.agent ?? c.actor}`)
+      : (person ?? readerKey(`p:${c.actor}`));
+  return { surface: c.surface, kind: c.reader, reader, ...(person ? { person } : {}) };
 }
 
 /** The least time between two presence messages for one agent and file. */
