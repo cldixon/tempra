@@ -350,6 +350,24 @@ describe("a turn", () => {
     expect((await thread(s, id)).comments.at(-1)?.body).toBe("Margin is revenue minus cost.");
   });
 
+  test("its reply naming @tempra is not a mention of itself", async () => {
+    const s = setup();
+    await seed(s);
+    enable(s);
+    const { jobs } = wire(s);
+    const { job } = await ask(s, jobs, "@tempra how do I ask you?");
+    const { model } = scripted([end("Mention @tempra in a comment and I reply.")]);
+    await runTurn(turnDeps(s, model), job as AgentJob);
+    const t = (await (await s.app.request(`${API}/comments?status=all`)).json()) as {
+      threads: { comments: { actor: string; mentions?: string[] }[] }[];
+    };
+    const reply = t.threads[0]?.comments.at(-1);
+    expect(reply?.actor).toBe(AGENT_ACTOR);
+    expect(reply?.mentions ?? []).toEqual([]);
+    // And its reply asked for no further turn.
+    expect(jobs).toHaveLength(1);
+  });
+
   test("a refusal says it cannot help; a retried job already answered does nothing", async () => {
     const s = setup();
     await seed(s);

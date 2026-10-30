@@ -495,7 +495,11 @@ export async function postComment(
   const body = typeof action.body === "string" ? action.body : "";
   // The owner comes first in `people` when the library is found.
   const agents = await managedAgents(d, people[0]?.id).catch(() => []);
-  const mentions = body ? resolveMentions(body, people, agents) : [];
+  // The managed agent naming itself in its reply ("mention @tempra…") is not a mention of it.
+  const self = ctx.actor === AGENT_ACTOR;
+  const mentions = body
+    ? resolveMentions(body, people, agents).filter((m) => !(self && "agent" in m))
+    : [];
   const res = await lib.comment(ctx, { ...action, mentions });
   try {
     await fanOut(d, token, ctx, action, res, people, mentions);
