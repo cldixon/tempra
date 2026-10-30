@@ -20,3 +20,15 @@ export function offered(people: string[], query: string): string[] {
     .sort((a, b) => Number(a === query) - Number(b === query) || a.localeCompare(b))
     .slice(0, 6);
 }
+
+/** A key event's own parts, as the comment box reads them. */
+type Keyed = Pick<KeyboardEvent, "key" | "shiftKey" | "isComposing" | "keyCode">;
+
+/** A key that is an input method's, mid-composition (229 is what Safari sends for its Enter). */
+export const composing = (e: Keyed) => e.isComposing || e.keyCode === 229;
+
+/**
+ * Whether a key sends the comment (TEMPRA-223): Enter, Ctrl+Enter or Cmd+Enter does; Shift+Enter
+ * is a new line, and an input method's Enter, mid-composition, is the method's.
+ */
+export const sendsComment = (e: Keyed) => e.key === "Enter" && !e.shiftKey && !composing(e);

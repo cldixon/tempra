@@ -1,7 +1,11 @@
 <script lang="ts">
-  import { mentionAt, offered } from "./mentions";
+  import { composing, mentionAt, offered, sendsComment } from "./mentions";
 
-  /** A textarea that offers handles after @; Up and Down choose, Enter or Tab takes one. */
+  /**
+   * A textarea that offers handles after @; Up and Down choose, Enter or Tab takes one. With
+   * `onSend` (every comment box, TEMPRA-223), Enter sends what is written and Shift+Enter is a new
+   * line; an empty box sends nothing, and an input method's Enter is its own.
+   */
   let {
     value,
     onValue,
@@ -11,6 +15,7 @@
     placeholder,
     onkeydown,
     onblur,
+    onSend,
   }: {
     value: string;
     onValue(v: string): void;
@@ -21,6 +26,8 @@
     placeholder?: string;
     onkeydown?(e: KeyboardEvent & { currentTarget: HTMLTextAreaElement }): void;
     onblur?(e: FocusEvent & { currentTarget: HTMLTextAreaElement }): void;
+    /** Enter sends: what to do with the text (never called for an empty box). */
+    onSend?(): void;
   } = $props();
 
   let at = $state<{ start: number; query: string } | null>(null);
@@ -47,7 +54,7 @@
     });
   }
   function keys(e: KeyboardEvent & { currentTarget: HTMLTextAreaElement }) {
-    if (open) {
+    if (open && !composing(e)) {
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
         const step = e.key === "ArrowDown" ? 1 : -1;
@@ -66,6 +73,11 @@
         at = null;
         return;
       }
+    }
+    if (onSend && sendsComment(e)) {
+      e.preventDefault();
+      if (value.trim()) onSend();
+      return;
     }
     onkeydown?.(e);
   }
