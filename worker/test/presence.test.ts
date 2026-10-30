@@ -3,12 +3,13 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import {
   broadcastPresence,
+  type Caller,
+  callerOf,
   FEED_MAX_AGE_MS,
   type FeedMessage,
   PRESENCE_THROTTLE_MS,
   Presence,
   type PresenceMessage,
-  presenceCaller,
   presencePaths,
 } from "../src/feed";
 import { API, setup } from "./harness";
@@ -16,7 +17,12 @@ import { API, setup } from "./harness";
 // Agents' presence on the change feed (TEMPRA-219): what an agent reads now, sent to the
 // library's sockets, throttled, never for people, never for a search, never stored.
 
-const agent = { actor: "claude-code/test", by: { person: "user_1", agent: "agt_1" } };
+const agent: Caller = {
+  actor: "claude-code/test",
+  by: { person: "user_1", agent: "agt_1" },
+  surface: "mcp",
+  reader: "agent",
+};
 const concept = (path: string) => ({ kind: "concept", path, hash: "h" });
 
 describe("presence messages", () => {
@@ -31,12 +37,27 @@ describe("presence messages", () => {
 
   test("people are never presence: a human actor, or no caller at all", () => {
     const p = new Presence();
-    expect(presenceCaller({ actor: "human:owner", created_by: "user_1" })).toBeNull();
-    expect(p.message({ actor: "human:owner", by: null }, "read", concept("a.md"))).toBeNull();
+    const person = callerOf({ id: "session:user_1", actor: "human:owner", created_by: "user_1" });
+    expect(person).toEqual({
+      actor: "human:owner",
+      by: { person: "user_1" },
+      surface: "app",
+      reader: "person",
+    });
+    expect(p.message(person, "read", concept("a.md"))).toBeNull();
+    expect(
+      p.message(
+        { actor: "human:owner", by: null, surface: "api", reader: "person" },
+        "read",
+        concept("a.md"),
+      ),
+    ).toBeNull();
     expect(p.message(null, "read", concept("a.md"))).toBeNull();
-    expect(presenceCaller({ actor: "claude-code/x", created_by: "u", agent: "agt" })).toEqual({
+    expect(callerOf({ actor: "claude-code/x", created_by: "u", agent: "agt" }, "mcp")).toEqual({
       actor: "claude-code/x",
       by: { person: "u", agent: "agt" },
+      surface: "mcp",
+      reader: "agent",
     });
   });
 

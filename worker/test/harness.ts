@@ -24,11 +24,12 @@ import {
   makeClient,
   recordingBlobStore,
 } from "../src/client";
-import { Presence, type PresenceMessage, presenceCaller } from "../src/feed";
+import { callerOf, Presence, type PresenceMessage, readingOf } from "../src/feed";
 import { d1Notifications } from "../src/notify";
 import { sha256Hex } from "../src/okf/hash";
 import type { RestoreRecord } from "../src/recovery";
 import { d1Sessions, SESSION_COOKIE } from "../src/session";
+import type { ReadSurface } from "../src/store/reads";
 import { LibraryStore } from "../src/store/store";
 import type { UsageEvent } from "../src/usage";
 import { bunD1 } from "./d1";
@@ -259,6 +260,7 @@ export function setup() {
         const result = await callStore(store, blobs, method, args, {
           storageLimitBytes: limits.storageBytes,
           references: (hashes) => d1BlobRefs(d1).reference(doId, hashes, new Date()),
+          reading: caller ? readingOf(caller) : null,
         });
         const message = caller && result.ok ? hub.message(caller, method, result.value) : null;
         if (message) presence.push({ doId, message });
@@ -270,8 +272,8 @@ export function setup() {
   };
   const clients = new Map<string, LibraryClient>();
   /** The library's client without a caller (the Worker's own calls), or for a token's caller. */
-  const clientFor = (doId: string, token?: TokenInfo) => {
-    const caller = token ? presenceCaller(token) : null;
+  const clientFor = (doId: string, token?: TokenInfo, surface?: ReadSurface) => {
+    const caller = token ? callerOf(token, surface) : null;
     if (caller) return makeClient(callFor(doId), caller);
     let c = clients.get(doId);
     if (!c) {
@@ -433,7 +435,7 @@ export function setup() {
     },
     meter: (e) => usage.push(e),
     blobs: recordingBlobStore(blobs, d1BlobRefs(d1)),
-    library: (token) => clientFor(token.library.do_id, token),
+    library: (token, surface) => clientFor(token.library.do_id, token, surface),
     libraryByDoId: async (doId) =>
       db.query("SELECT 1 FROM libraries WHERE do_id = ?").get(doId) ? clientFor(doId) : null,
   };

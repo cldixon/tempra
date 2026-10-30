@@ -8,6 +8,7 @@
   import { changesSince } from "./checked";
   import { useCheck } from "./checked.svelte.ts";
   import { actedBy, type Concept, type Json, type Links, type Standing } from "./data";
+  import { type ReadHistory, readWords } from "./reads";
 
   /**
    * The Properties panel (take 4, TEMPRA-114; TEMPRA-122 and 134; tempra-dev: app/reader, The
@@ -22,6 +23,8 @@
     links: Links;
     head: number;
     standing: Standing;
+    /** How much it is read and how recently (TEMPRA-220): counts only, never who. */
+    reads: ReadHistory | null;
     name: Namer;
     /** The page is current (not a pinned old version), so it can be checked. */
     current: boolean;
@@ -90,7 +93,11 @@
   >{#if last}<div class="fact"
       ><dt>Last changed</dt><dd><span><AgentName who={props.name(last.actor, actedBy(last))} />, <Moment ts={last.ts} /></span></dd></div
     >{/if}<div class="fact"><dt>Type</dt><dd>{#if type !== null}{type}{:else}{@render notSet()}{/if}</dd></div
-  >{#if tags}<div class="fact"><dt>Tags</dt><dd>{tags}</dd></div>{/if}<div class="fact"
+  >{#if tags}<div class="fact"><dt>Tags</dt><dd>{tags}</dd></div>{/if}{#if props.reads}<div class="fact"
+      ><dt>Read</dt><dd>{readWords(props.reads)}</dd></div
+    ><div class="fact"
+      ><dt>Last read</dt><dd>{#if props.reads.last_read}<Moment ts={props.reads.last_read} />{:else}<span class="muted">not yet</span>{/if}</dd></div
+    >{/if}<div class="fact"
     ><dt>Sources</dt><dd>{#if sources > 0}<a href="#doc-sources">{plural(sources, "source")}</a>{:else}None{/if}</dd></div
   ></dl
 ><section class="panel-section"

@@ -4,6 +4,7 @@ import { api } from "../api";
 import type { ImageRef } from "../images";
 import { registerPage } from "../prefetch";
 import { baseName, dirOf, enc, type Urls } from "../urls";
+import type { ReadHistory } from "./reads";
 
 /**
  * What a file's page loads (tempra-dev: app/reader): the file and, for a concept, everything its
@@ -114,6 +115,8 @@ export interface ConceptData {
   sources: Sources;
   links: Links;
   history: HistoryEvent[];
+  /** How much the page is read and how recently (TEMPRA-220); null when not known. */
+  reads: ReadHistory | null;
 }
 
 /** What a file's page shows: the file, the head, and for a concept its context. */
@@ -152,6 +155,7 @@ type PageJson =
       sources: Sources;
       links: Links;
       history: { events: HistoryEvent[] };
+      reads?: ReadHistory | null;
     }
   | { file: Exclude<FileJson, Concept>; head: number };
 
@@ -164,7 +168,11 @@ export async function loadFile(urls: Urls, path: string): Promise<FileData> {
   const page = await api<PageJson>(urls.api(`page/${enc(path)}`, { at: urls.at }));
   if (!("sources" in page)) return { file: page.file, head: page.head, extra: null };
   const { file, head, sources, links, history } = page;
-  return { file, head, extra: { concept: file, sources, links, history: history.events } };
+  return {
+    file,
+    head,
+    extra: { concept: file, sources, links, history: history.events, reads: page.reads ?? null },
+  };
 }
 
 // What a file's page loads: loaded ahead from links and the switcher, awaited by a navigation.

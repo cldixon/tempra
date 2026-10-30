@@ -5,6 +5,7 @@
  */
 import type { ActedBy } from "./agents";
 import { normalizeDir, underPrefix } from "./okf/paths";
+import { type ReaderKind, type Reading, type ReadSurface, readerKey } from "./store/reads";
 import type { EventRow } from "./store/store";
 
 /** One event as the feed sends it. */
@@ -165,10 +166,17 @@ export function broadcast(
  */
 export type PresenceKind = "reading" | "writing";
 
-/** Who a presence message is about: an agent's actor and, when known, its person and agent. */
-export interface PresenceCaller {
+/**
+ * Who makes a library call: the actor and, when known, its person and agent (presence,
+ * TEMPRA-219); where the call came from and whether the reader is an agent or a person (read
+ * history, TEMPRA-220). Every call a token or a session makes carries one; the Worker's own calls
+ * (downloads by a signed link, maintenance) carry none.
+ */
+export interface Caller {
   actor: string;
   by: ActedBy | null;
+  surface: ReadSurface;
+  reader: ReaderKind;
 }
 
 /**
@@ -187,21 +195,39 @@ export interface PresenceMessage {
 export const isPersonActor = (actor: string) => actor.startsWith("human:");
 
 /**
- * The caller a library call carries for presence: an agent's actor and who it acts for, or
- * null for a person (the app's session, a `human:` token), whose reads say nothing.
+ * The caller behind a token (a session's included): an agent, or a person (`human:` actors and
+ * the app's sessions), on `surface`: MCP when the /mcp route says so, else the app for a session
+ * and the REST API for a bearer token.
  */
-export function presenceCaller(t: {
-  actor: string;
-  created_by?: string | null;
-  agent?: string;
-}): PresenceCaller | null {
-  if (isPersonActor(t.actor)) return null;
+export function callerOf(
+  t: { id?: string; actor: string; created_by?: string | null; agent?: string },
+  surface?: ReadSurface,
+): Caller {
   const by: ActedBy | null = t.created_by
     ? t.agent
       ? { person: t.created_by, agent: t.agent }
       : { person: t.created_by }
     : null;
-  return { actor: t.actor, by };
+  return {
+    actor: t.actor,
+    by,
+    surface: surface ?? (t.id?.startsWith("session:") ? "app" : "api"),
+    reader: isPersonActor(t.actor) ? "person" : "agent",
+  };
+}
+
+/**
+ * The reader a call counts its reads as (TEMPRA-220): its surface and kind, a key for the reader
+ * (the agent, else the person, else the actor) and for the person it acts for, both hashed
+ * (`readerKey`): stored, never shown, and no raw id in the read log.
+ */
+export function readingOf(c: Caller): Reading {
+  const person = c.by?.person ? readerKey(`p:${c.by.person}`) : undefined;
+  const reader =
+    c.reader === "agent"
+      ? readerKey(`a:${c.by?.agent ?? c.actor}`)
+      : (person ?? readerKey(`p:${c.actor}`));
+  return { surface: c.surface, kind: c.reader, reader, ...(person ? { person } : {}) };
 }
 
 /** The least time between two presence messages for one agent and file. */
@@ -237,12 +263,12 @@ export class Presence {
   constructor(private readonly throttleMs = PRESENCE_THROTTLE_MS) {}
 
   message(
-    caller: PresenceCaller | null | undefined,
+    caller: Caller | null | undefined,
     method: string,
     value: unknown,
     now = Date.now(),
   ): PresenceMessage | null {
-    if (!caller || isPersonActor(caller.actor)) return null;
+    if (!caller || caller.reader === "person" || isPersonActor(caller.actor)) return null;
     const paths = presencePaths(method, value).filter((p) => {
       const key = `${caller.actor}|${p}`;
       const at = this.last.get(key);

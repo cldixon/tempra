@@ -4,6 +4,7 @@ import { type CallResult, callStore, type LibraryMethod, r2BlobStore } from "./c
 import {
   broadcast,
   broadcastPresence,
+  type Caller,
   FEED_FULL,
   FEED_SOCKETS_PER_LIBRARY,
   type FeedMessage,
@@ -11,7 +12,7 @@ import {
   feedEvent,
   feedPrefix,
   Presence,
-  type PresenceCaller,
+  readingOf,
   WRITE_METHODS,
 } from "./feed";
 import { DEFAULT_STORAGE_MB } from "./limits";
@@ -76,18 +77,14 @@ export class Library extends DurableObject<Env> {
    * `caller` is the agent making it, when it is one: its reads are presence on the feed
    * (TEMPRA-219).
    */
-  async call(
-    method: LibraryMethod,
-    args: unknown[],
-    caller?: PresenceCaller | null,
-  ): Promise<CallResult> {
+  async call(method: LibraryMethod, args: unknown[], caller?: Caller | null): Promise<CallResult> {
     if (this.restarting) return RESTARTING;
     // Where the time goes (TEMPRA-190): the first call after a start, and any slow one, is logged.
     const t0 = Date.now();
     const cold = this.calls++ === 0;
     if (!this.alarmChecked) await this.ensureAlarm();
     const t1 = Date.now();
-    const result = await this.run(method, args);
+    const result = await this.run(method, args, caller ?? null);
     // After the call, never inside a write's transaction; a failure here never fails the read.
     if (caller && result.ok) {
       try {
@@ -118,7 +115,11 @@ export class Library extends DurableObject<Env> {
   }
 
   /** Runs a store method for `call`: the write's feed and maintenance, the reads' counting. */
-  private async run(method: LibraryMethod, args: unknown[]): Promise<CallResult> {
+  private async run(
+    method: LibraryMethod,
+    args: unknown[],
+    caller: Caller | null,
+  ): Promise<CallResult> {
     const mb = Number(this.env.LIBRARY_STORAGE_MB) || DEFAULT_STORAGE_MB;
     const writes = WRITE_METHODS.has(method);
     const before = writes ? this.store.headSeq() : 0;
@@ -126,6 +127,8 @@ export class Library extends DurableObject<Env> {
       storageLimitBytes: mb * 1048576,
       references: (hashes) =>
         d1BlobRefs(this.env.DB).reference(this.libraryId(), hashes, new Date()),
+      // Reads counted as their surface and reader kind (TEMPRA-220).
+      reading: caller ? readingOf(caller) : null,
     });
     // The write has committed (the store's transaction is synchronous): tell the feed, and wake
     // the maintainers for the export it calls for. A failure here must not turn a committed
@@ -209,7 +212,7 @@ export class Library extends DurableObject<Env> {
    * An agent's read, as presence to every open feed socket (TEMPRA-219): throttled in memory per
    * agent and file, filtered by each socket's prefix, never stored. A search sends none.
    */
-  private sendPresence(caller: PresenceCaller, method: LibraryMethod, value: unknown) {
+  private sendPresence(caller: Caller, method: LibraryMethod, value: unknown) {
     const sockets = this.ctx.getWebSockets();
     if (sockets.length === 0) return;
     const message = this.presence.message(caller, method, value);

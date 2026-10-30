@@ -33,6 +33,7 @@ import type { PosterFrame, RenderContext, RenderDiagram } from "./render";
 import { readCookie, SESSION_COOKIE, type Sessions } from "./session";
 import { type Mailer, registerSignInRoutes } from "./signin";
 import { OkfError } from "./store/errors";
+import type { ReadSurface } from "./store/reads";
 import {
   type AttachFacts,
   type BlobRef,
@@ -74,7 +75,12 @@ export interface Deps extends UsageDeps {
   sessions: Sessions;
   /** Sends sign-in emails; without one, only local dev with DEV_SIGNIN=1 can sign in. */
   mailer?: Mailer | null;
-  library(token: TokenInfo): LibraryClient;
+  /**
+   * The token's library, its calls made as the token's caller (feed.ts `callerOf`): `surface` is
+   * where they come from, for read history (TEMPRA-220); the app for a session, the REST API for
+   * a bearer token, unless the caller says MCP.
+   */
+  library(token: TokenInfo, surface?: ReadSurface): LibraryClient;
   /** The library a signed download URL names, or null when no such library exists. */
   libraryByDoId(doId: string): Promise<LibraryClient | null>;
   blobs: BlobStore;
@@ -502,6 +508,21 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     return c.json({ file: await fileJson(c.var.lib, c.var.deps.blobs, file), ...rest });
   });
 
+  // The app's read of the page it shows (TEMPRA-220, tempra-dev: v2/read-history): one per page
+  // a person opens, so its prefetches, the shell's boot data and its background re-checks (all
+  // GETs, never counted for a session) do not count. A session's alone: a token's reads are
+  // counted as they happen. Answers the page's read history with this read in it.
+  app.post(`${BASE}/read/*`, async (c) => {
+    if (!c.var.token.id.startsWith("session:")) {
+      throw new OkfError(
+        400,
+        "app_only",
+        "This route is the app's. Reads through the API and MCP are counted as they happen.",
+      );
+    }
+    return c.json(await c.var.lib.viewed(tail(c, "/read/")));
+  });
+
   app.put(`${BASE}/files/*`, async (c) => {
     const path = tail(c, "/files/");
     requireWrite(c, path);
@@ -663,6 +684,10 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
         at: num(c, "at"),
         limit: num(c, "limit"),
         offset: num(c, "offset"),
+        // Hot and cold pages by their reads over 30 days (TEMPRA-220).
+        sort: c.req.query("sort") === "reads" ? "reads" : undefined,
+        min_reads: num(c, "min_reads"),
+        max_reads: num(c, "max_reads"),
       }),
     ),
   );

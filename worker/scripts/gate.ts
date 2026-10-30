@@ -3667,6 +3667,167 @@ async function browserRenders(
         await client.close();
       }
     });
+    // Read history (TEMPRA-220, tempra-dev: v2/read-history): pointing at links in the tree loads
+    // their pages ahead and counts no read; an agent reads a page over MCP, then the person opens
+    // it, and it counts once for each: Properties says so in people's words, and MCP `read`
+    // reports the reads by surface and by agent or person, never who.
+    await step(
+      "read history: Properties and MCP read report reads; hovering counts none",
+      async () => {
+        type Counts = { total: number; agents: number; people: number; mcp: number; app: number };
+        type Reads = {
+          week: Counts;
+          month: Counts;
+          last: { mcp: string | null; app: string | null };
+          last_read: string | null;
+        };
+        const api = `/api/v1/libraries/${owner}/${slug}`;
+        /** A page's reads, as the app's own GET sees them (a session's GET counts nothing). */
+        const readsOf = async (p: string) =>
+          (
+            (await page.evaluate(`fetch("${api}/page/${enc(p)}").then((r) => r.json())`)) as {
+              reads: Reads;
+            }
+          ).reads;
+        await page.evaluate(`localStorage.removeItem("tempra:tree-closed:${owner}/${slug}")`);
+        await page.goto(url);
+        await main.locator(".body .prose").waitFor({ timeout: 15_000 });
+        const rows = (
+          await sidebar
+            .locator("a[data-path]")
+            .evaluateAll((els) => els.map((e) => e.getAttribute("data-path") ?? ""))
+        ).filter((p) => p.endsWith(".md") && p !== concept && !p.startsWith("gate"));
+        const target = rows[0];
+        if (!target || rows.length < 3)
+          throw new Error(`too few pages in the tree: ${rows.length}`);
+        const hovered = rows.slice(0, 4);
+        const before = new Map<string, Reads>();
+        for (const p of hovered) before.set(p, await readsOf(p));
+        // Pointing at links loads their pages ahead (80 ms, TEMPRA-193): no read is counted.
+        for (const p of hovered) {
+          await sidebar.locator(`a[data-path="${p}"]`).hover();
+          await page.waitForTimeout(250);
+        }
+        await page.mouse.move(0, 0);
+        await page.waitForTimeout(300);
+        for (const p of hovered) {
+          const now = await readsOf(p);
+          if (now.month.total !== before.get(p)?.month.total) {
+            throw new Error(`hovering ${p} counted reads: ${JSON.stringify(now.month)}`);
+          }
+        }
+        // An agent reads it over MCP.
+        const client = new Client({ name: "gate-reads", version: "1.0.0" });
+        await client.connect(
+          new StreamableHTTPClientTransport(new URL(`${base}/mcp`), {
+            requestInit: { headers: { Authorization: `Bearer ${token}` } },
+          }),
+        );
+        const mcpRead = async () => {
+          const r = await client.callTool({
+            name: "read",
+            arguments: { library: `${owner}/${slug}`, path: target },
+          });
+          if (r.isError) throw new Error(`read: ${JSON.stringify(r.content).slice(0, 200)}`);
+          const text = (r.content as { type: string; text?: string }[])
+            .map((c) => c.text ?? "")
+            .join("\n");
+          return text.split("\n").find((l) => l.startsWith("reads: ")) ?? "";
+        };
+        try {
+          const started = Date.now();
+          const first = await mcpRead();
+          if (!first) throw new Error("MCP read has no reads line");
+          // The person opens it, from the tree (loaded ahead already).
+          await sidebar.locator(`a[data-path="${target}"]`).click();
+          await page.waitForURL((u) => decodeURIComponent(u.pathname).endsWith(`/${target}`));
+          await main.locator(".body .prose").waitFor({ timeout: 15_000 });
+          const was = before.get(target) as Reads;
+          // Each reader counts once per page and day (TEMPRA-220): the gate's one person and its
+          // agent may have read this page earlier today, so the counts are what they would be
+          // with both of them among today's readers.
+          const recent = (at: string | null | undefined) =>
+            !!at && Date.parse(at) >= started - 2000;
+          const deadline = Date.now() + 10_000;
+          let got = await readsOf(target);
+          while (!recent(got.last.app) && Date.now() < deadline) {
+            await page.waitForTimeout(200);
+            got = await readsOf(target);
+          }
+          const counted = (r: Reads, where: string) => {
+            const w = r.week;
+            if (
+              !recent(r.last.app) ||
+              !recent(r.last.mcp) ||
+              w.people !== Math.max(was.week.people, 1) ||
+              w.agents < Math.max(was.week.agents, 1) ||
+              w.agents > was.week.agents + 1 ||
+              w.total !== w.agents + w.people ||
+              w.app < 1 ||
+              w.mcp < 1
+            ) {
+              throw new Error(
+                `reads ${where}: ${JSON.stringify(r)}, before ${JSON.stringify(was.week)}`,
+              );
+            }
+          };
+          counted(got, "after an agent's read and one open");
+          // Opened again the same day: no more reads.
+          await page.goto(url);
+          await main.locator(".body .prose").waitFor({ timeout: 15_000 });
+          await sidebar.locator(`a[data-path="${target}"]`).click();
+          await page.waitForURL((u) => decodeURIComponent(u.pathname).endsWith(`/${target}`));
+          await main.locator(".body .prose").waitFor({ timeout: 15_000 });
+          await page.waitForTimeout(500);
+          const again = await readsOf(target);
+          counted(again, "after opening it again");
+          if (again.week.total !== got.week.total) {
+            throw new Error(`opening it again counted: ${got.week.total} then ${again.week.total}`);
+          }
+          // Properties, in people's words.
+          await more("Properties");
+          await properties().waitFor({ timeout: 5000 });
+          const fact = (name: string) =>
+            properties()
+              .locator(".fact")
+              .filter({ has: page.locator("dt", { hasText: new RegExp(`^${name}$`) }) })
+              .locator("dd");
+          const w = again.week;
+          const times = `${w.total} time${w.total === 1 ? "" : "s"} this week`;
+          const by = w.agents === w.total ? ", all by agents" : `, ${w.agents} by agents`;
+          await fact("Read")
+            .filter({ hasText: new RegExp(`^${times}${by}$`) })
+            .waitFor({ timeout: 5000 })
+            .catch(async () => {
+              throw new Error(`Properties' Read says "${await fact("Read").innerText()}"`);
+            });
+          const last = await fact("Last read").innerText();
+          if (last !== "just now") throw new Error(`Properties' Last read says "${last}"`);
+          // The reads name no reader and no surface (Last changed still names the writer).
+          const said = `${await fact("Read").innerText()} ${last}`;
+          if (/\bmcp\b|\bapi\b|claude|@dev|human:/i.test(said)) {
+            throw new Error(`Properties' reads name readers or surfaces: ${said}`);
+          }
+          if (shots) await properties().screenshot({ path: `${shots}/properties-reads.png` });
+          await page.getByRole("button", { name: "Close properties" }).click();
+          // MCP read reports both, by surface and by kind; the agent reading again that day adds
+          // nothing.
+          const line = await mcpRead();
+          if (
+            !line.startsWith(
+              `reads: ${w.total} in 7 days (${w.agents} by agents, ${w.people} by people · `,
+            ) ||
+            !/ · mcp \d+, app \d+/.test(line) ||
+            !/; last read .*just now \(mcp\)/.test(line) ||
+            !/; last read .*just now \(app\)/.test(line)
+          ) {
+            throw new Error(`MCP read says "${line}"`);
+          }
+        } finally {
+          await client.close();
+        }
+      },
+    );
     // View Markdown, in ⋯, shows the file as stored, frontmatter first, with line numbers, in
     // place of the page; Back to page returns.
     await step("the Markdown view shows the file as stored", async () => {

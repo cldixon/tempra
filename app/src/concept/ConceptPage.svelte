@@ -16,6 +16,7 @@
   import PageBar from "../PageBar.svelte";
   import Reader from "../Reader.svelte";
   import { type BodyOptions, prepare } from "../reader/prepare";
+  import { post } from "../api";
   import { pushRecent } from "../recent";
   import { useLibraryTitle, useRole } from "../role.svelte.ts";
   import { type Compare, navigate } from "../router";
@@ -28,6 +29,7 @@
   import { useCompare } from "./compare.svelte.ts";
   import { contentsOf } from "./contents";
   import { bodyHref, type ConceptData, standing, titleOf } from "./data";
+  import type { ReadHistory } from "./reads";
   import { figureViewOf } from "./figures";
   import HistoryList from "./HistoryList.svelte";
   import HoverCard from "./HoverCard.svelte";
@@ -287,6 +289,30 @@
     return () => document.removeEventListener("keydown", onKey);
   });
 
+  // Read history (TEMPRA-220, tempra-dev: v2/read-history): the page counts one read each time a
+  // person opens it, from here, so prefetches, the boot data and background re-checks (GETs the
+  // server never counts for a session) do not. It follows the read's URL, a string, so a redraw
+  // or a new version of the same page does not count again; the answer has this read in it.
+  const readUrl = $derived(urls.api(`read/${c.path.split("/").map(encodeURIComponent).join("/")}`));
+  let readsNow = $state.raw<{ url: string; reads: ReadHistory } | null>(null);
+  $effect(() => {
+    const url = readUrl;
+    let gone = false;
+    post<{ reads: ReadHistory }>(url)
+      .then((r) => {
+        if (!gone) readsNow = { url, reads: r.reads };
+      })
+      .catch(() => {
+        // Not counted (offline, over a limit): the page shows what it loaded.
+      });
+    return () => {
+      gone = true;
+    };
+  });
+  const reads = $derived(
+    readsNow?.url === readUrl ? readsNow.reads : (props.data.reads ?? null),
+  );
+
   // Recent files, for the quick switcher.
   $effect(() => {
     if (urls.at === undefined) pushRecent(urls, { path: c.path, title });
@@ -415,6 +441,7 @@
             {links}
             head={props.head}
             standing={s}
+            {reads}
             {name}
             {current}
             reviewing={compare?.kind === "review"}

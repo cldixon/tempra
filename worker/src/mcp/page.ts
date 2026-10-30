@@ -52,7 +52,8 @@ export async function pagePayload(
   path: string,
   names?: (ids: string[]) => Promise<Map<string, string>>,
 ): Promise<PagePayload> {
-  const page = await lib.page(path);
+  // The person sees it: their read, not the agent's (TEMPRA-220).
+  const page = await lib.page(path, { shown: true });
   const file = page.file;
   if (file.kind !== "concept" || !("sources" in page)) {
     throw new OkfError(400, "not_concept", "`show` draws a page (a concept), not other files.");
