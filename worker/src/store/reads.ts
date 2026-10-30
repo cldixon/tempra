@@ -146,7 +146,8 @@ export function readsText(h: ReadHistory, now: number): string {
     const t = h.last[s];
     return t ? [{ s, t }] : [];
   })
-    .sort((a, b) => (a.t < b.t ? 1 : -1))
+    // Newest first; a tie keeps the surfaces' order (mcp, app, api).
+    .sort((a, b) => (a.t === b.t ? 0 : a.t < b.t ? 1 : -1))
     .map(({ s, t }) => `${agoText(t, now)} (${s})`);
   return `reads: ${counts}; ${lasts.length > 0 ? `last read ${lasts.join(", ")}` : "no last read recorded"}`;
 }
