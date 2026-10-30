@@ -3439,50 +3439,79 @@ async function browserRenders(
         await wide();
       }
     });
-    // Agents' presence (TEMPRA-219): while a page is open, an agent searches the library and
-    // reads another page, then this one, over MCP. The tree's rows for what it found and read
-    // shimmer (a closed folder holding one shows the quieter mark), the byline says it is reading
-    // now, and all of it fades a few seconds after the agent stops; the person's own reads say
-    // nothing.
-    await step(
-      "presence: an agent reading and searching shows in the tree and the byline",
-      async () => {
-        await page.goto(url);
-        await main.locator(".body .prose").waitFor({ timeout: 15_000 });
-        // The page left open: the one with the oldest version, so no agent is editing it now
-        // (the byline then says only that); the agent reads it after the gate's own page.
-        const outline = (await page.evaluate(
-          `fetch("/api/v1/libraries/${owner}/${slug}/outline").then((r) => r.json())`,
-        )) as { files: { path: string; kind: string; title?: string | null; seq?: number }[] };
-        const other = outline.files
-          .filter(
-            (f) =>
-              f.kind === "concept" &&
-              f.path !== concept &&
-              !f.path.startsWith("gate") &&
-              /[A-Za-z]{4,}/.test(f.title ?? ""),
-          )
-          .sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0))[0];
-        if (!other) throw new Error("no other page to read");
-        // What the feed brings: its presence messages, said if a mark does not come.
-        const frames: string[] = [];
-        const listen = (ws: {
-          on(e: "framereceived", f: (d: { payload: unknown }) => void): void;
-        }) =>
-          ws.on("framereceived", (d) => {
-            const s = String(d.payload);
-            if (s.includes('"presence"')) frames.push(s);
-          });
-        page.on("websocket", listen);
+    // Agents' presence (TEMPRA-219): while a page is open, an agent searches the library over
+    // MCP, then reads two pages. A search marks nothing: what it found does not shimmer. The
+    // pages it reads do, with no words beside them; a hover names the agent (the row's title).
+    // A closed folder holding one shimmers its own name instead; opened mid-shimmer, the pages
+    // inside take it and the folder stops. All of it fades a few seconds after the agent stops,
+    // and the person's own reads and searches mark nothing. With GATE_SCREENSHOTS, a still with
+    // the band held mid-row; with GATE_RECORD=1 too, a recording of the tree (presence.webm,
+    // presence.gif) while the agent reads a page in a closed folder and the person opens it.
+    await step("presence: an agent's reads shimmer in the tree, its search does not", async () => {
+      await page.goto(url);
+      await main.locator(".body .prose").waitFor({ timeout: 15_000 });
+      // The page left open: one the gate's agent has not written in this run.
+      const outline = (await page.evaluate(
+        `fetch("/api/v1/libraries/${owner}/${slug}/outline").then((r) => r.json())`,
+      )) as { files: { path: string; kind: string; title?: string | null; seq?: number }[] };
+      const pages = outline.files.filter(
+        (f) =>
+          f.kind === "concept" &&
+          f.path !== concept &&
+          !f.path.startsWith("gate") &&
+          /[A-Za-z]{4,}/.test(f.title ?? ""),
+      );
+      const other = [...pages].sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0))[0];
+      if (!other) throw new Error("no other page to read");
+      const nested = [concept, other.path].find((p) => p.includes("/"));
+      if (!nested) throw new Error("no page in a folder to read");
+      const top = nested.split("/")[0] ?? "";
+      /** A folder's row in the tree, by its first-level name. */
+      const folderRow = (name: string) =>
+        sidebar
+          .locator(".tree-row.dir")
+          .filter({
+            has: page.locator(
+              `button.tree-name:is([title="${folderName(name)}"], [title^="${folderName(name)}: "])`,
+            ),
+          })
+          .first();
+      /** Holds every shimmer with its band mid-row, for a still that shows it; `false` lets go. */
+      const holdBand = (hold: boolean) =>
+        page.evaluate(
+          `document.getAnimations().filter((a) => a.animationName === "tempra-shimmer").forEach((a) => { if (${hold}) { a.pause(); a.currentTime = 1000; } else a.play(); })`,
+        );
+      // What the feed brings: its presence messages, said if a mark does not come.
+      const frames: string[] = [];
+      const listen = (ws: { on(e: "framereceived", f: (d: { payload: unknown }) => void): void }) =>
+        ws.on("framereceived", (d) => {
+          const s = String(d.payload);
+          if (s.includes('"presence"')) frames.push(s);
+        });
+      page.on("websocket", listen);
+      const client = new Client({ name: "gate-presence", version: "1.0.0" });
+      await client.connect(
+        new StreamableHTTPClientTransport(new URL(`${base}/mcp`), {
+          requestInit: { headers: { Authorization: `Bearer ${token}` } },
+        }),
+      );
+      const call = async (name: string, args: Record<string, unknown>) => {
+        const r = await client.callTool({
+          name,
+          arguments: { library: `${owner}/${slug}`, ...args },
+        });
+        if (r.isError) throw new Error(`${name}: ${JSON.stringify(r.content).slice(0, 200)}`);
+      };
+      const marked = sidebar.locator(".tree-row.presence");
+      try {
         // Every folder open, so every row the agent touches is drawn.
         await page.evaluate(`localStorage.removeItem("tempra:tree-closed:${owner}/${slug}")`);
         await page.goto(`${lib}/${enc(other.path)}`);
         await main.locator(".body .prose").waitFor({ timeout: 15_000 });
         await sidebar.locator(`a[data-path="${concept}"]`).waitFor({ timeout: 10_000 });
-        const marked = sidebar.locator("a.presence");
         // Earlier steps' agent writes and reads fade first.
         await marked.first().waitFor({ state: "detached", timeout: 20_000 });
-        // What a search will find, asked as the person (whose search is no presence).
+        // What a search will find, asked as the person (whose search is no presence either).
         const q =
           (other.title ?? "")
             .split(/[^A-Za-z]+/)
@@ -3491,53 +3520,32 @@ async function browserRenders(
         const found = (await page.evaluate(
           `fetch("/api/v1/libraries/${owner}/${slug}/search?q=${encodeURIComponent(q)}").then((r) => r.json())`,
         )) as { results: { path: string }[] };
-        // The server marks the top ten; the tree draws the ones that are rows (not a folder's
-        // generated index).
-        const rows = new Set(
-          await sidebar
-            .locator("a[data-path]")
-            .evaluateAll((els) => els.map((e) => e.getAttribute("data-path") ?? "")),
+        const read = [concept, other.path];
+        // What the search finds that the agent will not read: these must never shimmer.
+        const unread = [...new Set(found.results.map((r) => r.path))].filter(
+          (p) => !read.includes(p),
         );
-        const hits = [...new Set(found.results.map((r) => r.path))]
-          .slice(0, 10)
-          .filter((p) => rows.has(p));
-        if (hits.length === 0) throw new Error(`a search for "${q}" found nothing`);
-        /** Waits for a row's mark, saying which and what the row shows when it does not come. */
-        const rowMarked = async (path: string, kind?: string) => {
-          const sel = `a.presence[data-path="${path}"]${kind ? `[data-presence="${kind}"]` : ""}`;
-          try {
-            await sidebar.locator(sel).waitFor({ timeout: 5000 });
-          } catch {
-            const row = sidebar.locator(`a[data-path="${path}"]`);
-            const has =
-              (await row.count()) > 0 ? await row.getAttribute("data-presence") : "no row";
-            throw new Error(
-              `${path}: not marked ${kind ?? ""} (it shows ${has}); presence on the feed: ${frames.join(" ")}`,
-            );
-          }
-        };
-        if ((await marked.count()) > 0) throw new Error("the person's own reads show as presence");
-        const client = new Client({ name: "gate-presence", version: "1.0.0" });
-        await client.connect(
-          new StreamableHTTPClientTransport(new URL(`${base}/mcp`), {
-            requestInit: { headers: { Authorization: `Bearer ${token}` } },
-          }),
-        );
-        try {
-          const call = async (name: string, args: Record<string, unknown>) => {
-            const r = await client.callTool({ name, arguments: args });
-            if (r.isError) throw new Error(`${name}: ${JSON.stringify(r.content).slice(0, 200)}`);
-          };
-          await call("search", { library: `${owner}/${slug}`, q });
-          await call("read", { library: `${owner}/${slug}`, path: concept });
-          await call("read", { library: `${owner}/${slug}`, path: other.path });
-        } finally {
-          await client.close();
+        await call("search", { q });
+        // A presence message would land in milliseconds; the search sends none.
+        await page.waitForTimeout(1500);
+        if ((await marked.count()) > 0 || frames.length > 0) {
+          throw new Error(`a search marked pages: ${frames.join(" ")}`);
         }
-        // The pages it found shimmer; the ones it read after say reading.
-        for (const path of hits) await rowMarked(path);
-        for (const path of [concept, other.path]) await rowMarked(path, "reading");
-        const shimmer = await sidebar.locator(`a.presence[data-path="${other.path}"]`).evaluate(
+        for (const path of read) await call("read", { path });
+        // The pages it read shimmer, as reading; what it only found does not.
+        for (const path of read) {
+          const row = sidebar.locator(`a.presence[data-path="${path}"][data-presence="reading"]`);
+          await row.waitFor({ timeout: 5000 }).catch(() => {
+            throw new Error(`${path} is not marked; presence on the feed: ${frames.join(" ")}`);
+          });
+        }
+        for (const path of unread) {
+          if ((await sidebar.locator(`a.presence[data-path="${path}"]`).count()) > 0) {
+            throw new Error(`${path}, only found by the search, shimmers`);
+          }
+        }
+        const row = sidebar.locator(`a.presence[data-path="${other.path}"]`);
+        const shimmer = await row.evaluate(
           (el) =>
             (
               globalThis as unknown as {
@@ -3546,39 +3554,119 @@ async function browserRenders(
             ).getComputedStyle(el).animationName,
         );
         if (shimmer !== "tempra-shimmer") throw new Error(`the row's animation is "${shimmer}"`);
-        // The open page's byline: the agent is reading it now.
-        const reading = byline.locator(".byline-presence");
-        await reading.waitFor({ timeout: 5000 }).catch(async () => {
-          throw new Error(`the byline does not say reading: "${await byline.innerText()}"`);
-        });
-        const said = (await reading.innerText()).replace(/\s+/g, " ").trim();
-        if (!/reading now$/.test(said)) throw new Error(`the byline says "${said}"`);
+        // No words beside the name: the shimmer is the cue. A hover names the agent.
+        const shown = (await row.innerText()).trim();
+        if (shown !== other.title) throw new Error(`the row reads "${shown}", not its name`);
+        const title = (await row.getAttribute("title")) ?? "";
+        if (!/: Claude Code for @\w+ is reading$/.test(title)) {
+          throw new Error(`the row's tooltip is "${title}"`);
+        }
+        if ((await byline.getByText(/reading/).count()) > 0) {
+          throw new Error("the byline says the agent is reading");
+        }
         if (shots) {
+          await holdBand(true);
           await sidebar.screenshot({ path: `${shots}/presence-tree.png` });
-          await main.locator(".doc-head").screenshot({ path: `${shots}/presence-byline.png` });
+          await holdBand(false);
         }
-        // A closed folder holding a marked page shows the quieter mark.
-        const nestedHit = [other.path, ...hits].find((p) => p.includes("/"));
-        if (nestedHit) {
-          const top = nestedHit.split("/")[0] ?? "";
-          const row = sidebar
-            .locator(".tree-row.dir")
-            .filter({ has: page.locator(`button.tree-name[title="${folderName(top)}"]`) })
-            .first();
-          await row.locator("button.tree-name").click();
-          await row.locator(".presence-mark").waitFor({ timeout: 5000 });
-          if (shots) await sidebar.screenshot({ path: `${shots}/presence-folder.png` });
-          await row.locator("button.tree-name").click();
+        // Closed, a folder holding a page being read shimmers its own name: no ring or dot.
+        const folder = folderRow(top);
+        await folder.locator("button.tree-name").click();
+        await sidebar
+          .locator(".tree-row.dir.presence button.tree-name[data-presence='reading']")
+          .first()
+          .waitFor({ timeout: 3000 });
+        if (!(await folder.evaluate((el) => el.classList.contains("presence")))) {
+          throw new Error(`the closed ${folderName(top)} does not shimmer`);
         }
-        // Gone a few seconds after the agent stopped (about 8 s).
-        await marked.first().waitFor({ state: "detached", timeout: 15_000 });
-        await reading.waitFor({ state: "detached", timeout: 5000 });
         if ((await sidebar.locator(".presence-mark").count()) > 0) {
-          throw new Error("a folder's presence mark outlived the agent");
+          throw new Error("a closed folder shows a mark beside its name");
         }
+        if (shots) {
+          await holdBand(true);
+          await sidebar.screenshot({ path: `${shots}/presence-folder.png` });
+          await holdBand(false);
+        }
+        // Opened mid-shimmer: the pages inside take it at once, and the open folder stops.
+        await folder.locator("button.tree-name").click();
+        for (const path of read.filter((p) => p.startsWith(`${top}/`))) {
+          await sidebar.locator(`a.presence[data-path="${path}"]`).waitFor({ timeout: 1000 });
+        }
+        if (await folder.evaluate((el) => el.classList.contains("presence"))) {
+          throw new Error(`the open ${folderName(top)} still shimmers`);
+        }
+        if ((await sidebar.locator(".tree-row.dir.open.presence").count()) > 0) {
+          throw new Error("an open folder shimmers");
+        }
+        // Gone a few seconds after the agent stopped (8 s after its last read).
+        await marked.first().waitFor({ state: "detached", timeout: 15_000 });
+
+        // A recording for review, with GATE_RECORD=1 (it needs Playwright's ffmpeg, which CI's
+        // runners lack): the tree while the agent reads a page outside a closed folder and one
+        // inside it, and the person opens the folder while it shimmers.
+        if (shots && process.env.GATE_RECORD === "1") {
+          const outside = pages.find((f) => !f.path.startsWith(`${top}/`));
+          if (!outside) throw new Error("no page outside the folder to read");
+          const videoDir = join(shots, "presence-video");
+          mkdirSync(videoDir, { recursive: true });
+          const size = { width: 1280, height: 720 };
+          const rec = await b.browser.newContext({
+            storageState: await b.context.storageState(),
+            viewport: size,
+            recordVideo: { dir: videoDir, size },
+          });
+          try {
+            const p = await rec.newPage();
+            await p.goto(`${lib}/${enc(other.path)}`);
+            const side = p.locator("section.ws-sidebar");
+            await side.locator(`a[data-path="${concept}"]`).waitFor({ timeout: 15_000 });
+            const f = side
+              .locator(".tree-row.dir")
+              // Its title names the agent while it shimmers ("Computations: … in here").
+              .filter({
+                has: p.locator(
+                  `button.tree-name:is([title="${folderName(top)}"], [title^="${folderName(top)}: "])`,
+                ),
+              })
+              .first();
+            await f.locator("button.tree-name").click();
+            await p.waitForTimeout(800);
+            await call("read", { path: outside.path });
+            await p.waitForTimeout(400);
+            await call("read", { path: nested });
+            await side.locator(".tree-row.dir.presence").first().waitFor({ timeout: 3000 });
+            await p.waitForTimeout(2600);
+            await f.locator("button.tree-name").click();
+            await side.locator(`a.presence[data-path="${nested}"]`).waitFor({ timeout: 2000 });
+            await p.waitForTimeout(3000);
+            await p.close();
+            const video = await p.video()?.path();
+            if (!video) throw new Error("no recording");
+            await rec.close();
+            copyFileSync(video, `${shots}/presence.webm`);
+            // The sidebar alone, about 12 frames a second, one palette for the whole GIF.
+            const gif = Bun.spawnSync([
+              "/usr/bin/ffmpeg",
+              "-y",
+              "-loglevel",
+              "error",
+              "-i",
+              video,
+              "-vf",
+              "fps=12,crop=264:720:0:0,split[a][b];[a]palettegen=stats_mode=diff[p];[b][p]paletteuse=dither=sierra2_4a",
+              `${shots}/presence.gif`,
+            ]);
+            if (gif.exitCode !== 0)
+              throw new Error(`ffmpeg: ${gif.stderr.toString().slice(0, 300)}`);
+          } finally {
+            await rec.close().catch(() => {});
+          }
+        }
+      } finally {
         page.off("websocket", listen);
-      },
-    );
+        await client.close();
+      }
+    });
     // Read history (TEMPRA-220, tempra-dev: v2/read-history): pointing at links in the tree loads
     // their pages ahead and counts no read; an agent reads a page over MCP, then the person opens
     // it, and it counts once for each: Properties says so in people's words, and MCP `read`

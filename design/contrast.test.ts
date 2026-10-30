@@ -49,8 +49,8 @@ describe("text contrast (WCAG AA)", () => {
     }
   }
 
-  // Agents' presence (TEMPRA-219): the highlight that moves across a name, and its static mark
-  // under reduced motion, is in the words, so it is held to text's contrast too.
+  // Agents' presence (TEMPRA-219): the band that moves through a name, and its static mark
+  // under reduced motion, is in the words, so it is held to text's contrast.
   for (const surface of surfaces) {
     for (const [mode, i] of Object.entries(scheme)) {
       test(`color-agent-ink on ${surface}, ${mode}: at least 4.5:1`, () => {

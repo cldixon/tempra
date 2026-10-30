@@ -710,6 +710,35 @@ const NOTICE_CONCEPTS = 500;
 const MARK_OPEN = "\u0002";
 const MARK_CLOSE = "\u0003";
 /** A match's end, white space, and the next match's start: one highlight. */
+/**
+ * BM25's weight for each `fts` column (concept_id, title, body, tags): a word in the title counts
+ * ten times one in the body, a tag four times (TEMPRA-17).
+ */
+const SEARCH_WEIGHTS = "0, 10, 1, 4";
+
+/**
+ * A search box's words as an FTS5 query (TEMPRA-17): any word matches, so BM25 ranks by how many
+ * match and how rare they are, instead of a page needing every one. "A quoted phrase" stays a
+ * phrase and `word*` a prefix; everything is quoted, so FTS5's own operators and punctuation are
+ * plain words. Null when nothing is left to search for.
+ */
+export function searchMatch(q: string): string | null {
+  const parts: string[] = [];
+  for (const m of q.matchAll(/"([^"]*)"|(\S+)/g)) {
+    const phrase = m[1];
+    if (phrase !== undefined) {
+      const words = phrase.trim();
+      if (words) parts.push(`"${words}"`);
+      continue;
+    }
+    const raw = m[2] ?? "";
+    const star = raw.endsWith("*");
+    const word = (star ? raw.slice(0, -1) : raw).replace(/"/g, "");
+    if (word) parts.push(`"${word}"${star ? "*" : ""}`);
+  }
+  return parts.length > 0 ? parts.join(" OR ") : null;
+}
+
 const ADJACENT_MARKS = new RegExp(`${MARK_CLOSE}(\\s+)${MARK_OPEN}`, "g");
 
 /** What search indexes of a body: its text as the reader shows it, footnote definitions too. */
@@ -775,6 +804,7 @@ export class LibraryStore {
     this.addStructure();
     this.addLedgerCounts();
     this.addFtsRows();
+    this.stemSearch();
     this.addBlobDimensions();
     this.sql.script(DIAGRAM_RENDERS);
     this.addExternalImageFlags();
@@ -923,6 +953,38 @@ export class LibraryStore {
       );
       this.sql.run("INSERT INTO meta (key, value) VALUES ('fts_rows', '1')");
     });
+  }
+
+  /**
+   * Search is stemmed (TEMPRA-17: Porter over unicode61, so "comments" finds "comment").
+   * Libraries from before get it once: their rows copied into a stemmed table that takes the
+   * old one's place, and `fts_rows` refilled with the new rowids. Told from the table's own
+   * definition, so a new library (created stemmed) does nothing.
+   */
+  private stemSearch() {
+    const def = this.sql.all<{ sql: string }>(
+      "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'fts'",
+    )[0]?.sql;
+    if (!def || /porter/i.test(def)) return;
+    try {
+      this.sql.transaction(() => {
+        this.sql.script(
+          "CREATE VIRTUAL TABLE fts_stemmed USING fts5(concept_id UNINDEXED, title, body, tags, tokenize = 'porter unicode61');",
+        );
+        this.sql.run(
+          "INSERT INTO fts_stemmed (concept_id, title, body, tags) SELECT concept_id, title, body, tags FROM fts",
+        );
+        this.sql.script("DROP TABLE fts; ALTER TABLE fts_stemmed RENAME TO fts;");
+        this.sql.run("DELETE FROM fts_rows");
+        this.sql.run(
+          "INSERT INTO fts_rows (concept_id, fts_rowid) SELECT concept_id, rowid FROM fts",
+        );
+      });
+    } catch (e) {
+      // Rolled back: the library keeps its unstemmed search, which still works, rather than
+      // failing to open. Tried again the next time it opens.
+      console.error("search not stemmed", e);
+    }
   }
 
   /** Removes a concept's search row, by rowid (TEMPRA-87). */
@@ -3700,27 +3762,23 @@ export class LibraryStore {
       : { types: all.slice(0, 20), types_near: false };
   }
 
-  /** GET /search: FTS over title, body and tags at head, ranked, with snippets. */
+  /**
+   * GET /search: FTS over title, body and tags at head, ranked by BM25, with snippets. Any of the
+   * words matches (TEMPRA-17): a page with more of them, rarer ones, or in its title ranks first.
+   */
   search(q: string, opts: { prefix?: string; limit?: number } = {}) {
-    const terms = q
-      .split(/\s+/)
-      .filter(Boolean)
-      .map((t) => {
-        const star = t.endsWith("*");
-        const word = (star ? t.slice(0, -1) : t).replace(/"/g, '""');
-        return word ? `"${word}"${star ? "*" : ""}` : "";
-      })
-      .filter(Boolean);
-    if (terms.length === 0) throw new OkfError(400, "empty_query", "Send a search query in `q`.");
+    const match = searchMatch(q);
+    if (!match) throw new OkfError(400, "empty_query", "Send a search query in `q`.");
     const prefix = normalizeDir(opts.prefix);
     const limit = Math.min(Math.max(opts.limit ?? 20, 1), 200);
     const rows = this.sql.all<{ path: string; title: string; snippet: string; score: number }>(
       `SELECT paths.path AS path, fts.title AS title,
-              snippet(fts, 2, char(2), char(3), '…', 16) AS snippet, bm25(fts) AS score
+              snippet(fts, 2, char(2), char(3), '…', 16) AS snippet,
+              bm25(fts, ${SEARCH_WEIGHTS}) AS score
        FROM fts JOIN paths ON paths.concept_id = fts.concept_id
        WHERE fts MATCH ? AND (? = '' OR paths.path = ? OR paths.path LIKE ? ESCAPE '\\')
        ORDER BY score LIMIT ?`,
-      terms.join(" "),
+      match,
       prefix,
       prefix,
       `${escapeLike(prefix)}/%`,
