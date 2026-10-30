@@ -240,6 +240,12 @@ describe("the trigger (postComment)", () => {
     expect(jobs).toHaveLength(2);
     expect((await post(s, `/comments/${id}/resolve`, {})).status).toBe(200);
     expect(jobs).toHaveLength(2);
+    // Reopening it bare asks nothing; reopening it with a comment is a reply.
+    expect((await post(s, `/comments/${id}/reopen`, {})).status).toBe(200);
+    expect(jobs).toHaveLength(2);
+    expect((await post(s, `/comments/${id}/resolve`, {})).status).toBe(200);
+    expect((await post(s, `/comments/${id}/reopen`, { body: "Yes, please do." })).status).toBe(200);
+    expect(jobs).toHaveLength(3);
   });
 
   test("a mention by an agent acting for a person asks for that person", async () => {

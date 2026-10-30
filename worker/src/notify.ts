@@ -517,9 +517,10 @@ export async function postComment(
 /**
  * The managed agent's trigger (TEMPRA-222; tempra-dev: agents/managed-agent, How a mention runs):
  * a comment that mentions @tempra, or a reply in a thread the agent has answered, sends one turn
- * to its queue, and the thread shows "Tempra is replying…" at once. Never for the agent's own
- * comments, a resolve or reopen, or a comment no person stands behind; only while the agent is on
- * for the library's owner (`agents` is empty otherwise).
+ * to its queue, and the thread shows "Tempra is replying…" at once. A reopen with a comment counts
+ * as a reply (the agent asks people to reopen a thread to change its mind). Never for the agent's
+ * own comments, a resolve, a bare reopen, or a comment no person stands behind; only while the
+ * agent is on for the library's owner (`agents` is empty otherwise).
  */
 async function askAgent(
   d: NotifyDeps,
@@ -531,7 +532,11 @@ async function askAgent(
   mentions: Mention[],
 ) {
   if (!d.managed || agents.length === 0) return;
-  if (action.kind !== "open" && action.kind !== "reply") return;
+  const commented =
+    action.kind === "open" ||
+    action.kind === "reply" ||
+    (action.kind === "reopen" && !!action.body);
+  if (!commented) return;
   if (ctx.actor === AGENT_ACTOR) return;
   const asker = ctx.by?.person;
   if (!asker) return;
