@@ -437,7 +437,7 @@ describe("read history over MCP and REST", () => {
     // Two readers, one of them twice: two reads.
     expect(hot).toContain("b.md · Note · stable (not set) · unverified · 2 reads in 30 days");
     const cold = await call("query", { max_reads: 0 });
-    expect(cold).toContain("1 matching concept:");
+    expect(cold).toContain("1 matching concept ");
     expect(cold).toContain("a.md · Note");
   });
 
