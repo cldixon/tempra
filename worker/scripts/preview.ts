@@ -1,12 +1,14 @@
 /**
  * `bun run preview`: one pull request's preview deployment (tempra-dev library:
  * delivery/preview-deployments). PR N runs as its own Worker, tempra-pr-N on pr-N.tempra.dev, with
- * its own D1, R2 bucket, KV namespace and Queue, so it never touches staging or production data.
+ * its own D1, R2 bucket, KV namespace and Queues (the blob sweep's, tempra-sweep-pr-N, and the
+ * managed agent's, tempra-agent-pr-N), so it never touches staging or production data. With
+ * ANTHROPIC_API_KEY set, the key goes to the Worker and the operator's account gets the agent.
  *
  *   bun run preview up --pr N [--email <operator>]   create what is missing, migrate, deploy, seed, smoke
  *   bun run preview down --pr N                      delete the Workers (tempra-pr-N, then its render
  *                                                    Worker tempra-render-pr-N), D1, R2 (emptied
- *                                                    first), KV and Queue
+ *                                                    first), KV and Queues
  *   bun run preview sweep --keep 3,7                 tear down every preview whose PR is not listed
  *   bun run preview agents --pr N [--agents 3] [--scenario live] [--pace 2000] [--rounds 5]
  *                              [--patient] [--keep-files] [--email E]
@@ -30,6 +32,7 @@
 import { appendFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import { previewDeployment } from "../cloudflare.config";
+import { setWorkerSecret } from "./worker-secret";
 
 const { values, positionals } = parseArgs({
   args: process.argv.slice(2),
@@ -181,10 +184,13 @@ async function up(
     kv = await kvId(kvTitle);
   }
   if (!d1 || !kv) throw new Error(`Could not create or find the D1 or KV for PR ${pr}.`);
-  // The blob sweep's queue (TEMPRA-81): the Worker consumes it, so it must exist before the deploy.
-  if (!(await queueId(names.queue))) {
-    console.log(`Creating Queue ${names.queue}`);
-    await cf(["queues", "create", "--queue-name", names.queue]);
+  // The blob sweep's queue (TEMPRA-81) and the managed agent's (TEMPRA-222): the Worker consumes
+  // them, so they must exist before the deploy.
+  for (const name of [names.queue, names.agentQueue]) {
+    if (!(await queueId(name))) {
+      console.log(`Creating Queue ${name}`);
+      await cf(["queues", "create", "--queue-name", name]);
+    }
   }
 
   // The Anthropic key goes to the preview Worker as a secret (below), and the seed token only to
@@ -207,30 +213,24 @@ async function up(
   if (anthropicKey) await setWorkerSecret(names.name, "ANTHROPIC_API_KEY", anthropicKey);
   await waitForHealth(url);
   const library = await seedAndSmoke(url, email, env);
+  // With a key, the operator's account has the managed agent on in its preview (TEMPRA-222), so
+  // @tempra answers there; staging and production stay off until `bun run admin limits` says.
+  if (anthropicKey && email) {
+    await run(
+      [
+        "bun",
+        "scripts/admin.ts",
+        "limits",
+        "--email",
+        email,
+        "--set",
+        "agent_daily_usd=5",
+        "--remote",
+      ],
+      env,
+    ).catch((e) => console.log(`Could not turn the agent on: ${(e as Error).message}`));
+  }
   return { url, library };
-}
-
-/**
- * Sets a secret on one preview Worker through Cloudflare's API: the value travels only in the
- * request body, never on a command line or in the log. Previews only (the managed-agent spike,
- * TEMPRA-67, calls Claude with it); staging and production get secrets by hand.
- */
-async function setWorkerSecret(worker: string, name: string, text: string) {
-  if (!/^tempra-pr-[0-9]+$/.test(worker)) throw new Error(`Not a preview Worker: ${worker}`);
-  const account = process.env.CLOUDFLARE_ACCOUNT_ID;
-  const token = process.env.CLOUDFLARE_API_TOKEN;
-  if (!account || !token)
-    throw new Error("CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN are needed");
-  const r = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${account}/workers/scripts/${worker}/secrets`,
-    {
-      method: "PUT",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ name, text, type: "secret_text" }),
-    },
-  );
-  if (!r.ok) throw new Error(`Setting ${name} on ${worker}: ${r.status}`);
-  console.log(`Set ${name} on ${worker}`);
 }
 
 /** Runs a command in worker/; returns its output, or with `show` streams it to the log. */
@@ -422,17 +422,20 @@ async function down(pr: string) {
   const names = previewDeployment(pr);
   if (dryRun) {
     console.log(
-      `Would delete PR ${pr}: ${names.name}, ${names.render}, ${names.d1.name}, ${names.r2}, tempra-oauth-pr-${pr}, ${names.queue}`,
+      `Would delete PR ${pr}: ${names.name}, ${names.render}, ${names.d1.name}, ${names.r2}, tempra-oauth-pr-${pr}, ${names.queue}, ${names.agentQueue}`,
     );
     return;
   }
   // A Worker that consumes a queue cannot be deleted (Cloudflare 10064): detach it first. The
-  // queue itself goes last, once no Worker binds it (11005).
-  const queue = await queueId(names.queue);
-  if (queue) {
-    for (const consumer of await queueConsumers(queue)) {
-      console.log(`Removing ${names.queue}'s consumer ${consumer}`);
-      await cf(["queues", "consumers", "delete", consumer, "--queue-id", queue, "--force"]);
+  // queues themselves go last, once no Worker binds them (11005).
+  const queues: { name: string; id: string }[] = [];
+  for (const name of [names.queue, names.agentQueue]) {
+    const id = await queueId(name);
+    if (!id) continue;
+    queues.push({ name, id });
+    for (const consumer of await queueConsumers(id)) {
+      console.log(`Removing ${name}'s consumer ${consumer}`);
+      await cf(["queues", "consumers", "delete", consumer, "--queue-id", id, "--force"]);
     }
   }
   const running = await workers();
@@ -460,10 +463,10 @@ async function down(pr: string) {
     console.log(`Deleting KV tempra-oauth-pr-${pr}`);
     await cf(["kv", "namespaces", "delete", kv, "--force"]);
   }
-  // After the Worker, which binds it as producer and consumer.
-  if (queue) {
-    console.log(`Deleting Queue ${names.queue}`);
-    await cf(["queues", "delete", queue, "--force"]);
+  // After the Worker, which binds them as producer and consumer.
+  for (const q of queues) {
+    console.log(`Deleting Queue ${q.name}`);
+    await cf(["queues", "delete", q.id, "--force"]);
   }
 }
 
@@ -517,7 +520,10 @@ async function previews(): Promise<string[]> {
     add(d.name, /^tempra-accounts-pr-([0-9]+)$/);
   for (const b of await buckets()) add(b, /^tempra-blobs-pr-([0-9]+)$/);
   for (const n of await kvNamespaces()) add(n.title, /^tempra-oauth-pr-([0-9]+)$/);
-  for (const q of await queues()) add(q.queue_name, /^tempra-sweep-pr-([0-9]+)$/);
+  for (const q of await queues()) {
+    add(q.queue_name, /^tempra-sweep-pr-([0-9]+)$/);
+    add(q.queue_name, /^tempra-agent-pr-([0-9]+)$/);
+  }
   return [...found].sort((a, b) => Number(a) - Number(b));
 }
 

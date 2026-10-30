@@ -7,3 +7,9 @@ DEV_SIGNIN=1
 #
 # Anyone may sign up locally; deployments use invite (cloudflare.config.ts).
 SIGNUP=open
+#
+# The managed agent, @tempra (TEMPRA-222): "fake" runs it on a scripted stand-in with no network
+# (honored only with DEV_SIGNIN=1). For the real model, set ANTHROPIC_API_KEY here instead. Either
+# way it answers only for accounts with a budget: `bun run admin limits --email dev@localhost
+# --set agent_daily_usd=5`.
+AGENT_MODEL=fake

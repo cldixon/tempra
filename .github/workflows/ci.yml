@@ -224,6 +224,14 @@ jobs:
       - if: steps.tip.outputs.deploy == 'true'
         working-directory: worker
         run: bun run deploy --mode staging --message "${{ github.sha }}"
+      # The managed agent's model key (TEMPRA-222), from the GitHub secret through Cloudflare's
+      # API; skipped quietly when the secret is empty.
+      - if: steps.tip.outputs.deploy == 'true'
+        name: Set the agent's key
+        working-directory: worker
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: bun scripts/worker-secret.ts --mode staging --name ANTHROPIC_API_KEY
       - if: steps.tip.outputs.deploy == 'true'
         name: Check staging
         working-directory: worker
@@ -270,6 +278,12 @@ jobs:
       - if: steps.tip.outputs.deploy == 'true'
         working-directory: worker
         run: bun run deploy --mode production --message "${{ github.sha }}"
+      - if: steps.tip.outputs.deploy == 'true'
+        name: Set the agent's key
+        working-directory: worker
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: bun scripts/worker-secret.ts --mode production --name ANTHROPIC_API_KEY
       - if: steps.tip.outputs.deploy == 'true'
         name: Check production
         working-directory: worker
