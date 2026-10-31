@@ -263,6 +263,8 @@ const depsFor = (env: Env): Deps => {
       const url = new URL("https://library/feed");
       if (prefix) url.searchParams.set("prefix", prefix);
       url.searchParams.set("lease", lease);
+      // Whose lease it is, so the library releases it when the socket closes.
+      url.searchParams.set("account", account);
       return libraryStub(env, doId).fetch(new Request(url, request));
     },
     // Checked against D1 first, so a forged download URL cannot create Durable Objects.

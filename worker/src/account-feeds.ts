@@ -6,7 +6,7 @@ import { doSqlHandle } from "./store/sql";
 /**
  * One per account, by name (TEMPRA-80): the leases on the account's open change-feed sockets
  * across all its libraries, so the Worker can cap them (feed-leases.ts). No sockets live here;
- * the object is asked once per connect and sleeps otherwise.
+ * the object is asked once per connect, told once per close, and sleeps otherwise.
  */
 export class AccountFeeds extends DurableObject<Env> {
   private readonly leases = new FeedLeases(doSqlHandle(this.ctx.storage));
@@ -20,5 +20,10 @@ export class AccountFeeds extends DurableObject<Env> {
     );
     this.queue = run.catch(() => {});
     return run;
+  }
+
+  /** A library saw the socket holding this lease close: its place is free at once. */
+  async release(id: string): Promise<void> {
+    this.leases.release(id);
   }
 }

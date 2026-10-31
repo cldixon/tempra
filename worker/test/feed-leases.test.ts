@@ -56,6 +56,23 @@ describe("FeedLeases", () => {
     expect(await leases.acquire({ id: "y", doId: "a" }, 2, live, later)).toBe(false);
   });
 
+  test("a socket's close releases its place at once, however young its lease", async () => {
+    // A page reloaded again and again: each load opens a socket and the last one closes. The
+    // closed sockets' leases are inside the grace period, so only their release frees them.
+    const leases = new FeedLeases(bunSqlHandle());
+    const open = new Set<string>();
+    const live: LiveLeases = async () => [...open];
+    for (let i = 0; i < 10; i++) {
+      expect(await leases.acquire({ id: `l${i}`, doId: "a" }, 3, live, T0 + i)).toBe(true);
+      open.add(`l${i}`);
+      if (i > 0) {
+        open.delete(`l${i - 1}`);
+        leases.release(`l${i - 1}`);
+      }
+    }
+    expect(leases.count()).toBe(1);
+  });
+
   test("a library that cannot answer keeps its leases; one that is gone frees them", async () => {
     const leases = new FeedLeases(bunSqlHandle());
     await leases.acquire({ id: "l0", doId: "flaky" }, 2, async () => [], T0);
