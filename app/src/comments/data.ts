@@ -86,23 +86,54 @@ export type CommentPart = { text: string } | { text: string; href: string };
 
 const LINKS = /(https?:\/\/[^\s<>"')\]]+[^\s<>"')\].,;:!?])|(?<![\w/.])(\/[\w./-]*[\w-]\.md)\b/g;
 
+/** A page's path as a comment shows it: no leading slash, no `.md` (TEMPRA-225). */
+const shown = (path: string) => path.replace(/^\//, "").replace(/\.md$/, "");
+
 /**
- * A comment's text with its links (TEMPRA-222: the library's agent cites pages by URL, people by
- * path): http(s) URLs as they are, `/dir/page.md` as the page in this library (`file`). Nothing
+ * A comment's text with its links (TEMPRA-222: the library's agent cites pages by path, people
+ * and older replies by URL): http(s) URLs as they are, except a page of this library (`library`,
+ * the library's own URL with its trailing slash), which, like `/dir/page.md`, links to the page
+ * in this app (`file`) and reads as its path without `.md` (`dir/page`; TEMPRA-225). Nothing
  * else is markup: the text stays text.
  */
-export function commentParts(body: string, file: (path: string) => string): CommentPart[] {
+export function commentParts(
+  body: string,
+  file: (path: string) => string,
+  library?: string,
+): CommentPart[] {
   const out: CommentPart[] = [];
   let at = 0;
   for (const m of body.matchAll(LINKS)) {
     const i = m.index ?? 0;
     if (i > at) out.push({ text: body.slice(at, i) });
     const [whole, url, path] = m;
-    out.push(url ? { text: url, href: url } : { text: whole, href: file((path ?? "").slice(1)) });
+    if (url) {
+      const page =
+        library && url.startsWith(library) ? libraryPage(url.slice(library.length)) : null;
+      out.push(
+        page
+          ? { text: shown(page.path), href: file(page.path) + page.rest }
+          : { text: url, href: url },
+      );
+    } else {
+      out.push({ text: shown(path ?? ""), href: file((path ?? "").slice(1)) });
+    }
     at = i + whole.length;
   }
   if (at < body.length) out.push({ text: body.slice(at) });
   return out;
+}
+
+/** A URL's rest after the library's own URL, when it is a page there: its path and its query. */
+function libraryPage(rest: string): { path: string; rest: string } | null {
+  const cut = rest.search(/[?#]/);
+  const raw = cut === -1 ? rest : rest.slice(0, cut);
+  if (!raw.endsWith(".md") || raw.startsWith("-/")) return null;
+  try {
+    return { path: decodeURIComponent(raw), rest: cut === -1 ? "" : rest.slice(cut) };
+  } catch {
+    return null;
+  }
 }
 
 /**

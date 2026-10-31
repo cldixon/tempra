@@ -72,10 +72,31 @@ describe("links in a comment (commentParts)", () => {
       { text: "See " },
       { text: "https://x.dev/a/b.md", href: "https://x.dev/a/b.md" },
       { text: ", and " },
-      { text: "/dir/page.md", href: "/ann/lib/dir/page.md" },
+      { text: "dir/page", href: "/ann/lib/dir/page.md" },
       { text: ". Not a/b.md or e@x.md" },
     ]);
     expect(commentParts("plain", file)).toEqual([{ text: "plain" }]);
+  });
+
+  test("a page of this library cited by URL reads as its path, links in the app (TEMPRA-225)", () => {
+    const lib = "https://app.tempra.dev/ann/lib/";
+    expect(
+      commentParts(
+        `Source: ${lib}datasets/ntsb-narratives.md (a draft). Changes: ${lib}a%20b.md?since=4. ` +
+          `Not ${lib}-/activity or https://app.tempra.dev/bob/x/y.md`,
+        file,
+        lib,
+      ),
+    ).toEqual([
+      { text: "Source: " },
+      { text: "datasets/ntsb-narratives", href: "/ann/lib/datasets/ntsb-narratives.md" },
+      { text: " (a draft). Changes: " },
+      { text: "a b", href: "/ann/lib/a b.md?since=4" },
+      { text: ". Not " },
+      { text: `${lib}-/activity`, href: `${lib}-/activity` },
+      { text: " or " },
+      { text: "https://app.tempra.dev/bob/x/y.md", href: "https://app.tempra.dev/bob/x/y.md" },
+    ]);
   });
 });
 
