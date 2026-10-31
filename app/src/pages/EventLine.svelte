@@ -42,7 +42,7 @@
   </td>
   <td class="events-who">
     {#if row.lead}
-      <span class="events-person"><Avatar name={actor.mark} agent={actor.agent} tempra={actor.tempra} /><AgentName who={actor} /></span>
+      <span class="events-person"><Avatar name={actor.mark} fullName={actor.fullName} agent={actor.agent} tempra={actor.tempra} /><AgentName who={actor} /></span>
     {/if}
   </td>
   <td class="events-kind">{row.kind}</td>

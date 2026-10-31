@@ -18,7 +18,7 @@
 </script>
 
 <article class="entry live" aria-live="polite">
-  <Avatar name={actor.mark} agent={actor.agent} tempra={actor.tempra} />
+  <Avatar name={actor.mark} fullName={actor.fullName} agent={actor.agent} tempra={actor.tempra} />
   <div class="entry-body">
     <p class="entry-line"><AgentName who={actor} /> is editing <a href={urls.file(w.path)}>{title}</a></p>
   </div>

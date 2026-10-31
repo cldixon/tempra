@@ -1,6 +1,6 @@
 <script lang="ts">
   import Avatar from "./Avatar.svelte";
-  import { initials } from "./chrome";
+  import { personInitials } from "./chrome";
   import Icon from "./Icon.svelte";
   import Menu from "./Menu.svelte";
   import ThemeChoice from "./ThemeChoice.svelte";
@@ -13,19 +13,21 @@
    */
   let { me }: { me: Me | null } = $props();
   const handle = $derived(me?.handle ?? "");
+  /** The account's name, when given (TEMPRA-54): the initials and the menu's first line. */
+  const name = $derived(me?.name ?? null);
   const theme = useTheme();
 </script>
 
-<Menu title={me ? `${handle} · ${me.email}` : "Account"} buttonClass="avatar" listClass="account" align="end">
+<Menu title={me ? `${name ?? handle} · ${me.email}` : "Account"} buttonClass="avatar" listClass="account" align="end">
   {#snippet label()}
     <!-- Named by its own words, not an aria-label over the initials (WCAG 2.5.3). -->
-    <span aria-hidden="true">{initials(handle)}</span><span class="visually-hidden">Account menu</span>
+    <span aria-hidden="true">{personInitials(handle, name)}</span><span class="visually-hidden">Account menu</span>
   {/snippet}
   <div class="menu-person">
-    <Avatar name={handle} />
+    <Avatar name={handle} fullName={name} />
     <span class="menu-person-names">
-      <!-- The handle once (no names on accounts yet, TEMPRA-54), then the email. -->
-      <span>{me ? `@${handle}` : ""}</span>
+      <!-- The name and the handle (TEMPRA-54), or the handle alone, then the email. -->
+      <span>{me ? (name ? `${name} · @${handle}` : `@${handle}`) : ""}</span>
       <span class="email">{me?.email ?? ""}</span>
     </span>
   </div>

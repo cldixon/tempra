@@ -79,6 +79,8 @@ export interface PendingInvitation {
 export interface AccountData {
   email: string;
   handle: string;
+  /** The account's name, or null (TEMPRA-54). */
+  name: string | null;
   actor: string;
   sessions: {
     id: string;

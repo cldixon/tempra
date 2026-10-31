@@ -60,7 +60,12 @@ describe("a comment author's round mark", () => {
   });
 
   test("drawn decorative: a person's initials, an agent on ink, Tempra's own on the agent colour", () => {
-    const mark = (props: { name: string; agent?: boolean; tempra?: boolean }) => {
+    const mark = (props: {
+      name: string;
+      fullName?: string | null;
+      agent?: boolean;
+      tempra?: boolean;
+    }) => {
       const d = draw(Avatar, props);
       const el = d.host.querySelector(".avatar-mark") as HTMLElement;
       const out = {
@@ -72,6 +77,9 @@ describe("a comment author's round mark", () => {
       return out;
     };
     expect(mark({ name: "ann_lee" })).toEqual({ cls: "avatar-mark", text: "AL", hidden: "true" });
+    // From the account's name when given (TEMPRA-54).
+    expect(mark({ name: "ann_lee", fullName: "Ann Smith" }).text).toBe("AS");
+    expect(mark({ name: "sam", fullName: "Sam" }).text).toBe("S");
     expect(mark({ name: "Claude", agent: true })).toEqual({
       cls: "avatar-mark agent",
       text: "C",
