@@ -378,6 +378,26 @@ describe("over REST", () => {
     expect((await s.app.request(`${API}/files/notes/a.md`)).status).toBe(200);
   });
 
+  test("the quotas take nothing from the per-minute limiters", async () => {
+    // One limiter call per request and one per write, as before the quotas; a write the quota
+    // refuses spends no more than any other request (the gate's scripted agents share 60 a minute).
+    const s = setup();
+    const spent: string[] = [];
+    s.deps.rateLimit = async (kind) => {
+      spent.push(kind);
+      return true;
+    };
+    limit(s, { writes_monthly: 1 });
+    expect((await put(s, "notes/a.md")).status).toBe(200);
+    expect(spent).toEqual(["request", "write"]);
+    spent.length = 0;
+    expect((await put(s, "notes/b.md")).status).toBe(403);
+    expect(spent).toEqual(["request", "write"]);
+    spent.length = 0;
+    expect((await s.req("/files/notes/a.md")).status).toBe(200);
+    expect(spent).toEqual(["request"]);
+  });
+
   test("the month resets", async () => {
     const s = setup();
     s.clock.now = () => NOV;
