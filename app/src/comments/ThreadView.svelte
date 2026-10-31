@@ -34,6 +34,8 @@
   const t = $derived(props.thread);
   const first = $derived(t.comments[0]);
   const outdated = $derived(t.anchor !== null && t.at === null);
+  /** This library's own URL: its pages cited by URL read as their paths (TEMPRA-225). */
+  const libraryUrl = $derived(`${location.origin}${props.urls.base}`);
   function select() {
     props.onActive(t.id);
     if (t.at) revealOffset(t.at.from);
@@ -55,7 +57,7 @@
 {#snippet outdatedMark()}<span class="thread-outdated" title="The quoted text is no longer on the page">Outdated</span>{/snippet}
 {#snippet marks()}{#if t.kind === "request"}<span class="thread-request" title="Left for people's agents to do">Request</span>{/if}{#if outdated}{@render outdatedMark()}{/if}{/snippet}
 <!-- A comment's words, with the links it names (a URL, or a page by its path). -->
-{#snippet words(body: string)}{#each commentParts(body, (p) => props.urls.file(p)) as part, i (i)}{#if "href" in part}<a href={part.href}>{part.text}</a>{:else}{part.text}{/if}{/each}{/snippet}
+{#snippet words(body: string)}{#each commentParts(body, (p) => props.urls.file(p), libraryUrl) as part, i (i)}{#if "href" in part}<a href={part.href}>{part.text}</a>{:else}{part.text}{/if}{/each}{/snippet}
 {#snippet comment(c: CommentT)}<div class="said"
     ><div class="said-by">{@render by(name(c.actor, c.by))} <Moment ts={c.ts} /></div
     ><p class="comment">{@render words(c.body)}</p></div

@@ -22,6 +22,7 @@ import {
   changedBlocks,
   citedPaths,
   type ModelClient,
+  REPLY_MAX_WORDS,
   runTurn,
   SAY,
   SYSTEM_PROMPT,
@@ -847,5 +848,54 @@ describe("the pages a reply cites (TEMPRA-224)", () => {
       ),
     ).toEqual(["metrics/margin.md", "a b.md"]);
     expect(citedPaths("No links here.", lib)).toEqual([]);
+    // By path, as it now cites them (TEMPRA-225); not a path inside a URL.
+    expect(
+      citedPaths("See /datasets/ntsb-findings.md and https://example.com/z/y.md.", lib),
+    ).toEqual(["datasets/ntsb-findings.md"]);
+  });
+});
+
+describe("reply length (TEMPRA-225)", () => {
+  test("a reply over the cap is sent back once to shorten; the shorter one lands", async () => {
+    const s = setup();
+    await seed(s);
+    enable(s);
+    const { jobs } = wire(s);
+    const { id, job } = await ask(s, jobs, "@tempra what is margin?");
+    const long = Array.from({ length: REPLY_MAX_WORDS + 10 }, () => "word").join(" ");
+    const { model, sent } = scripted([
+      () => ({ content: [use("comment", { action: "reply", thread: id, body: long })] }),
+      () => ({
+        content: [
+          use("comment", {
+            action: "reply",
+            thread: id,
+            body: "Revenue minus cost: /metrics/margin.md",
+          }),
+        ],
+      }),
+      end(),
+    ]);
+    await runTurn(turnDeps(s, model), job as AgentJob);
+    const t = await thread(s, id);
+    expect(t.comments).toHaveLength(2);
+    expect(t.comments[1]?.body).toBe("Revenue minus cost: /metrics/margin.md");
+    // The model was told why.
+    expect(JSON.stringify(sent[1]?.messages.at(-1))).toContain(`at most ${REPLY_MAX_WORDS} words`);
+  });
+
+  test("a second long reply is posted rather than lose the answer", async () => {
+    const s = setup();
+    await seed(s);
+    enable(s);
+    const { jobs } = wire(s);
+    const { id, job } = await ask(s, jobs, "@tempra what is margin?");
+    const long = Array.from({ length: REPLY_MAX_WORDS + 10 }, () => "word").join(" ");
+    const reply = () => ({
+      content: [use("comment", { action: "reply", thread: id, body: long })],
+    });
+    const { model } = scripted([reply, reply, end()]);
+    await runTurn(turnDeps(s, model), job as AgentJob);
+    expect((await thread(s, id)).comments.at(-1)?.body).toBe(long);
   });
 });
