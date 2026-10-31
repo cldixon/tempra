@@ -103,17 +103,34 @@ function pad(n: number): Uint8Array {
   return new Uint8Array((512 - (n % 512)) % 512);
 }
 
+/**
+ * One entry's header, a pax header first when the path is over 100 bytes; its `size` bytes and
+ * `tarPadding(size)` follow. For archives written as a stream (TEMPRA-83).
+ */
+export function tarHeader(path: string, size: number, mtime: number): Uint8Array {
+  const h = header(path, size, "0", mtime);
+  if (enc.encode(path).length <= 100) return h;
+  const rec = paxRecord("path", path);
+  return concat([header("PaxHeader", rec.length, "x", mtime), rec, pad(rec.length), h]);
+}
+
+/** The zeros after an entry's `size` bytes, up to the next 512-byte block. */
+export const tarPadding = (size: number): Uint8Array => pad(size);
+
+/** The two zero blocks that end an archive. */
+export const tarEnd = (): Uint8Array => new Uint8Array(1024);
+
 /** A tar archive of the files, with pax headers for paths over 100 bytes. */
 export function writeTar(files: TarFile[], mtime = Math.floor(Date.now() / 1000)): Uint8Array {
   const parts: Uint8Array[] = [];
   for (const f of files) {
-    if (enc.encode(f.path).length > 100) {
-      const rec = paxRecord("path", f.path);
-      parts.push(header("PaxHeader", rec.length, "x", mtime), rec, pad(rec.length));
-    }
-    parts.push(header(f.path, f.bytes.length, "0", mtime), f.bytes, pad(f.bytes.length));
+    parts.push(tarHeader(f.path, f.bytes.length, mtime), f.bytes, pad(f.bytes.length));
   }
-  parts.push(new Uint8Array(1024));
+  parts.push(tarEnd());
+  return concat(parts);
+}
+
+function concat(parts: Uint8Array[]): Uint8Array {
   const total = parts.reduce((n, p) => n + p.length, 0);
   const out = new Uint8Array(total);
   let off = 0;

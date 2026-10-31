@@ -1,4 +1,4 @@
-import { type DiagramExport, drawnDiagrams, isDrawnDiagram } from "./diagram-export";
+import { isDrawnDiagram } from "./diagram-export";
 import type { Caller } from "./feed";
 import { checkAttachment, formatOf, imageInfo } from "./media";
 import type { FigureFact } from "./okf/figures";
@@ -7,7 +7,6 @@ import { normalizePath } from "./okf/paths";
 import { OkfError } from "./store/errors";
 import type { Reading } from "./store/reads";
 import type { BlobRef, ImageRef, ImportFile, LibraryStore, WriteOp } from "./store/store";
-import { writeTar } from "./util/tar";
 
 /** Store methods the Worker may call on a library, over DO RPC or in process. */
 export const LIBRARY_METHODS = [
@@ -469,44 +468,4 @@ export async function bundleFiles(
   }
   if (files.length === 0) throw new OkfError(400, "empty_import", "No files found to import.");
   return files;
-}
-
-/**
- * A library's bundle as tar bytes, attachments read from blob storage (spec: Reads and export).
- * With `diagrams`, each concept's Mermaid, SVG and Vega-Lite fences are drawn beside it as SVG
- * (TEMPRA-168, TEMPRA-206, TEMPRA-207): on for downloads, off for the nightly export so it stays
- * small (TEMPRA-83).
- */
-export async function bundleTar(
-  lib: { exportBundle(at?: number): unknown },
-  blobs: BlobStore,
-  at?: number,
-  opts: { diagrams?: DiagramExport } = {},
-): Promise<{ seq: number; bytes: Uint8Array; files: number }> {
-  const bundle = (await lib.exportBundle(at)) as {
-    seq: number;
-    files: { path: string; text?: string; blob?: { hash: string } }[];
-  };
-  const enc = new TextEncoder();
-  const files: { path: string; bytes: Uint8Array }[] = [];
-  for (const f of bundle.files) {
-    if (f.text !== undefined) files.push({ path: f.path, bytes: enc.encode(f.text) });
-    else if (f.blob) {
-      const bytes = await blobBytes(blobs, f.blob.hash);
-      if (!bytes) throw new OkfError(500, "blob_missing", `Bytes for ${f.path} are missing.`);
-      files.push({ path: f.path, bytes });
-    }
-  }
-  if (opts.diagrams) {
-    // A chart's data files are in the bundle already (TEMPRA-207).
-    const byPath = new Map(files.map((f) => [f.path, f.bytes]));
-    const read = async (path: string) => {
-      const bytes = byPath.get(path);
-      return bytes ? new TextDecoder().decode(bytes) : null;
-    };
-    for (const d of await drawnDiagrams(bundle.files, { read, ...opts.diagrams })) {
-      files.push({ path: d.path, bytes: enc.encode(d.svg) });
-    }
-  }
-  return { seq: bundle.seq, bytes: writeTar(files), files: files.length };
 }

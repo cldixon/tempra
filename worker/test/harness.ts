@@ -348,7 +348,6 @@ export function setup() {
       const { runMaintenance } = await import("../src/maintain");
       return runMaintenance({
         store: stores.get(doId) as LibraryStore,
-        blobs,
         bucket,
         libraryId: doId,
         now: new Date(),
@@ -369,7 +368,6 @@ export function setup() {
         }
         return prepareRestore({
           store: stores.get(doId) as LibraryStore,
-          blobs,
           bucket,
           recovery: pitr,
           libraryId: doId,
