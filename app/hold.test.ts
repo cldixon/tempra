@@ -88,8 +88,8 @@ describe("follow", () => {
     expect(here.url.pathname).toBe(`/ann/notes/${path}`);
     expect(here.held).toBe(false);
     expect(here.loading).toBe(false);
-    // Kept as a prefetch: the page draws from it without asking again.
-    expect(cache.takeFresh(fileKey(urls, path))).toBe(true);
+    // Kept as a fresh answer: the page draws from it without asking again.
+    expect(cache.fresh(fileKey(urls, path))).toBe(true);
     expect(asked.filter((p) => p.includes("/page/"))).toHaveLength(1);
   });
 

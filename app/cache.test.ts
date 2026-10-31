@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { PageCache, share } from "./src/cache";
+import { FRESH_MS, PageCache, share } from "./src/cache";
 
 describe("PageCache", () => {
   test("an older request never overwrites a newer answer", () => {
@@ -11,18 +11,62 @@ describe("PageCache", () => {
     expect(c.get("k")).toBe("newer");
   });
 
-  test("only a fresh prefetch spares the page from asking again, and only once", () => {
+  test("an answer is fresh for a few seconds after it was asked for (TEMPRA-103)", () => {
     let now = 0;
-    const c = new PageCache(100, 5000, () => now);
-    c.put("own", "loaded by the page", 0);
-    expect(c.takeFresh("own")).toBe(false);
-    c.put("hovered", "prefetched", 0, true);
-    expect(c.fresh("hovered")).toBe(true);
-    expect(c.takeFresh("hovered")).toBe(true);
-    expect(c.takeFresh("hovered")).toBe(false);
-    c.put("late", "prefetched", 0, true);
-    now = 6000;
-    expect(c.takeFresh("late")).toBe(false);
+    const c = new PageCache(100, () => now);
+    expect(c.fresh("missing")).toBe(false);
+    c.put("page", "loaded", 0);
+    now = FRESH_MS - 1;
+    expect(c.fresh("page")).toBe(true);
+    now = FRESH_MS;
+    expect(c.fresh("page")).toBe(false);
+    // Seldom-changing data keeps longer.
+    expect(c.fresh("page", 60_000)).toBe(true);
+  });
+
+  test("a write on the feed makes what was asked for before it stale", () => {
+    let now = 0;
+    const c = new PageCache(100, () => now);
+    c.put("page", "before", 0);
+    c.put("libraries", "the person's", 0);
+    now = 100;
+    c.wrote();
+    expect(c.fresh("page")).toBe(false);
+    // The person's libraries, their account and a library's members are not a library's writes.
+    expect(c.fresh("libraries", FRESH_MS, false)).toBe(true);
+    now = 200;
+    c.put("page", "after", 150);
+    expect(c.fresh("page")).toBe(true);
+    // A request that started before the write but answered after it may have missed it.
+    c.put("slow", "raced", 50);
+    expect(c.fresh("slow")).toBe(false);
+  });
+
+  test("an entry told it changed is stale until answered by a later request", () => {
+    let now = 0;
+    const c = new PageCache(100, () => now);
+    c.put("bell", "two items", 0);
+    now = 10;
+    c.stale("bell");
+    expect(c.get("bell")).toBe("two items");
+    expect(c.fresh("bell", 60_000, false)).toBe(false);
+    // A request that started before the change answers late: still stale.
+    c.put("bell", "two items, late", 5);
+    expect(c.fresh("bell", 60_000, false)).toBe(false);
+    c.put("bell", "one item", 20);
+    expect(c.fresh("bell", 60_000, false)).toBe(true);
+  });
+
+  test("tells whoever watches a key of each newer answer, until they stop", () => {
+    const c = new PageCache();
+    const seen: unknown[] = [];
+    const stop = c.watch("k", (d) => seen.push(d));
+    c.put("k", "a", 2);
+    c.put("k", "older", 1);
+    c.put("other", "x", 3);
+    stop();
+    c.put("k", "b", 4);
+    expect(seen).toEqual(["a"]);
   });
 
   test("keeps the most recently used entries", () => {

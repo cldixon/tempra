@@ -1,5 +1,5 @@
 import { api } from "./api";
-import { useLoad } from "./load.svelte.ts";
+import { useLoad, WORKSPACE_DATA } from "./load.svelte.ts";
 import type { Urls } from "./urls";
 
 /**
@@ -13,6 +13,8 @@ export function useMentionable(urls: () => Urls) {
       api<{ owner: string; members: { handle: string }[]; agents?: string[] }>(
         urls().api("members"),
       ),
+    [],
+    WORKSPACE_DATA,
   );
   const people = $derived(
     loaded.data ? [loaded.data.owner, ...loaded.data.members.map((m) => m.handle)] : [],
