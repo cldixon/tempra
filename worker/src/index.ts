@@ -10,7 +10,7 @@ import { routedDb, withD1Session } from "./d1session";
 import { type Caller, callerOf, FEED_SOCKETS_PER_ACCOUNT } from "./feed";
 import { deleteVariants, imagesService, r2VariantCache } from "./images";
 import { type Library, refuseFeed } from "./library";
-import { DEFAULT_STORAGE_MB } from "./limits";
+import { healthDigest } from "./library-health";
 import { exportsPrefix, listExports } from "./maintain";
 import type { AgentJob, ManagedDeps } from "./managed/agent";
 import { d1AgentBudget } from "./managed/budget";
@@ -19,7 +19,7 @@ import { fakeModel } from "./managed/fake";
 import type { ModelClient } from "./managed/turn";
 import { d1Notifications } from "./notify";
 import { devMailer, flushMail } from "./notify-mail";
-import { counterName, Quota, quotaBackend, quotaGuarded, recordStorage } from "./quota";
+import { counterName, Quota, quotaBackend, quotaGuarded } from "./quota";
 import { listRestores, RESTORE_ID, restoresPrefix } from "./recovery";
 import { type RenderService, servicePoster, serviceRenderer } from "./render";
 import { d1Sessions } from "./session";
@@ -109,9 +109,6 @@ function agentModel(env: Env): ModelClient | null {
   if (env.AGENT_MODEL === "fake" && env.DEV_SIGNIN === "1") return fakeModel();
   return env.ANTHROPIC_API_KEY ? anthropicModel(env.ANTHROPIC_API_KEY) : null;
 }
-
-const storageLimitBytes = (env: Env) =>
-  (Number(env.LIBRARY_STORAGE_MB) || DEFAULT_STORAGE_MB) * 1048576;
 
 /**
  * What authorization read from D1 in this isolate, up to 30 s old (authcache.ts, TEMPRA-84):
@@ -343,17 +340,9 @@ export default {
           await deleteVariants(env.BLOBS, keys);
         },
       },
-      libraries: async () =>
-        (
-          await env.DB.prepare(
-            "SELECT l.do_id AS id, COALESCE(u.handle, '?') || '/' || l.slug AS path FROM libraries l LEFT JOIN users u ON u.id = l.owner",
-          ).all<{ id: string; path: string }>()
-        ).results,
-      inventory: (id) => libraryStub(env, id).inventory(),
-      // A library not written since storage_bytes arrived is counted from the first cron.
-      recordStorage: (id, bytes) => recordStorage(env.DB, id, bytes),
+      // Each library's own health row (TEMPRA-92): the digest wakes no library.
+      health: (now) => healthDigest(env.DB, now),
       prune: () => pruneAccounts(env.DB, new Date()),
-      storageLimitBytes: storageLimitBytes(env),
       now: new Date(),
     });
     // @tempra's spend this month (TEMPRA-233); a failed read only leaves the line out.

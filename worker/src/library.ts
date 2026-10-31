@@ -18,6 +18,7 @@ import {
   readingOf,
   WRITE_METHODS,
 } from "./feed";
+import { ensureHealthRow, reportHealth } from "./library-health";
 import { DEFAULT_STORAGE_MB } from "./limits";
 import {
   DEFAULT_RETENTION_DAYS,
@@ -36,7 +37,7 @@ import {
   RowTally,
   rowsTo,
 } from "./store/sql";
-import { type LibraryHealth, LibraryStore } from "./store/store";
+import { LibraryStore } from "./store/store";
 import { callLine, worthLogging } from "./timing";
 import { usagePoint } from "./usage";
 
@@ -139,11 +140,10 @@ export class Library extends DurableObject<Env> {
     args: unknown[],
     caller: Caller | null,
   ): Promise<CallResult> {
-    const mb = Number(this.env.LIBRARY_STORAGE_MB) || DEFAULT_STORAGE_MB;
     const writes = WRITE_METHODS.has(method);
     const before = writes ? this.store.headSeq() : 0;
     const result = await callStore(this.store, r2BlobStore(this.env.BLOBS), method, args, {
-      storageLimitBytes: mb * 1048576,
+      storageLimitBytes: this.storageLimitBytes(),
       references: (hashes) =>
         d1BlobRefs(this.env.DB).reference(this.libraryId(), hashes, new Date()),
       // Reads counted as their surface and reader kind (TEMPRA-220).
@@ -325,20 +325,6 @@ export class Library extends DurableObject<Env> {
     );
   }
 
-  /** For the daily digest: storage, maintenance stats and health. */
-  async inventory(): Promise<{
-    bytes: number;
-    stats: ReturnType<LibraryStore["stats"]>;
-    health: LibraryHealth;
-  }> {
-    if (this.restarting) throw new Error("The library is restarting.");
-    return {
-      bytes: this.store.storageBytes(),
-      stats: this.store.stats(),
-      health: this.store.health(),
-    };
-  }
-
   /** For a blob sweep recount (TEMPRA-81): every attachment hash this library references. */
   async blobRefs(): Promise<string[]> {
     if (this.restarting) throw new Error("The library is restarting.");
@@ -375,14 +361,63 @@ export class Library extends DurableObject<Env> {
       this.store.setMaintenance({ library_id: name });
     }
     await this.schedule.ensure();
+    // Once per library: a health row with its next pass, so an alarm that never fires is found
+    // (TEMPRA-92). Off the call's path; the first pass writes it in full anyway.
+    if (!this.store.maintenance().health_row) {
+      const next = this.store.maintenance().next_run ?? null;
+      this.ctx.waitUntil(
+        ensureHealthRow(this.env.DB, this.libraryId(), next, new Date())
+          .then(() => this.store.setMaintenance({ health_row: "1" }))
+          .catch((e) => console.error(JSON.stringify({ health_row: String(e) }))),
+      );
+    }
+  }
+
+  /** The storage cap per library, from the deployment's LIBRARY_STORAGE_MB. */
+  private storageLimitBytes(): number {
+    return (Number(this.env.LIBRARY_STORAGE_MB) || DEFAULT_STORAGE_MB) * 1048576;
+  }
+
+  /**
+   * After a pass: the library's health row in D1 (TEMPRA-92), written only when it changed, and
+   * its storage for the account's quota (TEMPRA-232). Never throws: a row not written is caught
+   * by the digest as an overdue pass.
+   */
+  private async reportHealth(failure: string | null) {
+    try {
+      await reportHealth(this.env.DB, this.libraryId(), this.store, {
+        limitBytes: this.storageLimitBytes(),
+        failure,
+        now: new Date(),
+      });
+      if (!this.store.maintenance().health_row) this.store.setMaintenance({ health_row: "1" });
+    } catch (e) {
+      console.error(JSON.stringify({ health_row: this.libraryId(), error: String(e) }));
+    }
   }
 
   private libraryId(): string {
     return this.store.maintenance().library_id ?? this.ctx.id.name ?? this.ctx.id.toString();
   }
 
-  /** Runs the maintainers now ("Export now" in the UI); the alarm keeps its schedule. */
+  /**
+   * Runs the maintainers now ("Export now" in the UI), then reports the library's health; the
+   * alarm keeps its schedule.
+   */
   async maintain(): Promise<MaintenanceResult> {
+    let failure: string | null = null;
+    try {
+      return await this.pass();
+    } catch (e) {
+      failure = e instanceof Error ? e.message : String(e);
+      throw e;
+    } finally {
+      if (!this.restarting) await this.reportHealth(failure);
+    }
+  }
+
+  /** One maintenance pass (maintain.ts runMaintenance). */
+  private async pass(): Promise<MaintenanceResult> {
     if (this.restarting) throw new Error("The library is restarting after a restore.");
     if (!this.alarmChecked) await this.ensureAlarm();
     return runMaintenance({
@@ -439,14 +474,22 @@ export class Library extends DurableObject<Env> {
 
   override async alarm() {
     if (this.restarting) return;
+    let failure: string | null = null;
     try {
-      const result = await this.maintain();
+      const result = await this.pass();
       console.log(JSON.stringify({ maintenance: this.libraryId(), ...result }));
     } catch (e) {
-      // Logged, not rethrown: the next slot exports whatever this one missed.
+      // Logged, not rethrown: the next slot exports whatever this one missed. Its health row
+      // tells the operator.
+      failure = e instanceof Error ? e.message : String(e);
       console.error(JSON.stringify({ maintenance: this.libraryId(), error: String(e) }));
     }
-    await this.schedule.afterPass();
+    try {
+      await this.schedule.afterPass();
+    } finally {
+      // After the next pass is set, so the row carries when it is due (TEMPRA-92).
+      if (!this.restarting) await this.reportHealth(failure);
+    }
   }
 }
 

@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { d1BlobRefs } from "../src/blobrefs";
+import { healthDigest, healthRow, writeHealth } from "../src/library-health";
 import { runMaintenance } from "../src/maintain";
 import { healthLines } from "../src/mcp/server";
 import { sha256Hex } from "../src/okf/hash";
@@ -284,24 +285,38 @@ describe("the health summary (TEMPRA-66)", () => {
       counts: { stale: 0, stale_soon: 2, broken_link: 0, lint, structure, comment: 0 },
       unverified: { total: 0, newest: [] },
     });
-    const stats = {
-      seq: 1,
-      maintainers: { export: { lag: 0, last_run: "2026-10-01T03:00:00Z" } },
-      next_run: "2026-10-02T03:00:00Z",
-    };
     const libs: Record<string, ReturnType<typeof health>> = {
       quiet: health(0, 0),
       some: health(1, 0),
       most: health(2, 3),
     };
+    // Each library's pass writes its own health row (TEMPRA-92); the digest reads only those.
+    const { d1, db } = bunD1();
+    db.run(
+      "INSERT INTO users (id, email, actor, handle, created) VALUES ('u', 'u@x', 'human:o', 'o', '')",
+    );
+    const now = new Date("2026-10-01T04:30:00Z");
+    for (const [id, h] of Object.entries(libs)) {
+      db.run(
+        "INSERT INTO libraries (id, slug, owner, visibility, created, do_id) VALUES (?, ?, 'u', 'private', '', ?)",
+        [id, id, id],
+      );
+      const row = healthRow({
+        export: { lag: 0, last_run: "2026-10-01T03:00:00Z" },
+        bytes: 0,
+        limitBytes: 1e9,
+        counts: h.counts,
+        nextRun: "2026-10-02T03:00:00Z",
+        now,
+      });
+      await writeHealth(d1, id, row, now);
+    }
     const r = await sweep({
-      libraries: async () => Object.keys(libs).map((id) => ({ id, path: `o/${id}` })),
-      inventory: async (id) => ({ bytes: 0, stats, health: libs[id] }),
-      refs: d1BlobRefs(bunD1().d1),
+      health: (t) => healthDigest(d1, t),
+      refs: d1BlobRefs(d1),
       queue: { send: async () => {}, sendBatch: async () => {} },
       bucket: { delete: async () => {} },
-      storageLimitBytes: 1e9,
-      now: new Date("2026-10-01T04:30:00Z"),
+      now,
     });
     expect(r.health.map((h) => h.path)).toEqual(["o/most", "o/some"]);
     expect(digestText(r)).toContain(

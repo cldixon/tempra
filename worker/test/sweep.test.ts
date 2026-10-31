@@ -1,6 +1,7 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { d1BlobRefs, RECOUNT_MARGIN_MS } from "../src/blobrefs";
+import { healthDigest, healthRow, writeHealth } from "../src/library-health";
 import { MAX_SLEEP_DAYS, nextMaintenance, runMaintenance } from "../src/maintain";
 import { LibraryStore } from "../src/store/store";
 import {
@@ -9,7 +10,6 @@ import {
   FULL_RECOUNT_DAYS,
   GRACE_DAYS,
   handleSweepMessage,
-  type Inventory,
   isSweepMessage,
   type SweepMessage,
   sweep,
@@ -21,16 +21,6 @@ import { bunSqlHandle } from "./sqlite";
 const DAY = 86_400_000;
 const T0 = new Date("2026-10-01T04:30:00Z");
 const at = (days: number) => new Date(T0.getTime() + days * DAY);
-
-const inv = (over: Partial<Inventory> = {}): Inventory => ({
-  bytes: 1000,
-  stats: {
-    seq: 3,
-    maintainers: { export: { lag: 0, last_run: "2026-10-01T03:00:00Z" } },
-    next_run: "2026-10-02T03:00:00Z",
-  },
-  ...over,
-});
 
 /**
  * Libraries in D1, each with the hashes its Durable Object would report (or an error), a bucket,
@@ -54,7 +44,7 @@ function world() {
       queued.push(...ms);
     },
   };
-  const calls = { hashes: 0, inventory: 0, deleted: [] as string[] };
+  const calls = { hashes: 0, deleted: [] as string[] };
   let clock = T0;
   /** A library row; `counted` as a library made by today's code is, or not as one from before. */
   const addLibrary = (id: string, hashes: string[] | Error, counted = false) => {
@@ -125,16 +115,7 @@ function world() {
           }
         },
       },
-      libraries: async () =>
-        db
-          .query("SELECT do_id AS id, 'o/' || slug AS path FROM libraries ORDER BY do_id")
-          .all() as { id: string; path: string }[],
-      inventory: async (id) => {
-        calls.inventory++;
-        if (libs.get(id) instanceof Error) throw libs.get(id);
-        return inv();
-      },
-      storageLimitBytes: 100 * 1048576,
+      health: (t) => healthDigest(d1, t),
       now,
     });
   };
@@ -240,8 +221,6 @@ describe("blob sweep (TEMPRA-81, TEMPRA-91)", () => {
     const held = await w.day(at(GRACE_DAYS + 1));
     expect(held.deleted).toBe(0);
     expect(held.held).toContain("o/flaky");
-    // A library that does not answer is reported, but no longer what holds the sweep.
-    expect(digestText(held)).toContain("o/flaky: did not answer (overloaded)");
     expect(w.objects.has("blobs/orphan")).toBe(true);
 
     // It answers once, and is counted.
@@ -439,44 +418,62 @@ describe("blob sweep (TEMPRA-81, TEMPRA-91)", () => {
     expect(digestText(r)).toContain(
       "Libraries 1. Blobs stored 2, referenced 1, waiting 1, deleted 0 (deletion held). Recounted every library.",
     );
-    expect(w.calls.inventory).toBe(1);
+    // The digest asked no library: the sweep's only calls were the recounts.
+    expect(w.calls.hashes).toBe(1);
     expect(digestText(await w.day(at(1)))).toContain(
       "Libraries 1. Blobs stored 2, referenced 1, waiting 1, deleted 0. Recounted libraries not yet counted or restored.",
     );
   });
 
   test("the digest flags stale exports, overdue maintenance and full libraries", async () => {
-    const { d1 } = bunD1();
-    const recorded: Record<string, number> = {};
-    const libs: Record<string, Inventory> = {
-      ok: inv(),
-      stale: inv({
-        stats: {
-          seq: 9,
-          maintainers: { export: { lag: 4, last_run: "2026-09-25T03:00:00Z" } },
-          next_run: "2026-09-26T03:00:00Z",
-        },
-      }),
-      full: inv({ bytes: 90 * 1048576 }),
+    const { d1, db } = bunD1();
+    db.run(
+      "INSERT INTO users (id, email, actor, handle, created) VALUES ('u', 'u@x', 'human:owner', 'owner', '')",
+    );
+    // What each library's own pass reported (TEMPRA-92); the digest reads only these rows.
+    const report = async (
+      id: string,
+      o: { lag?: number; last?: string; bytes?: number; next?: string } = {},
+    ) => {
+      db.run(
+        "INSERT INTO libraries (id, slug, owner, visibility, created, do_id) VALUES (?, ?, 'u', 'private', '', ?)",
+        [id, id, id],
+      );
+      const row = healthRow({
+        export: { lag: o.lag ?? 0, last_run: o.last ?? "2026-10-01T03:00:00Z" },
+        bytes: o.bytes ?? 1000,
+        limitBytes: 100 * 1048576,
+        counts: null,
+        nextRun: o.next ?? "2026-10-02T03:00:00Z",
+        now: at(-1),
+      });
+      await writeHealth(d1, id, row, at(-1), o.bytes ?? 1000);
     };
+    await report("ok");
+    await report("stale", {
+      lag: 4,
+      last: "2026-09-25T03:00:00Z",
+      next: "2026-09-26T03:00:00Z",
+    });
+    await report("full", { bytes: 90 * 1048576 });
     const r = await sweep({
       refs: d1BlobRefs(d1),
       queue: { send: async () => {}, sendBatch: async () => {} },
       bucket: { delete: async () => {} },
-      libraries: async () => Object.keys(libs).map((id) => ({ id, path: `owner/${id}` })),
-      inventory: async (id) => libs[id] as Inventory,
-      // The daily backfill of each library's storage for the account quota (TEMPRA-232).
-      recordStorage: async (id, bytes) => {
-        recorded[id] = bytes;
-      },
-      storageLimitBytes: 100 * 1048576,
+      health: (t) => healthDigest(d1, t),
       now: T0,
     });
-    expect(recorded).toEqual({ ok: 1000, stale: 1000, full: 90 * 1048576 });
+    // The library's own report recorded its storage for the account quota (TEMPRA-232).
+    expect(db.query("SELECT do_id, storage_bytes FROM libraries ORDER BY do_id").all()).toEqual([
+      { do_id: "full", storage_bytes: 90 * 1048576 },
+      { do_id: "ok", storage_bytes: 1000 },
+      { do_id: "stale", storage_bytes: 1000 },
+    ]);
+    expect(r.libraries).toBe(3);
     expect(r.attention.filter((a) => !a.startsWith("Blob sweep held"))).toEqual([
+      "owner/full: 90 MB of 100 MB",
       "owner/stale: last export 2026-09-25T03:00:00Z, 4 events behind",
       "owner/stale: daily maintenance overdue since 2026-09-26T03:00:00Z",
-      "owner/full: 90 MB of 100 MB",
     ]);
   });
 

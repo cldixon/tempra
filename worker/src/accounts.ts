@@ -1065,6 +1065,12 @@ export function d1Accounts(db: D1Database): Accounts {
         db.prepare("DELETE FROM library_seen WHERE library = ?").bind(libraryId),
         db.prepare("DELETE FROM notification_prefs WHERE library = ?").bind(libraryId),
         db.prepare("DELETE FROM grant_libraries WHERE library = ?").bind(libraryId),
+        // Its health row (TEMPRA-92), keyed by the object's name.
+        db
+          .prepare(
+            "DELETE FROM library_health WHERE library IN (SELECT do_id FROM libraries WHERE id = ?)",
+          )
+          .bind(libraryId),
         db.prepare("DELETE FROM libraries WHERE id = ?").bind(libraryId),
       ]);
     },
