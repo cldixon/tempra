@@ -11,6 +11,7 @@
     "seed": "bun scripts/seed.ts",
     "gate": "bun scripts/gate.ts",
     "logs": "bun scripts/logs.ts",
+    "costs": "bun scripts/costs.ts",
     "admin": "bun scripts/admin.ts",
     "preview": "bun scripts/preview.ts",
     "agents": "bun scripts/agents.ts",

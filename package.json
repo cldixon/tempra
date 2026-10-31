@@ -22,6 +22,7 @@
     "seed": "bun run --filter worker seed",
     "gate": "bun run --cwd worker gate",
     "logs": "bun run --filter worker logs",
+    "costs": "bun run --filter worker costs",
     "preview": "bun run --filter worker preview",
     "admin": "bun run --filter worker admin",
     "agents": "bun run --filter worker agents",
