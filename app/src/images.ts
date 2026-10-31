@@ -23,7 +23,7 @@ export interface ImageRef {
   width?: number | null;
   height?: number | null;
   /** A video's poster, the image attached beside it (`demo.poster.png`; TEMPRA-164). */
-  poster?: ImageRef;
+  poster?: ImageRef | null;
 }
 
 /**

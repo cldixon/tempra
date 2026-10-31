@@ -223,6 +223,143 @@ describe("attachments: checked images, type from the bytes, dimensions (TEMPRA-1
   });
 });
 
+/** A concept showing the given files as figures. */
+const showing = (s: S, path: string, files: string[]) =>
+  s.req(`/files/${path}`, {
+    method: "PUT",
+    headers: { "Content-Type": "text/markdown" },
+    body: [
+      "---",
+      "type: Note",
+      "title: Figures",
+      "description: Figures.",
+      "---",
+      ...files.map((f) => `![${f}](/${f})\n`),
+    ].join("\n"),
+  });
+
+/** An MP4 as clip.mp4 is, `moov` after its media data, with `pad` more bytes of media data. */
+function paddedMp4(pad: number): Uint8Array {
+  const b = sample("clip.mp4");
+  const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
+  const parts: Uint8Array[] = [];
+  for (let at = 0; at < b.length; ) {
+    const size = v.getUint32(at);
+    const box = b.subarray(at, at + size);
+    if (new TextDecoder().decode(box.subarray(4, 8)) === "mdat") {
+      const grown = new Uint8Array(size + pad);
+      grown.set(box);
+      new DataView(grown.buffer).setUint32(0, size + pad);
+      parts.push(grown);
+    } else parts.push(box);
+    at += size;
+  }
+  const out = new Uint8Array(parts.reduce((n, p) => n + p.length, 0));
+  let at = 0;
+  for (const p of parts) {
+    out.set(p, at);
+    at += p.length;
+  }
+  return out;
+}
+
+describe("sizes worked out once from stored bytes (TEMPRA-183, TEMPRA-185)", () => {
+  test("a stored image that does not decode is fetched from the blob store once", async () => {
+    const s = setup();
+    const bytes = truncatedIdatPng();
+    const hash = sha256Hex(bytes);
+    legacyAttach(s, "bad.png", bytes, "image/png");
+    await showing(s, "uses.md", ["bad.png"]);
+    const fetched = () => s.blobs.gets.filter((g) => g.hash === hash).length;
+    expect(await describeFile(s, "bad.png")).toMatchObject({ width: null, height: null });
+    expect(fetched()).toBe(1);
+    // Read again: the attachment, the page showing it, its figures for an agent.
+    expect(await describeFile(s, "bad.png")).toMatchObject({ width: null, height: null });
+    const page = (await describeFile(s, "uses.md")) as { images: Record<string, unknown> };
+    expect(page.images["bad.png"]).toMatchObject({ width: null, height: null });
+    const call = await mcp(s);
+    expect((await call("read", { path: "uses.md" })).text).toContain("/bad.png");
+    expect(fetched()).toBe(1);
+  });
+
+  test("a video stored without its size gains it on first read, through ranged reads only", async () => {
+    const s = setup();
+    const webm = sample("clip.webm");
+    const mp4 = paddedMp4(200 * 1024);
+    legacyAttach(s, "clips/a.webm", webm, "video/webm");
+    legacyAttach(s, "clips/b.mp4", mp4, "video/mp4");
+    expect(s.store().read("clips/a.webm")).not.toHaveProperty("width");
+    expect(await describeFile(s, "clips/a.webm")).toMatchObject({ width: 64, height: 36 });
+    expect(s.store().read("clips/a.webm")).toMatchObject({ width: 64, height: 36 });
+    // An MP4 whose moov comes after 200 KB of media data: found box by box, not read whole.
+    await showing(s, "clips.md", ["clips/b.mp4"]);
+    const page = (await describeFile(s, "clips.md")) as { images: Record<string, unknown> };
+    const mp4Hash = sha256Hex(mp4);
+    expect(page.images["clips/b.mp4"]).toMatchObject({ width: 48, height: 32 });
+    expect(s.store().read("clips/b.mp4")).toMatchObject({ width: 48, height: 32 });
+    const reads = s.blobs.gets.filter((g) => g.hash === mp4Hash || g.hash === sha256Hex(webm));
+    expect(reads.length).toBeGreaterThan(0);
+    expect(reads.every((g) => g.range !== undefined)).toBe(true);
+    const read = reads
+      .filter((g) => g.hash === mp4Hash)
+      .reduce((n, g) => n + (g.range?.length ?? 0), 0);
+    expect(read).toBeLessThan(mp4.length / 2);
+    // Settled: read again, nothing more is fetched.
+    const before = s.blobs.gets.length;
+    await describeFile(s, "clips/b.mp4");
+    await describeFile(s, "clips.md");
+    expect(s.blobs.gets.length).toBe(before);
+  });
+
+  test("a video whose header does not parse is kept unsized and not read again", async () => {
+    const s = setup();
+    const cut = sample("clip.webm").subarray(0, 40);
+    const hash = sha256Hex(cut);
+    legacyAttach(s, "clips/cut.webm", cut, "video/webm");
+    expect(await describeFile(s, "clips/cut.webm")).toMatchObject({ width: null, height: null });
+    expect(await describeFile(s, "clips/cut.webm")).toMatchObject({ width: null, height: null });
+    expect(s.blobs.gets.filter((g) => g.hash === hash)).toHaveLength(1);
+  });
+});
+
+describe("a video and its poster name each other (TEMPRA-182)", () => {
+  test("the video's JSON carries its poster, the poster's names its video", async () => {
+    const s = setup();
+    const webm = sample("clip.webm");
+    const poster = makePng(64, 36);
+    await put(s, "clips/demo.webm", webm, "video/webm");
+    expect(await describeFile(s, "clips/demo.webm")).toMatchObject({
+      poster: null,
+      poster_for: null,
+    });
+    await put(s, "clips/demo.poster.png", poster, "image/png");
+    expect(await describeFile(s, "clips/demo.webm")).toMatchObject({
+      poster: {
+        path: "clips/demo.poster.png",
+        hash: sha256Hex(poster),
+        media: "image/png",
+        width: 64,
+        height: 36,
+      },
+      poster_for: null,
+    });
+    expect(await describeFile(s, "clips/demo.poster.png")).toMatchObject({
+      poster: null,
+      poster_for: "clips/demo.webm",
+    });
+    // An image named like a poster with no video beside it is just an image.
+    await put(s, "clips/lone.poster.png", poster, "image/png");
+    expect(await describeFile(s, "clips/lone.poster.png")).toMatchObject({ poster_for: null });
+    const call = await mcp(s);
+    expect((await call("read", { path: "clips/demo.webm" })).text).toContain(
+      "poster: /clips/demo.poster.png",
+    );
+    expect((await call("read", { path: "clips/demo.poster.png", image: false })).text).toContain(
+      "poster for: /clips/demo.webm",
+    );
+  });
+});
+
 describe("exports name attachments by hash (TEMPRA-83)", () => {
   test("a nightly folder holds no bytes and downloads whole; a person's export streams them", async () => {
     const s = setup();

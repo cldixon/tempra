@@ -23,8 +23,9 @@
   /**
    * An attachment (board 28; TEMPRA-170, tempra-dev: app/media, The image's page): the image (or a
    * file icon) large on a dark frame; beside it the filename and what it shows, Download and Copy
-   * link, then Type, Size, Added, Source, Credit, Licence and Used in (each page and the figures it
-   * appears as); under them File history, every version with its own Download.
+   * link, then Type, Size, Added, Source, Credit, Licence, Poster for (a video's poster, TEMPRA-182)
+   * and Used in (each page and the figures it appears as); under them File history, every version
+   * with its own Download. A video plays in place with its poster when one is beside it.
    */
   let { urls, head, file }: { urls: Urls; head: number; file: AttachmentFile } = $props();
   useLibraryTitle(
@@ -130,6 +131,8 @@
         ></div
       >{#if file.credit}<div><dt>Credit</dt><dd>{file.credit}</dd></div>{/if}{#if file.licence}<div
           ><dt>Licence</dt><dd>{file.licence}</dd></div
+        >{/if}{#if file.poster_for}<div
+          ><dt>Poster for</dt><dd><a href={urls.file(file.poster_for)}>{baseName(file.poster_for)}</a></dd></div
         >{/if}<div
         ><dt>Used in</dt><dd><UsedIn {urls} paths={usedIn} uses={usesShown} {titles} /></dd></div
       ></dl

@@ -60,6 +60,10 @@ export type FileJson =
       supplied_by?: string | null;
       /** What this version was made from on the server, by an agent's `transform` (TEMPRA-208). */
       made_from?: MadeFrom | null;
+      /** A video's poster, the image beside it as `<name>.poster.png` (TEMPRA-182). */
+      poster?: ({ path: string } & ImageRef) | null;
+      /** For a video's poster, the video's path (TEMPRA-182). */
+      poster_for?: string | null;
     };
 
 /** An attachment made from another: the file, the hash it had, and what was done. */

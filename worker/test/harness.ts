@@ -40,14 +40,21 @@ import { bunSqlHandle } from "./sqlite";
 
 const { createWorker } = await import("../src/worker");
 
-export function memoryBlobs(): BlobStore & { map: Map<string, Uint8Array> } {
+export function memoryBlobs(): BlobStore & {
+  map: Map<string, Uint8Array>;
+  /** Every `get`, in order, with its range when it had one (TEMPRA-183, TEMPRA-185). */
+  gets: { hash: string; range?: { offset: number; length: number } }[];
+} {
   const map = new Map<string, Uint8Array>();
+  const gets: { hash: string; range?: { offset: number; length: number } }[] = [];
   return {
     map,
+    gets,
     async put(hash, bytes) {
       map.set(hash, bytes);
     },
     async get(hash, range) {
+      gets.push(range ? { hash, range } : { hash });
       const b = map.get(hash);
       if (!b) return null;
       const body = range ? b.subarray(range.offset, range.offset + range.length) : b;

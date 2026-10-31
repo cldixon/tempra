@@ -1652,6 +1652,9 @@ async function fileJson(lib: LibraryClient, blobs: BlobStore, view: FileView) {
       origin: v.origin ?? null,
       // What it was made from on the server (TEMPRA-208).
       made_from: v.made_from ?? null,
+      // A video's poster beside it, and for a poster its video (TEMPRA-182).
+      poster: v.poster ?? null,
+      poster_for: v.poster_for ?? null,
     };
   }
   if (view.kind === "derived") {
