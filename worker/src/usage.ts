@@ -19,11 +19,60 @@ export interface UsageEvent {
    * diagram drawn by the render Worker (TEMPRA-165), or a file fetched from a URL an agent named
    * (TEMPRA-157; bytes: what was read).
    */
-  kind: "request" | "write" | "email" | "feed" | "read_image" | "read_pdf" | "render" | "fetch";
+  kind:
+    | "request"
+    | "write"
+    | "email"
+    | "feed"
+    | "read_image"
+    | "read_pdf"
+    | "render"
+    | "fetch"
+    | "cost";
   /** The account: a library owner's handle, or an email for sign-in mail. */
   account: string;
   library?: string;
   bytes?: number;
+  /**
+   * `cost` (TEMPRA-228): what one MCP tool call or REST request cost its library's object, under
+   * `op` (`mcp:write`, `GET /files/*`, or `read_flush` for the object's own flush of read counts).
+   */
+  op?: string;
+  cost?: {
+    /** Library DO calls. */
+    calls: number;
+    rowsRead: number;
+    rowsWritten: number;
+    /** Of rowsWritten: the search index's (`fts`, `fts_rows`) and the read counts' flush. */
+    ftsRowsWritten: number;
+    readFlushRowsWritten: number;
+    /** The round trips to the object, summed. */
+    ms: number;
+  };
+}
+
+/**
+ * An Analytics Engine data point for a usage event. The first blobs and doubles keep their places
+ * (kind, account, library; 1, bytes); a cost adds its op as blob 4 and doubles 3 to 8: calls,
+ * rows read, rows written, FTS rows written, read-flush rows written, ms (TEMPRA-228).
+ */
+export function usagePoint(e: UsageEvent): {
+  blobs: string[];
+  doubles: number[];
+  indexes: string[];
+} {
+  const c = e.cost;
+  return {
+    blobs: [e.kind, e.account, e.library ?? "", ...(e.op !== undefined ? [e.op] : [])],
+    doubles: [
+      1,
+      e.bytes ?? 0,
+      ...(c
+        ? [c.calls, c.rowsRead, c.rowsWritten, c.ftsRowsWritten, c.readFlushRowsWritten, c.ms]
+        : []),
+    ],
+    indexes: [e.account.slice(0, 96)],
+  };
 }
 
 export interface UsageDeps {

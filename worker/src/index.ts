@@ -32,6 +32,7 @@ import {
   sweep,
 } from "./sweep";
 import { rpcLine } from "./timing";
+import { usagePoint } from "./usage";
 import { createWorker } from "./worker";
 
 export { AccountFeeds } from "./account-feeds";
@@ -144,11 +145,7 @@ const depsFor = (env: Env): Deps => {
   };
   const meter: Deps["meter"] = (e) => {
     try {
-      env.USAGE.writeDataPoint({
-        blobs: [e.kind, e.account, e.library ?? ""],
-        doubles: [1, e.bytes ?? 0],
-        indexes: [e.account.slice(0, 96)],
-      });
+      env.USAGE.writeDataPoint(usagePoint(e));
     } catch {}
   };
   return {

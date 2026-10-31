@@ -1,5 +1,6 @@
 import { type Doc, parseMarkdown } from "@tempra/editor/doc";
 import { type Context, Hono } from "hono";
+import { routePath } from "hono/route";
 import { registerAccountApi } from "./account-api";
 import { type Accounts, checkNewToken, humanActor, type MemberRole, type User } from "./accounts";
 import { tokenAgent } from "./agents";
@@ -28,6 +29,7 @@ import { type GrantProps, registerAppRoutes } from "./oauth/routes";
 import { splitFrontmatter } from "./okf/concept";
 import { normalizePath, underPrefix } from "./okf/paths";
 import type { JsonObject } from "./okf/types";
+import { withCostHeader, withCosts } from "./op-costs";
 import { fromThisSite } from "./origin";
 import type { RestoreOutcome, RestoreRecord } from "./recovery";
 import type { PosterFrame, RenderContext, RenderDiagram } from "./render";
@@ -64,7 +66,14 @@ import {
   readCapped,
   type UploadGrant,
 } from "./uploads";
-import { admit, admitSession, RETRY_AFTER_S, tokenAdmission, type UsageDeps } from "./usage";
+import {
+  type Admission,
+  admit,
+  admitSession,
+  RETRY_AFTER_S,
+  tokenAdmission,
+  type UsageDeps,
+} from "./usage";
 import { maybeGunzip, readTar } from "./util/tar";
 import { registerWaitlistRoutes } from "./waitlist";
 
@@ -467,7 +476,14 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     c.set("deps", d);
     c.set("token", token);
     c.set("lib", notifying(d, token, d.library(token), afterResponse(c)));
-    await next();
+    // What the request cost its library's object, metered under its route (TEMPRA-228).
+    const { cost } = await withCosts(() => next());
+    if (cost.calls > 0) {
+      const op = `${c.req.method} ${routePath(c, -1).slice(BASE.length) || "/"}`;
+      const { account, library } = tokenAdmission(token);
+      d.meter?.({ kind: "cost", account, library, op, cost });
+      if (c.res.status !== 101) c.res = withCostHeader(c.req.raw, c.res, cost);
+    }
   });
 
   // ------------------------------------------------------------------ files
@@ -1209,27 +1225,38 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     const raw = c.req.param("token");
     const lib = await d.libraryByDoId(doId);
     if (!lib) throw badUpload();
-    const grant = await openUploadGrant(lib, raw, doId);
-    const length = Number(c.req.header("Content-Length") ?? Number.NaN);
-    if (length > WORKER_ATTACHMENT_CAP) {
-      throw new OkfError(
-        413,
-        "attachment_too_large",
-        `Attachments are capped at ${WORKER_ATTACHMENT_CAP} bytes.`,
-      );
-    }
-    checkMedia(grant.media, c.req.header("Content-Type"));
-    const bytes = await readCapped(c.req.raw.body);
-    checkLength(bytes, c.req.header("Content-Length"));
-    const person = grant.token.person || grant.token.library.owner;
-    const done = await receiveUpload(d, lib, raw, grant, {
-      bytes,
-      type: c.req.header("Content-Type"),
-      waitUntil: afterResponse(c),
-      ...(c.req.query("via") === "chat" && person ? { supplied_by: person } : {}),
+    // What the upload cost its library's object, metered as the agent's (TEMPRA-228).
+    let who: Admission | null = null;
+    const { value: res, cost } = await withCosts(async () => {
+      const grant = await openUploadGrant(lib, raw, doId);
+      who = tokenAdmission(grant.token);
+      const length = Number(c.req.header("Content-Length") ?? Number.NaN);
+      if (length > WORKER_ATTACHMENT_CAP) {
+        throw new OkfError(
+          413,
+          "attachment_too_large",
+          `Attachments are capped at ${WORKER_ATTACHMENT_CAP} bytes.`,
+        );
+      }
+      checkMedia(grant.media, c.req.header("Content-Type"));
+      const bytes = await readCapped(c.req.raw.body);
+      checkLength(bytes, c.req.header("Content-Length"));
+      const person = grant.token.person || grant.token.library.owner;
+      const done = await receiveUpload(d, lib, raw, grant, {
+        bytes,
+        type: c.req.header("Content-Type"),
+        waitUntil: afterResponse(c),
+        ...(c.req.query("via") === "chat" && person ? { supplied_by: person } : {}),
+      });
+      if ("blob" in done) return c.json(done.blob, 201);
+      return writeResponse(c, done.res);
     });
-    if ("blob" in done) return c.json(done.blob, 201);
-    return writeResponse(c, done.res);
+    const payer = who as Admission | null;
+    if (payer && cost.calls > 0) {
+      const { account, library } = payer;
+      d.meter?.({ kind: "cost", account, library, op: "PUT /ul/*", cost });
+    }
+    return withCostHeader(c.req.raw, res, cost);
   });
 
   // ------------------------------------------------------------------ libraries and tokens

@@ -31,6 +31,7 @@ import { Quota, QuotaCounter, quotaBackend, quotaGuarded } from "../src/quota";
 import type { RestoreRecord } from "../src/recovery";
 import { d1Sessions, SESSION_COOKIE } from "../src/session";
 import type { ReadSurface } from "../src/store/reads";
+import { RowTally } from "../src/store/sql";
 import { LibraryStore } from "../src/store/store";
 import type { UsageEvent } from "../src/usage";
 import { bunD1 } from "./d1";
@@ -254,7 +255,9 @@ export function setup() {
   const callFor = (doId: string) => {
     let c = calls.get(doId);
     if (!c) {
-      const store = new LibraryStore(bunSqlHandle());
+      // Rows counted as the DO counts them, as near as bun:sqlite tells (TEMPRA-228).
+      const rows = new RowTally();
+      const store = new LibraryStore(bunSqlHandle(undefined, rows));
       stores.set(doId, store);
       const hub = new Presence();
       c = async (method, args, caller) => {
@@ -262,6 +265,7 @@ export function setup() {
           storageLimitBytes: limits.storageBytes,
           references: (hashes) => d1BlobRefs(d1).reference(doId, hashes, new Date()),
           reading: caller ? readingOf(caller) : null,
+          rows,
         });
         const message = caller && result.ok ? hub.message(caller, method, result.value) : null;
         if (message) presence.push({ doId, message });
