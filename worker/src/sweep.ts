@@ -1,6 +1,7 @@
 import type { BlobRefs } from "./blobrefs";
 import { blobKey } from "./client";
 import { DIGEST_HEALTH_LIBRARIES, type HealthCounts, type HealthDigest } from "./library-health";
+import { MAIL_SENT_RETENTION_DAYS } from "./mail-queue";
 
 /**
  * The daily sweep and operator digest (v2 spec: A3; TEMPRA-81, TEMPRA-91; tempra-dev:
@@ -339,7 +340,7 @@ export function digestText(r: SweepResult): string {
     `Libraries ${r.libraries}. Blobs stored ${r.stored}, referenced ${r.referenced}, waiting ${r.orphaned}, deleted ${r.deleted}${r.held ? " (deletion held)" : ""}. Recounted ${r.recount === "all" ? "every library" : "libraries not yet counted or restored"}.`,
     ...(r.pruned
       ? [
-          `Pruned sessions ${r.pruned.sessions}, sign-in links ${r.pruned.sign_in_links}, invitations ${r.pruned.invitations}.`,
+          `Pruned sessions ${r.pruned.sessions}, sign-in links ${r.pruned.sign_in_links}, invitations ${r.pruned.invitations}, sent mail keys ${r.pruned.mail_sent}.`,
         ]
       : []),
     ...(r.agentSpend ? [agentSpendLine(r.agentSpend)] : []),
@@ -369,6 +370,8 @@ export interface PruneResult {
   sessions: number;
   sign_in_links: number;
   invitations: number;
+  /** Outgoing mail's dedupe keys past MAIL_SENT_RETENTION_DAYS (TEMPRA-89). */
+  mail_sent: number;
 }
 
 /**
@@ -393,6 +396,9 @@ export async function pruneAccounts(db: D1Database, now: Date): Promise<PruneRes
       "(status IN ('declined', 'revoked') AND decided < ?1) OR (status = 'pending' AND expires < ?1)",
       [invitationsBefore],
     ),
+    mail_sent: await pruneBatches(db, "mail_sent", "claimed_at < ?1", [
+      iso(t - MAIL_SENT_RETENTION_DAYS * DAY_MS),
+    ]),
   };
 }
 

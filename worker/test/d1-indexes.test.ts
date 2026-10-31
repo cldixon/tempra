@@ -205,7 +205,7 @@ describe("daily account prune (TEMPRA-79)", () => {
   test("deletes expired sessions, links older than a day and old finished invitations", async () => {
     const { d1, db } = seeded();
     const r = await pruneAccounts(d1, NOW);
-    expect(r).toEqual({ sessions: 2, sign_in_links: 1, invitations: 3 });
+    expect(r).toEqual({ sessions: 2, sign_in_links: 1, invitations: 3, mail_sent: 0 });
     const col = (sql: string) => (db.query(sql).all() as { k: string }[]).map((x) => x.k).sort();
     expect(col("SELECT hash AS k FROM sessions")).toEqual(["live"]);
     expect(col("SELECT hash AS k FROM sign_in_links")).toEqual(["fresh"]);
@@ -216,7 +216,12 @@ describe("daily account prune (TEMPRA-79)", () => {
       "pending",
     ]);
     // Again: nothing left to do.
-    expect(await pruneAccounts(d1, NOW)).toEqual({ sessions: 0, sign_in_links: 0, invitations: 0 });
+    expect(await pruneAccounts(d1, NOW)).toEqual({
+      sessions: 0,
+      sign_in_links: 0,
+      invitations: 0,
+      mail_sent: 0,
+    });
   });
 
   test("deletes in batches of a thousand until done", async () => {
@@ -249,8 +254,10 @@ describe("daily account prune (TEMPRA-79)", () => {
       prune: () => pruneAccounts(d1, NOW),
       now: NOW,
     });
-    expect(r.pruned).toEqual({ sessions: 2, sign_in_links: 1, invitations: 3 });
-    expect(digestText(r)).toContain("Pruned sessions 2, sign-in links 1, invitations 3.");
+    expect(r.pruned).toEqual({ sessions: 2, sign_in_links: 1, invitations: 3, mail_sent: 0 });
+    expect(digestText(r)).toContain(
+      "Pruned sessions 2, sign-in links 1, invitations 3, sent mail keys 0.",
+    );
   });
 
   test("a failed prune is something to look at, and the sweep goes on", async () => {

@@ -3119,9 +3119,13 @@ async function browserRenders(
           method: "POST",
           headers: { Accept: "application/json" },
         });
-        const outbox = (await (await ui(`${base}/_dev/mail.json`)).json()) as {
-          mails: { to: string; text: string }[];
-        };
+        // Queued on the local MAIL_QUEUE (TEMPRA-89): its consumer fills the outbox a moment later.
+        let outbox: { mails: { to: string; text: string }[] } = { mails: [] };
+        for (let i = 0; i < 40; i++) {
+          outbox = (await (await ui(`${base}/_dev/mail.json`)).json()) as typeof outbox;
+          if (outbox.mails.some((m) => m.text.includes("Checked it; it holds."))) break;
+          await new Promise((r) => setTimeout(r, 250));
+        }
         if (!sent.ok || !outbox.mails.some((m) => m.text.includes("Checked it; it holds."))) {
           throw new Error(`dev outbox: ${sent.status} ${JSON.stringify(outbox.mails[0] ?? null)}`);
         }

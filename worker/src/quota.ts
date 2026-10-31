@@ -13,8 +13,8 @@ import type { TokenInfo } from "./auth";
 import { grows, type LibraryClient, type LibraryMethod } from "./client";
 import { WRITE_METHODS } from "./feed";
 import { type Limits, limitsFrom } from "./limits";
+import type { Outbox } from "./mail-queue";
 import type { NewItem } from "./notify";
-import type { Mailer } from "./signin";
 import { OkfError } from "./store/errors";
 import type { SqlHandle } from "./store/sql";
 import { tokenAdmission } from "./usage";
@@ -157,7 +157,14 @@ export interface QuotaBackend {
   accountById(userId: string): Promise<QuotaAccount | null>;
   /** The account that owns a library. */
   owner(libraryId: string): Promise<QuotaAccount | null>;
-  mail(msg: { to: string; subject: string; text: string }): Promise<void>;
+  /** Queues the notice's mail (TEMPRA-89); `key` makes a repeat of the same notice one mail. */
+  mail(msg: {
+    key: string;
+    account: string;
+    to: string;
+    subject: string;
+    text: string;
+  }): Promise<void>;
   /** Puts a notice in the person's bell. */
   notice(userId: string, n: QuotaNotice): Promise<void>;
 }
@@ -408,7 +415,8 @@ export class Quota {
         console.error(JSON.stringify({ quota_notice_failed: a.id, error: String(e) }));
       await this.b.notice(a.id, quotaNotice(kind, top.pct, limit, n, month)).catch(said);
       const msg = quotaMail(kind, top.pct, limit, n, month, this.origin);
-      await this.b.mail({ to: a.email, ...msg }).catch(said);
+      const key = `quota:${a.id}:${month}:${kind}:${top.pct}`;
+      await this.b.mail({ key, account: a.handle, to: a.email, ...msg }).catch(said);
     }
   }
 }
@@ -605,12 +613,12 @@ export interface QuotaCounterStub {
 
 /**
  * The backend from D1, the account's object (by user id), the notifications (the bell) and the
- * mailer (none: no mail).
+ * outbox (mail-queue.ts; none: no mail).
  */
 export function quotaBackend(
   db: D1Database,
   counter: (userId: string) => QuotaCounterStub,
-  mailer: Mailer | null,
+  outbox: Outbox | null,
   notifications: { add(items: NewItem[]): Promise<void> } | null,
 ): QuotaBackend {
   const accounts = d1QuotaAccounts(db);
@@ -621,7 +629,7 @@ export function quotaBackend(
     accountById: accounts.accountById,
     owner: accounts.owner,
     mail: async (msg) => {
-      await mailer?.send(msg);
+      await outbox?.send({ kind: "quota", ...msg });
     },
     notice: async (userId, n) => {
       // On no library; mailed at once above, never in the batched mail.

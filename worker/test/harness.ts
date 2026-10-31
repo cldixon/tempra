@@ -27,6 +27,13 @@ import {
 } from "../src/client";
 import { routedDb, withD1Session } from "../src/d1session";
 import { callerOf, Presence, type PresenceMessage, readingOf } from "../src/feed";
+import {
+  d1SentLog,
+  handleMailMessage,
+  type MailJob,
+  type Outbox,
+  queueOutbox,
+} from "../src/mail-queue";
 import { d1Notifications } from "../src/notify";
 import { sha256Hex } from "../src/okf/hash";
 import { Quota, QuotaCounter, quotaBackend, quotaGuarded } from "../src/quota";
@@ -336,6 +343,29 @@ export function setup(
   }[] = [];
   /** Metered usage, as the Worker would write it to Analytics Engine. */
   const usage: UsageEvent[] = [];
+  /**
+   * Queued mail (TEMPRA-89) as MAIL_QUEUE delivers it, at once: each message through the real
+   * consumer, with its dedupe keys in D1 and a mailer that lands in `outbox`.
+   */
+  const mailQueue: MailJob[] = [];
+  const queuedMail: Outbox = queueOutbox(async (job) => {
+    mailQueue.push(job);
+    await handleMailMessage(
+      {
+        mailer: {
+          async send(msg) {
+            outbox.push(msg);
+          },
+        },
+        sent: d1SentLog(d1),
+        recordFailure: (day) => notifications.recordFailure(day),
+        meter: (e) => usage.push(e),
+        now: () => new Date(),
+      },
+      job,
+      1,
+    );
+  });
   // No cache, so a revocation shows at once.
   const d1Auth = authCache
     ? d1Authenticate(d1, Date.now, authCache.ms, authCache.tokens)
@@ -380,16 +410,7 @@ export function setup(
     };
   };
   const quota = new Quota(
-    quotaBackend(
-      d1,
-      counter,
-      {
-        async send(msg) {
-          outbox.push(msg);
-        },
-      },
-      notifications,
-    ),
+    quotaBackend(d1, counter, queuedMail, notifications),
     // With the auth cache, an isolate as deployed: the account's limits and storage kept a
     // minute (REFRESH_MS), so a warm isolate asks D1 nothing for the quotas either.
     {
@@ -495,6 +516,7 @@ export function setup(
         outbox.push(msg);
       },
     },
+    outbox: queuedMail,
     meter: (e) => usage.push(e),
     blobs: recordingBlobStore(blobs, d1BlobRefs(d1)),
     quota,
@@ -604,6 +626,7 @@ export function setup(
     sessions,
     notifications,
     outbox,
+    mailQueue,
     db,
     queries,
     deps,

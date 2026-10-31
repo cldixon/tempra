@@ -1,4 +1,5 @@
 import type { Accounts } from "./accounts";
+import { mailKey, type Outbox } from "./mail-queue";
 import type { Item, Notifications } from "./notify";
 import { esc } from "./oauth/pages";
 import type { Mailer } from "./signin";
@@ -18,11 +19,11 @@ export const MAX_WAIT_MS = 10 * 60_000;
 export interface MailDeps {
   accounts: Accounts;
   notifications: Notifications;
-  mailer: Mailer | null;
+  /** Where the batches go: MAIL_QUEUE (TEMPRA-89), whose consumer sends and meters them. */
+  outbox: Outbox | null;
   /** The app's origin for links: https://app.tempra.dev. */
   origin: string;
   now: Date;
-  meter?: (e: { kind: "email"; account: string }) => void;
 }
 
 const day = (d: Date) => d.toISOString().slice(0, 10);
@@ -105,23 +106,33 @@ export function composeBatch(origin: string, key: string, items: Item[]): Compos
   };
 }
 
-/** Sends one notification mail within the person's cap; false when capped or it failed. */
+/**
+ * Queues one notification mail within the person's cap (TEMPRA-89): the MAIL_QUEUE consumer sends
+ * it with retries, once per batch (its key is the batch's items). The cap's slot is taken here,
+ * so retries never spend it twice. "unsent" when it could not be queued: the items stay pending
+ * for the next run.
+ */
 async function deliver(
   d: MailDeps,
   user: { id: string; email: string; handle: string },
+  items: Item[],
   compose: (key: string) => Composed,
-): Promise<"sent" | "capped" | "failed"> {
-  if (!d.mailer) return "failed";
+): Promise<"queued" | "capped" | "none" | "unsent"> {
+  if (!d.outbox) return "none";
   if (!(await d.notifications.takeMailSlot(user.id, day(d.now)))) return "capped";
   const m = compose(await d.notifications.unsubscribeKey(user.id));
   try {
-    await d.mailer.send({ to: user.email, ...m });
-    d.meter?.({ kind: "email", account: user.handle });
-    return "sent";
+    await d.outbox.send({
+      key: mailKey(`notify:${user.id}`, ...items.map((i) => i.id).sort()),
+      kind: "notification",
+      account: user.handle,
+      to: user.email,
+      ...m,
+    });
+    return "queued";
   } catch (e) {
-    console.error(JSON.stringify({ mail_failed: "notification", error: String(e) }));
-    await d.notifications.recordFailure(day(d.now));
-    return "failed";
+    console.error(JSON.stringify({ mail_not_queued: "notification", error: String(e) }));
+    return "unsent";
   }
 }
 
@@ -152,11 +163,14 @@ export async function flushMail(d: MailDeps, opts: { force?: boolean } = {}) {
     const skip = items.filter((i) => !send.includes(i)).map((i) => i.id);
     let sent: string[] = [];
     if (user && send.length > 0) {
-      const r = await deliver(d, user, (key) => composeBatch(d.origin, key, send));
-      if (r === "sent") {
+      const r = await deliver(d, user, send, (key) => composeBatch(d.origin, key, send));
+      if (r === "queued") {
         sent = send.map((i) => i.id);
         out.mails++;
         out.items += sent.length;
+      } else if (r === "unsent") {
+        // Not queued: left pending, so the next run tries again (within the daily cap).
+        out.waiting += send.length;
       } else skip.push(...send.map((i) => i.id));
     }
     await d.notifications.setMail(sent, "sent");
@@ -169,8 +183,9 @@ export async function flushMail(d: MailDeps, opts: { force?: boolean } = {}) {
 // ---------------------------------------------------------------- local dev
 
 /**
- * Local dev (DEV_SIGNIN=1): notification mail is kept here and shown at /_dev/mail instead of
- * being sent, as sign-in links are shown on the page. One isolate in `cf dev`; newest first.
+ * Local dev (DEV_SIGNIN=1): queued mail (notifications, invitations, quota notices) is kept here
+ * by the MAIL_QUEUE consumer and shown at /_dev/mail instead of being sent, as sign-in links are
+ * shown on the page. One isolate in `cf dev`; newest first.
  */
 export const devOutbox: (Parameters<Mailer["send"]>[0] & { at: string })[] = [];
 

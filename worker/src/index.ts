@@ -11,6 +11,7 @@ import { type Caller, callerOf, FEED_SOCKETS_PER_ACCOUNT } from "./feed";
 import { deleteVariants, imagesService, r2VariantCache } from "./images";
 import { type Library, refuseFeed } from "./library";
 import { healthDigest } from "./library-health";
+import { d1SentLog, handleMailMessage, type MailJob, type Outbox, queueOutbox } from "./mail-queue";
 import { exportsPrefix, listExports } from "./maintain";
 import type { AgentJob, ManagedDeps } from "./managed/agent";
 import { d1AgentBudget } from "./managed/budget";
@@ -75,6 +76,22 @@ function mailerFor(env: Env): Mailer | null {
   };
 }
 
+/**
+ * Mail nobody waits on goes through MAIL_QUEUE (TEMPRA-89, mail-queue.ts): wherever mail can be
+ * sent, and in local dev, where the consumer keeps it in the dev outbox.
+ */
+function mailOutbox(env: Env): Outbox | null {
+  if (env.DEV_SIGNIN !== "1" && !mailerFor(env)) return null;
+  const q = env.MAIL_QUEUE as Queue<MailJob>;
+  return queueOutbox(async (job) => {
+    await q.send(job);
+  });
+}
+
+/** What the MAIL_QUEUE consumer sends through: the binding, or the dev outbox locally. */
+const mailSender = (env: Env): Mailer | null =>
+  env.DEV_SIGNIN === "1" ? devMailer : mailerFor(env);
+
 /** The blob sweep's Queue (TEMPRA-81). */
 function sweepQueue(env: Env): SweepQueue {
   const q = env.SWEEP_QUEUE as Queue<SweepMessage>;
@@ -131,7 +148,7 @@ const depsFor = (env: Env): Deps => {
         const ns = env.ACCOUNT_FEEDS as DurableObjectNamespace<AccountFeeds>;
         return ns.get(ns.idFromName(counterName(userId)));
       },
-      env.DEV_SIGNIN === "1" ? devMailer : mailerFor(env),
+      mailOutbox(env),
       d1Notifications(db),
     ),
     { origin: env.APP_ORIGIN },
@@ -160,6 +177,7 @@ const depsFor = (env: Env): Deps => {
     sessions: d1Sessions(db, Date.now, authCache),
     authCache,
     mailer: mailerFor(env),
+    outbox: mailOutbox(env),
     notifications: d1Notifications(db),
     managed: managedDeps(env),
     async rateLimit(kind, key) {
@@ -317,11 +335,12 @@ export default {
    * TEMPRA-189.
    */
   async scheduled(controller, env) {
-    // Local dev (DEV_SIGNIN=1) keeps notification mail in the dev outbox (/_dev/mail).
+    // Queued on MAIL_QUEUE (TEMPRA-89); local dev's consumer keeps it in the dev outbox.
+    const outbox = mailOutbox(env);
     const mail = {
       accounts: d1Accounts(env.DB),
       notifications: d1Notifications(env.DB),
-      mailer: env.DEV_SIGNIN === "1" ? devMailer : mailerFor(env),
+      outbox,
       origin: env.APP_ORIGIN,
       now: new Date(),
     };
@@ -358,11 +377,12 @@ export default {
     const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
     const failed = await mail.notifications.failures(yesterday);
     if (failed)
-      result.attention.push(`${failed} notification mails failed to send on ${yesterday}`);
+      result.attention.push(`${failed} mails failed to send on ${yesterday}, after their retries`);
     console.log(JSON.stringify({ sweep: result }));
-    const mailer = mailerFor(env);
-    if (result.attention.length && env.OPERATOR_EMAIL && mailer) {
-      await mailer.send({
+    if (result.attention.length && env.OPERATOR_EMAIL && outbox) {
+      await outbox.send({
+        key: `digest:${new Date().toISOString().slice(0, 10)}`,
+        kind: "operator",
         to: env.OPERATOR_EMAIL,
         subject: `Tempra digest: ${result.attention.length} to look at`,
         text: digestText(result),
@@ -371,11 +391,32 @@ export default {
   },
 
   /**
-   * Two queues, told apart by name: the managed agent's turns (TEMPRA-222), and the blob sweep's
+   * Three queues, told apart by name: outgoing mail (TEMPRA-89), the managed agent's turns
+   * (TEMPRA-222), and the blob sweep's
    * fan-out (TEMPRA-81): dispatch pages, library recounts, the one-time bucket listing and the
    * drift scan, each message on its own, retried on failure.
    */
   async queue(batch, env, ctx) {
+    if (batch.queue.startsWith("tempra-mail")) {
+      // One mail after another, so a batch paces itself; a failure backs off on its own.
+      const d = {
+        mailer: mailSender(env),
+        sent: d1SentLog(env.DB),
+        recordFailure: (day: string) => d1Notifications(env.DB).recordFailure(day),
+        meter: (e: { kind: "email"; account: string }) => {
+          try {
+            env.USAGE.writeDataPoint(usagePoint(e));
+          } catch {}
+        },
+        now: () => new Date(),
+      };
+      for (const msg of batch.messages) {
+        const out = await handleMailMessage(d, msg.body, msg.attempts);
+        if ("retry" in out) msg.retry({ delaySeconds: out.retry });
+        else msg.ack();
+      }
+      return;
+    }
     if (batch.queue.startsWith("tempra-agent")) {
       const d = depsFor(env);
       const turn = {
@@ -418,4 +459,4 @@ export default {
       }
     }
   },
-} satisfies ExportedHandler<Env, SweepMessage | AgentJob>;
+} satisfies ExportedHandler<Env, SweepMessage | AgentJob | MailJob>;

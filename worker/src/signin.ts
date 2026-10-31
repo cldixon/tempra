@@ -2,6 +2,7 @@ import type { Context, Hono } from "hono";
 import { type SignupMode, signupMode, type User } from "./accounts";
 import type { Deps } from "./app";
 import { LEGAL } from "./legal";
+import { mailKey, sendNow } from "./mail-queue";
 import { alertNotice, esc, invalid, messagePage, PAGE_HEADERS, page } from "./oauth/pages";
 import { fromThisSite } from "./origin";
 import {
@@ -107,7 +108,9 @@ export async function sendLink(
     return msg.link;
   }
   try {
-    await d.mailer.send({ to: msg.to, subject: msg.subject, text: msg.text, html: msg.html });
+    // Not queued (TEMPRA-89): the person is waiting on the page, which must say at once when the
+    // link could not be sent. One retry after a short pause covers a passing failure.
+    await sendNow(d.mailer, { to: msg.to, subject: msg.subject, text: msg.text, html: msg.html });
     d.meter?.({ kind: "email", account: msg.to });
     return "";
   } catch (e) {
@@ -136,13 +139,15 @@ export const operatorEmail = (env: Cloudflare.Env) =>
 /** Tells the operator a new email joined the waitlist (v2 spec: Accounts, The waitlist). */
 async function notifyOperator(env: Cloudflare.Env, d: Deps, email: string, origin: string) {
   const to = operatorEmail(env);
-  if (!to || !d.mailer) return;
-  await d.mailer.send({
+  if (!to || !d.outbox) return;
+  await d.outbox.send({
+    key: mailKey("waitlist-notice", email),
+    kind: "operator",
+    account: to,
     to,
     subject: `Tempra waitlist: ${email}`,
     text: `${email} asked to join Tempra.\n\nApprove or dismiss: ${origin}/waitlist\n`,
   });
-  d.meter?.({ kind: "email", account: to });
 }
 
 /** A server-rendered page with the strict headers sign-in uses: no script, no framing, no cache. */
@@ -323,12 +328,18 @@ const couldNotSend = (back: string) =>
 /** Tells a new waitlisted email it is on the list, once (TEMPRA-125). */
 async function welcomeToWaitlist(c: C, d: Deps, email: string) {
   const text = `Thanks for asking to join Tempra. You're on the list, and we'll email this address when you're in.\n\nIf you did not ask, ignore this email.\n`;
-  if (!d.mailer || devSignIn(c.req.raw, c.env)) {
+  if (!d.outbox || devSignIn(c.req.raw, c.env)) {
     if (devSignIn(c.req.raw, c.env)) console.log(`Waitlist email for ${email}`);
     return;
   }
-  await d.mailer.send({ to: email, subject: "You're on the list: Tempra", text });
-  d.meter?.({ kind: "email", account: email });
+  await d.outbox.send({
+    key: mailKey("waitlist-welcome", email),
+    kind: "waitlist",
+    account: email,
+    to: email,
+    subject: "You're on the list: Tempra",
+    text,
+  });
 }
 
 /**

@@ -2,7 +2,7 @@
  * `bun run preview`: one pull request's preview deployment (tempra-dev library:
  * delivery/preview-deployments). PR N runs as its own Worker, tempra-pr-N on pr-N.tempra.dev, with
  * its own D1, R2 bucket, KV namespace and Queues (the blob sweep's, tempra-sweep-pr-N, and the
- * managed agent's, tempra-agent-pr-N), so it never touches staging or production data. With
+ * managed agent's, tempra-agent-pr-N, and outgoing mail's, tempra-mail-pr-N), so it never touches staging or production data. With
  * ANTHROPIC_API_KEY set, the key goes to the Worker and the operator's account gets the agent.
  *
  *   bun run preview up --pr N [--email <operator>]   create what is missing, migrate, deploy, seed, smoke
@@ -184,9 +184,9 @@ async function up(
     kv = await kvId(kvTitle);
   }
   if (!d1 || !kv) throw new Error(`Could not create or find the D1 or KV for PR ${pr}.`);
-  // The blob sweep's queue (TEMPRA-81) and the managed agent's (TEMPRA-222): the Worker consumes
-  // them, so they must exist before the deploy.
-  for (const name of [names.queue, names.agentQueue]) {
+  // The blob sweep's queue (TEMPRA-81), the managed agent's (TEMPRA-222) and outgoing mail's
+  // (TEMPRA-89): the Worker consumes them, so they must exist before the deploy.
+  for (const name of [names.queue, names.agentQueue, names.mailQueue]) {
     if (!(await queueId(name))) {
       console.log(`Creating Queue ${name}`);
       await cf(["queues", "create", "--queue-name", name]);
@@ -422,14 +422,14 @@ async function down(pr: string) {
   const names = previewDeployment(pr);
   if (dryRun) {
     console.log(
-      `Would delete PR ${pr}: ${names.name}, ${names.render}, ${names.d1.name}, ${names.r2}, tempra-oauth-pr-${pr}, ${names.queue}, ${names.agentQueue}`,
+      `Would delete PR ${pr}: ${names.name}, ${names.render}, ${names.d1.name}, ${names.r2}, tempra-oauth-pr-${pr}, ${names.queue}, ${names.agentQueue}, ${names.mailQueue}`,
     );
     return;
   }
   // A Worker that consumes a queue cannot be deleted (Cloudflare 10064): detach it first. The
   // queues themselves go last, once no Worker binds them (11005).
   const queues: { name: string; id: string }[] = [];
-  for (const name of [names.queue, names.agentQueue]) {
+  for (const name of [names.queue, names.agentQueue, names.mailQueue]) {
     const id = await queueId(name);
     if (!id) continue;
     queues.push({ name, id });
@@ -523,6 +523,7 @@ async function previews(): Promise<string[]> {
   for (const q of await queues()) {
     add(q.queue_name, /^tempra-sweep-pr-([0-9]+)$/);
     add(q.queue_name, /^tempra-agent-pr-([0-9]+)$/);
+    add(q.queue_name, /^tempra-mail-pr-([0-9]+)$/);
   }
   return [...found].sort((a, b) => Number(a) - Number(b));
 }

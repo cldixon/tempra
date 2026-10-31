@@ -26,6 +26,11 @@ export interface Deployment {
   queue: string;
   /** The managed agent's Queue (TEMPRA-222): one message per turn of @tempra. */
   agentQueue: string;
+  /**
+   * Outgoing mail's Queue (TEMPRA-89): invitations, notification batches, quota notices, the
+   * waitlist's and the operator's mail, sent by the consumer with retries. Sign-in links stay out.
+   */
+  mailQueue: string;
   /** The address sign-in links and the digest come from (Cloudflare Email Service). */
   mailFrom: string;
   /** Analytics Engine dataset for metering; tempra_usage unless set. */
@@ -49,6 +54,7 @@ const PRODUCTION: Deployment = {
   kv: "9e57232de5b940e4b2319f31da509f42",
   queue: "tempra-sweep",
   agentQueue: "tempra-agent",
+  mailQueue: "tempra-mail",
   // mail.tempra.dev is onboarded for Cloudflare Email Sending.
   mailFrom: "noreply@mail.tempra.dev",
 };
@@ -62,6 +68,7 @@ const STAGING: Deployment = {
   kv: "b63bffc9b65743a99783013effb89324",
   queue: "tempra-sweep-staging",
   agentQueue: "tempra-agent-staging",
+  mailQueue: "tempra-mail-staging",
   mailFrom: "noreply@mail.tempra.dev",
   // Staging's traffic and counters stay out of production's (TEMPRA-76). Datasets are created on
   // first write and namespaces are only ids, so neither needs a resource made.
@@ -85,6 +92,7 @@ export function previewDeployment(pr: string, ids: { d1?: string; kv?: string } 
     kv: ids.kv ?? "",
     queue: `tempra-sweep-pr-${pr}`,
     agentQueue: `tempra-agent-pr-${pr}`,
+    mailQueue: `tempra-mail-pr-${pr}`,
     mailFrom: "noreply@mail.tempra.dev",
     // Previews are short-lived; the daily sweep and digest run on staging and production only,
     // and their traffic stays out of the usage data.
@@ -182,6 +190,18 @@ export default defineConfig(({ mode }) => {
           maxRetries: 1,
           retryDelay: 5,
         }),
+        // Outgoing mail (TEMPRA-89): batches of up to 10 sent one after another, at most two
+        // consumers at once, so a burst is paced under Email Service's rate limit. A transient
+        // failure is retried with backoff (the consumer sets each delay: 30 s, 2, 8, 15 minutes);
+        // the last failure is counted for the operator's digest. No dead-letter queue.
+        triggers.queue({
+          name: d.mailQueue,
+          maxBatchSize: 10,
+          maxBatchTimeout: 1,
+          maxConcurrency: 2,
+          maxRetries: 4,
+          retryDelay: 30,
+        }),
       ],
 
       // One SQLite-backed Durable Object per library (spec: Backend architecture). Declared as an
@@ -209,6 +229,8 @@ export default defineConfig(({ mode }) => {
         // The managed agent's Queue (TEMPRA-222): comments that ask @tempra send, the Worker
         // consumes (src/index.ts queue(), by the batch's queue name).
         AGENT_QUEUE: bindings.queue({ name: d.agentQueue }),
+        // Outgoing mail (TEMPRA-89, src/mail-queue.ts): producers send, the Worker consumes.
+        MAIL_QUEUE: bindings.queue({ name: d.mailQueue }),
 
         // Cloudflare Images (TEMPRA-153, images.ts): attachments scaled for models and readers,
         // cached in BLOBS under variants/. No resource to create; the account needs the Images

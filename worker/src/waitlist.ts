@@ -1,5 +1,6 @@
 import type { Hono } from "hono";
 import type { Deps } from "./app";
+import { mailKey } from "./mail-queue";
 import { esc, messagePage } from "./oauth/pages";
 import { fromThisSite } from "./origin";
 import { html, operatorEmail, signedIn } from "./signin";
@@ -82,17 +83,20 @@ export function registerWaitlistRoutes<E extends AppEnv>(
     let done: keyof typeof OUTCOMES = decided ? "dismissed" : "missing";
     if (decided && decision === "invited") {
       done = "approved";
-      if (d.mailer) {
+      if (d.outbox) {
         const origin = new URL(c.req.url).origin;
         try {
-          await d.mailer.send({
+          // Queued (TEMPRA-89): the operator is not waiting on it, and a retry should reach them.
+          await d.outbox.send({
+            key: mailKey("waitlist-in", email, new Date().toISOString().slice(0, 10)),
+            kind: "waitlist",
+            account: email,
             to: email,
             subject: "You're in: Tempra",
             text: `You asked to join Tempra, and you're in.\n\nSign in with this email at ${origin}/sign-in\n`,
           });
-          d.meter?.({ kind: "email", account: email });
         } catch (e) {
-          console.error(JSON.stringify({ mail_failed: "waitlist approval", error: String(e) }));
+          console.error(JSON.stringify({ mail_not_queued: "waitlist approval", error: String(e) }));
           done = "mail_failed";
         }
       } else {
