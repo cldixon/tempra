@@ -16,13 +16,19 @@ export interface Limits {
    */
   agent_daily_usd: number;
   /**
-   * Monthly quotas (TEMPRA-232, tempra-dev: v2/limits, Monthly quotas), per UTC calendar month:
-   * the writes and the requests (MCP tool calls and the REST API) an account's agents make, and
-   * storage across the libraries it owns, in MB. Generous until plans exist (TEMPRA-229): far above
-   * what any account makes today, and 1 GB, the ten libraries of 100 MB the other defaults allow.
+   * Monthly quotas (TEMPRA-232, tempra-dev: v2/limits, Monthly quotas), per UTC calendar month,
+   * until plans exist (TEMPRA-229) and to be adjusted once real usage is known. Writes an
+   * account's agents make (refusing writes past it).
    */
-  writes_month: number;
-  requests_month: number;
+  writes_monthly: number;
+  /**
+   * Requests (MCP tool calls and the REST API) from the account's tokens and app connections: a
+   * ceiling that refuses all of them, reads too. Sized for parallel agents: model and network
+   * latency hold one agent to a call every 3 to 5 s, under 1M a month nonstop, so 10M is about
+   * ten running nonstop, roughly $10 at list price. The person's browser is never refused.
+   */
+  requests_monthly: number;
+  /** Storage across the libraries the account owns, in MB (refusing writes that add). */
   storage_mb: number;
 }
 
@@ -30,8 +36,8 @@ export const DEFAULT_LIMITS: Limits = {
   libraries: 10,
   tokens: 50,
   agent_daily_usd: 0,
-  writes_month: 100_000,
-  requests_month: 1_000_000,
+  writes_monthly: 100_000,
+  requests_monthly: 10_000_000,
   storage_mb: 1024,
 };
 

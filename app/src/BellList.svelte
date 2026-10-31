@@ -24,8 +24,9 @@
   /**
    * The bell's panel is the person's notifications (TEMPRA-189; tempra-dev: v2/notifications):
    * what waits, newest first. A reply or a mention is a link to its thread, done as it is opened;
-   * an invitation is answered here, Accept opening the library. Nothing else: there is no Inbox
-   * page, no Earlier and no filter.
+   * an invitation is answered here, Accept opening the library; a monthly quota at 80% or 100%
+   * (TEMPRA-232) opens the Account page's usage, done as it is opened. Nothing else: there is no
+   * Inbox page, no Earlier and no filter.
    */
   let { close }: { close: () => void } = $props();
 
@@ -70,7 +71,11 @@
 {:else}
   {#each items as i (i.id)}
     {#snippet about()}
-      <LibraryTile name={i.library_title || urlsOf(i.library).slug} shared={handle !== null && urlsOf(i.library).owner !== handle} />
+      {#if i.kind === "quota"}
+        <LibraryTile name="Tempra" />
+      {:else}
+        <LibraryTile name={i.library_title || urlsOf(i.library).slug} shared={handle !== null && urlsOf(i.library).owner !== handle} />
+      {/if}
       <span class="bell-item-what"><strong>{itemTitle(i, titles.current)}</strong><span class="bell-item-detail">{itemDetail(i)}</span></span>
       <span class="bell-item-where">{itemLibrary(i, handle)}{" · "}<Moment ts={i.created} /></span>
     {/snippet}

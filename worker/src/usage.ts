@@ -92,8 +92,8 @@ export async function admit(
       "Too many writes to this account in the last minute; slow down.",
     );
   }
-  // The month's count (TEMPRA-232): in memory, flushed every few seconds; refusals are quota.ts's.
-  if (limited) await d.quota?.count(account, write);
+  // The month's requests (TEMPRA-232, quota.ts): counted in memory, 403 past the ceiling.
+  if (limited) await d.quota?.admitRequest(account);
   d.meter?.({ kind: "request", account, library });
   if (write) d.meter?.({ kind: "write", account, library });
 }

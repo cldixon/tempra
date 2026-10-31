@@ -95,11 +95,13 @@ export function registerInboxApi(
         const agent = by_agent ? (agentName.get(by_agent) ?? null) : null;
         return {
           ...i,
-          // Where it is now (a renamed handle), or where it happened.
+          // Where it is now (a renamed handle), or where it happened; "" for the account's own
+          // notices (`quota`, TEMPRA-232).
           library: lib ? `${lib.owner}/${lib.slug}` : i.place,
           library_title: lib?.title || null,
           who: agent ?? (by_agent ? i.actor : i.actor.replace(/^human:/, "")),
-          agent: by_agent !== null || !i.actor.startsWith("human:"),
+          // Tempra's own notices (`quota`) are no agent's.
+          agent: i.kind !== "quota" && (by_agent !== null || !i.actor.startsWith("human:")),
           invitation: i.kind === "invitation" ? (invitation.get(i.place) ?? null) : null,
           actions: i.done_at === null ? itemActions(i.kind) : [],
           href: itemLink("", { ...i, place: lib ? `${lib.owner}/${lib.slug}` : i.place }),

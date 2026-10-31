@@ -68,6 +68,23 @@ const INVITE_ITEM = {
   href: "/invitations",
 };
 
+/** A monthly quota's notice (TEMPRA-232): on the account, opening its usage. */
+const QUOTA_ITEM = {
+  ...INBOX_ITEM,
+  id: "i3",
+  kind: "quota",
+  library: "",
+  library_title: null,
+  path: null,
+  thread: null,
+  title: "Writes this month",
+  actor: "tempra",
+  who: "tempra",
+  excerpt: "80% used: 80,000 of 100,000",
+  actions: ["open"],
+  href: "/account#usage",
+};
+
 const realFetch = globalThis.fetch;
 const realSocket = globalThis.WebSocket;
 beforeEach(() => {
@@ -81,9 +98,9 @@ beforeEach(() => {
       : url.includes("/events")
         ? { events: [], seq: 8 }
         : url.includes("/inbox/count")
-          ? { open: 3 }
+          ? { open: 4 }
           : url.includes("/api/v1/inbox?")
-            ? { items: [INBOX_ITEM, INVITE_ITEM], next: null, open: 3 }
+            ? { items: [INBOX_ITEM, INVITE_ITEM, QUOTA_ITEM], next: null, open: 4 }
             : url.includes("/api/v1/libraries")
               ? {
                   libraries: [
@@ -166,8 +183,8 @@ describe("the account's frame (AccountFrame.svelte)", () => {
     // The bell is the notifications: a panel of what waits, a reply a link to its thread, an
     // invitation answered in place; no Inbox page to link to.
     const bell = f.host.querySelector<HTMLButtonElement>("button.bell");
-    expect(bell?.getAttribute("aria-label")).toBe("Notifications, 3 waiting");
-    expect(bell?.querySelector(".badge")?.textContent).toBe("3");
+    expect(bell?.getAttribute("aria-label")).toBe("Notifications, 4 waiting");
+    expect(bell?.querySelector(".badge")?.textContent).toBe("4");
     expect(f.host.querySelector(".bell-pop")).toBeNull();
     bell?.click();
     await settle(10);
@@ -182,6 +199,11 @@ describe("the account's frame (AccountFrame.svelte)", () => {
     expect(invite?.textContent).toContain("@sam invited you to write");
     const answers = [...(invite?.querySelectorAll("button") ?? [])].map((b) => b.textContent);
     expect(answers).toEqual(["Accept", "Decline"]);
+    // A monthly quota (TEMPRA-232): on the account, opening its usage.
+    const quota = pop?.querySelector<HTMLAnchorElement>('a.bell-item[href="/account#usage"]');
+    expect(quota?.textContent).toContain("Writes this month");
+    expect(quota?.textContent).toContain("80% used: 80,000 of 100,000");
+    expect(quota?.textContent).toContain("Your account");
     expect(pop?.querySelector(".bell-more")?.textContent).toBe("1 more");
     expect(pop?.querySelector('a[href="/inbox"]')).toBeNull();
     f.destroy();

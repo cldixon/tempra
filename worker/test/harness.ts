@@ -358,11 +358,16 @@ export function setup() {
     };
   };
   const quota = new Quota(
-    quotaBackend(d1, counter, {
-      async send(msg) {
-        outbox.push(msg);
+    quotaBackend(
+      d1,
+      counter,
+      {
+        async send(msg) {
+          outbox.push(msg);
+        },
       },
-    }),
+      notifications,
+    ),
     { origin: ORIGIN, now: () => clock.now(), flushMs: 0, refreshMs: 0 },
   );
   const deps: Deps = {

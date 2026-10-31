@@ -9,7 +9,9 @@ import {
   monthResets,
   Quota,
   type QuotaAccount,
+  type QuotaBackend,
   QuotaCounter,
+  type QuotaNotice,
   recordStorage,
   StorageReport,
 } from "../src/quota";
@@ -47,6 +49,20 @@ async function mcp(s: S, token = "writer") {
   };
 }
 
+/** This month as the Account page reads it. */
+async function month(s: S) {
+  const a = (await (await s.app.request("/api/v1/account")).json()) as {
+    month: {
+      month: string;
+      resets: string;
+      writes: { used: number; limit: number };
+      requests: { used: number; limit: number };
+      storage: { used: number; limit: number };
+    };
+  };
+  return a.month;
+}
+
 const NOV = Date.UTC(2026, 10, 14, 12);
 const DEC = Date.UTC(2026, 11, 1, 0, 0, 1);
 
@@ -61,13 +77,13 @@ describe("the month", () => {
 
   test("the quotas are limits like the others, with defaults and overrides", () => {
     expect(DEFAULT_LIMITS).toMatchObject({
-      writes_month: 100_000,
-      requests_month: 1_000_000,
+      writes_monthly: 100_000,
+      requests_monthly: 10_000_000,
       storage_mb: 1024,
     });
-    expect(limitsFrom('{"writes_month": 5, "storage_mb": -1}')).toMatchObject({
-      writes_month: 5,
-      requests_month: 1_000_000,
+    expect(limitsFrom('{"writes_monthly": 5, "storage_mb": -1}')).toMatchObject({
+      writes_monthly: 5,
+      requests_monthly: 10_000_000,
       storage_mb: 1024,
     });
   });
@@ -96,39 +112,53 @@ describe("QuotaCounter (the account's object)", () => {
 
 describe("Quota (the isolate's tally)", () => {
   function world(limits: Partial<QuotaAccount["limits"]> = {}) {
-    const counter = new QuotaCounter(bunSqlHandle());
+    const counters = new Map<string, QuotaCounter>();
+    const counter = (id: string) => {
+      let c = counters.get(id);
+      if (!c) {
+        c = new QuotaCounter(bunSqlHandle());
+        counters.set(id, c);
+      }
+      return c;
+    };
     const calls = { add: 0, account: 0 };
     const mails: string[] = [];
+    const notices: QuotaNotice[] = [];
     let now = NOV;
     const account: QuotaAccount = {
+      id: "user_ann",
       handle: "ann",
       email: "ann@example.com",
       limits: { ...DEFAULT_LIMITS, ...limits },
       storageBytes: 0,
     };
-    const quota = new Quota(
-      {
-        add: async (_a, month, add: Counts) => {
-          calls.add++;
-          return counter.add(month, add);
-        },
-        mark: async (_a, month, keys) => counter.mark(month, keys),
-        account: async () => {
-          calls.account++;
-          return account;
-        },
-        owner: async () => account,
-        mail: async (m) => {
-          mails.push(m.subject);
-        },
+    const backend: QuotaBackend = {
+      add: async (id, m, add: Counts) => {
+        calls.add++;
+        return counter(id).add(m, add);
       },
-      { now: () => now, origin: ORIGIN },
-    );
+      mark: async (id, m, keys) => counter(id).mark(m, keys),
+      account: async (handle) => {
+        calls.account++;
+        return handle === account.handle ? account : null;
+      },
+      accountById: async (id) => (id === account.id ? account : null),
+      owner: async () => account,
+      mail: async (m) => {
+        mails.push(m.subject);
+      },
+      notice: async (_id, n) => {
+        notices.push(n);
+      },
+    };
+    const quota = new Quota(backend, { now: () => now, origin: ORIGIN });
     return {
       quota,
+      backend,
       counter,
       calls,
       mails,
+      notices,
       account,
       tick: (ms: number) => {
         now += ms;
@@ -139,88 +169,122 @@ describe("Quota (the isolate's tally)", () => {
     };
   }
 
+  /** A write as the guard makes it: checked, then counted once it went through. */
+  const write = async (q: Quota, handle = "ann") => {
+    await q.checkWrite(handle);
+    await q.countWrite(handle);
+  };
+
   test("counts in memory, flushing to the object at most every 5 s", async () => {
     const w = world();
-    for (let i = 0; i < 50; i++) await w.quota.count("ann", i % 2 === 0);
+    for (let i = 0; i < 50; i++) await w.quota.admitRequest("ann");
     // The first request flushed (and read the limits); the rest waited in memory.
     expect(w.calls).toEqual({ add: 1, account: 1 });
-    expect(w.counter.get("2026-11")).toEqual({ writes: 1, requests: 1 });
+    expect(w.counter("user_ann").get("2026-11")).toEqual({ writes: 0, requests: 1 });
     w.tick(5_000);
-    await w.quota.count("ann", false);
+    await w.quota.admitRequest("ann");
     expect(w.calls.add).toBe(2);
-    expect(w.counter.get("2026-11")).toEqual({ writes: 25, requests: 51 });
+    expect(w.counter("user_ann").get("2026-11")).toEqual({ writes: 0, requests: 51 });
     // The limits are read again after a minute, not on every flush.
     expect(w.calls.account).toBe(1);
     w.tick(60_000);
-    await w.quota.count("ann", false);
+    await w.quota.admitRequest("ann");
     expect(w.calls.account).toBe(2);
   });
 
-  test("refuses writes past the month's writes, counting what is not flushed yet", async () => {
-    const w = world({ writes_month: 3 });
-    for (let i = 0; i < 3; i++) {
-      await w.quota.count("ann", true);
-      await w.quota.checkWrite("ann");
-    }
-    await w.quota.count("ann", true);
+  test("counts are kept by user id, so a new handle keeps the month", async () => {
+    const w = world();
+    await w.quota.admitRequest("ann");
+    w.account.handle = "annie";
+    await w.quota.admitRequest("annie");
+    expect(w.counter("user_ann").get("2026-11").requests).toBe(2);
+  });
+
+  test("refuses writes at the month's writes, and never counts a refused one", async () => {
+    const w = world({ writes_monthly: 3 });
+    for (let i = 0; i < 3; i++) await write(w.quota);
     const err = await w.quota.checkWrite("ann").catch((e) => e);
     expect(err.status).toBe(403);
     expect(err.code).toBe("quota_reached");
-    expect(err.extra).toEqual({ quota: "writes", limit: 3, resets: "2026-12-01T00:00:00.000Z" });
-    expect(err.message).toContain("monthly limit of 3 writes");
+    expect(err.extra).toEqual({
+      quota: "writes",
+      limit: 3,
+      used: 3,
+      resets: "2026-12-01T00:00:00.000Z",
+      usage: `${ORIGIN}/account#usage`,
+    });
+    expect(err.message).toContain("monthly limit of 3 writes: 3 this month");
+    expect(err.message).toContain("Reads still work");
     expect(err.message).toContain("1 December 2026");
+    expect(err.message).toContain(`${ORIGIN}/account#usage`);
+    expect(err.message).not.toContain("ask for more");
+    await w.quota.checkWrite("ann").catch(() => {});
+    w.tick(5_000);
+    await w.quota.admitRequest("ann");
+    expect(w.counter("user_ann").get("2026-11").writes).toBe(3);
+  });
+
+  test("the request ceiling refuses every request past it, reads included", async () => {
+    const w = world({ requests_monthly: 3 });
+    for (let i = 0; i < 3; i++) await w.quota.admitRequest("ann");
+    const err = await w.quota.admitRequest("ann").catch((e) => e);
+    expect(err.code).toBe("quota_reached");
+    expect(err.extra).toMatchObject({ quota: "requests", limit: 3, used: 4 });
+    expect(err.message).toContain("monthly limit of 3 tool calls and API requests");
+    expect(err.message).toContain("Nothing more is answered");
+    expect(err.message).toContain("reads included");
   });
 
   test("a new month starts again", async () => {
-    const w = world({ writes_month: 1 });
-    await w.quota.count("ann", true);
-    await w.quota.count("ann", true);
+    const w = world({ writes_monthly: 1 });
+    await write(w.quota);
     await expect(w.quota.checkWrite("ann")).rejects.toMatchObject({ code: "quota_reached" });
     w.at(DEC);
-    await w.quota.count("ann", true);
-    await w.quota.checkWrite("ann");
-    expect(w.counter.get("2026-12")).toEqual({ writes: 1, requests: 1 });
+    await write(w.quota);
+    w.tick(5_000);
+    await w.quota.admitRequest("ann");
+    expect(w.counter("user_ann").get("2026-12")).toEqual({ writes: 1, requests: 1 });
   });
 
-  test("tells the person once at 80% and once at 100%, the highest crossed only", async () => {
-    const w = world({ writes_month: 10 });
+  test("tells the person once at 80% and once at 100%, in the bell and by mail", async () => {
+    const w = world({ writes_monthly: 10 });
     for (let i = 0; i < 8; i++) {
-      await w.quota.count("ann", true);
+      await write(w.quota);
       w.tick(5_000);
     }
     expect(w.mails).toEqual(["Your Tempra account has used 80% of its monthly writes"]);
-    for (let i = 0; i < 5; i++) {
-      await w.quota.count("ann", true);
+    expect(w.notices).toEqual([
+      { quota: "writes", pct: 80, title: "Writes this month", excerpt: "80% used: 8 of 10" },
+    ]);
+    for (let i = 0; i < 2; i++) {
+      await write(w.quota);
       w.tick(5_000);
     }
     expect(w.mails).toEqual([
       "Your Tempra account has used 80% of its monthly writes",
       "Your Tempra account has reached its monthly writes limit",
     ]);
-    // Another isolate crossing the same lines sends nothing: the object recorded them.
-    const other = new Quota(
-      {
-        add: async (_a, month, add) => w.counter.add(month, add),
-        mark: async (_a, month, keys) => w.counter.mark(month, keys),
-        account: async () => w.account,
-        owner: async () => w.account,
-        mail: async (m) => {
-          w.mails.push(m.subject);
-        },
-      },
-      { now: () => NOV },
-    );
-    await other.count("ann", true);
+    expect(w.notices[1]).toEqual({
+      quota: "writes",
+      pct: 100,
+      title: "Writes this month",
+      excerpt: "Limit reached: 10 of 10; writes start again on 1 December 2026",
+    });
+    // Another isolate crossing the same lines tells no one again: the object recorded them.
+    const other = new Quota(w.backend, { now: () => NOV });
+    await other.admitRequest("ann");
     expect(w.mails).toHaveLength(2);
+    expect(w.notices).toHaveLength(2);
 
-    // A jump past both lines mails the 100% one alone.
-    const jump = world({ requests_month: 4 });
-    for (let i = 0; i < 4; i++) await jump.quota.count("ann", false);
+    // A jump past both lines tells the 100% one alone.
+    const jump = world({ requests_monthly: 4 });
+    for (let i = 0; i < 4; i++) await jump.quota.admitRequest("ann");
     jump.tick(5_000);
-    await jump.quota.count("ann", false);
+    await jump.quota.admitRequest("ann").catch(() => {});
     expect(jump.mails).toEqual([
       "Your Tempra account has reached its monthly tool calls and API requests limit",
     ]);
+    expect(jump.notices.map((n) => n.pct)).toEqual([100]);
   });
 
   test("storage across the owner's libraries", async () => {
@@ -230,9 +294,11 @@ describe("Quota (the isolate's tally)", () => {
     w.tick(60_000);
     const err = await w.quota.checkStorage("lib").catch((e) => e);
     expect(err.code).toBe("quota_reached");
-    expect(err.extra).toEqual({ quota: "storage", limit: 1 });
-    expect(err.message).toContain("limit of 1 MB of storage");
+    expect(err.extra).toMatchObject({ quota: "storage", limit: 1, used: 1048576 });
+    expect(err.message).toContain("limit of 1 MB of storage: 1 MB is used");
+    expect(err.message).toContain("delete or move content");
     expect(w.mails).toEqual(["Your Tempra account has reached its storage limit"]);
+    expect(w.notices[0]?.title).toBe("Storage");
   });
 });
 
@@ -242,10 +308,11 @@ describe("storage per library in D1", () => {
     const other = await s.accounts.createLibrary("other", await s.accounts.user(OWNER.email));
     s.db.run("UPDATE libraries SET storage_bytes = 300 WHERE id = ?", [LIB.id]);
     s.db.run("UPDATE libraries SET storage_bytes = 200 WHERE id = ?", [other.id]);
-    const accounts = d1QuotaAccounts(d1Of(s));
+    const accounts = d1QuotaAccounts(s.d1);
     expect((await accounts.account(OWNER.handle))?.storageBytes).toBe(500);
-    expect((await accounts.owner(other.id))?.handle).toBe(OWNER.handle);
-    await recordStorage(d1Of(s), LIB.do_id, 1000);
+    expect((await accounts.accountById(OWNER.id))?.handle).toBe(OWNER.handle);
+    expect((await accounts.owner(other.id))?.id).toBe(OWNER.id);
+    await recordStorage(s.d1, LIB.do_id, 1000);
     expect((await accounts.owner(LIB.id))?.storageBytes).toBe(1200);
   });
 
@@ -271,22 +338,23 @@ describe("storage per library in D1", () => {
 });
 
 describe("over REST", () => {
-  test("writes are refused past the month's writes; reads keep working", async () => {
+  test("writes are refused at the month's writes; reads keep working", async () => {
     const s = setup();
-    limit(s, { writes_month: 2 });
+    limit(s, { writes_monthly: 2 });
     expect((await put(s, "notes/a.md")).status).toBe(200);
     expect((await put(s, "notes/b.md")).status).toBe(200);
     const refused = await put(s, "notes/c.md");
     expect(refused.status).toBe(403);
     const body = (await refused.json()) as Record<string, unknown>;
-    expect(body.code).toBe("quota_reached");
-    expect(body.quota).toBe("writes");
-    expect(body.limit).toBe(2);
+    expect(body).toMatchObject({ code: "quota_reached", quota: "writes", limit: 2, used: 2 });
     expect(typeof body.resets).toBe("string");
     expect(String(body.error)).toContain("monthly limit of 2 writes");
     expect((await s.req("/files/notes/c.md")).status).toBe(404);
     expect((await s.req("/files/notes/a.md")).status).toBe(200);
     expect((await s.req("/stats")).status).toBe(200);
+    // The refused write was not counted.
+    await put(s, "notes/d.md");
+    expect((await month(s)).writes).toEqual({ used: 2, limit: 2 });
     // A person in the app is not held to the agents' monthly counts.
     const comment = await s.app.request(`${API}/comments`, {
       method: "POST",
@@ -296,22 +364,24 @@ describe("over REST", () => {
     expect(comment.status).toBe(201);
   });
 
-  test("past the month's requests, writes are refused and reads answered", async () => {
+  test("past the request ceiling nothing is answered for agents; the browser still is", async () => {
     const s = setup();
-    limit(s, { requests_month: 3 });
+    limit(s, { requests_monthly: 3 });
     expect((await put(s, "notes/a.md")).status).toBe(200);
     expect((await s.req("/files/notes/a.md")).status).toBe(200);
     expect((await s.req("/files/notes/a.md")).status).toBe(200);
-    const refused = (await (await put(s, "notes/b.md")).json()) as Record<string, unknown>;
-    expect(refused.code).toBe("quota_reached");
-    expect(refused.quota).toBe("requests");
-    expect((await s.req("/files/notes/a.md")).status).toBe(200);
+    const read = await s.req("/files/notes/a.md");
+    expect(read.status).toBe(403);
+    const body = (await read.json()) as Record<string, unknown>;
+    expect(body).toMatchObject({ code: "quota_reached", quota: "requests", limit: 3 });
+    expect((await s.req("/files/notes/a.md", { token: "reader" })).status).toBe(403);
+    expect((await s.app.request(`${API}/files/notes/a.md`)).status).toBe(200);
   });
 
   test("the month resets", async () => {
     const s = setup();
     s.clock.now = () => NOV;
-    limit(s, { writes_month: 1 });
+    limit(s, { writes_monthly: 1 });
     expect((await put(s, "notes/a.md")).status).toBe(200);
     expect((await put(s, "notes/b.md")).status).toBe(403);
     s.clock.now = () => DEC;
@@ -336,17 +406,39 @@ describe("over REST", () => {
     expect(del.status).toBe(200);
   });
 
-  test("the person is mailed at 80% and at 100%, once each", async () => {
+  test("the person is told at 80% and at 100%, once each: the bell and mail", async () => {
     const s = setup();
-    limit(s, { writes_month: 5 });
+    limit(s, { writes_monthly: 5 });
     for (let i = 0; i < 7; i++) await put(s, `notes/${i}.md`);
-    const quota = s.outbox.filter((m) => m.subject.includes("monthly writes"));
-    expect(quota.map((m) => m.to)).toEqual([OWNER.email, OWNER.email]);
-    expect(quota.map((m) => m.subject)).toEqual([
+    const mails = s.outbox.filter((m) => m.subject.includes("monthly writes"));
+    expect(mails.map((m) => m.to)).toEqual([OWNER.email, OWNER.email]);
+    expect(mails.map((m) => m.subject)).toEqual([
       "Your Tempra account has used 80% of its monthly writes",
       "Your Tempra account has reached its monthly writes limit",
     ]);
-    expect(quota[1]?.text).toContain(`${ORIGIN}/account#usage`);
+    expect(mails[1]?.text).toContain(`${ORIGIN}/account#usage`);
+
+    // The bell: two `quota` items, opening the Account page's usage, done once opened.
+    const inbox = (await (await s.app.request("/api/v1/inbox")).json()) as {
+      items: { id: string; kind: string; title: string; excerpt: string; href: string }[];
+      open: number;
+    };
+    const quota = inbox.items.filter((i) => i.kind === "quota");
+    expect(quota.map((i) => i.excerpt)).toEqual([
+      expect.stringContaining("Limit reached: 5 of 5"),
+      "80% used: 4 of 5",
+    ]);
+    expect(quota.every((i) => i.href === "/account#usage" && i.title === "Writes this month")).toBe(
+      true,
+    );
+    const done = await s.app.request(`/api/v1/inbox/${quota[0]?.id}/done`, {
+      method: "POST",
+      headers: { Origin: ORIGIN, "Content-Type": "application/json" },
+      body: "{}",
+    });
+    expect(done.status).toBeLessThan(300);
+    const count = (await (await s.app.request("/api/v1/inbox/count")).json()) as { open: number };
+    expect(count.open).toBe(inbox.open - 1);
   });
 
   test("the Account page shows the month against the quotas", async () => {
@@ -354,26 +446,18 @@ describe("over REST", () => {
     await put(s, "notes/a.md");
     await s.req("/files/notes/a.md");
     s.db.run("UPDATE libraries SET storage_bytes = 4096 WHERE id = ?", [LIB.id]);
-    const account = (await (await s.app.request("/api/v1/account")).json()) as {
-      month: {
-        month: string;
-        resets: string;
-        writes: { used: number; limit: number };
-        requests: { used: number; limit: number };
-        storage: { used: number; limit: number };
-      };
-    };
-    expect(account.month.writes).toEqual({ used: 1, limit: 100_000 });
-    expect(account.month.requests).toEqual({ used: 2, limit: 1_000_000 });
-    expect(account.month.storage).toEqual({ used: 4096, limit: 1024 * 1048576 });
-    expect(account.month.resets).toBe(monthResets(account.month.month).toISOString());
+    const m = await month(s);
+    expect(m.writes).toEqual({ used: 1, limit: 100_000 });
+    expect(m.requests).toEqual({ used: 2, limit: 10_000_000 });
+    expect(m.storage).toEqual({ used: 4096, limit: 1024 * 1048576 });
+    expect(m.resets).toBe(monthResets(m.month).toISOString());
   });
 });
 
 describe("over MCP", () => {
   test("a write past the quota is a tool error naming it; reads keep working", async () => {
     const s = setup();
-    limit(s, { writes_month: 1 });
+    limit(s, { writes_monthly: 1 });
     const call = await mcp(s);
     expect((await call("write", { path: "notes/a.md", content: md("A.") })).isError).toBe(false);
     const refused = await call("write", { path: "notes/b.md", content: md("B.") });
@@ -384,6 +468,22 @@ describe("over MCP", () => {
     expect(read.isError).toBe(false);
     expect(read.text).toContain("A.");
   });
-});
 
-const d1Of = (s: S): D1Database => s.d1;
+  test("past the request ceiling the MCP endpoint answers 403 quota_reached", async () => {
+    const s = setup();
+    const call = await mcp(s);
+    expect((await call("read", { path: "notes/none.md" })).text).toBeTruthy();
+    limit(s, { requests_monthly: 1 });
+    const r = await s.anon.request("/mcp", {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer writer",
+        "Content-Type": "application/json",
+        Accept: "application/json, text/event-stream",
+      },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list" }),
+    });
+    expect(r.status).toBe(403);
+    expect(((await r.json()) as { code: string }).code).toBe("quota_reached");
+  });
+});

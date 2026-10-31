@@ -16,7 +16,7 @@
  *       Lists accounts with their handles and libraries.
  *   bun run admin limits --email <email> [--set libraries=10,tokens=100,agent_daily_usd=5] [--reset] [--remote]
  *       Shows an account's limits, or overrides them (v2 spec: Limits; defaults in limits.ts), and
- *       this month against the monthly quotas (TEMPRA-232; writes_month, requests_month and
+ *       this month against the monthly quotas (TEMPRA-232; writes_monthly, requests_monthly and
  *       storage_mb set the same way): storage from D1, and with --remote the month's metered
  *       writes and requests from Analytics Engine (CLOUDFLARE_API_TOKEN and _ACCOUNT_ID).
  *   bun run admin invite --email <email> [--remote]      Lets an email sign up when SIGNUP=invite.
@@ -267,7 +267,7 @@ async function printMonth(
   try {
     const counts = await meteredThisMonth(handle, month);
     console.log(
-      `  writes: ${counts.write ?? 0} of ${limits.writes_month}; requests: ${counts.request ?? 0} of ${limits.requests_month} (metered, the app's included)`,
+      `  writes: ${counts.write ?? 0} of ${limits.writes_monthly}; requests: ${counts.request ?? 0} of ${limits.requests_monthly} (metered, the app's included)`,
     );
   } catch (e) {
     console.log(`  writes and requests: Analytics Engine unavailable (${String(e)}).`);

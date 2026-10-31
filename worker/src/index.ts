@@ -17,7 +17,7 @@ import { fakeModel } from "./managed/fake";
 import type { ModelClient } from "./managed/turn";
 import { d1Notifications } from "./notify";
 import { devMailer, flushMail } from "./notify-mail";
-import { Quota, quotaBackend, quotaGuarded } from "./quota";
+import { counterName, Quota, quotaBackend, quotaGuarded, recordStorage } from "./quota";
 import { listRestores, RESTORE_ID, restoresPrefix } from "./recovery";
 import { type RenderService, servicePoster, serviceRenderer } from "./render";
 import { d1Sessions } from "./session";
@@ -119,11 +119,13 @@ const depsFor = (env: Env): Deps => {
   quota ??= new Quota(
     quotaBackend(
       env.DB,
-      (account) => {
+      // The account's AccountFeeds object by user id, apart from its feed leases (by handle).
+      (userId) => {
         const ns = env.ACCOUNT_FEEDS as DurableObjectNamespace<AccountFeeds>;
-        return ns.get(ns.idFromName(account));
+        return ns.get(ns.idFromName(counterName(userId)));
       },
       env.DEV_SIGNIN === "1" ? devMailer : mailerFor(env),
+      d1Notifications(env.DB),
     ),
     { origin: env.APP_ORIGIN },
   );
@@ -336,6 +338,8 @@ export default {
           ).all<{ id: string; path: string }>()
         ).results,
       inventory: (id) => libraryStub(env, id).inventory(),
+      // A library not written since storage_bytes arrived is counted from the first cron.
+      recordStorage: (id, bytes) => recordStorage(env.DB, id, bytes),
       prune: () => pruneAccounts(env.DB, new Date()),
       storageLimitBytes: storageLimitBytes(env),
       now: new Date(),

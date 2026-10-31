@@ -59,6 +59,11 @@ export interface SweepDeps {
   /** Every library: its id (the Durable Object name) and path, for the digest. */
   libraries(): Promise<{ id: string; path: string }[]>;
   inventory(libraryId: string): Promise<Inventory>;
+  /**
+   * Records a library's storage in D1 for the account's quota across libraries (TEMPRA-232):
+   * the daily backfill beside each library's own reports after its writes.
+   */
+  recordStorage?: (libraryId: string, bytes: number) => Promise<void>;
   storageLimitBytes: number;
   /** The account D1's daily prune (pruneAccounts); its counts go in the digest. */
   prune?: () => Promise<PruneResult>;
@@ -223,6 +228,11 @@ async function reportLibraries(d: SweepDeps) {
     } catch (e) {
       attention.push(`${lib.path}: did not answer (${e instanceof Error ? e.message : String(e)})`);
       continue;
+    }
+    try {
+      await d.recordStorage?.(lib.id, inv.bytes);
+    } catch (e) {
+      console.error(JSON.stringify({ storage_not_recorded: lib.id, error: String(e) }));
     }
     attention.push(...libraryProblems(lib.path, inv, d.storageLimitBytes, d.now));
     if (inv.health && openWork(inv.health.counts) > 0) {

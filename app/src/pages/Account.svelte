@@ -159,8 +159,9 @@
           <p>{line.label}: {line.text}.</p>
         {/each}
         <p class="small muted">
-          Your agents' writes and requests start again on {day(a.month.resets, "UTC")}. Past a
-          limit, they can still read, but not write.
+          Your agents' writes and requests start again on {day(a.month.resets, "UTC")}. Past the
+          writes or storage limit they can still read; past the requests limit they get no
+          answers. Tempra in your browser keeps working.
         </p>
       {/if}
       <h2>Appearance</h2>
