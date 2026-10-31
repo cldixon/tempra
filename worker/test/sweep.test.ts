@@ -1,5 +1,8 @@
+import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { d1BlobRefs, RECOUNT_MARGIN_MS } from "../src/blobrefs";
+import { MAX_SLEEP_DAYS, nextMaintenance, runMaintenance } from "../src/maintain";
+import { LibraryStore } from "../src/store/store";
 import {
   DISPATCH_PAGE,
   digestText,
@@ -12,7 +15,8 @@ import {
   sweep,
 } from "../src/sweep";
 import { bunD1 } from "./d1";
-import { setup } from "./harness";
+import { memoryBucket, setup } from "./harness";
+import { bunSqlHandle } from "./sqlite";
 
 const DAY = 86_400_000;
 const T0 = new Date("2026-10-01T04:30:00Z");
@@ -568,5 +572,91 @@ describe("which writes touch D1 (TEMPRA-91)", () => {
     expect(r.ok).toBe(true);
     expect(calls).toEqual([[h1]]);
     expect(db).toBeDefined();
+  });
+});
+
+/**
+ * Nightly exports name attachments by hash instead of copying their bytes (TEMPRA-83; tempra-dev:
+ * v2/exports), so the sweep must never delete bytes a retained export lists. A library attaches a
+ * blob, exports it, is restored to before the attach (its references drop, the blob becomes an
+ * orphan), and then lives through 80 days of daily sweeps and maintenance passes on the alarm's
+ * schedule, its first pass after the restore as late as the heartbeat allows.
+ */
+describe("exports and the sweep (TEMPRA-83)", () => {
+  test("a retained export's bytes outlive it", async () => {
+    const w = world();
+    const H = "e".repeat(64);
+    const clock = { t: T0.getTime() };
+    let db = new Database(":memory:");
+    let store = new LibraryStore(bunSqlHandle(db), { now: () => new Date(clock.t) });
+    const exports = memoryBucket();
+    const ctx = () => ({ actor: "claude-code/test", request_id: crypto.randomUUID() });
+    const pass = async (t: number) => {
+      clock.t = t;
+      await runMaintenance({ store, bucket: exports, libraryId: "a", now: new Date(t) });
+      return nextMaintenance(new Date(t), "a", store.maintenanceDue(new Date(t))).getTime();
+    };
+    /** Every hash a folder in R2 lists, by folder. */
+    const listed = () => {
+      const out = new Map<string, string[]>();
+      for (const [k, v] of exports.objects) {
+        if (!k.endsWith("/attachments.json")) continue;
+        const list = JSON.parse(new TextDecoder().decode(v)) as { hash: string }[];
+        out.set(
+          k,
+          list.map((a) => a.hash),
+        );
+      }
+      return out;
+    };
+    const check = (when: string) => {
+      for (const [folder, hashes] of listed()) {
+        for (const h of hashes) {
+          if (!w.objects.has(`blobs/${h}`)) {
+            throw new Error(`${when}: ${folder} lists ${h}, deleted`);
+          }
+        }
+      }
+    };
+
+    w.addLibrary("a", [], true);
+    store.apply(ctx(), [{ op: "write", path: "a.md", content: "---\ntype: Note\n---\nA\n" }]);
+    await pass(T0.getTime());
+    const restorePoint = db.serialize();
+
+    // Day 1: an attachment, recorded as the write path records it, and exported.
+    w.setClock(at(1));
+    await w.upload(H);
+    await w.refs.reference("a", [H], at(1));
+    store.apply(ctx(), [{ op: "attach", path: "x.png", blob: { hash: H, size: 3, media: null } }]);
+    w.libs.set("a", [H]);
+    await w.day(at(1));
+    await pass(at(1).getTime() + 3_600_000);
+    expect([...listed().values()].flat()).toContain(H);
+
+    // Day 2: restored to before the attach; the recount carrying the restore's token drops H.
+    w.setClock(at(2));
+    await w.refs.pend("a", "restore-1");
+    db = Database.deserialize(restorePoint);
+    store = new LibraryStore(bunSqlHandle(db), { now: () => new Date(clock.t) });
+    w.libs.set("a", []);
+    w.queued.push({ kind: "recount", library: "a", token: "restore-1" });
+    await w.drain();
+    expect(w.db.query("SELECT hash FROM blob_orphans").all()).toEqual([{ hash: H }]);
+
+    // The restored library's first pass comes as late as the heartbeat allows.
+    let next = at(2).getTime() + MAX_SLEEP_DAYS * DAY;
+    for (let d = 2; d <= 80; d++) {
+      while (next < at(d).getTime()) next = await pass(next);
+      await w.day(at(d));
+      check(`day ${d}, after the sweep`);
+      while (next < at(d + 1).getTime()) {
+        next = await pass(next);
+        check(`day ${d}, after the pass`);
+      }
+    }
+    // The blob went in the end, and no folder lists it any more.
+    expect(w.calls.deleted).toContain(`blobs/${H}`);
+    expect([...listed().values()].flat()).not.toContain(H);
   });
 });

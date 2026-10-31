@@ -4,7 +4,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { sha256Hex } from "../src/okf/hash";
 import { LibraryStore } from "../src/store/store";
-import { writeTar } from "../src/util/tar";
+import { readTar, writeTar } from "../src/util/tar";
 import { API, setup } from "./harness";
 import { base64, makePng, SAMPLES, SVG, sample, truncatedIdatPng } from "./images";
 import { bunSqlHandle } from "./sqlite";
@@ -220,5 +220,39 @@ describe("attachments: checked images, type from the bytes, dimensions (TEMPRA-1
     expect(view).not.toHaveProperty("width");
     reopened.setDimensions(sha256Hex(bytes), 2, 2);
     expect(reopened.read("a.png")).toMatchObject({ width: 2, height: 2 });
+  });
+});
+
+describe("exports name attachments by hash (TEMPRA-83)", () => {
+  test("a nightly folder holds no bytes and downloads whole; a person's export streams them", async () => {
+    const s = setup();
+    const bytes = new Uint8Array(1500).map((_, i) => i % 251);
+    legacyAttach(s, "files/data.bin", bytes, "application/octet-stream");
+    const r = await s.app.request(`${API}/maintain`, {
+      method: "POST",
+      headers: { Origin: "http://localhost" },
+    });
+    expect(r.status).toBe(200);
+    const key = ((await r.json()) as { export: string }).export;
+    const stored = readTar(s.bucket.objects.get(`${key}bundle.tar`) as Uint8Array);
+    expect(stored.map((f) => f.path)).not.toContain("files/data.bin");
+
+    const date = key.split("/").at(-2);
+    const dl = await s.app.request(`/owner/demo/-/exports/${date}/bundle.tar`);
+    expect(dl.status).toBe(200);
+    const whole = readTar(new Uint8Array(await dl.arrayBuffer()));
+    expect(whole.find((f) => f.path === "files/data.bin")?.bytes).toEqual(bytes);
+    expect(whole.map((f) => f.path)).toContain("log.md");
+
+    const exp = await s.req("/export");
+    expect(exp.status).toBe(200);
+    const mine = readTar(new Uint8Array(await exp.arrayBuffer()));
+    expect(mine.find((f) => f.path === "files/data.bin")?.bytes).toEqual(bytes);
+
+    // Bytes gone: the person's export is a clear 500 before anything is sent.
+    s.blobs.map.delete(sha256Hex(bytes));
+    const gone = await s.req("/export");
+    expect(gone.status).toBe(500);
+    expect(await gone.text()).toContain("blob_missing");
   });
 });

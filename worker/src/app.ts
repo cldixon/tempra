@@ -7,7 +7,6 @@ import type { Authenticate, TokenInfo } from "./auth";
 import {
   type BlobStore,
   bundleFiles,
-  bundleTar,
   describeBlob,
   imagesWithDimensions,
   type LibraryClient,
@@ -16,6 +15,7 @@ import {
   WORKER_ATTACHMENT_CAP,
   withDimensions,
 } from "./client";
+import { bundleStream } from "./export-bundle";
 import { type FetchFn, fetchBlob } from "./fetch-source";
 import type { Images } from "./images";
 import { registerInboxApi } from "./inbox-api";
@@ -1705,11 +1705,12 @@ async function exportTar(
   name: string,
   ctx: RenderContext,
 ) {
-  const bundle = await bundleTar(lib, d.blobs, at, {
+  // Streamed: attachments' bytes are piped from blob storage, never all in memory (TEMPRA-83).
+  const bundle = await bundleStream(lib, d.blobs, at, {
     // SVG fences are exported without a renderer; Mermaid needs one (TEMPRA-168, TEMPRA-206).
     diagrams: { ...(d.renderDiagram ? { render: d.renderDiagram } : {}), ctx },
   });
-  return new Response(bundle.bytes as unknown as ArrayBuffer, {
+  return new Response(bundle.body, {
     headers: {
       "Content-Type": "application/x-tar",
       "Content-Disposition": `attachment; filename="${name}-${bundle.seq}.tar"`,

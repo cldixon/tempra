@@ -10,7 +10,7 @@ import {
   slotAtOrAfter,
 } from "../src/maintain";
 import { LibraryStore, type MaintenanceDue } from "../src/store/store";
-import { memoryBlobs, memoryBucket } from "./harness";
+import { memoryBucket } from "./harness";
 import { bunSqlHandle } from "./sqlite";
 
 const DAY = 86_400_000;
@@ -25,7 +25,6 @@ async function library(id: string, start: string) {
   const clock = { t: Date.parse(start) };
   const store = new LibraryStore(bunSqlHandle(), { now: () => new Date(clock.t) });
   const bucket = memoryBucket();
-  const blobs = memoryBlobs();
   const alarm = { at: null as number | null };
   const schedule = new MaintenanceSchedule(
     {
@@ -56,7 +55,6 @@ async function library(id: string, start: string) {
         alarm.at = null;
         const r = await runMaintenance({
           store,
-          blobs,
           bucket,
           libraryId: id,
           now: new Date(clock.t),
