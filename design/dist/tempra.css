@@ -283,26 +283,27 @@
   --tempra-measure: 680px; /* the reader's column, with its padding: diagrams, captions */
   --tempra-measure-reader: 34em; /* concept text: about 66 characters at the reading size */
 
-  /* Space: one scale, named by its size in px (take 2 to take 4 used every step below; the
-     palette round may thin it). Only these appear as padding, margin, gap and offsets. */
-  --tempra-space-02: 2px;
-  --tempra-space-04: 4px;
-  --tempra-space-06: 6px;
-  --tempra-space-08: 8px;
-  --tempra-space-10: 10px;
-  --tempra-space-12: 12px;
-  --tempra-space-14: 14px;
-  --tempra-space-16: 16px;
-  --tempra-space-18: 18px;
-  --tempra-space-20: 20px;
-  --tempra-space-24: 24px;
-  --tempra-space-28: 28px;
-  --tempra-space-32: 32px;
-  --tempra-space-40: 40px;
-  --tempra-space-48: 48px;
-  --tempra-space-56: 56px;
-  --tempra-space-72: 72px;
-  --tempra-space-96: 96px;
+  /* Space: one scale in rem, so spacing grows with the reader's chosen text size, named by its
+     size in px at the default 16px root (take 2 to take 4 used every step below; the palette
+     round may thin it). Only these appear as padding, margin, gap and offsets. */
+  --tempra-space-02: 0.125rem;
+  --tempra-space-04: 0.25rem;
+  --tempra-space-06: 0.375rem;
+  --tempra-space-08: 0.5rem;
+  --tempra-space-10: 0.625rem;
+  --tempra-space-12: 0.75rem;
+  --tempra-space-14: 0.875rem;
+  --tempra-space-16: 1rem;
+  --tempra-space-18: 1.125rem;
+  --tempra-space-20: 1.25rem;
+  --tempra-space-24: 1.5rem;
+  --tempra-space-28: 1.75rem;
+  --tempra-space-32: 2rem;
+  --tempra-space-40: 2.5rem;
+  --tempra-space-48: 3rem;
+  --tempra-space-56: 3.5rem;
+  --tempra-space-72: 4.5rem;
+  --tempra-space-96: 6rem;
   --tempra-space-gutter: var(--tempra-space-08); /* the frame's gutter */
   --tempra-space-page: var(--tempra-space-40); /* a page's side padding in its column */
   --tempra-space-figure: var(--tempra-space-12); /* between a group's images */
