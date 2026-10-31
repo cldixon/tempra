@@ -6,7 +6,11 @@
  *
  *   bun run agents --url http://localhost:8787 --seed 3                       local, mints tokens
  *   bun run agents --url <base> --library owner/slug --token T1 --token T2     any deployment
- *        [--scenario edit-race|live|load …] [--pace 2000] [--rounds 5] [--keep] [--patient] [--json]
+ *        [--scenario edit-race|live|load|costs …] [--pace 2000] [--rounds 5] [--keep] [--patient] [--json]
+ *
+ * Every call's answer says what it cost the library (rows read and written, the search index's
+ * share, DO time; TEMPRA-228), reported per tool and per Library DO call. `costs` (only by name)
+ * makes each kind of call once a round to measure them.
  *
  * Every agent of a library writes as its owner's account, so together they share its write
  * limit (60 a minute): a load run past it reports the calls refused, or with --patient waits
@@ -20,7 +24,9 @@ import {
   Agent,
   type CallRecord,
   type CallResult,
+  type CostSummary,
   FeedWatch,
+  meanCost,
   sleep,
   summarize,
 } from "./agents/runner";
@@ -58,6 +64,13 @@ export interface Report {
   tools: Record<string, ReturnType<typeof summarize> & { refused: number; limited: number }>;
   /** From a write's start to its event arriving on the feed, in ms. */
   feed: ReturnType<typeof summarize> & { missing: number };
+  /**
+   * What each tool call cost its library's object on average (TEMPRA-228): rows read and
+   * written, the search index's and the read flush's share, time waiting on the object.
+   */
+  costs: Record<string, CostSummary>;
+  /** The same per Library DO call, by operation (`write`, `edit`, `read`, `batch`, …). */
+  ops: Record<string, CostSummary>;
   writesPerSecond: number;
 }
 
@@ -82,7 +95,9 @@ export async function runAgents(opts: RunOptions): Promise<Report> {
 
   const writes: { seq: number; startedAt: number }[] = [];
   const results: Report["scenarios"] = [];
-  const wanted = opts.scenarios?.length ? opts.scenarios : SCENARIOS.map((s) => s.name);
+  const wanted = opts.scenarios?.length
+    ? opts.scenarios
+    : SCENARIOS.filter((s) => !s.onlyByName).map((s) => s.name);
   for (const name of wanted) {
     const scenario = SCENARIOS.find((s) => s.name === name);
     if (!scenario)
@@ -150,6 +165,16 @@ export async function runAgents(opts: RunOptions): Promise<Report> {
       limited: mine.filter((c) => c.limited).length,
     };
   }
+  const costs: Report["costs"] = {};
+  for (const tool of Object.keys(tools)) {
+    const mine = calls.flatMap((c) => (c.tool === tool && c.cost ? [c.cost] : []));
+    if (mine.length) costs[tool] = meanCost(mine);
+  }
+  const doCalls = calls.flatMap((c) => c.cost?.ops ?? []);
+  const ops: Report["ops"] = {};
+  for (const op of new Set(doCalls.map((o) => o.op))) {
+    ops[op] = meanCost(doCalls.filter((o) => o.op === op));
+  }
   return {
     ok: results.every((r) => r.ok) && missing === 0,
     url: opts.url,
@@ -160,7 +185,23 @@ export async function runAgents(opts: RunOptions): Promise<Report> {
     tools,
     feed: { ...summarize(delivery), missing },
     writesPerSecond: Math.round((writes.length / (durationMs / 1000)) * 10) / 10,
+    costs,
+    ops,
   };
+}
+
+/** A cost table's rows: per call, means. */
+function costLines(title: string, rows: Record<string, CostSummary>): string[] {
+  const entries = Object.entries(rows);
+  if (entries.length === 0) return [];
+  const n = (v: number, w: number) => String(v).padStart(w);
+  return [
+    `  ${title.padEnd(10)}  n  rows read  rows written  of them fts  read flush  DO ms`,
+    ...entries.map(
+      ([t, c]) =>
+        `  ${t.padEnd(10)} ${n(c.n, 3)} ${n(c.rowsRead, 10)} ${n(c.rowsWritten, 13)} ${n(c.ftsRowsWritten, 12)} ${n(c.readFlushRowsWritten, 11)} ${n(c.doMs, 6)}`,
+    ),
+  ];
 }
 
 /** The report as a few lines of text. */
@@ -180,6 +221,9 @@ export function formatReport(r: Report): string {
         `  ${t.padEnd(10)} ${String(s.n).padStart(3)} ${String(s.p50).padStart(8)} ${String(s.p95).padStart(8)} ${String(s.max).padStart(8)}  ${String(s.refused).padStart(7)}  ${s.limited}`,
     ),
     `  feed       ${String(r.feed.n).padStart(3)} ${String(r.feed.p50).padStart(8)} ${String(r.feed.p95).padStart(8)} ${String(r.feed.max).padStart(8)}  ${r.feed.missing} missing  (write start → event on the feed)`,
+    // What each call cost its library (TEMPRA-228), per tool call and per Library DO call.
+    ...costLines("tool cost", r.costs),
+    ...costLines("DO op", r.ops),
   ];
   return lines.join("\n");
 }

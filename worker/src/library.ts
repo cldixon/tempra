@@ -25,9 +25,18 @@ import {
   runMaintenance,
 } from "./maintain";
 import { prepareRestore, type RestoreOutcome, type RestoreTarget } from "./recovery";
-import { doSqlHandle } from "./store/sql";
+import {
+  addCost,
+  doSqlHandle,
+  FTS_TABLES,
+  READ_FLUSH_TABLES,
+  type RowCost,
+  RowTally,
+  rowsTo,
+} from "./store/sql";
 import { type LibraryHealth, LibraryStore } from "./store/store";
 import { callLine, worthLogging } from "./timing";
+import { usagePoint } from "./usage";
 
 /** How long reads counted in memory wait before they are written to `access_log`. */
 const READ_FLUSH_MS = 5000;
@@ -56,6 +65,8 @@ export class Library extends DurableObject<Env> {
   private calls = 0;
   /** Agents' presence on the feed (TEMPRA-219): only its throttle, in memory. */
   private readonly presence = new Presence();
+  /** Every statement's rows, so each call returns what it cost (TEMPRA-228). */
+  private readonly rows = new RowTally();
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
@@ -68,7 +79,7 @@ export class Library extends DurableObject<Env> {
    * can still be deleted.
    */
   private get store(): LibraryStore {
-    this.opened ??= new LibraryStore(doSqlHandle(this.ctx.storage), {
+    this.opened ??= new LibraryStore(doSqlHandle(this.ctx.storage, this.rows), {
       size: () => this.ctx.storage.sql.databaseSize,
     });
     return this.opened;
@@ -131,16 +142,20 @@ export class Library extends DurableObject<Env> {
         d1BlobRefs(this.env.DB).reference(this.libraryId(), hashes, new Date()),
       // Reads counted as their surface and reader kind (TEMPRA-220).
       reading: caller ? readingOf(caller) : null,
+      rows: this.rows,
     });
     // The write has committed (the store's transaction is synchronous): tell the feed, and wake
     // the maintainers for the export it calls for. A failure here must not turn a committed
     // write into an error (a client would retry it).
     if (writes && result.ok) {
+      const mark = this.rows.mark();
       try {
         this.publish(before);
       } catch (e) {
         console.error("feed publish failed", e);
       }
+      // The feed's read of the new events is the write's cost too.
+      if (result.cost) result.cost = addCost(result.cost, this.rows.since(mark));
       try {
         if (this.store.headSeq() > before) await this.schedule.wake();
       } catch (e) {
@@ -162,11 +177,37 @@ export class Library extends DurableObject<Env> {
       this.flushTimer = null;
       if (this.restarting) return;
       try {
-        this.store.flushReads();
+        const { cost } = this.rows.measure(() => this.store.flushReads());
+        this.meterFlush(cost);
       } catch (e) {
         console.error("read counts not written", e);
       }
     }, READ_FLUSH_MS);
+  }
+
+  /**
+   * The timer's flush belongs to no request, so the object meters it itself, as `read_flush`
+   * under the library (TEMPRA-228); a flush a write makes first is in that write's cost.
+   */
+  private meterFlush(cost: RowCost) {
+    try {
+      this.env.USAGE?.writeDataPoint(
+        usagePoint({
+          kind: "cost",
+          account: "",
+          library: this.libraryId(),
+          op: "read_flush",
+          cost: {
+            calls: 1,
+            rowsRead: cost.rowsRead,
+            rowsWritten: cost.rowsWritten,
+            ftsRowsWritten: rowsTo(cost, FTS_TABLES),
+            readFlushRowsWritten: rowsTo(cost, READ_FLUSH_TABLES),
+            ms: 0,
+          },
+        }),
+      );
+    } catch {}
   }
 
   // ---------------------------------------------------------------- the change feed
