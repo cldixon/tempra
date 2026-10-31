@@ -2,7 +2,7 @@ import type { Context, Hono } from "hono";
 import type { User } from "./accounts";
 import type { Deps } from "./app";
 import type { ItemKind, Notifications } from "./notify";
-import { devMailer, devOutbox, flushMail, itemLink } from "./notify-mail";
+import { devOutbox, flushMail, itemLink } from "./notify-mail";
 import { esc } from "./oauth/pages";
 import { devSignIn, html } from "./signin";
 import { OkfError } from "./store/errors";
@@ -218,7 +218,8 @@ export function registerInboxApi(
       {
         accounts: d.accounts,
         notifications: notificationsOf(d),
-        mailer: devMailer,
+        // Through MAIL_QUEUE as deployed (TEMPRA-89); its consumer puts it in the outbox.
+        outbox: d.outbox ?? null,
         origin: new URL(c.req.url).origin,
         now: new Date(),
       },

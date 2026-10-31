@@ -6,6 +6,7 @@ import { type LibraryClient, WORKER_ATTACHMENT_CAP } from "../client";
 import { nightlyBundle } from "../export-bundle";
 import { isRouteName } from "../handles";
 import { VARIANT_EDGES } from "../images";
+import { mailKey } from "../mail-queue";
 import { esc, messagePage, type Onward, PAGE_HEADERS, page } from "../oauth/pages";
 import { basename, dirname } from "../okf/paths";
 import { fromThisSite } from "../origin";
@@ -603,14 +604,20 @@ export function registerUiRoutes<E extends AppEnv>(
       const old = p.user.email;
       await p.deps.accounts.setEmail(p.user.id, link.email);
       // Tell the old address, so a takeover does not go unnoticed.
-      await p.deps.mailer
+      // Queued (TEMPRA-89): nobody waits on it, and it should reach the old address.
+      await p.deps.outbox
         ?.send({
+          key: mailKey("email-changed", p.user.id, link.email),
+          kind: "account",
+          account: p.user.handle,
           to: old,
           subject: "Your Tempra email changed",
           text: `Your Tempra account now signs in with ${link.email}.\n`,
         })
         .catch((e) =>
-          console.error(JSON.stringify({ mail_failed: "email change notice", error: String(e) })),
+          console.error(
+            JSON.stringify({ mail_not_queued: "email change notice", error: String(e) }),
+          ),
         );
       return p.c.redirect("/account?done=email", 303);
     }) as never,

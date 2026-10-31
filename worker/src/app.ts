@@ -23,6 +23,7 @@ import type { Images } from "./images";
 import { registerInboxApi } from "./inbox-api";
 import { registerLegalRoutes } from "./legal";
 import { deleteLibrary } from "./lifecycle";
+import type { Outbox } from "./mail-queue";
 import type { ManagedDeps } from "./managed/agent";
 import { managedAgents, type Notifications, notifying, postComment } from "./notify";
 import { messagePage, wantsPage } from "./oauth/pages";
@@ -90,8 +91,17 @@ export interface Deps extends UsageDeps {
    * `accounts` share in a deployment; absent, every request asks D1.
    */
   authCache?: AuthCache;
-  /** Sends sign-in emails; without one, only local dev with DEV_SIGNIN=1 can sign in. */
+  /**
+   * Sends now: links a person waits on (sign-in, a new email's confirmation), retried once in the
+   * request; without one, only local dev with DEV_SIGNIN=1 can sign in.
+   */
   mailer?: Mailer | null;
+  /**
+   * Queues mail nobody waits on (TEMPRA-89, mail-queue.ts): invitations, notification batches,
+   * quota notices, the waitlist's and the operator's; the MAIL_QUEUE consumer sends them with
+   * retries. None: no such mail.
+   */
+  outbox?: Outbox | null;
   /**
    * The token's library, its calls made as the token's caller (feed.ts `callerOf`): `surface` is
    * where they come from, for read history (TEMPRA-220); the app for a session, the REST API for
@@ -1072,7 +1082,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
       throw new OkfError(404, "no_account", `There is no Tempra account @${to.replace(/^@/, "")}.`);
     }
     const inviter = c.var.token.created_by ?? "";
-    const { renewed } = await accounts.invite(ref.id, invitee.id, role, inviter);
+    const { id: invitation, renewed } = await accounts.invite(ref.id, invitee.id, role, inviter);
     if (!renewed) {
       // The invitation mails at once, below; the inbox keeps it too (TEMPRA-72).
       await c.var.deps.notifications
@@ -1092,15 +1102,18 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
         );
       const origin = new URL(c.req.url).origin;
       const who = c.var.token.actor.replace(/^human:/, "@");
-      await c.var.deps.mailer
+      // Queued (TEMPRA-89): sent with retries, once per invitation however often it is redelivered.
+      await c.var.deps.outbox
         ?.send({
+          key: `invitation:${invitation}`,
+          kind: "invitation",
+          account: invitee.handle,
           to: invitee.email,
           subject: `${who} invited you to ${ref.owner}/${ref.slug} on Tempra`,
           text: `${who} invited you to the library ${ref.owner}/${ref.slug} with ${role} access${role === "read" ? " (read and comment)" : ""}.\n\nAccept or decline: ${origin}/invitations\n\nThe invitation is open for 14 days. If you did not expect it, ignore this email.\n`,
         })
-        .then(() => c.var.deps.meter?.({ kind: "email", account: invitee.handle }))
         .catch((e) =>
-          console.error(JSON.stringify({ mail_failed: "invitation", error: String(e) })),
+          console.error(JSON.stringify({ mail_not_queued: "invitation", error: String(e) })),
         );
     }
     return c.json(

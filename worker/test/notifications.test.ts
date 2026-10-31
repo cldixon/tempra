@@ -380,7 +380,7 @@ describe("notification mail (TEMPRA-74)", () => {
       {
         accounts: s.accounts,
         notifications: s.notifications,
-        mailer: s.deps.mailer ?? null,
+        outbox: s.deps.outbox ?? null,
         origin,
         now,
       },

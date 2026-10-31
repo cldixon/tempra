@@ -22,7 +22,7 @@ if (!worker) throw new Error("cloudflare.config.ts defines no worker.");
 
 export const WORKER_NAME = worker.name;
 
-/** Every Queue the Worker binds (SWEEP_QUEUE, AGENT_QUEUE), by name. */
+/** Every Queue the Worker binds (SWEEP_QUEUE, AGENT_QUEUE, MAIL_QUEUE), by name. */
 export function boundQueues(): string[] {
   return Object.values(worker?.env ?? {})
     .map((b) => b as { type?: string; name?: string })

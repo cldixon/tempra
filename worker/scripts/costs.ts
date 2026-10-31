@@ -79,7 +79,7 @@ const namespaces = (
 )
   .filter((n) => n.script === d.name)
   .map((n) => n.id);
-const queueNames = [d.queue, d.agentQueue];
+const queueNames = [d.queue, d.agentQueue, d.mailQueue];
 const queues = (await rest<{ queue_id: string; queue_name: string }>("/queues?per_page=1000"))
   .filter((q) => queueNames.includes(q.queue_name))
   .map((q) => q.queue_id);
