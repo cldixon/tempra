@@ -14,8 +14,8 @@
   import EmailSwitch from "./EmailSwitch.svelte";
 
   /**
-   * The account: email, handle, limits, appearance, email settings (TEMPRA-189), sessions,
-   * deleting it (v2 spec: Accounts).
+   * The account: email, name (TEMPRA-54), handle, limits, appearance, email settings
+   * (TEMPRA-189), sessions, deleting it (v2 spec: Accounts).
    */
   let { done }: { done: string | null } = $props();
   useTitle(() => "Account");
@@ -46,6 +46,16 @@
       });
       notice = `Check ${res.sent_to} for a link, and open it while signed in as you are now.`;
       devLink = res.dev_link ?? null;
+    });
+  }
+  /** The name (TEMPRA-54): optional; an empty field clears it. A full load, so the avatar follows. */
+  function changeName(e: SubmitEvent & { currentTarget: HTMLFormElement }, current: string | null) {
+    e.preventDefault();
+    const name = field(e.currentTarget, "name").trim();
+    if (name === (current ?? "")) return;
+    void action.run(async () => {
+      await post("/api/v1/account", { name: name || null }, "PATCH");
+      location.assign("/account");
     });
   }
   function changeHandle(e: SubmitEvent & { currentTarget: HTMLFormElement }, current: string) {
@@ -114,6 +124,22 @@
           <button type="submit" disabled={action.busy}>Change</button>
         </p>
       </form>
+      <form onsubmit={(e) => changeName(e, a.name)}>
+        <p>
+          <label>
+            Name
+            <input
+              type="text"
+              name="name"
+              autocomplete="name"
+              maxlength={80}
+              defaultValue={a.name ?? ""}
+            />
+          </label>
+          <button type="submit" disabled={action.busy}>Change</button>
+        </p>
+      </form>
+      <p class="small muted">Optional. Your avatar's initials come from it.</p>
       <form onsubmit={(e) => changeHandle(e, a.handle)}>
         <p>
           <label>

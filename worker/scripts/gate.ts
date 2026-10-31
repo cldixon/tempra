@@ -5233,6 +5233,8 @@ async function freshAccountConnects(): Promise<string[]> {
     await b.signInAs("newcomer@localhost", "/");
     await page.waitForURL(`${base}/welcome`);
     await page.getByRole("heading", { level: 1, name: "Welcome" }).waitFor({ timeout: 15_000 });
+    // A name (TEMPRA-54): the avatar's initials come from it ("AL"), not the handle ("NE").
+    await page.locator('input[name="name"]').fill("Ada Lovelace");
     await page.locator('input[name="handle"]').fill("newcomer");
     await page.locator('input[name="library"]').fill("notes");
     // Both fields say they become the library's address, and how they may be written (H-12).
@@ -5273,6 +5275,11 @@ async function freshAccountConnects(): Promise<string[]> {
         }
       },
     );
+    await step("the avatar's initials come from the name given at first run", async () => {
+      const avatar = page.getByRole("button", { name: "Account menu" });
+      const shown = (await avatar.locator('span[aria-hidden="true"]').innerText()).trim();
+      if (shown !== "AL") throw new Error(`the avatar reads "${shown}", not AL`);
+    });
     const connectTab = await b.context.newPage();
     await connectTab.goto(`${lib}/-/settings#connect`);
     await connectTab.getByText("No agent has written yet").waitFor({ timeout: 15_000 });

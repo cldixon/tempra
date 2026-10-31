@@ -52,7 +52,7 @@
 </script>
 
 <!-- Who said it: their mark and name, an agent with whom it acts for (AgentName). -->
-{#snippet by(who: ActorView)}<Avatar name={who.mark} agent={who.agent} tempra={who.tempra} /><AgentName {who} />{/snippet}
+{#snippet by(who: ActorView)}<Avatar name={who.mark} fullName={who.fullName} agent={who.agent} tempra={who.tempra} /><AgentName {who} />{/snippet}
 <!-- A thread whose quote is no longer in the body, said where it shows; a request (TEMPRA-222). -->
 {#snippet outdatedMark()}<span class="thread-outdated" title="The quoted text is no longer on the page">Outdated</span>{/snippet}
 {#snippet marks()}{#if t.kind === "request"}<span class="thread-request" title="Left for people's agents to do">Request</span>{/if}{#if outdated}{@render outdatedMark()}{/if}{/snippet}

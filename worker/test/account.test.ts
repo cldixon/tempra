@@ -509,6 +509,91 @@ describe("the account's theme (take 4, TEMPRA-113)", () => {
   });
 });
 
+describe("the account's name (TEMPRA-54)", () => {
+  type Named = { name: string | null; handle: string };
+  const me = async (s: ReturnType<typeof setup>) =>
+    (await (await s.app.request("/api/v1/me")).json()) as Named;
+  const account = async (s: ReturnType<typeof setup>) =>
+    (await (await s.app.request("/api/v1/account")).json()) as Named;
+
+  test("none at first; set, read back with /me and /account, and cleared", async () => {
+    const s = setup();
+    expect((await me(s)).name).toBeNull();
+    expect((await account(s)).name).toBeNull();
+    // Trimmed, runs of spaces made one; the theme left alone.
+    const set = await call(s.app, "/api/v1/account", "PATCH", { name: "  Ann   Lee Smith " });
+    expect(set.status).toBe(200);
+    expect((await set.json()) as unknown).toEqual({ name: "Ann Lee Smith" });
+    expect(await me(s)).toMatchObject({ name: "Ann Lee Smith", handle: "owner" });
+    expect((await account(s)).name).toBe("Ann Lee Smith");
+    // Both at once: each is set.
+    const both = await call(s.app, "/api/v1/account", "PATCH", { name: "Ann", theme: "dark" });
+    expect((await both.json()) as unknown).toEqual({ name: "Ann", theme: "dark" });
+    // Empty or null clears it.
+    for (const cleared of ["   ", null]) {
+      await call(s.app, "/api/v1/account", "PATCH", { name: "Ann" });
+      const r = await call(s.app, "/api/v1/account", "PATCH", { name: cleared });
+      expect((await r.json()) as unknown).toEqual({ name: null });
+      expect((await me(s)).name).toBeNull();
+    }
+  });
+
+  test("refused when too long, not text, or holding control characters", async () => {
+    const s = setup();
+    for (const name of ["x".repeat(81), 42, "Ann\nLee", "Ann\u0000", "Ann Lee"]) {
+      const r = await call(s.app, "/api/v1/account", "PATCH", { name });
+      expect(r.status).toBe(400);
+      expect(((await r.json()) as { code: string }).code).toBe("bad_name");
+    }
+    // 80 characters, counted as characters, not UTF-16 units.
+    expect((await call(s.app, "/api/v1/account", "PATCH", { name: "é".repeat(80) })).status).toBe(
+      200,
+    );
+    expect((await call(s.app, "/api/v1/account", "PATCH", { name: "😀".repeat(80) })).status).toBe(
+      200,
+    );
+    // A refused name leaves the theme unset too.
+    await call(s.app, "/api/v1/account", "PATCH", { name: "Ann", theme: "dark" });
+    const bad = await call(s.app, "/api/v1/account", "PATCH", { name: 1, theme: "light" });
+    expect(bad.status).toBe(400);
+    const after = (await (await s.app.request("/api/v1/me")).json()) as Named & { theme: string };
+    expect(after).toMatchObject({ name: "Ann", theme: "dark" });
+  });
+
+  test("only from the app's pages, never with a token", async () => {
+    const s = setup();
+    const token = await s.app.request("/api/v1/account", {
+      method: "PATCH",
+      headers: { Authorization: "Bearer human", "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "Mallory" }),
+    });
+    expect(token.status).toBe(403);
+    expect(
+      (await call(s.app, "/api/v1/account", "PATCH", { name: "Mallory" }, "https://evil.example"))
+        .status,
+    ).toBe(403);
+    expect((await me(s)).name).toBeNull();
+  });
+
+  test("the library's people carry it beside the handle, for their marks", async () => {
+    const s = setup();
+    await call(s.app, "/api/v1/account", "PATCH", { name: "Ann Lee" });
+    const w = await s.req("/files/notes/a.md", {
+      method: "PUT",
+      token: "human",
+      body: "---\ntype: Note\n---\nHi.\n",
+    });
+    expect(w.status).toBeLessThan(300);
+    const r = await s.app.request("/api/v1/libraries/owner/demo/agents");
+    const { contributors } = (await r.json()) as {
+      contributors: { person: string; person_name: string | null }[];
+    };
+    expect(contributors.length).toBeGreaterThan(0);
+    for (const c of contributors)
+      expect(c).toMatchObject({ person: "owner", person_name: "Ann Lee" });
+  });
+});
+
 describe("a library's title and description (TEMPRA-102, in take 4's General settings)", () => {
   test("the owner sets and clears them; they show in the list; a member reads only", async () => {
     const s = setup();

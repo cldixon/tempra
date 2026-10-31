@@ -837,15 +837,18 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
         a,
       ]),
     );
-    const handles = new Map<string, string | null>();
+    const people = new Map<string, { handle: string; name: string | null } | null>();
     for (const id of new Set(rows.map((r) => r.person))) {
-      handles.set(id, (await accounts.account(id))?.handle ?? null);
+      const a = await accounts.account(id);
+      people.set(id, a ? { handle: a.handle, name: a.name ?? null } : null);
     }
     return c.json({
       contributors: rows.map((r) => {
         const a = r.agent ? agents.get(r.agent) : undefined;
         return {
-          person: handles.get(r.person) ?? null,
+          person: people.get(r.person)?.handle ?? null,
+          // The person's name, for their round mark's initials only (TEMPRA-54).
+          person_name: people.get(r.person)?.name ?? null,
           agent: r.agent
             ? {
                 id: r.agent,
@@ -1261,6 +1264,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     return c.json({
       email: account.email,
       handle: account.handle,
+      name: account.name ?? null,
       actor: account.actor,
       theme: account.theme ?? null,
     });

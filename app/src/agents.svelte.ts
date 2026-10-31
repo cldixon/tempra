@@ -5,6 +5,7 @@ import {
   agentNames,
   agentsById,
   type Contributor,
+  personNames,
 } from "./agents";
 import { api } from "./api";
 import { useLoad } from "./load.svelte.ts";
@@ -23,6 +24,7 @@ function useContributors(urls: () => Urls) {
   );
   const list = $derived(loaded.data ?? null);
   const byId = $derived(agentsById(list ?? []));
+  const names = $derived(personNames(list ?? []));
   // Ids met while drawing that the list lacks; asked for after the render, each once.
   const asked = new Set<string>();
   let pending = false;
@@ -43,6 +45,9 @@ function useContributors(urls: () => Urls) {
     get byId() {
       return byId;
     },
+    get names() {
+      return names;
+    },
     note,
   };
 }
@@ -57,7 +62,7 @@ export function useActors(urls: () => Urls) {
   return {
     view: (actor: string, by?: ActedBy | null) => {
       c.note(by?.agent);
-      return actorView(actor, by, c.byId, me.current?.actor ?? null);
+      return actorView(actor, by, c.byId, me.current?.actor ?? null, c.names);
     },
     /** Everyone who has worked here: people and agents. */
     get contributors() {

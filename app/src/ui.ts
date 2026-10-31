@@ -4,6 +4,8 @@ import { baseName } from "./urls";
 export interface Me {
   email: string;
   handle: string;
+  /** The account's name, when the person gave one (TEMPRA-54): the avatar's initials. */
+  name?: string | null;
   actor: string;
   /** The account's theme (take 4): light, dark, or null for the system's. */
   theme?: "light" | "dark" | null;

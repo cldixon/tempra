@@ -1,6 +1,6 @@
 import type { OAuthHelpers } from "@cloudflare/workers-oauth-provider";
 import type { Context, Hono } from "hono";
-import { checkTheme, type User } from "./accounts";
+import { checkName, checkTheme, type User } from "./accounts";
 import type { Deps } from "./app";
 import { deleteAccount } from "./lifecycle";
 import {
@@ -42,14 +42,17 @@ export function registerAccountApi(
     const { d, user } = await person(c);
     const secret = readCookie(c.req.raw, SESSION_COOKIE);
     const current = secret ? sessionId(secret) : null;
-    const [sessions, usage, limits] = await Promise.all([
+    // The session's user carries no name (TEMPRA-54); the account's row does.
+    const [sessions, usage, limits, account] = await Promise.all([
       d.sessions.list(user.id),
       d.accounts.usage(user.id),
       d.accounts.limits(user.id),
+      d.accounts.account(user.id),
     ]);
     return c.json({
       email: user.email,
       handle: user.handle,
+      name: account?.name ?? null,
       actor: user.actor,
       theme: user.theme ?? null,
       sessions: sessions.map((s) => ({ ...s, current: s.id === current })),
@@ -58,14 +61,22 @@ export function registerAccountApi(
     });
   });
 
-  // The account's settings that are one value each (take 4): the theme, for now.
+  // The account's settings that are one value each (take 4): the theme and the name (TEMPRA-54).
+  // Each field given is set; both are checked before either is written.
   app.patch("/api/v1/account", async (c) => {
     const { d, user } = await person(c);
-    const b = await body<{ theme?: unknown }>(c);
-    if (!("theme" in b)) throw new OkfError(400, "nothing_to_change", "Nothing to change.");
-    const theme = checkTheme(b.theme);
-    await d.accounts.setTheme(user.id, theme);
-    return c.json({ theme });
+    const b = await body<{ theme?: unknown; name?: unknown }>(c);
+    if (!("theme" in b) && !("name" in b)) {
+      throw new OkfError(400, "nothing_to_change", "Nothing to change.");
+    }
+    const theme = "theme" in b ? checkTheme(b.theme) : undefined;
+    const name = "name" in b ? checkName(b.name) : undefined;
+    if (theme !== undefined) await d.accounts.setTheme(user.id, theme);
+    if (name !== undefined) await d.accounts.setName(user.id, name);
+    return c.json({
+      ...(theme !== undefined && { theme }),
+      ...(name !== undefined && { name }),
+    });
   });
 
   app.put("/api/v1/account/handle", async (c) => {
