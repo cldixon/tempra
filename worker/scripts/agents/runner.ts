@@ -6,6 +6,7 @@
  */
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { localFetch } from "../local-fetch";
 
 export interface AgentSpec {
   /** The bearer token; its actor is the agent's identity in the ledger. */
@@ -90,7 +91,7 @@ export class Agent {
         headers: { Authorization: `Bearer ${this.spec.token}`, "X-Tempra-Cost": "1" },
       },
       fetch: async (input, init) => {
-        const res = await fetch(input, init);
+        const res = await localFetch(input, init);
         const cost = res.headers.get("X-Tempra-Cost");
         if (cost) this.lastCost = JSON.parse(cost) as WireCost;
         return res;
@@ -176,7 +177,7 @@ export class Agent {
     let wait = 5000;
     for (;;) {
       const t0 = performance.now();
-      const res = await fetch(url, {
+      const res = await localFetch(url, {
         method: "PUT",
         headers: { "Content-Type": type, "X-Tempra-Cost": "1" },
         body: bytes,

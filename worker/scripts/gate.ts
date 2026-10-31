@@ -40,6 +40,9 @@ import { compareBundle } from "../test/compare";
 import { BUNDLES, loadBundle } from "../test/fixtures";
 import { formatReport, runAgents } from "./agents";
 import { d1Sql, WORKER_DIR } from "./cf";
+// Every request the gate makes opens its own connection, never one cf dev may be closing as
+// idle (TEMPRA-186); its MCP clients are given the same fetch.
+import { localFetch as fetch } from "./local-fetch";
 import { mcpSmoke } from "./mcp-smoke";
 import { seed } from "./seed";
 
@@ -3553,6 +3556,7 @@ async function browserRenders(
       const client = new Client({ name: "gate-presence", version: "1.0.0" });
       await client.connect(
         new StreamableHTTPClientTransport(new URL(`${base}/mcp`), {
+          fetch,
           requestInit: { headers: { Authorization: `Bearer ${token}` } },
         }),
       );
@@ -3781,6 +3785,7 @@ async function browserRenders(
         const client = new Client({ name: "gate-reads", version: "1.0.0" });
         await client.connect(
           new StreamableHTTPClientTransport(new URL(`${base}/mcp`), {
+            fetch,
             requestInit: { headers: { Authorization: `Bearer ${token}` } },
           }),
         );
@@ -4710,7 +4715,10 @@ async function managedAgent(owner: string, slug: string, token: string): Promise
     await step("the request is listed by MCP work", async () => {
       const client = new Client({ name: "gate-agent", version: "1.0.0" });
       await client.connect(
-        new StreamableHTTPClientTransport(new URL(`${base}/mcp`), { requestInit: { headers } }),
+        new StreamableHTTPClientTransport(new URL(`${base}/mcp`), {
+          fetch,
+          requestInit: { headers },
+        }),
       );
       const r = await client.callTool({
         name: "work",
@@ -4748,6 +4756,7 @@ async function uploadPanel(token: string): Promise<string[]> {
   const client = new Client({ name: "gate", version: "1.0.0" });
   await client.connect(
     new StreamableHTTPClientTransport(new URL(`${base}/mcp`), {
+      fetch,
       requestInit: { headers: { Authorization: `Bearer ${token}` } },
     }),
   );
@@ -4850,6 +4859,7 @@ async function pagePanel(token: string): Promise<string[]> {
   const client = new Client({ name: "gate", version: "1.0.0" });
   await client.connect(
     new StreamableHTTPClientTransport(new URL(`${base}/mcp`), {
+      fetch,
       requestInit: { headers: { Authorization: `Bearer ${token}` } },
     }),
   );
