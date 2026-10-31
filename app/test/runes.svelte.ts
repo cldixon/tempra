@@ -5,7 +5,7 @@
 
 import { usePrefetchLinks } from "../src/links.svelte.ts";
 import { useFeed } from "../src/live.svelte.ts";
-import { useLoad } from "../src/load.svelte.ts";
+import { type Freshness, useLoad } from "../src/load.svelte.ts";
 import type { Urls } from "../src/urls";
 import { useWake } from "../src/wake.svelte.ts";
 
@@ -23,10 +23,10 @@ export function box<T>(value: T) {
 }
 
 /** useLoad in an effect root; `stop` ends it, as a page going away would. */
-export function rootLoad<T>(key: () => string, load: () => Promise<T>) {
+export function rootLoad<T>(key: () => string, load: () => Promise<T>, freshness?: Freshness) {
   let loaded!: ReturnType<typeof useLoad<T>>;
   const stop = $effect.root(() => {
-    loaded = useLoad(key, load);
+    loaded = useLoad(key, load, [], freshness);
   });
   return { loaded, stop };
 }

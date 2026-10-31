@@ -1,5 +1,5 @@
 import { api } from "./api";
-import { useLoad } from "./load.svelte.ts";
+import { useLoad, WORKSPACE_DATA } from "./load.svelte.ts";
 import {
   LIBRARIES_EVENT,
   LIBRARY_NAMES_URL,
@@ -10,14 +10,16 @@ import {
 import { useTitle } from "./ui.svelte.ts";
 
 /**
- * The person's libraries, own and shared (one load, shared by the workspace's parts; each part
- * reloads when told the libraries changed, since each holds its own copy of the answer).
+ * The person's libraries, own and shared (one load, shared by the workspace's parts, asked again
+ * by a page that mounts at most once a minute; each part reloads when told the libraries
+ * changed, since each holds its own copy of the answer).
  */
 export function useLibraries() {
   return useLoad(
     () => "workspace libraries",
     () => api<{ libraries: ReachableLibrary[] }>(LIBRARY_NAMES_URL),
     [LIBRARIES_EVENT],
+    WORKSPACE_DATA,
   );
 }
 

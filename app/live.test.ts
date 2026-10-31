@@ -109,6 +109,34 @@ describe("LibraryFeed", () => {
     expect(h.heard).toEqual([4, 5]);
   });
 
+  test("a page drawn from older data catches up from what the feed delivered, not the ledger", async () => {
+    // TEMPRA-103: a page drawn from the cache reflects a sequence the feed has passed since.
+    const h = harness();
+    h.commit(4);
+    h.send({ type: "hello", head: 4 });
+    h.commit(2);
+    h.send({ type: "events", head: 6, events: [ev(5), ev(6)] });
+    expect(h.heard).toEqual([5, 6]);
+    const late: number[] = [];
+    const page = h.feed.subscribe({
+      events: (events) => late.push(...events.map((e) => e.seq)),
+      reset: () => {},
+    });
+    h.feed.sync(page, 5);
+    await h.tick();
+    expect(late).toEqual([6]);
+    // From before the socket opened: only the ledger has those.
+    const older: number[] = [];
+    const old = h.feed.subscribe({
+      events: (events) => older.push(...events.map((e) => e.seq)),
+      reset: () => {},
+    });
+    h.feed.sync(old, 2);
+    await h.tick();
+    expect(older).toEqual([3, 4, 5, 6]);
+    expect(h.reads()).toBe(1);
+  });
+
   test("events arriving during a replay follow it, in order, without duplicates", async () => {
     const h = harness();
     h.commit(10);

@@ -8,19 +8,22 @@ import {
   personNames,
 } from "./agents";
 import { api } from "./api";
-import { useLoad } from "./load.svelte.ts";
+import { useLoad, WORKSPACE_DATA } from "./load.svelte.ts";
 import { useMe } from "./ui.svelte.ts";
 import type { Urls } from "./urls";
 
 /**
  * The library's contributors (`GET …/agents`), loaded once per library and shared by every page
- * that names people and agents. An agent seen on screen that the list does not know yet (its
- * first write, arriving live) loads it again, once per agent.
+ * that names people and agents (asked again by a page that mounts at most once a minute). An
+ * agent seen on screen that the list does not know yet (its first write, arriving live) loads it
+ * again, once per agent.
  */
 function useContributors(urls: () => Urls) {
   const loaded = useLoad(
     () => `contributors ${urls().base}`,
     () => api<{ contributors: Contributor[] }>(urls().api("agents")).then((r) => r.contributors),
+    [],
+    WORKSPACE_DATA,
   );
   const list = $derived(loaded.data ?? null);
   const byId = $derived(agentsById(list ?? []));
