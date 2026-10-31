@@ -11,6 +11,7 @@ import {
   type FeedSocket,
   feedEvent,
   feedPrefix,
+  isPersonActor,
   Presence,
   type PresenceMessage,
   readingOf,
@@ -278,7 +279,9 @@ export class Library extends DurableObject<Env> {
    * open feed socket, by its prefix; nothing is stored.
    */
   async announce(message: PresenceMessage): Promise<number> {
-    if (message.type !== "presence" || message.kind !== "replying") return 0;
+    // The managed agent's: "replying" on a thread, and "reading" for the pages a turn works from
+    // (the thread's page it is given, the pages it cites; TEMPRA-224). Never a person's.
+    if (message.type !== "presence" || isPersonActor(message.actor)) return 0;
     const sockets = this.ctx.getWebSockets();
     if (sockets.length === 0) return 0;
     return broadcastPresence(this.feedSockets(sockets), message);
