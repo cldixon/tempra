@@ -18,20 +18,22 @@ export interface ToolOutcome {
   isError: boolean;
 }
 
-/** Tools that only read, in the order they are listed (a stable order keeps the cache). */
+/**
+ * Tools that only read, in the order they are listed (a stable order keeps the cache). Only what
+ * answering a thread needs (TEMPRA-231): every tool's definition is input on every model call, so
+ * `start` (the prompt names the library; `browse` lists its root), `sources` (in `read`'s
+ * frontmatter), `log` (`history` covers a page) and `work` (it files requests, never picks up
+ * work) are left out.
+ */
 export const READ_TOOLS = [
-  "start",
   "browse",
   "read",
   "search",
   "grep",
   "query",
   "links",
-  "sources",
   "history",
   "diff",
-  "log",
-  "work",
   "comments",
 ] as const;
 
