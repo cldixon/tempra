@@ -6,6 +6,7 @@ import { AuthCache, invalidatingAccounts } from "./authcache";
 import { d1BlobRefs } from "./blobrefs";
 import { makeClient, r2BlobStore, recordingBlobStore } from "./client";
 import { agentSpendThisMonth } from "./costs";
+import { routedDb, withD1Session } from "./d1session";
 import { type Caller, callerOf, FEED_SOCKETS_PER_ACCOUNT } from "./feed";
 import { deleteVariants, imagesService, r2VariantCache } from "./images";
 import { type Library, refuseFeed } from "./library";
@@ -122,17 +123,19 @@ let authenticate: ReturnType<typeof d1Authenticate> | undefined;
 let quota: Quota | undefined;
 
 const depsFor = (env: Env): Deps => {
-  authenticate ??= d1Authenticate(env.DB, Date.now, authCache.ms, authCache.tokens);
+  // Each query in the request's D1 session (TEMPRA-85, d1session.ts), the binding outside one.
+  const db = routedDb(env.DB);
+  authenticate ??= d1Authenticate(db, Date.now, authCache.ms, authCache.tokens);
   quota ??= new Quota(
     quotaBackend(
-      env.DB,
+      db,
       // The account's AccountFeeds object by user id, apart from its feed leases (by handle).
       (userId) => {
         const ns = env.ACCOUNT_FEEDS as DurableObjectNamespace<AccountFeeds>;
         return ns.get(ns.idFromName(counterName(userId)));
       },
       env.DEV_SIGNIN === "1" ? devMailer : mailerFor(env),
-      d1Notifications(env.DB),
+      d1Notifications(db),
     ),
     { origin: env.APP_ORIGIN },
   );
@@ -156,11 +159,11 @@ const depsFor = (env: Env): Deps => {
   };
   return {
     authenticate,
-    accounts: invalidatingAccounts(d1Accounts(env.DB), authCache),
-    sessions: d1Sessions(env.DB, Date.now, authCache),
+    accounts: invalidatingAccounts(d1Accounts(db), authCache),
+    sessions: d1Sessions(db, Date.now, authCache),
     authCache,
     mailer: mailerFor(env),
-    notifications: d1Notifications(env.DB),
+    notifications: d1Notifications(db),
     managed: managedDeps(env),
     async rateLimit(kind, key) {
       const limiter =
@@ -177,7 +180,7 @@ const depsFor = (env: Env): Deps => {
     renderDiagram: serviceRenderer((env as unknown as { RENDER?: RenderService }).RENDER, meter),
     posterFrame: servicePoster((env as unknown as { RENDER?: RenderService }).RENDER, meter),
     // Each blob put is recorded in D1 first, so the sweep never lists the bucket (TEMPRA-81).
-    blobs: recordingBlobStore(r2BlobStore(env.BLOBS), d1BlobRefs(env.DB)),
+    blobs: recordingBlobStore(r2BlobStore(env.BLOBS), d1BlobRefs(db)),
     // Scaled copies under variants/ in the same bucket (TEMPRA-153); reads only, so no recording.
     images: imagesService({
       blobs: r2BlobStore(env.BLOBS),
@@ -191,7 +194,7 @@ const depsFor = (env: Env): Deps => {
         .destroy()
         .catch(() => {});
       // Its references go; blobs it was the last to reference start their 31 days (TEMPRA-91).
-      await d1BlobRefs(env.DB).forget(doId, new Date());
+      await d1BlobRefs(db).forget(doId, new Date());
       for (const prefix of [exportsPrefix(doId), restoresPrefix(doId)]) {
         let cursor: string | undefined;
         do {
@@ -237,7 +240,7 @@ const depsFor = (env: Env): Deps => {
         // A restore can drop references (TEMPRA-91): deletion is held from before it is armed
         // until a recount after the restart, carrying this token, has replaced the library's rows.
         const token = crypto.randomUUID();
-        await d1BlobRefs(env.DB).pend(doId, token);
+        await d1BlobRefs(db).pend(doId, token);
         const outcome = await stub.prepareRestore(t, actor);
         if (outcome.ok) {
           // abort() fails the call by design; the next request starts the restored library.
@@ -292,7 +295,8 @@ const depsFor = (env: Env): Deps => {
     },
     // Checked against D1 first, so a forged download URL cannot create Durable Objects.
     libraryByDoId: async (doId) => {
-      const row = await env.DB.prepare("SELECT 1 AS ok FROM libraries WHERE do_id = ?")
+      const row = await db
+        .prepare("SELECT 1 AS ok FROM libraries WHERE do_id = ?")
         .bind(doId)
         .first();
       return row ? client(doId) : null;
@@ -306,7 +310,9 @@ const worker = createWorker(depsFor);
 const NOTIFY_CRON = "*/5 * * * *";
 
 export default {
-  fetch: worker.fetch,
+  /** Each request in one D1 session, its bookmark carried to the browser (TEMPRA-85). */
+  fetch: (request, env, ctx) =>
+    withD1Session(env.DB, request, async () => worker.fetch(request, env, ctx)),
 
   /**
    * The crons in cloudflare.config.ts: every 5 minutes the batched notification mail (TEMPRA-74);

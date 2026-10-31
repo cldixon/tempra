@@ -25,6 +25,7 @@ import {
   makeClient,
   recordingBlobStore,
 } from "../src/client";
+import { routedDb, withD1Session } from "../src/d1session";
 import { callerOf, Presence, type PresenceMessage, readingOf } from "../src/feed";
 import { d1Notifications } from "../src/notify";
 import { sha256Hex } from "../src/okf/hash";
@@ -293,14 +294,16 @@ export function setup(
     return c;
   };
   clientFor(LIB.do_id);
-  const { d1, db } = bunD1();
+  const { d1: base, db, sessions: d1Starts } = bunD1();
   /** Every D1 statement prepared, in order, so a test can count a request's round trips. */
   const queries: string[] = [];
-  const prepare = d1.prepare.bind(d1);
-  d1.prepare = (sql: string) => {
+  const prepare = base.prepare.bind(base);
+  base.prepare = (sql: string) => {
     queries.push(sql);
     return prepare(sql);
-  };
+  }; /** As deployed: each query in the request's D1 session (TEMPRA-85, d1session.ts). */
+  const d1 = routedDb(base);
+
   const now = new Date().toISOString();
   db.run("INSERT INTO users (id, email, actor, handle, created) VALUES (?, ?, ?, ?, ?)", [
     OWNER.id,
@@ -523,11 +526,17 @@ export function setup(
         const ours = `${SESSION_COOKIE}=${session}`;
         request.headers.set("Cookie", cookie ? `${cookie}; ${ours}` : ours);
       }
-      return worker.fetch(
-        request as Request<unknown, IncomingRequestCfProperties>,
-        env,
-        ctx,
-      ) as Promise<Response>;
+      // One D1 session per request, its bookmark carried back, as the Worker's fetch does.
+      return withD1Session(
+        base,
+        request,
+        async () =>
+          worker.fetch(
+            request as Request<unknown, IncomingRequestCfProperties>,
+            env,
+            ctx,
+          ) as Promise<Response>,
+      );
     },
   });
   /** Requests as the demo library's owner. */
@@ -602,6 +611,8 @@ export function setup(
     counters,
     /** The account layer's D1 (bun:sqlite behind D1's API). */
     d1,
+    /** Where each request's D1 session started, in order (TEMPRA-85). */
+    d1Starts,
     stranger,
     sessionFor,
     /** Presence the libraries' objects would have sent, in order (TEMPRA-219). */

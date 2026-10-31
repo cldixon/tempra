@@ -6,7 +6,7 @@ import { join } from "node:path";
  * Enough of D1 over bun:sqlite for the account layer, with the real migrations applied, so tests
  * run the same SQL production does.
  */
-export function bunD1(): { d1: D1Database; db: Database } {
+export function bunD1(): { d1: D1Database; db: Database; sessions: string[] } {
   const db = new Database(":memory:");
   db.run("PRAGMA foreign_keys = ON");
   const dir = join(import.meta.dir, "../migrations");
@@ -62,6 +62,34 @@ export function bunD1(): { d1: D1Database; db: Database } {
       db.run(sql);
       return { count: 1, duration: 0 };
     },
+    /**
+     * D1's Sessions API without replicas (TEMPRA-85): one database, so every session reads the
+     * latest; the bookmark counts the changes made so far, shaped and ordered as D1's are.
+     * Queries go through `d1.prepare` at call time, so a test that wraps it still sees them.
+     */
+    withSession(start = "first-unconstrained") {
+      sessions.push(start);
+      let used = false;
+      return {
+        prepare(sql: string) {
+          used = true;
+          return d1.prepare(sql);
+        },
+        batch(stmts: ReturnType<typeof statement>[]) {
+          used = true;
+          return d1.batch(stmts);
+        },
+        getBookmark: () => (used ? bunBookmark(db) : null),
+      };
+    },
   };
-  return { d1: d1 as unknown as D1Database, db };
+  /** Where each request's session started, in order. */
+  const sessions: string[] = [];
+  return { d1: d1 as unknown as D1Database, db, sessions };
+}
+
+/** A D1-shaped bookmark for the database's state: its total changes, so later sorts after. */
+export function bunBookmark(db: Database): string {
+  const n = (db.query("SELECT total_changes() AS n").get() as { n: number }).n;
+  return `${n.toString(16).padStart(8, "0")}-00000000-00000000-${"0".repeat(32)}`;
 }
