@@ -380,7 +380,14 @@ export function setup(
       },
       notifications,
     ),
-    { origin: ORIGIN, now: () => clock.now(), flushMs: 0, refreshMs: 0 },
+    // With the auth cache, an isolate as deployed: the account's limits and storage kept a
+    // minute (REFRESH_MS), so a warm isolate asks D1 nothing for the quotas either.
+    {
+      origin: ORIGIN,
+      now: () => clock.now(),
+      flushMs: 0,
+      ...(opts.authCache ? {} : { refreshMs: 0 }),
+    },
   );
   const deps: Deps = {
     fetch: async (url, init) => {
