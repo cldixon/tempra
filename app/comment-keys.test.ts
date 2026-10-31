@@ -120,6 +120,16 @@ describe("a comment box", () => {
     b.destroy();
   });
 
+  test("a name typed out in full at the end is chosen already: Enter sends (TEMPRA-224)", () => {
+    const b = box();
+    b.type("What is margin? @anton");
+    expect(b.area.parentElement?.querySelector("[role=listbox]")).not.toBeNull();
+    const e = b.press({ key: "Enter" });
+    expect(e.defaultPrevented).toBe(true);
+    expect(b.sent).toEqual(["What is margin? @anton"]);
+    b.destroy();
+  });
+
   test("Escape still reaches the form (it drops a draft)", () => {
     const b = box();
     b.type("Draft");

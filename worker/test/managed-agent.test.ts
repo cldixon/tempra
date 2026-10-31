@@ -7,7 +7,12 @@ import type {
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { parseMarkdown, reconcile } from "@tempra/editor/doc";
-import { AGENT_ACTOR, type AgentJob, type ReplyingMessage } from "../src/managed/agent";
+import {
+  AGENT_ACTOR,
+  type AgentJob,
+  type ReadingMessage,
+  type ReplyingMessage,
+} from "../src/managed/agent";
 import { type AgentBudget, costMicros, d1AgentBudget, usageDay } from "../src/managed/budget";
 import { handleAgentMessage } from "../src/managed/consumer";
 import { fakeModel } from "../src/managed/fake";
@@ -15,6 +20,7 @@ import { agentTools } from "../src/managed/local-mcp";
 import {
   blocksTouched,
   changedBlocks,
+  citedPaths,
   type ModelClient,
   runTurn,
   SAY,
@@ -66,7 +72,7 @@ function enable(s: S, usd = 5) {
 /** The agent's queue and feed as the Worker would wire them, captured. */
 function wire(s: S) {
   const jobs: AgentJob[] = [];
-  const announced: { doId: string; message: ReplyingMessage }[] = [];
+  const announced: { doId: string; message: ReplyingMessage | ReadingMessage }[] = [];
   s.deps.managed = {
     enqueue: async (job) => {
       jobs.push(job);
@@ -326,7 +332,15 @@ describe("a turn", () => {
       ),
     ).toBe(true);
     // At the comment, at the turn's start, before its second call; not after its reply landed.
-    expect(announced.filter((a) => a.message.thread === id)).toHaveLength(3);
+    expect(
+      announced.filter((a) => a.message.kind === "replying" && a.message.thread === id),
+    ).toHaveLength(3);
+    // The thread's page, which it is given rather than reads, and the page its reply cites, are
+    // its reads too (TEMPRA-224): announced as such, so the tree shimmers them.
+    const read = announced.filter((a) => a.message.kind === "reading");
+    expect(read.length).toBeGreaterThanOrEqual(2);
+    expect(read.every((a) => a.message.actor === AGENT_ACTOR)).toBe(true);
+    expect(read.at(-1)?.message.paths).toEqual(["metrics/margin.md"]);
     // It is the asker's agent on its own platform.
     const agents = (await (await s.app.request(`${API}/agents`)).json()) as {
       agents: { name: string }[];
@@ -819,5 +833,19 @@ describe("requests and library threads", () => {
     const other = await s.stranger();
     expect((await other.app.request(`${API}/comments?path=`)).status).toBe(404);
     expect((await post(s, "/comments", { body: "x" }, other.app)).status).toBe(404);
+  });
+});
+
+describe("the pages a reply cites (TEMPRA-224)", () => {
+  test("the library's page URLs, by path, once each; nothing else", () => {
+    const lib = "https://app.tempra.dev/ann/notes";
+    expect(
+      citedPaths(
+        `See ${lib}/metrics/margin.md and (${lib}/a%20b.md). Again ${lib}/metrics/margin.md?since=4, ` +
+          `not ${lib}/-/activity, https://app.tempra.dev/ann/other/x.md or https://example.com/y.md.`,
+        lib,
+      ),
+    ).toEqual(["metrics/margin.md", "a b.md"]);
+    expect(citedPaths("No links here.", lib)).toEqual([]);
   });
 });

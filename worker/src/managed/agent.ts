@@ -74,7 +74,24 @@ export interface ManagedDeps {
    * Says on the library's feed that the agent is replying on a thread (feed.ts presence, kind
    * `replying`); the Library DO's `announce`.
    */
-  announce?(doId: string, message: ReplyingMessage): Promise<void>;
+  announce?(doId: string, message: ReplyingMessage | ReadingMessage): Promise<void>;
+}
+
+/**
+ * The agent "reading" pages it works from without a `read` call (TEMPRA-224): the thread's page,
+ * given it with the question, and the pages its reply cites. The tree shimmers them as it does any
+ * agent's reads (feed.ts presence, kind reading).
+ */
+export interface ReadingMessage {
+  type: "presence";
+  kind: "reading";
+  actor: string;
+  by: ActedBy | null;
+  paths: string[];
+}
+
+export function reading(paths: string[], by: ActedBy | null): ReadingMessage {
+  return { type: "presence", kind: "reading", actor: AGENT_ACTOR, by, paths };
 }
 
 /** The presence message for "Tempra is replying…" (feed.ts PresenceMessage, kind replying). */

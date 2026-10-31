@@ -61,7 +61,10 @@
         active = (active + step + options.length) % options.length;
         return;
       }
-      if (e.key === "Enter" || e.key === "Tab") {
+      // A name typed out in full ("…? @tempra") is already chosen: Enter sends rather than taking
+      // it again (TEMPRA-224); Tab still completes it.
+      const typed = !!at && at.query.toLowerCase() === options[active]?.toLowerCase();
+      if (e.key === "Tab" || (e.key === "Enter" && !(typed && onSend))) {
         e.preventDefault();
         take(options[active] ?? "");
         return;
