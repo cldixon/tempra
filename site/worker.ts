@@ -14,6 +14,8 @@ const HEADERS: Record<string, string> = {
   "Referrer-Policy": "strict-origin-when-cross-origin",
 };
 
+const SVG_CSP = "default-src 'none'; style-src 'unsafe-inline'";
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -24,6 +26,11 @@ export default {
     const asset = await env.ASSETS.fetch(request);
     const response = new Response(asset.body, asset);
     for (const [name, value] of Object.entries(HEADERS)) response.headers.set(name, value);
+    // The favicon (an SVG from the design package) themes itself with an inline <style>; an SVG
+    // is drawn under its own response's CSP, so it gets one that allows that and nothing else.
+    if (response.headers.get("Content-Type")?.startsWith("image/svg+xml")) {
+      response.headers.set("Content-Security-Policy", SVG_CSP);
+    }
     return response;
   },
 };

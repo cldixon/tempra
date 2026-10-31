@@ -1,10 +1,12 @@
 ---
 /**
- * Every page: the wordmark and the way into the app, the page as one sheet, and the footer. The
- * look is the app's (take 3, TEMPRA-110), all of it from the shared design package's public pages
- * (`public.css`); the site adds no styles of its own.
+ * Every page: a skip link, the wordmark and the way into the app over a hairline, the page as a
+ * plain column, and the footer's links. Flat like the app (TEMPRA-126), all of it from the shared
+ * design package's public pages (`public.css`); the site adds no styles of its own.
  */
 import "@tempra/design/tempra.css";
+import favicon from "@tempra/design/favicon.svg?url";
+import { APP, SITE_NAME } from "../site";
 
 interface Props {
   title: string;
@@ -14,7 +16,8 @@ interface Props {
 }
 
 const { title, description, noindex = false } = Astro.props;
-const APP = "https://app.tempra.dev";
+// The page's one URL, with no trailing slash and no .html (pages build to terms.html; W-9).
+const url = new URL(Astro.url.pathname.replace(/(index)?\.html$/, ""), Astro.site);
 ---
 
 <!doctype html>
@@ -24,9 +27,21 @@ const APP = "https://app.tempra.dev";
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>{title}</title>
     <meta name="description" content={description} />
-    {noindex ? <meta name="robots" content="noindex" /> : <link rel="canonical" href={new URL(Astro.url.pathname, Astro.site)} />}
+    <link rel="icon" href={favicon} type="image/svg+xml" />
+    {noindex ? <meta name="robots" content="noindex" /> : <link rel="canonical" href={url} />}
+    <link rel="sitemap" href="/sitemap.xml" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content={SITE_NAME} />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={url} />
+    <meta property="og:locale" content="en" />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
   </head>
-  <body class="ground public">
+  <body class="public">
+    <a class="skip-link" href="#main">Skip to content</a>
     <header class="public-head">
       <a class="wordmark" href="/"><span class="wordmark-tile" aria-hidden="true">T</span>Tempra</a>
       <nav class="public-nav" aria-label="Main">
@@ -34,13 +49,18 @@ const APP = "https://app.tempra.dev";
         <a class="button primary" href={`${APP}/request-access`}>Request access</a>
       </nav>
     </header>
-    <main class="public-sheet">
+    <main id="main" class="public-main">
       <slot />
     </main>
     <footer class="public-foot">
-      <a href="/terms">Terms</a>
-      <a href="/privacy">Privacy</a>
-      <a href="https://github.com/cldixon/tempra">GitHub</a>
+      <nav aria-label="Footer">
+        <ul role="list">
+          <li><a href="/">Home</a></li>
+          <li><a href="/terms">Terms</a></li>
+          <li><a href="/privacy">Privacy</a></li>
+          <li><a href={`${APP}/sign-in`}>Sign in</a></li>
+        </ul>
+      </nav>
     </footer>
   </body>
 </html>
