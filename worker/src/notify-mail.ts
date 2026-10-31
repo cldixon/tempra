@@ -42,6 +42,8 @@ export function itemLink(
   i: Pick<Item, "kind" | "place" | "path"> & { thread?: string | null },
 ): string {
   if (i.kind === "invitation") return `${origin}/invitations`;
+  // The account's monthly quotas (TEMPRA-232): the Account page's usage.
+  if (i.kind === "quota") return `${origin}/account#usage`;
   // A library thread (TEMPRA-222) opens on the library's home.
   if (!i.path && i.thread) return `${origin}/${i.place}/#thread-${encodeURIComponent(i.thread)}`;
   if (!i.path) return `${origin}/${i.place}/`;

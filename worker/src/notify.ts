@@ -27,10 +27,12 @@ import { tokenAdmission } from "./usage";
  * wrote in the thread, a mention to the person mentioned; never to the person who acted in the
  * app themselves (their agents acting for them do notify them), and only to people who can reach
  * the library at that moment. Items are closed by what resolves them: a resolved thread, an
- * answered invitation; open items follow a moved page.
+ * answered invitation; open items follow a moved page. A fourth, `quota` (TEMPRA-232, the
+ * decision's addendum of 2026-10-31), is about the account, on no library: once at 80% and once
+ * at 100% of each monthly quota (quota.ts makes it, and mails it at once), done once opened.
  */
 
-export type ItemKind = "reply" | "mention" | "invitation";
+export type ItemKind = "reply" | "mention" | "invitation" | "quota";
 
 /** Kinds that are mailed at once (batched): the ones addressed to the person. */
 export const MAILED: ReadonlySet<ItemKind> = new Set(["reply", "mention"]);

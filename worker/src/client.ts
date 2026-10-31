@@ -208,7 +208,7 @@ export async function verifyBlobs(
  * Calls that can add to a library, refused once it is at its storage limit. Deletes and moves
  * always go through, so a full library can be cleared.
  */
-function grows(method: LibraryMethod, args: unknown[]): boolean {
+export function grows(method: LibraryMethod, args: unknown[]): boolean {
   if (method === "import" || method === "revert" || method === "comment") return true;
   if (method !== "apply") return false;
   const ops = (args[1] ?? []) as { op?: string }[];

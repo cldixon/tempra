@@ -25,7 +25,9 @@ export function useOpenCount() {
  */
 export function useAgentLabels(items: () => InboxItem[] | null) {
   const want = $derived(
-    [...new Set((items() ?? []).filter((i) => i.agent).map((i) => i.library))].sort(),
+    [
+      ...new Set((items() ?? []).filter((i) => i.agent && i.library !== "").map((i) => i.library)),
+    ].sort(),
   );
   const loaded = useLoad(
     () => `inbox agents ${want.join(" ")}`,

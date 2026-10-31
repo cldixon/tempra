@@ -15,7 +15,10 @@
  *   bun run admin users [--remote]
  *       Lists accounts with their handles and libraries.
  *   bun run admin limits --email <email> [--set libraries=10,tokens=100,agent_daily_usd=5] [--reset] [--remote]
- *       Shows an account's limits, or overrides them (v2 spec: Limits; defaults in limits.ts).
+ *       Shows an account's limits, or overrides them (v2 spec: Limits; defaults in limits.ts), and
+ *       this month against the monthly quotas (TEMPRA-232; writes_monthly, requests_monthly and
+ *       storage_mb set the same way): storage from D1, and with --remote the month's metered
+ *       writes and requests from Analytics Engine (CLOUDFLARE_API_TOKEN and _ACCOUNT_ID).
  *   bun run admin invite --email <email> [--remote]      Lets an email sign up when SIGNUP=invite.
  *   bun run admin uninvite --email <email> [--remote]    Withdraws an invite (accounts stay).
  *   bun run admin waitlist [--remote]                    Invites and the waitlist, newest first.
@@ -24,9 +27,11 @@
  *       account, or reclaiming one that impersonates. The old handle is held for the account.
  */
 import { parseArgs } from "node:util";
+import { deploymentFor } from "../cloudflare.config";
 import { checkHandle, HANDLE_HOLD_DAYS } from "../src/handles";
 import { DEFAULT_LIMITS, type Limits, limitsFrom } from "../src/limits";
-import { type CfOptions, d1Sql } from "./cf";
+import { monthOf, monthResets } from "../src/quota";
+import { type CfOptions, d1Sql, MODE } from "./cf";
 
 const { values, positionals } = parseArgs({
   allowPositionals: true,
@@ -130,7 +135,10 @@ switch (positionals[0]) {
     if (!values.email)
       fail("Usage: limits --email <email> [--set libraries=10,tokens=100] [--reset]");
     const user = await one(
-      `SELECT id, limits FROM users WHERE email = ${q(values.email.toLowerCase())}`,
+      `SELECT id, limits, handle,
+              (SELECT COALESCE(SUM(storage_bytes), 0) FROM libraries WHERE owner = users.id),
+              (SELECT COUNT(*) FROM libraries WHERE owner = users.id)
+         FROM users WHERE email = ${q(values.email.toLowerCase())}`,
     );
     if (!user) fail(`No account for ${values.email}.`);
     let overrides = JSON.parse(String(user[1] ?? "{}")) as Partial<Limits>;
@@ -144,7 +152,9 @@ switch (positionals[0]) {
       const json = Object.keys(overrides).length ? q(JSON.stringify(overrides)) : "NULL";
       await d1Sql(`UPDATE users SET limits = ${json} WHERE id = ${q(String(user[0]))}`, where);
     }
-    console.log(JSON.stringify(limitsFrom(JSON.stringify(overrides))));
+    const limits = limitsFrom(JSON.stringify(overrides));
+    console.log(JSON.stringify(limits));
+    await printMonth(String(user[2]), Number(user[3] ?? 0), Number(user[4] ?? 0), limits);
     break;
   }
   case "invite":
@@ -227,4 +237,61 @@ switch (positionals[0]) {
     fail(
       "Commands: transfer, share, unshare, suspend, users, limits, invite, uninvite, waitlist, rename (see scripts/admin.ts).",
     );
+}
+
+/**
+ * This month against the monthly quotas (TEMPRA-232). Storage is the libraries' recorded bytes in
+ * D1. The quota's own counts live in the account's AccountFeeds object, which no script reaches,
+ * so writes and requests are read from Analytics Engine's metering (remote only): it counts the
+ * app's own requests and writes too, so it reads a little above what the quota counts.
+ */
+async function printMonth(
+  handle: string,
+  storageBytes: number,
+  libraries: number,
+  limits: Limits,
+): Promise<void> {
+  const month = monthOf(Date.now());
+  const resets = monthResets(month).toISOString().slice(0, 10);
+  const mb = (b: number) => (b / 1048576).toFixed(1);
+  console.log(`This month (${month}, resets ${resets} UTC):`);
+  console.log(
+    `  storage: ${mb(storageBytes)} MB of ${limits.storage_mb} MB, across ${libraries} libraries (as last recorded)`,
+  );
+  if (!values.remote) {
+    console.log(
+      "  writes and requests: no metering locally; the Account page shows the quota's count.",
+    );
+    return;
+  }
+  try {
+    const counts = await meteredThisMonth(handle, month);
+    console.log(
+      `  writes: ${counts.write ?? 0} of ${limits.writes_monthly}; requests: ${counts.request ?? 0} of ${limits.requests_monthly} (metered, the app's included)`,
+    );
+  } catch (e) {
+    console.log(`  writes and requests: Analytics Engine unavailable (${String(e)}).`);
+  }
+}
+
+/** The month's metered requests and writes for an account, from Analytics Engine's SQL API. */
+async function meteredThisMonth(handle: string, month: string): Promise<Record<string, number>> {
+  const account = process.env.CLOUDFLARE_ACCOUNT_ID;
+  const token = process.env.CLOUDFLARE_API_TOKEN;
+  if (!account || !token) throw new Error("CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN unset");
+  const dataset = deploymentFor(MODE).usage ?? "tempra_usage";
+  if (!/^[a-z_]+$/.test(dataset)) throw new Error(`odd dataset name ${dataset}`);
+  // usagePoint's layout (usage.ts): blob1 the kind, index1 the account. Only `request` and
+  // `write` points count; `cost` points (TEMPRA-228, the op in blob4) are left out.
+  const sql = `SELECT blob1 AS kind, SUM(_sample_interval) AS n FROM ${dataset}
+    WHERE index1 = ${q(handle.slice(0, 96))} AND blob1 IN ('request', 'write')
+      AND timestamp >= toDateTime(${q(`${month}-01 00:00:00`)})
+    GROUP BY kind FORMAT JSON`;
+  const res = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${account}/analytics_engine/sql`,
+    { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: sql },
+  );
+  if (!res.ok) throw new Error(`${res.status} ${(await res.text()).slice(0, 200)}`);
+  const body = (await res.json()) as { data?: { kind: string; n: number | string }[] };
+  return Object.fromEntries((body.data ?? []).map((r) => [r.kind, Number(r.n)]));
 }
