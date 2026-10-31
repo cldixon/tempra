@@ -1,6 +1,7 @@
 import type { Accounts, LibraryRef, MemberRole, Role, User } from "./accounts";
 import { agentId, type ClientSignals, connectionAgent } from "./agents";
 import type { TokenInfo } from "./auth";
+import { type AuthCache, libraryTag, userTag } from "./authcache";
 import { OkfError } from "./store/errors";
 
 /**
@@ -80,8 +81,9 @@ export function requireOwner(role: Role, what: string): void {
 /**
  * An app connection approved at /authorize: it belongs to the account, like a GitHub App
  * installation, and covers all of the account's libraries (including later ones) or a
- * selection of them by id. The libraries are resolved on every request, so new, deleted and
- * transferred libraries and a suspension take effect at once.
+ * selection of them by id. The libraries are resolved from D1, at most 30 s old (TEMPRA-84), so
+ * new, deleted and transferred libraries and a suspension take effect within 30 s (at once in
+ * the isolate that made the change through `Accounts`).
  */
 export interface AccountGrant {
   /** Random per grant: the rate-limit key. */
@@ -134,23 +136,43 @@ export function grantAgent(grant: AccountGrant, userId: string): string {
  * The libraries a connection reaches now, each as the token it acts with there; null when the
  * account is gone or suspended. "All libraries" means the account's own; a library shared with
  * it is reached only when the grant selects it, at the lower of the grant's scope and the
- * person's role now, so lowering or ending a membership applies on the next request
+ * person's role now, so lowering or ending a membership applies within 30 s (TEMPRA-84)
  * (tempra-dev: v2/sharing).
  */
 export async function grantLibraries(
   accounts: Accounts,
   grant: AccountGrant,
+  /**
+   * The isolate's auth cache (TEMPRA-84): the account and what it reaches, kept up to 30 s by
+   * the grant's own id and person, and dropped at once by a change made in this isolate.
+   */
+  cache?: AuthCache,
 ): Promise<{ user: User; libraries: TokenInfo[] } | null> {
-  const user = await accounts.account(grant.userId);
-  if (!user) return null;
-  // A selected connection also reaches what it created since consent (grant_libraries), read
-  // by its own grant id and person, so it can never pick up another connection's libraries.
-  const selected =
-    grant.libraries === "all"
-      ? null
-      : new Set([...grant.libraries, ...(await accounts.grantLibraries(grant.id, user.id))]);
+  const key = `${grant.id}\n${grant.userId}`;
+  let found = cache?.grants.get(key);
+  if (!found) {
+    const since = cache?.grants.drops;
+    const user = await accounts.account(grant.userId);
+    if (!user) return null;
+    // A selected connection also reaches what it created since consent (grant_libraries), read
+    // by its own grant id and person, so it can never pick up another connection's libraries.
+    const [created, reachable] = await Promise.all([
+      grant.libraries === "all" ? [] : accounts.grantLibraries(grant.id, user.id),
+      accounts.reachable(user.id),
+    ]);
+    found = { user, created, reachable };
+    cache?.grants.set(
+      key,
+      found,
+      cache.ms,
+      [userTag(user.id), ...reachable.map((l) => libraryTag(l.id))],
+      since,
+    );
+  }
+  const { user, created, reachable } = found;
+  const selected = grant.libraries === "all" ? null : new Set([...grant.libraries, ...created]);
   const agent = grantAgent(grant, user.id);
-  const libraries = (await accounts.reachable(user.id))
+  const libraries = reachable
     .filter((l) => (selected ? selected.has(l.id) : l.role === "owner"))
     .map(({ role, ...l }) => grantToken(grant, user, l, role, agent));
   return { user, libraries };

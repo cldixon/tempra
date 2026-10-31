@@ -163,6 +163,11 @@ export interface Accounts {
   decideWaitlist(email: string, decision: "invited" | "dismissed"): Promise<boolean>;
   /** The account by its users row id; null when there is none or it is suspended. */
   account(userId: string): Promise<User | null>;
+  /**
+   * The handles and names of these accounts in one query (TEMPRA-84, TEMPRA-54), by users row
+   * id; an id with no account, or a suspended one, is left out, as `account` would answer null.
+   */
+  people(userIds: string[]): Promise<Map<string, { handle: string; name: string | null }>>;
   /** The libraries the user owns, by name. */
   libraries(userId: string): Promise<LibraryRef[]>;
   /**
@@ -534,6 +539,24 @@ export function d1Accounts(db: D1Database): Accounts {
         )
         .bind(userId)
         .first<User>();
+    },
+    async people(userIds) {
+      const unique = [...new Set(userIds)];
+      const people = new Map<string, { handle: string; name: string | null }>();
+      // D1 binds at most 100 parameters a statement: one query per 100 people.
+      for (let i = 0; i < unique.length; i += 100) {
+        const ids = unique.slice(i, i + 100);
+        const r = await db
+          .prepare(
+            `SELECT id, handle, name FROM users
+             WHERE id IN (${ids.map(() => "?").join(", ")}) AND suspended IS NULL`,
+          )
+          .bind(...ids)
+          .all<{ id: string; handle: string; name: string | null }>();
+        for (const row of r.results)
+          people.set(row.id, { handle: row.handle, name: row.name ?? null });
+      }
+      return people;
     },
     async libraries(userId) {
       const r = await db
