@@ -2,6 +2,7 @@ import type { AccountFeeds } from "./account-feeds";
 import { d1Accounts } from "./accounts";
 import type { Deps } from "./app";
 import { d1Authenticate } from "./auth";
+import { AuthCache, invalidatingAccounts } from "./authcache";
 import { d1BlobRefs } from "./blobrefs";
 import { makeClient, r2BlobStore, recordingBlobStore } from "./client";
 import { agentSpendThisMonth } from "./costs";
@@ -111,12 +112,17 @@ function agentModel(env: Env): ModelClient | null {
 const storageLimitBytes = (env: Env) =>
   (Number(env.LIBRARY_STORAGE_MB) || DEFAULT_STORAGE_MB) * 1048576;
 
+/**
+ * What authorization read from D1 in this isolate, up to 30 s old (authcache.ts, TEMPRA-84):
+ * tokens, sessions and app connections, dropped by the changes this isolate makes.
+ */
+const authCache = new AuthCache();
 let authenticate: ReturnType<typeof d1Authenticate> | undefined;
 /** The monthly quotas' tally (TEMPRA-232): one per isolate, so it outlives a request. */
 let quota: Quota | undefined;
 
 const depsFor = (env: Env): Deps => {
-  authenticate ??= d1Authenticate(env.DB);
+  authenticate ??= d1Authenticate(env.DB, Date.now, authCache.ms, authCache.tokens);
   quota ??= new Quota(
     quotaBackend(
       env.DB,
@@ -150,8 +156,9 @@ const depsFor = (env: Env): Deps => {
   };
   return {
     authenticate,
-    accounts: d1Accounts(env.DB),
-    sessions: d1Sessions(env.DB),
+    accounts: invalidatingAccounts(d1Accounts(env.DB), authCache),
+    sessions: d1Sessions(env.DB, Date.now, authCache),
+    authCache,
     mailer: mailerFor(env),
     notifications: d1Notifications(env.DB),
     managed: managedDeps(env),
@@ -279,6 +286,8 @@ const depsFor = (env: Env): Deps => {
       const url = new URL("https://library/feed");
       if (prefix) url.searchParams.set("prefix", prefix);
       url.searchParams.set("lease", lease);
+      // Whose lease it is, so the library releases it when the socket closes.
+      url.searchParams.set("account", account);
       return libraryStub(env, doId).fetch(new Request(url, request));
     },
     // Checked against D1 first, so a forged download URL cannot create Durable Objects.

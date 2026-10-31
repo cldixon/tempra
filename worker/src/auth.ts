@@ -1,6 +1,14 @@
 import { bytesToHex, randomBytes } from "@noble/hashes/utils.js";
 import type { Role } from "./accounts";
 import { agentId, tokenAgent } from "./agents";
+import {
+  AUTH_CACHE_MAX,
+  AUTH_CACHE_MS,
+  libraryTag,
+  TtlCache,
+  tokenTag,
+  userTag,
+} from "./authcache";
 import { sha256Hex } from "./okf/hash";
 import { OkfError } from "./store/errors";
 
@@ -57,19 +65,22 @@ interface TokenRow {
   suspended: string | null;
 }
 
-const CACHE_MS = 30_000;
-
-/** Looks tokens up in D1 by hash, with a short per-isolate cache so revocation lands within 30s. */
+/**
+ * Looks tokens up in D1 by hash, with a short per-isolate cache (authcache.ts, TEMPRA-84) so
+ * revocation lands within 30 s, and at once in the isolate that revokes it or ends its creator's
+ * membership. `cacheMs` 0 keeps nothing.
+ */
 export function d1Authenticate(
   db: D1Database,
   now = () => Date.now(),
-  cacheMs = CACHE_MS,
+  cacheMs = AUTH_CACHE_MS,
+  cache: TtlCache<unknown> = new TtlCache(AUTH_CACHE_MAX, now),
 ): Authenticate {
-  const cache = new Map<string, { row: TokenRow | null; at: number }>();
   return async (secret) => {
     const hash = hashToken(secret);
-    let hit = cache.get(hash);
-    if (!hit || now() - hit.at >= cacheMs) {
+    let hit = cache.get(hash) as { row: TokenRow | null } | undefined;
+    if (!hit) {
+      const since = cache.drops;
       const row = await db
         .prepare(
           `SELECT t.id, t.actor, t.scope, t.prefix, t.mcp_tiers, t.expires, t.revoked, t.created_by,
@@ -83,9 +94,16 @@ export function d1Authenticate(
         )
         .bind(hash)
         .first<TokenRow>();
-      hit = { row, at: now() };
-      if (cache.size > 1000) cache.clear();
-      cache.set(hash, hit);
+      hit = { row };
+      const tags = row
+        ? [
+            tokenTag(row.id),
+            libraryTag(row.library_id),
+            ...(row.owner_id ? [userTag(row.owner_id)] : []),
+            ...(row.created_by ? [userTag(row.created_by)] : []),
+          ]
+        : [];
+      cache.set(hash, hit, cacheMs, tags, since);
     }
     const row = hit.row;
     if (!row) throw new OkfError(401, "bad_token", "Unknown bearer token.");

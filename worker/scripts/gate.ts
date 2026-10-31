@@ -5576,8 +5576,8 @@ async function freshAccountConnects(): Promise<string[]> {
 
 /**
  * The per-account cap on open feed sockets (TEMPRA-80), end to end: one account's token opens
- * sockets until one is refused, which must be with FEED_FULL, at the cap at most (the leases the
- * gate's own browser and agents took in the last minute still count).
+ * sockets until one is refused, which must be with FEED_FULL, at the cap at most (sockets the
+ * gate's own browsers and agents still hold count, and a close's release may still be on its way).
  */
 async function feedCap(owner: string, slug: string, token: string): Promise<string[]> {
   const url = `${base.replace(/^http/, "ws")}/api/v1/libraries/${owner}/${slug}/feed`;
@@ -5601,8 +5601,8 @@ async function feedCap(owner: string, slug: string, token: string): Promise<stri
         continue;
       }
       if (outcome !== FEED_FULL) problems.push(`socket ${i + 1} closed with ${outcome}`);
-      // The scripted agents' sockets of the last minute still hold places, so only the upper
-      // bound is exact here; feed-leases.test.ts checks the count itself.
+      // Other sockets of the account may still hold places, so only the upper bound is exact
+      // here; feed-leases.test.ts checks the count itself.
       if (open.length > FEED_SOCKETS_PER_ACCOUNT || open.length === 0) {
         problems.push(
           `refused after ${open.length} sockets; the cap is ${FEED_SOCKETS_PER_ACCOUNT}`,

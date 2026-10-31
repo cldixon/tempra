@@ -1,4 +1,5 @@
 import { DurableObject } from "cloudflare:workers";
+import type { AccountFeeds } from "./account-feeds";
 import { d1BlobRefs } from "./blobrefs";
 import { type CallResult, callStore, type LibraryMethod, r2BlobStore } from "./client";
 import {
@@ -241,6 +242,7 @@ export class Library extends DurableObject<Env> {
       prefix: feedPrefix(params.get("prefix")),
       opened: Date.now(),
       lease: params.get("lease"),
+      account: params.get("account"),
     });
     const hello: FeedMessage = { type: "hello", head: this.store.headSeq() };
     server.send(JSON.stringify(hello));
@@ -299,6 +301,28 @@ export class Library extends DurableObject<Env> {
     } catch {
       // Already closed.
     }
+    this.releaseLease(ws);
+  }
+
+  override async webSocketError(ws: WebSocket): Promise<void> {
+    this.releaseLease(ws);
+  }
+
+  /**
+   * Gives a closed socket's place under its account's cap back at once (feed-leases.ts), so a
+   * page reloaded again and again never counts its old sockets. Off the close's path; a release
+   * that fails is caught up by the account's check at the cap.
+   */
+  private releaseLease(ws: WebSocket) {
+    const a = ws.deserializeAttachment() as { lease?: string | null; account?: string | null };
+    if (!a?.lease || !a.account) return;
+    const ns = this.env.ACCOUNT_FEEDS as DurableObjectNamespace<AccountFeeds>;
+    this.ctx.waitUntil(
+      ns
+        .get(ns.idFromName(a.account))
+        .release(a.lease)
+        .catch(() => {}),
+    );
   }
 
   /** For the daily digest: storage, maintenance stats and health. */

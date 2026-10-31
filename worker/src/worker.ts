@@ -79,7 +79,7 @@ export function createWorker(deps: (env: Cloudflare.Env) => Deps): {
           let agent: { userId: string; key: AgentKey } | null = null;
           if (props.grant) {
             const g = props.grant;
-            const reach = await grantLibraries(d.accounts, g);
+            const reach = await grantLibraries(d.accounts, g, d.authCache);
             // The account is gone (deleted, or a data reset) or suspended: the token is dead.
             // Say so as OAuth does, so the client signs in again instead of showing no tools.
             if (!reach) return invalidToken(origin, "This account is suspended or deleted.");

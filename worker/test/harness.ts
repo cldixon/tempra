@@ -15,6 +15,7 @@ Object.assign(globalThis, {
 import { d1Accounts, type LibraryRef } from "../src/accounts";
 import type { Deps } from "../src/app";
 import { d1Authenticate, type TokenInfo } from "../src/auth";
+import { AuthCache, invalidatingAccounts } from "../src/authcache";
 import { d1BlobRefs } from "../src/blobrefs";
 import {
   type BlobStore,
@@ -241,7 +242,11 @@ export const TOKENS: Record<string, TokenInfo> = {
 
 export const ORIGIN = "http://localhost";
 
-export function setup() {
+export function setup(
+  opts: {
+    /** The auth cache a deployment has (TEMPRA-84); off, every request asks D1. */ authCache?: boolean;
+  } = {},
+) {
   const blobs = memoryBlobs();
   /** Storage per library; tests lower it to see the limit. */
   const limits = { storageBytes: undefined as number | undefined };
@@ -308,8 +313,9 @@ export function setup() {
     "INSERT INTO libraries (id, slug, owner, visibility, created, do_id) VALUES (?, ?, ?, 'private', ?, ?)",
     [LIB.id, LIB.slug, OWNER.id, now, LIB.do_id],
   );
-  const accounts = d1Accounts(d1);
-  const sessions = d1Sessions(d1);
+  const authCache = opts.authCache ? new AuthCache() : undefined;
+  const accounts = authCache ? invalidatingAccounts(d1Accounts(d1), authCache) : d1Accounts(d1);
+  const sessions = d1Sessions(d1, Date.now, authCache);
   const notifications = d1Notifications(d1);
   const outbox: {
     to: string;
@@ -321,7 +327,9 @@ export function setup() {
   /** Metered usage, as the Worker would write it to Analytics Engine. */
   const usage: UsageEvent[] = [];
   // No cache, so a revocation shows at once.
-  const d1Auth = d1Authenticate(d1, Date.now, 0);
+  const d1Auth = authCache
+    ? d1Authenticate(d1, Date.now, authCache.ms, authCache.tokens)
+    : d1Authenticate(d1, Date.now, 0);
   /** A session for a user, written straight to D1 (setup stays synchronous). */
   const sessionFor = (userId: string) => {
     const secret = `session-${userId}-${crypto.randomUUID()}`;
@@ -450,6 +458,7 @@ export function setup() {
       return d1Auth(secret);
     },
     accounts,
+    authCache,
     sessions,
     notifications,
     async destroyLibrary(doId) {
@@ -568,6 +577,7 @@ export function setup() {
     kv,
     env,
     accounts,
+    authCache,
     sessions,
     notifications,
     outbox,
