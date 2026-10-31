@@ -1,12 +1,12 @@
 /*
- * The app's frame (TEMPRA-19; take 2 in TEMPRA-53, take 3 in TEMPRA-106, take 4 in TEMPRA-113;
- * tempra-dev: app/workspace). A docs-site layout: a top bar across the window, split at the
- * sidebar's edge (the mark, the library switcher and search over the sidebar; the page's tools,
- * the bell and the avatar over the page; no crumbs), a navigation sidebar with a hairline on
- * its right, and the page as a flat column: no ground, no sheet. The sidebar can be hidden; under
- * 900px it is a drawer behind a top bar. A library's Settings is one of its pages; the account's
- * pages use the same frame with a sidebar of their own. A concept's own layout is in concept.css; the person's views
- * (home, Activity, a folder) in views.css.
+ * The app's frame (TEMPRA-19; take 4 in TEMPRA-113; tempra-dev: app/workspace). A docs-site
+ * layout: a top bar across the window, split at the sidebar's edge (the mark, the library's name,
+ * the switcher and search over the sidebar; the page's path, its tools, the bell and the avatar
+ * over the page), a navigation sidebar with a hairline on its right, and the page as a flat
+ * column. The sidebar can be hidden; under 900px it is a drawer behind a top bar. A library's
+ * Settings is one of its pages; the account's pages use the same frame with a sidebar of their
+ * own. A concept's own layout is in concept.css; the person's views (home, Activity, Settings,
+ * an attachment, Not found) in views.css.
  */
 body:has(> #root),
 body.ground {
@@ -24,30 +24,25 @@ body.ground {
 .menu-button {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 8px;
+  gap: var(--tempra-space-06);
+  padding: var(--tempra-space-04) var(--tempra-space-08);
   border: 0;
   background: transparent;
   color: var(--tempra-color-muted);
 }
 
-.menu-button .caret {
-  display: inline-flex;
-  color: var(--tempra-color-faint);
-}
-
 .menu-list {
   position: absolute;
-  top: calc(100% + 6px);
+  top: calc(100% + var(--tempra-space-06));
   z-index: 20;
   display: flex;
   flex-direction: column;
   gap: 1px;
-  min-width: 13rem;
-  max-height: 70vh;
+  min-width: var(--tempra-size-menu);
+  max-height: 70vh; /* a long menu scrolls within the window */
   overflow: auto;
   margin: 0;
-  padding: 6px;
+  padding: var(--tempra-space-06);
   border: 1px solid var(--tempra-color-border);
   border-radius: var(--tempra-radius-box);
   background: var(--tempra-color-bg);
@@ -67,14 +62,14 @@ body.ground {
 /* A menu at the foot of the sidebar opens upwards. */
 .menu-list.up {
   top: auto;
-  bottom: calc(100% + 6px);
+  bottom: calc(100% + var(--tempra-space-06));
 }
 
 .menu-list a,
 .menu-list button {
   display: block;
   width: 100%;
-  padding: 6px 10px;
+  padding: var(--tempra-space-06) var(--tempra-space-10);
   border: 0;
   border-radius: var(--tempra-radius-row);
   background: none;
@@ -91,24 +86,24 @@ body.ground {
 }
 
 .menu-list .menu-note {
-  padding: 6px 10px 2px;
+  padding: var(--tempra-space-06) var(--tempra-space-10) var(--tempra-space-02);
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-label);
-  letter-spacing: 0.04em;
+  letter-spacing: var(--tempra-tracking-label);
   text-transform: uppercase;
 }
 
 .menu-list hr {
   width: 100%;
-  margin: 4px 0;
+  margin: var(--tempra-space-04) 0;
 }
 
 .avatar {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 26px;
+  width: var(--tempra-size-avatar-menu);
+  height: var(--tempra-size-avatar-menu);
   padding: 0;
   border: 0;
   border-radius: 50%;
@@ -124,8 +119,8 @@ body.ground {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 30px;
-  height: 30px;
+  width: var(--tempra-size-control-small);
+  height: var(--tempra-size-control-small);
   padding: 0;
   border: 0;
   background: transparent;
@@ -146,12 +141,12 @@ body.ground {
   color: var(--tempra-color-text);
 }
 
-/* The change dot (the one colour): solid for changed since the person looked, pulsing (.live)
-   for an agent writing now. */
+/* The change dot (the one colour): pulsing (.live) for an agent writing now; solid beside an
+   empty library's last write. Nothing marks what changed since the person looked (TEMPRA-173). */
 .change-dot {
   display: inline-block;
-  width: var(--tempra-dot);
-  height: var(--tempra-dot);
+  width: var(--tempra-size-dot);
+  height: var(--tempra-size-dot);
   border-radius: 50%;
   background: var(--tempra-color-agent);
   vertical-align: middle;
@@ -162,8 +157,8 @@ body.ground {
   display: inline-grid;
   flex: none;
   place-items: center;
-  width: var(--tempra-avatar);
-  height: var(--tempra-avatar);
+  width: var(--tempra-size-avatar);
+  height: var(--tempra-size-avatar);
   border-radius: 50%;
   background: var(--tempra-color-selected);
   color: var(--tempra-color-text);
@@ -184,10 +179,10 @@ body.ground {
   color: var(--tempra-color-on-agent);
 }
 
-/* A dialog (a concept's properties, its agent notes, all its versions): a card in the top layer. */
+/* A dialog (a confirmation, a compose dialog, a new token's secret): a card in the top layer. */
 .dialog {
-  width: min(32rem, calc(100vw - 32px));
-  max-height: min(80dvh, 44rem);
+  width: min(var(--tempra-size-dialog), calc(100vw - var(--tempra-space-32)));
+  max-height: min(80dvh, 44rem); /* one-off: a tall dialog scrolls */
   padding: 0;
   border: 1px solid var(--tempra-color-border);
   border-radius: var(--tempra-radius-card);
@@ -197,7 +192,7 @@ body.ground {
 }
 
 .dialog.wide {
-  width: min(40rem, calc(100vw - 32px));
+  width: min(var(--tempra-size-dialog-wide), calc(100vw - var(--tempra-space-32)));
 }
 
 .dialog::backdrop {
@@ -210,8 +205,9 @@ body.ground {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
-  padding: 10px 10px 6px 18px;
+  gap: var(--tempra-space-08);
+  padding: var(--tempra-space-10) var(--tempra-space-10) var(--tempra-space-06)
+    var(--tempra-space-18);
   background: var(--tempra-color-bg);
 }
 
@@ -222,7 +218,7 @@ body.ground {
 }
 
 .dialog-body {
-  padding: 4px 18px 18px;
+  padding: var(--tempra-space-04) var(--tempra-space-18) var(--tempra-space-18);
   font-size: var(--tempra-text-ui);
 }
 
@@ -231,8 +227,8 @@ body.ground {
    body is the form's own fields without boxes (a large name, then a description); then a row of
    small fields as pills, and the action at the foot. */
 .dialog.compose {
-  width: min(40rem, calc(100vw - 32px));
-  margin: 12dvh auto auto;
+  width: min(var(--tempra-size-dialog-wide), calc(100vw - var(--tempra-space-32)));
+  margin: 12dvh auto auto; /* one-off: anchored high, as Linear's */
 }
 
 .compose-form {
@@ -243,8 +239,8 @@ body.ground {
 .compose-head {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 12px 12px 0 16px;
+  gap: var(--tempra-space-06);
+  padding: var(--tempra-space-12) var(--tempra-space-12) 0 var(--tempra-space-16);
   color: var(--tempra-color-faint);
 }
 
@@ -257,7 +253,7 @@ body.ground {
 }
 
 .compose-context {
-  padding: 3px 10px;
+  padding: 3px var(--tempra-space-10); /* one-off: a pill a little smaller than a button */
   border: 1px solid var(--tempra-color-border);
   border-radius: var(--tempra-radius-pill);
   color: var(--tempra-color-text);
@@ -268,8 +264,8 @@ body.ground {
 .compose-body {
   display: flex;
   flex-direction: column;
-  gap: var(--tempra-space-2);
-  padding: 20px 18px 8px;
+  gap: var(--tempra-space-08);
+  padding: var(--tempra-space-20) var(--tempra-space-18) var(--tempra-space-08);
 }
 
 .compose-body .compose-title,
@@ -292,9 +288,9 @@ body.ground {
 .compose-body .compose-text {
   min-height: 4lh;
   field-sizing: content;
-  max-height: 40dvh;
+  max-height: 40dvh; /* one-off: a long description scrolls */
   resize: none;
-  font-size: var(--tempra-font-size);
+  font-size: var(--tempra-text-base);
 }
 
 .compose-body ::placeholder {
@@ -311,8 +307,8 @@ body.ground {
 .compose-fields {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  padding: 8px 18px 12px;
+  gap: var(--tempra-space-08);
+  padding: var(--tempra-space-08) var(--tempra-space-18) var(--tempra-space-12);
 }
 
 /* A small field as a pill: its label, then the field without a box of its own. */
@@ -320,7 +316,7 @@ body.ground {
   display: inline-flex;
   align-items: center;
   max-width: 100%;
-  padding: 0 4px 0 12px;
+  padding: 0 var(--tempra-space-04) 0 var(--tempra-space-12);
   border: 1px solid var(--tempra-color-border);
   border-radius: var(--tempra-radius-pill);
   color: var(--tempra-color-muted);
@@ -329,14 +325,14 @@ body.ground {
 
 .compose-field:focus-within {
   outline: var(--tempra-focus-ring);
-  outline-offset: 1px;
+  outline-offset: var(--tempra-focus-offset-field);
 }
 
 .compose-field input:not([type="checkbox"], [type="radio"], [type="file"]),
 .compose-field select {
   width: 18ch;
   min-width: 0;
-  padding: 5px 8px 5px 1px;
+  padding: 5px var(--tempra-space-08) 5px 1px; /* a field's height (--tempra-space-field), flush with its label */
   border: 0;
   background: transparent;
   outline: none;
@@ -346,7 +342,7 @@ body.ground {
    library's address) runs straight into it. */
 .compose-field > span:not(.compose-prefix) + input,
 .compose-field > span:not(.compose-prefix) + select {
-  margin-left: 6px;
+  margin-left: var(--tempra-space-06);
 }
 
 .compose-field select {
@@ -366,60 +362,59 @@ body.ground {
 }
 
 .compose-form > .notice {
-  margin: 0 18px 12px;
+  margin: 0 var(--tempra-space-18) var(--tempra-space-12);
 }
 
 .compose-foot {
   display: flex;
   justify-content: flex-end;
-  gap: 8px;
-  padding: 12px 16px;
+  gap: var(--tempra-space-08);
+  padding: var(--tempra-space-12) var(--tempra-space-16);
   border-top: 1px solid var(--tempra-color-border);
 }
 
 @media (max-width: 900px) {
   .dialog.compose {
-    margin-top: 16px;
+    margin-top: var(--tempra-space-16);
   }
 }
 
 /* A confirmation: what happens, then the action and Cancel. */
 .confirm-body p {
-  margin: 0 0 var(--tempra-space-2);
+  margin: 0 0 var(--tempra-space-08);
 }
 
 /* ---------- A page's column: the account's pages, settings, the library's tools ---------- */
 
 /* One centred column; the frame's top bar and sidebar are around it. */
-.page-column,
-.page {
+.page-column {
   width: 100%;
-  max-width: var(--tempra-page-width);
+  max-width: var(--tempra-size-page);
   margin: 0 auto;
-  padding: 72px var(--tempra-page-pad) 96px;
+  padding: var(--tempra-space-72) var(--tempra-space-page) var(--tempra-space-96);
 }
 
 .page-column.wide {
-  max-width: 960px;
+  max-width: var(--tempra-size-page-wide);
 }
 
-/* The New pill: an outlined pill with a plus. */
+/* A pill with a glyph before its words (Back to page). */
 .pill-button,
 a.button.pill-button {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 6px 12px 6px 8px;
+  gap: var(--tempra-space-06);
+  padding: var(--tempra-space-06) var(--tempra-space-12) var(--tempra-space-06)
+    var(--tempra-space-08);
 }
 
 /* The library list (take 4, board 01): cards under Yours and Shared with you. Each card has a
-   quiet cover (the library's tile; an agent's latest change at the right), then its name, what
-   is for the person there, its description and one line of facts. */
+   quiet cover (the library's tile), then its name, its description and one line of facts. */
 .lib-cards {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 16px;
-  margin: 0 0 var(--tempra-space-4);
+  grid-template-columns: repeat(auto-fill, minmax(var(--tempra-size-card), 1fr));
+  gap: var(--tempra-space-16);
+  margin: 0 0 var(--tempra-space-32);
   padding: 0;
   list-style: none;
 }
@@ -447,29 +442,29 @@ a.button.pill-button {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 8px;
-  min-height: 112px;
-  padding: 16px;
+  gap: var(--tempra-space-08);
+  min-height: 112px; /* one-off: the card's cover */
+  padding: var(--tempra-space-16);
   background: var(--tempra-color-ground);
 }
 
 .lib-card-cover .lib-tile {
-  width: 28px;
-  height: 28px;
+  width: var(--tempra-size-tile-large);
+  height: var(--tempra-size-tile-large);
 }
 
 .lib-card-body {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 14px 16px 16px;
+  gap: var(--tempra-space-04);
+  padding: var(--tempra-space-14) var(--tempra-space-16) var(--tempra-space-16);
 }
 
 .lib-card-name {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 8px;
+  gap: var(--tempra-space-08);
   font-size: var(--tempra-text-name);
   font-weight: var(--tempra-weight-medium);
 }
@@ -481,14 +476,14 @@ a.button.pill-button {
 }
 
 .lib-card-meta {
-  margin: 4px 0 0;
+  margin: var(--tempra-space-04) 0 0;
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
 }
 
 /* A section of the list (Yours, Shared with you). */
 .lib-section-title {
-  margin: 0 0 12px;
+  margin: 0 0 var(--tempra-space-12);
   font-size: var(--tempra-text-reader);
   font-weight: var(--tempra-weight-strong);
 }
@@ -497,8 +492,8 @@ a.button.pill-button {
 
 .workspace {
   display: grid;
-  grid-template-columns: var(--tempra-sidebar) minmax(0, 1fr);
-  grid-template-rows: var(--tempra-topbar) minmax(0, 1fr);
+  grid-template-columns: var(--tempra-size-sidebar) minmax(0, 1fr);
+  grid-template-rows: var(--tempra-size-topbar) minmax(0, 1fr);
   grid-template-areas:
     "topbar topbar"
     "sidebar main";
@@ -516,7 +511,7 @@ a.button.pill-button {
 .ws-topbar {
   grid-area: topbar;
   display: grid;
-  grid-template-columns: var(--tempra-sidebar) minmax(0, 1fr);
+  grid-template-columns: var(--tempra-size-sidebar) minmax(0, 1fr);
   min-width: 0;
   border-bottom: 1px solid var(--tempra-color-border);
   background: var(--tempra-color-bg);
@@ -537,15 +532,15 @@ a.button.pill-button {
 .topbar-brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--tempra-space-08);
   min-width: 0;
-  padding: 0 12px 0 16px;
+  padding: 0 var(--tempra-space-12) 0 var(--tempra-space-16);
   border-right: 1px solid var(--tempra-color-border);
 }
 
 .brand-mark {
-  width: 28px;
-  height: 28px;
+  width: var(--tempra-size-tile-large);
+  height: var(--tempra-size-tile-large);
   text-decoration: none;
 }
 
@@ -553,8 +548,8 @@ a.button.pill-button {
 .brand-sep {
   flex: none;
   width: 1px;
-  height: 20px;
-  margin: 0 2px;
+  height: 20px; /* one-off: shorter than the mark */
+  margin: 0 var(--tempra-space-02);
   background: var(--tempra-color-border);
 }
 
@@ -576,9 +571,9 @@ a.button.pill-button {
 /* The switcher's ⌄, right beside the name. */
 .lib-switch {
   flex: none;
-  width: 28px;
-  height: 28px;
-  margin-left: -4px;
+  width: var(--tempra-size-tile-large); /* as tall as the mark beside it */
+  height: var(--tempra-size-tile-large);
+  margin-left: calc(-1 * var(--tempra-space-04));
   color: var(--tempra-color-muted);
 }
 
@@ -589,8 +584,8 @@ a.button.pill-button {
 /* The round search button, at the bar's end over the sidebar. */
 .search-button {
   flex: none;
-  width: 36px;
-  height: 36px;
+  width: var(--tempra-size-control);
+  height: var(--tempra-size-control);
   margin-left: auto;
   border: 1px solid var(--tempra-color-border);
   border-radius: 50%;
@@ -602,9 +597,9 @@ a.button.pill-button {
 .topbar-page {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--tempra-space-08);
   min-width: 0;
-  padding: 0 16px 0 20px;
+  padding: 0 var(--tempra-space-16) 0 var(--tempra-space-20);
 }
 
 .topbar-path {
@@ -635,7 +630,7 @@ a.button.pill-button {
 
 .topbar-crumbs .crumb + .crumb::before {
   content: "/";
-  margin: 0 8px;
+  margin: 0 var(--tempra-space-08);
   color: var(--tempra-color-faint);
 }
 
@@ -652,7 +647,7 @@ a.button.pill-button {
   display: flex;
   flex: none;
   align-items: center;
-  gap: 6px;
+  gap: var(--tempra-space-06);
 }
 
 .topbar-tools:empty {
@@ -663,13 +658,16 @@ a.button.pill-button {
   display: flex;
   flex: none;
   align-items: center;
-  gap: 6px;
+  gap: var(--tempra-space-06);
 }
 
 /* A control in the top bar that reads as a pill (New library). */
 .tool-pill {
-  height: 36px;
-  padding: 0 14px;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--tempra-space-08);
+  height: var(--tempra-size-control);
+  padding: 0 var(--tempra-space-14);
   border: 1px solid var(--tempra-color-border);
   border-radius: var(--tempra-radius-pill);
   background: var(--tempra-color-bg);
@@ -677,31 +675,25 @@ a.button.pill-button {
   font-size: var(--tempra-text-ui);
 }
 
-.tool-pill {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-}
-
 .topbar-tools .icon-button,
 .topbar-end .icon-button {
-  width: 36px;
-  height: 36px;
+  width: var(--tempra-size-control);
+  height: var(--tempra-size-control);
   border: 1px solid var(--tempra-color-border);
   border-radius: 50%;
   color: var(--tempra-color-text);
 }
 
-/* The bell: what waits in the Inbox as a small badge on the corner. */
+/* The bell: how many notifications wait, as a small badge on its corner. */
 .bell .badge {
   position: absolute;
-  top: -4px;
-  right: -4px;
+  top: calc(-1 * var(--tempra-space-04));
+  right: calc(-1 * var(--tempra-space-04));
   display: grid;
   place-items: center;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
+  min-width: var(--tempra-size-badge);
+  height: var(--tempra-size-badge);
+  padding: 0 var(--tempra-space-04);
   border-radius: var(--tempra-radius-pill);
   background: var(--tempra-color-text);
   color: var(--tempra-color-bg);
@@ -716,14 +708,14 @@ a.button.pill-button {
  * invitation's Accept and Decline under them), "n more" when there are more. Rules and greys only.
  */
 .bell-pop {
-  width: min(360px, calc(100vw - 32px));
+  width: min(var(--tempra-size-popover), calc(100vw - var(--tempra-space-32)));
   padding: 0;
   gap: 0;
 }
 
 .menu-list .bell-head {
   margin: 0;
-  padding: 12px 16px 10px;
+  padding: var(--tempra-space-12) var(--tempra-space-16) var(--tempra-space-10);
   border-bottom: 1px solid var(--tempra-color-border);
   font-size: var(--tempra-text-name);
   font-weight: var(--tempra-weight-strong);
@@ -731,17 +723,17 @@ a.button.pill-button {
 
 .menu-list .bell-item {
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr);
-  gap: 2px 10px;
-  padding: 10px 16px;
+  grid-template-columns: var(--tempra-size-tile-small) minmax(0, 1fr);
+  gap: var(--tempra-space-02) var(--tempra-space-10);
+  padding: var(--tempra-space-10) var(--tempra-space-16);
   border-bottom: 1px solid var(--tempra-color-border);
   border-radius: 0;
 }
 
 .bell-item .lib-tile {
   grid-row: span 2;
-  width: 20px;
-  height: 20px;
+  width: var(--tempra-size-tile-small);
+  height: var(--tempra-size-tile-small);
   font-size: var(--tempra-text-label);
 }
 
@@ -763,13 +755,13 @@ a.button.pill-button {
 .menu-list .bell-empty,
 .menu-list .bell-more {
   margin: 0;
-  padding: 24px 16px;
+  padding: var(--tempra-space-24) var(--tempra-space-16);
   color: var(--tempra-color-muted);
   text-align: center;
 }
 
 .menu-list .bell-more {
-  padding: 10px 16px;
+  padding: var(--tempra-space-10) var(--tempra-space-16);
   border-bottom: 1px solid var(--tempra-color-border);
   font-size: var(--tempra-text-meta);
 }
@@ -777,14 +769,14 @@ a.button.pill-button {
 .bell-item-actions {
   display: flex;
   grid-column: 2;
-  gap: 8px;
-  margin-top: 6px;
+  gap: var(--tempra-space-08);
+  margin-top: var(--tempra-space-06);
 }
 
 /* The invitation's answers are the base pills, not the menu's rows. */
 .menu-list .bell-item-actions button {
   width: auto;
-  padding: 5px 12px;
+  padding: var(--tempra-space-button);
   border: 1px solid var(--tempra-color-border);
   border-radius: var(--tempra-radius-pill);
   background: var(--tempra-color-bg);
@@ -800,7 +792,7 @@ a.button.pill-button {
 
 .menu-list .bell-error {
   margin: 0;
-  padding: 10px 16px;
+  padding: var(--tempra-space-10) var(--tempra-space-16);
   color: var(--tempra-color-text);
 }
 
@@ -808,9 +800,9 @@ a.button.pill-button {
 @media (max-width: 900px) {
   .bell-pop {
     position: fixed;
-    top: calc(var(--tempra-bar) + 4px);
-    right: 16px;
-    left: 16px;
+    top: calc(var(--tempra-size-topbar-phone) + var(--tempra-space-04));
+    right: var(--tempra-space-16);
+    left: var(--tempra-space-16);
     width: auto;
   }
 }
@@ -828,20 +820,20 @@ a.button.pill-button {
 
 /* The avatar's menu: who, then the pages, the theme, sign out, each with its glyph. */
 .menu-list.account {
-  min-width: 15rem;
+  min-width: 15rem; /* one-off: room for the person's email */
 }
 
 .menu-list .menu-person {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 10px 10px;
+  gap: var(--tempra-space-10);
+  padding: var(--tempra-space-08) var(--tempra-space-10) var(--tempra-space-10);
   color: var(--tempra-color-text);
 }
 
 .menu-person .avatar-mark {
-  width: 32px;
-  height: 32px;
+  width: var(--tempra-size-avatar-large);
+  height: var(--tempra-size-avatar-large);
   font-size: var(--tempra-text-label);
 }
 
@@ -862,7 +854,7 @@ a.button.pill-button {
 .menu-list button.menu-item {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--tempra-space-10);
 }
 
 .menu-item svg {
@@ -874,8 +866,8 @@ a.button.pill-button {
 .menu-list .menu-theme {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 6px 10px;
+  gap: var(--tempra-space-10);
+  padding: var(--tempra-space-06) var(--tempra-space-10);
   font-size: var(--tempra-text-ui);
 }
 
@@ -889,27 +881,27 @@ a.button.pill-button {
 }
 
 .menu-theme .segmented button {
-  padding: 2px 8px;
+  padding: var(--tempra-space-02) var(--tempra-space-08);
   font-size: var(--tempra-text-meta);
 }
 
 /* The library switcher's menu: libraries as rows with their tile and, when shared, the role. */
 .menu-list.libraries {
-  min-width: 17rem;
+  min-width: 17rem; /* one-off: a library's name and its role */
 }
 
 .menu-list a.menu-lib {
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr) auto;
-  gap: 0 10px;
+  grid-template-columns: var(--tempra-size-tile-small) minmax(0, 1fr) auto;
+  gap: 0 var(--tempra-space-10);
   align-items: center;
-  padding: 6px 10px;
+  padding: var(--tempra-space-06) var(--tempra-space-10);
 }
 
 .menu-lib .lib-tile {
   grid-row: span 2;
-  width: 20px;
-  height: 20px;
+  width: var(--tempra-size-tile-small);
+  height: var(--tempra-size-tile-small);
   font-size: var(--tempra-text-label);
 }
 
@@ -932,10 +924,10 @@ a.button.pill-button {
   grid-area: sidebar;
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--tempra-space-02);
   min-width: 0;
   min-height: 0;
-  padding: 12px 10px;
+  padding: var(--tempra-space-12) var(--tempra-space-10);
   border-right: 1px solid var(--tempra-color-border);
   background: var(--tempra-color-bg);
   font-size: var(--tempra-text-ui);
@@ -946,7 +938,7 @@ a.button.pill-button {
 }
 
 .sidebar-label {
-  margin: 14px 10px 4px;
+  margin: var(--tempra-space-14) var(--tempra-space-10) var(--tempra-space-04);
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
 }
@@ -960,8 +952,12 @@ a.button.pill-button {
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding-bottom: 40px;
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 40px), transparent);
+  padding-bottom: var(--tempra-space-40);
+  mask-image: linear-gradient(
+    to bottom,
+    #000 calc(100% - var(--tempra-space-40)),
+    transparent
+  ); /* a mask's alpha, not a colour */
 }
 
 /* The library's tools, fixed under the tree (TEMPRA-145): Activity, Settings. */
@@ -969,15 +965,15 @@ a.button.pill-button {
   display: flex;
   flex: none;
   flex-direction: column;
-  gap: 2px;
-  margin: 0 -10px;
-  padding: 8px 10px 0;
+  gap: var(--tempra-space-02);
+  margin: 0 calc(-1 * var(--tempra-space-10));
+  padding: var(--tempra-space-08) var(--tempra-space-10) 0;
   border-top: 1px solid var(--tempra-color-border);
 }
 
 /* The way back at the top of the account's settings sidebar: "‹ Back to libraries". */
 .nav-row.back {
-  margin-bottom: 14px;
+  margin-bottom: var(--tempra-space-14);
   color: var(--tempra-color-muted);
 }
 
@@ -988,8 +984,8 @@ a.button.pill-button {
 /* A library in the account's sidebar (or the switcher's row): its tile, its name. */
 .nav-row .lib-tile,
 .lib-switch .lib-tile {
-  width: 20px;
-  height: 20px;
+  width: var(--tempra-size-tile-small);
+  height: var(--tempra-size-tile-small);
   font-size: var(--tempra-text-label);
 }
 
@@ -1020,7 +1016,7 @@ a.button.pill-button {
 /* The change dot's second state (take 4): pulsing while an agent writes. */
 .change-dot.live {
   background: var(--tempra-color-agent);
-  animation: tempra-pulse var(--tempra-pulse) ease-in-out infinite;
+  animation: tempra-pulse var(--tempra-motion-pulse) ease-in-out infinite;
 }
 
 @keyframes tempra-pulse {
@@ -1047,8 +1043,8 @@ a.button.pill-button {
   display: grid;
   flex: none;
   place-items: center;
-  width: 24px;
-  height: 24px;
+  width: var(--tempra-size-tile);
+  height: var(--tempra-size-tile);
   border-radius: var(--tempra-radius-tile);
   background: var(--tempra-color-text);
   color: var(--tempra-color-bg);
@@ -1056,27 +1052,20 @@ a.button.pill-button {
   font-weight: var(--tempra-weight-strong);
 }
 
-.lib-name {
-  overflow: hidden;
-  font-weight: var(--tempra-weight-strong);
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .nav {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: var(--tempra-space-02);
 }
 
 /* A row in the sidebar: a glyph, a name, a count or mark at the end. */
 .nav-row {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--tempra-space-10);
   width: 100%;
-  min-height: var(--tempra-row);
-  padding: 4px 10px;
+  min-height: var(--tempra-size-row);
+  padding: var(--tempra-space-04) var(--tempra-space-10);
   border: 0;
   border-radius: var(--tempra-radius-row);
   background: transparent;
@@ -1114,17 +1103,9 @@ a.button.pill-button {
   white-space: nowrap;
 }
 
-.nav-row.person {
-  padding-left: 8px;
-}
-
-.nav-row.person .avatar-mark {
-  margin-right: 0;
-}
-
 /* The tree: nested lists, one row per folder or file, indented a step a level. A folder's row is
-   one button that opens and closes it (TEMPRA-138): its chevron (turning), its name and its count
-   of concepts; a page's or a file's row is a link, a file's with a small icon. */
+   one button that opens and closes it (TEMPRA-138): its chevron (turning) and its name, no count;
+   a page's or a file's row is a link, a file's with a small icon. */
 .tree,
 .tree ul {
   margin: 0;
@@ -1133,7 +1114,7 @@ a.button.pill-button {
 }
 
 .tree ul {
-  padding-left: 12px;
+  padding-left: var(--tempra-space-12);
 }
 
 .tree li {
@@ -1143,10 +1124,10 @@ a.button.pill-button {
 .tree-row {
   display: flex;
   align-items: center;
-  gap: 6px;
-  min-height: var(--tempra-row);
+  gap: var(--tempra-space-06);
+  min-height: var(--tempra-size-row);
   margin-bottom: 1px;
-  padding: 0 10px 0 4px;
+  padding: 0 var(--tempra-space-10) 0 var(--tempra-space-04);
   border-radius: var(--tempra-radius-row);
   font-size: var(--tempra-text-ui);
   white-space: nowrap;
@@ -1177,7 +1158,7 @@ a.button.pill-button {
   align-self: stretch;
   align-items: center;
   justify-content: center;
-  width: 16px;
+  width: var(--tempra-size-icon);
   color: var(--tempra-color-faint);
 }
 
@@ -1186,9 +1167,9 @@ a.button.pill-button {
 }
 
 .tree-chevron svg {
-  width: 12px;
-  height: 12px;
-  transition: transform 0.15s ease;
+  width: var(--tempra-size-icon-small);
+  height: var(--tempra-size-icon-small);
+  transition: transform var(--tempra-motion-quick) ease;
 }
 
 .tree-row.open .tree-chevron svg {
@@ -1242,12 +1223,12 @@ button.tree-name {
   flex: none;
   display: flex;
   justify-content: center;
-  width: 16px;
+  width: var(--tempra-size-icon);
   color: var(--tempra-color-faint);
 }
 
-/* Marks: an agent's change (a dot), open comments (a count), a clock (stale) or an hourglass
-   (stale soon). */
+/* Marks: open comments (a count), a clock (stale) or an hourglass (stale soon); a closed folder
+   rolls up those inside it. The tree marks no change (TEMPRA-173). */
 .tree-mark {
   display: inline-flex;
   flex: none;
@@ -1258,7 +1239,7 @@ button.tree-name {
 }
 
 .tree-note {
-  padding: 4px 10px;
+  padding: var(--tempra-space-04) var(--tempra-space-10);
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
 }
@@ -1282,7 +1263,7 @@ button.tree-name {
   background-position: 100% 0;
   background-clip: text;
   -webkit-text-fill-color: transparent;
-  animation: tempra-shimmer var(--tempra-shimmer) linear infinite;
+  animation: tempra-shimmer var(--tempra-motion-shimmer) linear infinite;
 }
 
 @keyframes tempra-shimmer {
@@ -1317,8 +1298,8 @@ button.tree-name {
 /* ---------- The quick switcher ---------- */
 
 .switcher {
-  width: min(36rem, 90vw);
-  padding: 12px;
+  width: min(36rem, 90vw); /* one-off: the quick switcher */
+  padding: var(--tempra-space-12);
   border: 1px solid var(--tempra-color-border);
   border-radius: var(--tempra-radius-card);
   background: var(--tempra-color-bg);
@@ -1336,11 +1317,11 @@ button.tree-name {
 }
 
 .switcher [role="listbox"] {
-  margin-top: var(--tempra-space-2);
+  margin-top: var(--tempra-space-08);
 }
 
 .switcher [role="option"] {
-  padding: 6px 10px;
+  padding: var(--tempra-space-06) var(--tempra-space-10);
   border-radius: var(--tempra-radius-row);
   cursor: pointer;
 }
@@ -1351,7 +1332,7 @@ button.tree-name {
 
 /* Searching…, No results, or that search did not answer (F-12); empty, it takes no room. */
 .switcher-status {
-  margin: var(--tempra-space-2) 10px 0;
+  margin: var(--tempra-space-08) var(--tempra-space-10) 0;
 }
 
 .switcher-status:empty {
@@ -1360,13 +1341,12 @@ button.tree-name {
 
 /* ---------- A phone: a top bar, the sidebar as a drawer (take 4, boards 33 to 36) ---------- */
 
-/* The phone's pieces of the top bar (the menu button, the mark and the library), of the drawer
-   (its head, the Inbox row at its foot) and the dimmed page behind it show only here. */
+/* The phone's pieces of the top bar (the menu button, the mark and the library), the drawer's
+   head and the dimmed page behind it show only here. */
 .ws-menu,
 .ws-topbar-place,
 .drawer-head,
-.ws-scrim,
-.phone-only {
+.ws-scrim {
   display: none;
 }
 
@@ -1374,20 +1354,21 @@ button.tree-name {
   .workspace,
   .workspace.sidebar-hidden {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: var(--tempra-bar) minmax(0, 1fr);
+    grid-template-rows: var(--tempra-size-topbar-phone) minmax(0, 1fr);
     grid-template-areas:
       "topbar"
       "main";
   }
 
   /* The bar: the menu button, the mark and the library's name, then a page's tools (a concept's
-     ⋯; its actions float at the bottom right, TEMPRA-172) and the bell; the avatar last. Search and the switcher are the drawer's head's,
-     as on the desktop the bar's over the sidebar (TEMPRA-145). */
+     ⋯; its actions float at the bottom right, TEMPRA-172) and the bell; the avatar last. Search
+     and the switcher are the drawer's head's, as on the desktop the bar's over the sidebar
+     (TEMPRA-145). */
   .ws-topbar,
   .sidebar-hidden .ws-topbar {
     display: flex;
     align-items: center;
-    padding: 0 12px 0 6px;
+    padding: 0 var(--tempra-space-12) 0 var(--tempra-space-06);
   }
 
   .topbar-brand,
@@ -1400,7 +1381,7 @@ button.tree-name {
   .bare .topbar-brand {
     display: flex;
     flex: 1;
-    padding: 0 0 0 10px;
+    padding: 0 0 0 var(--tempra-space-10);
   }
 
   .bare .ws-topbar-place {
@@ -1413,7 +1394,7 @@ button.tree-name {
 
   .topbar-page {
     flex: 1;
-    gap: 8px;
+    gap: var(--tempra-space-08);
     padding: 0;
   }
 
@@ -1424,19 +1405,15 @@ button.tree-name {
     color: var(--tempra-color-text);
   }
 
-  .nav-row.phone-only {
-    display: flex;
-  }
-
   /* The mark and the library's name, where the desktop has them (TEMPRA-145); the page's own
      title names the page (TEMPRA-140). The drawer's head starts the same way (TEMPRA-141). */
   .ws-topbar-place {
     display: flex;
     flex: 1;
     align-items: center;
-    gap: 8px;
+    gap: var(--tempra-space-08);
     min-width: 0;
-    padding: 0 4px;
+    padding: 0 var(--tempra-space-04);
   }
 
   /* The bar's controls, and the drawer's head's (the switcher, search), keep their desktop
@@ -1447,19 +1424,19 @@ button.tree-name {
   .drawer-head .search-button::after {
     content: "";
     position: absolute;
-    inset: min(0px, calc((100% - var(--tempra-touch)) / 2));
+    inset: min(0px, calc((100% - var(--tempra-size-touch)) / 2));
   }
 
   .topbar-page .avatar {
     position: relative;
-    width: 36px;
-    height: 36px;
+    width: var(--tempra-size-control);
+    height: var(--tempra-size-control);
   }
 
   /* The drawer (board 34): about four fifths of the screen, over the top bar, the page dimmed
      behind it. At its head the desktop's bar over the sidebar (the mark, the library, its
-     switcher, search) and × (TEMPRA-141, TEMPRA-145); then the tree; Activity, Settings and the
-     Inbox at its foot. */
+     switcher, search) and × (TEMPRA-141, TEMPRA-145); then the tree; Activity and Settings at its
+     foot. */
   .ws-scrim {
     position: fixed;
     inset: 0;
@@ -1475,8 +1452,8 @@ button.tree-name {
     left: 0;
     z-index: 8;
     display: none;
-    width: var(--tempra-drawer);
-    padding: 0 12px 8px;
+    width: var(--tempra-size-drawer);
+    padding: 0 var(--tempra-space-12) var(--tempra-space-08);
     border-right: 1px solid var(--tempra-color-border);
     background: var(--tempra-color-bg);
     box-shadow: var(--tempra-shadow);
@@ -1494,10 +1471,10 @@ button.tree-name {
     display: flex;
     flex: none;
     align-items: center;
-    gap: 8px;
-    min-height: var(--tempra-topbar);
-    margin: 0 -12px 12px;
-    padding: 0 8px 0 16px;
+    gap: var(--tempra-space-08);
+    min-height: var(--tempra-size-topbar);
+    margin: 0 calc(-1 * var(--tempra-space-12)) var(--tempra-space-12);
+    padding: 0 var(--tempra-space-08) 0 var(--tempra-space-16);
     border-bottom: 1px solid var(--tempra-color-border);
   }
 
@@ -1512,15 +1489,15 @@ button.tree-name {
   }
 
   .ws-sidebar .sidebar-foot {
-    margin: 0 -12px;
-    padding: 8px 12px 0;
+    margin: 0 calc(-1 * var(--tempra-space-12));
+    padding: var(--tempra-space-08) var(--tempra-space-12) 0;
     border-top: 1px solid var(--tempra-color-border);
   }
 
   /* Touch targets: every row and control at least 44px tall. */
   .nav-row,
   .tree-row {
-    min-height: var(--tempra-touch);
+    min-height: var(--tempra-size-touch);
   }
 
   .drawer-head .lib-switch,
@@ -1529,13 +1506,12 @@ button.tree-name {
   }
 
   .icon-button.touch {
-    width: var(--tempra-touch);
-    height: var(--tempra-touch);
+    width: var(--tempra-size-touch);
+    height: var(--tempra-size-touch);
   }
 
-  .page-column,
-  .page {
-    padding: 32px 16px 72px;
+  .page-column {
+    padding: var(--tempra-space-32) var(--tempra-space-16) var(--tempra-space-72);
   }
 }
 
@@ -1555,14 +1531,14 @@ button.tree-name {
 
   .fab {
     position: fixed;
-    right: max(16px, env(safe-area-inset-right));
-    bottom: max(16px, env(safe-area-inset-bottom));
+    right: max(var(--tempra-space-16), env(safe-area-inset-right));
+    bottom: max(var(--tempra-space-16), env(safe-area-inset-bottom));
     z-index: 5;
     display: inline-flex;
     align-items: center;
-    gap: 8px;
-    min-height: var(--tempra-touch);
-    padding: 0 20px;
+    gap: var(--tempra-space-08);
+    min-height: var(--tempra-size-touch);
+    padding: 0 var(--tempra-space-20);
     box-shadow: var(--tempra-shadow);
   }
 }
@@ -1570,32 +1546,25 @@ button.tree-name {
 /* ---------- Page pieces: lists, tables, forms ---------- */
 
 /* A command or URL to copy (the connect pages): an inset that wraps rather than widening the page. */
-.page pre,
 .page-column pre {
-  margin: 0 0 var(--tempra-space-3);
-  padding: 10px 14px;
+  margin: 0 0 var(--tempra-space-16);
+  padding: var(--tempra-space-10) var(--tempra-space-14);
   border-radius: var(--tempra-radius-row);
   background: var(--tempra-color-ground);
   font-size: var(--tempra-text-ui);
-  line-height: var(--tempra-line-height);
+  line-height: var(--tempra-leading-base);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-.page-column pre,
-.page-column pre.src {
-  background: var(--tempra-color-ground);
-}
-
-/* Dates and short facts in a table keep to one line. */
-table.list td.when,
-table.list .nowrap {
+/* Dates in a table keep to one line. */
+table.list td.when {
   white-space: nowrap;
 }
 
 .table-wrap {
   overflow-x: auto;
-  margin: 0 0 var(--tempra-space-3);
+  margin: 0 0 var(--tempra-space-16);
 }
 
 table.list {
@@ -1604,17 +1573,17 @@ table.list {
 }
 
 table.list th {
-  padding: 6px 10px;
+  padding: var(--tempra-space-06) var(--tempra-space-10);
   border-bottom: 1px solid var(--tempra-color-border);
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-label);
   font-weight: var(--tempra-weight-regular);
-  letter-spacing: 0.04em;
+  letter-spacing: var(--tempra-tracking-label);
   text-transform: uppercase;
 }
 
 table.list td {
-  padding: 10px;
+  padding: var(--tempra-space-10);
   border-bottom: 1px solid var(--tempra-color-border);
 }
 
@@ -1626,13 +1595,13 @@ table.list td.name a {
 .field-row {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: var(--tempra-space-16);
 }
 
 /* A group of related controls on a page (a form, a list with its actions). */
 .panel-box {
-  margin: 0 0 var(--tempra-space-4);
-  padding: 16px 18px;
+  margin: 0 0 var(--tempra-space-32);
+  padding: var(--tempra-space-16) var(--tempra-space-18);
   border: 1px solid var(--tempra-color-border);
   border-radius: var(--tempra-radius-box);
   background: var(--tempra-color-bg);
@@ -1643,65 +1612,21 @@ table.list td.name a {
   margin-top: 0;
 }
 
-form.inline,
-form.filters,
+/* A form whose fields stack, each at its own width (Members' invite). */
 form.token {
   display: flex;
   flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-}
-
-/* The ledger's filters: small labels, inset fields, no box. */
-form.filters {
-  margin: 0 0 var(--tempra-space-3);
-  color: var(--tempra-color-muted);
-  font-size: var(--tempra-text-meta);
-}
-
-form.filters label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-form.filters input {
-  padding: 4px 10px;
-  border: 0;
-  border-radius: var(--tempra-radius-pill);
-  background: var(--tempra-color-ground);
-  color: var(--tempra-color-text);
-}
-
-form.filters input[type="text"] {
-  width: 9rem;
-}
-
-form.filters button {
-  padding: 4px 12px;
-  font-size: var(--tempra-text-meta);
-}
-
-form.token {
   align-items: flex-start;
   flex-direction: column;
-}
-
-pre.src {
-  overflow-x: auto;
-  padding: 12px 14px;
-  border-radius: var(--tempra-radius-box);
-  background: var(--tempra-color-ground);
-  font-size: var(--tempra-text-meta);
-  line-height: var(--tempra-line-height);
+  gap: var(--tempra-space-08);
 }
 
 ul.events {
-  margin: 4px 0 0;
+  margin: var(--tempra-space-04) 0 0;
   padding: 0;
   list-style: none;
   font-size: var(--tempra-text-ui);
-  line-height: var(--tempra-line-height);
+  line-height: var(--tempra-leading-base);
 }
 
 /* ---------- Mentions in the comment boxes (TEMPRA-73) ---------- */

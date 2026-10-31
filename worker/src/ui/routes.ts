@@ -3,6 +3,7 @@ import type { User } from "../accounts";
 import { agentName } from "../agents";
 import type { Deps, openUploadGrant, receiveUpload } from "../app";
 import { type LibraryClient, WORKER_ATTACHMENT_CAP } from "../client";
+import { nightlyBundle } from "../export-bundle";
 import { isRouteName } from "../handles";
 import { VARIANT_EDGES } from "../images";
 import { esc, messagePage, type Onward, PAGE_HEADERS, page } from "../oauth/pages";
@@ -547,12 +548,19 @@ export function registerUiRoutes<E extends AppEnv>(
       "manifest.json": "application/json",
     };
     const type = types[file];
-    const obj =
-      type && /^\d{4}-\d{2}-\d{2}(-pre-restore-\d{9}(-[0-9a-f]{4})?)?$/.test(date) && p.deps.exports
-        ? await p.deps.exports.get(`exports/${ref.do_id}/${date}/${file}`)
-        : null;
-    if (!obj || !type) throw new OkfError(404, "not_found", "No such export.");
-    return new Response(obj.body as BodyInit, {
+    const exports = p.deps.exports;
+    const folder = `exports/${ref.do_id}/${date}/`;
+    const ok = type && /^\d{4}-\d{2}-\d{2}(-pre-restore-\d{9}(-[0-9a-f]{4})?)?$/.test(date);
+    // A bundle is whole for download: a folder that names its attachments by hash has their
+    // bytes streamed in from blob storage (TEMPRA-83).
+    const body =
+      !ok || !exports
+        ? null
+        : file === "bundle.tar"
+          ? await nightlyBundle(folder, (k) => exports.get(k), p.deps.blobs)
+          : ((await exports.get(`${folder}${file}`))?.body ?? null);
+    if (!body || !type) throw new OkfError(404, "not_found", "No such export.");
+    return new Response(body as BodyInit, {
       headers: {
         "Content-Type": type,
         "Content-Disposition": `attachment; filename="${ref.slug}-${date}-${file}"`,

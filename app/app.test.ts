@@ -3,8 +3,8 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { HEADERS, moduleSource, PUBLIC } from "./build";
 import { pagePanel } from "./dist/panels";
-import { actorView } from "./src/agents";
-import { initials } from "./src/chrome";
+import { actorView, personNames } from "./src/agents";
+import { initials, nameInitials, personInitials } from "./src/chrome";
 import { versionHref } from "./src/concept/history";
 import { panelInUrl, threadInHash } from "./src/concept/panel";
 import { followsInPlace, match, pageKey } from "./src/router";
@@ -275,5 +275,35 @@ describe("the concept page (TEMPRA-128)", () => {
     expect(me.name).toBe("You");
     expect(initials(me.mark)).toBe("DE");
     expect(initials(actorView("human:ann_lee", null, {}, "human:dev").mark)).toBe("AL");
+  });
+
+  test("initials come from the account's name when given, else the handle (TEMPRA-54)", () => {
+    expect(nameInitials("Ann Lee Smith")).toBe("AS");
+    expect(nameInitials("  ann   lee ")).toBe("AL");
+    expect(nameInitials("Ann")).toBe("A");
+    expect(nameInitials("Émile Zola")).toBe("ÉZ");
+    expect(nameInitials("😀 Smith")).toBe("😀S");
+    expect(nameInitials("")).toBe("?");
+    expect(personInitials("cl_dixon", "Chris Dixon")).toBe("CD");
+    expect(personInitials("sam", "Ann")).toBe("A");
+    expect(personInitials("sam", null)).toBe("SA");
+    expect(personInitials("sam", "  ")).toBe("SA");
+    // Others' names come from the library's people, by handle; text still names the handle.
+    const names = personNames([
+      {
+        person: "ann_lee",
+        person_name: "Ann Smith",
+        agent: null,
+        actor: "human:ann_lee",
+        requests: 1,
+        last_ts: "",
+      },
+      { person: "bo", person_name: null, agent: null, actor: "human:bo", requests: 1, last_ts: "" },
+    ]);
+    expect(names).toEqual({ ann_lee: "Ann Smith" });
+    const ann = actorView("human:ann_lee", null, {}, "human:dev", names);
+    expect(ann).toMatchObject({ name: "ann_lee", mark: "ann_lee", fullName: "Ann Smith" });
+    expect(personInitials(ann.mark, ann.fullName)).toBe("AS");
+    expect(actorView("human:bo", null, {}, "human:dev", names).fullName).toBeNull();
   });
 });

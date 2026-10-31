@@ -31,7 +31,7 @@ export function holdFor(shown: URL, next: URL): PageLoad | null {
 
 /**
  * Starts the next page's load, shared with the page once it mounts (`fetchOnce`) and kept as a
- * prefetch, so the page draws from it without asking again. `ready` settles when the load does
+ * fresh answer, so the page draws from it without asking again. `ready` settles when the load does
  * (either way); `settled` says whether it has.
  */
 export function startLoad(l: PageLoad): { ready: Promise<void>; settled: () => boolean } {
@@ -39,7 +39,7 @@ export function startLoad(l: PageLoad): { ready: Promise<void>; settled: () => b
   let done = false;
   const ready = promise.then(
     (data) => {
-      cache.put(l.key, data, started, true);
+      cache.put(l.key, data, started);
       done = true;
     },
     () => {

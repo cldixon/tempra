@@ -8,7 +8,6 @@ import type { Authenticate, TokenInfo } from "./auth";
 import {
   type BlobStore,
   bundleFiles,
-  bundleTar,
   describeBlob,
   imagesWithDimensions,
   type LibraryClient,
@@ -17,7 +16,7 @@ import {
   WORKER_ATTACHMENT_CAP,
   withDimensions,
 } from "./client";
-import { withCostHeader, withCosts } from "./costs";
+import { bundleStream } from "./export-bundle";
 import { type FetchFn, fetchBlob } from "./fetch-source";
 import type { Images } from "./images";
 import { registerInboxApi } from "./inbox-api";
@@ -30,6 +29,7 @@ import { type GrantProps, registerAppRoutes } from "./oauth/routes";
 import { splitFrontmatter } from "./okf/concept";
 import { normalizePath, underPrefix } from "./okf/paths";
 import type { JsonObject } from "./okf/types";
+import { withCostHeader, withCosts } from "./op-costs";
 import { fromThisSite } from "./origin";
 import type { RestoreOutcome, RestoreRecord } from "./recovery";
 import type { PosterFrame, RenderContext, RenderDiagram } from "./render";
@@ -853,15 +853,18 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
         a,
       ]),
     );
-    const handles = new Map<string, string | null>();
+    const people = new Map<string, { handle: string; name: string | null } | null>();
     for (const id of new Set(rows.map((r) => r.person))) {
-      handles.set(id, (await accounts.account(id))?.handle ?? null);
+      const a = await accounts.account(id);
+      people.set(id, a ? { handle: a.handle, name: a.name ?? null } : null);
     }
     return c.json({
       contributors: rows.map((r) => {
         const a = r.agent ? agents.get(r.agent) : undefined;
         return {
-          person: handles.get(r.person) ?? null,
+          person: people.get(r.person)?.handle ?? null,
+          // The person's name, for their round mark's initials only (TEMPRA-54).
+          person_name: people.get(r.person)?.name ?? null,
           agent: r.agent
             ? {
                 id: r.agent,
@@ -1288,6 +1291,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
     return c.json({
       email: account.email,
       handle: account.handle,
+      name: account.name ?? null,
       actor: account.actor,
       theme: account.theme ?? null,
     });
@@ -1728,11 +1732,12 @@ async function exportTar(
   name: string,
   ctx: RenderContext,
 ) {
-  const bundle = await bundleTar(lib, d.blobs, at, {
+  // Streamed: attachments' bytes are piped from blob storage, never all in memory (TEMPRA-83).
+  const bundle = await bundleStream(lib, d.blobs, at, {
     // SVG fences are exported without a renderer; Mermaid needs one (TEMPRA-168, TEMPRA-206).
     diagrams: { ...(d.renderDiagram ? { render: d.renderDiagram } : {}), ctx },
   });
-  return new Response(bundle.bytes as unknown as ArrayBuffer, {
+  return new Response(bundle.body, {
     headers: {
       "Content-Type": "application/x-tar",
       "Content-Disposition": `attachment; filename="${name}-${bundle.seq}.tar"`,

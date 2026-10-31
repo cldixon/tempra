@@ -1,5 +1,6 @@
-import { type BlobStore, bundleTar } from "./client";
+import type { ExportAttachment } from "./export-bundle";
 import type { LibraryHealth, MaintenanceDue, StalenessRun, StructureRun } from "./store/store";
+import { writeTar } from "./util/tar";
 
 /**
  * The daily maintainers (spec: Tier 3). A library's maintainers are of two kinds: processes,
@@ -17,6 +18,8 @@ export interface ExportBucket {
     body: Uint8Array | string,
     opts?: { httpMetadata?: { contentType?: string } },
   ): Promise<unknown>;
+  /** An object's body, or null; the export reads the newest folder's manifest. */
+  get(key: string): Promise<{ body: ReadableStream | Uint8Array } | null>;
   list(opts: { prefix: string; delimiter?: string; cursor?: string }): Promise<{
     objects: { key: string }[];
     delimitedPrefixes: string[];
@@ -60,7 +63,6 @@ const day = (d: Date) => d.toISOString().slice(0, 10);
 /** Runs every daily maintainer once. Idempotent: running it twice in a row exports once. */
 export async function runMaintenance(opts: {
   store: MaintainedStore;
-  blobs: BlobStore;
   bucket: ExportBucket;
   libraryId: string;
   now: Date;
@@ -71,17 +73,27 @@ export async function runMaintenance(opts: {
   const state = store.maintenance();
   const seq = store.headSeq();
 
-  // Export: only when the ledger moved since the last one (its cursor).
+  // Export: when the ledger moved since the last one (its cursor), or when the newest folder in
+  // R2 is not the export this library last wrote. After a point-in-time restore the library's
+  // meta is rewound and the newest folder holds what the restore discarded; exporting again
+  // makes the newest folder (the one retention always keeps) the restored library, so no folder
+  // that names an attachment the restore dropped outlives retention, and the blob sweep may
+  // delete those bytes 31 days after the restore (TEMPRA-83; tempra-dev: v2/exports).
+  const folders = await listExports(bucket, opts.libraryId);
+  const newest = folders.at(-1);
+  const foreign = newest !== undefined && (await createdOf(bucket, newest)) !== state.export_at;
   let exported: MaintenanceResult["export"] = { skipped: "unchanged" };
-  if (seq > 0 && seq !== Number(state.export_seq ?? -1)) {
+  if ((seq > 0 && seq !== Number(state.export_seq ?? -1)) || foreign) {
     const folder = `${exportsPrefix(opts.libraryId)}${day(now)}/`;
     const files = await writeExport({ ...opts, folder, stamp });
     store.setMaintenance({ export_seq: String(seq), export_at: stamp, export_key: folder });
     exported = { key: folder, seq, files };
+    if (!folders.includes(folder)) folders.push(folder);
+    folders.sort();
   }
 
   const retentionDays = opts.retentionDays ?? DEFAULT_RETENTION_DAYS;
-  const { deleted, kept } = await pruneExports(bucket, opts.libraryId, now, retentionDays);
+  const { deleted, kept } = await pruneExports(bucket, folders, opts.libraryId, now, retentionDays);
   // When the oldest export the next pass may prune passes retention (the newest is always kept),
   // so an idle library's alarm wakes for it (TEMPRA-82).
   const prefix = exportsPrefix(opts.libraryId);
@@ -98,13 +110,30 @@ export async function runMaintenance(opts: {
   return { export: exported, deleted, pruned, staleness, structure, health };
 }
 
+/** The `created` stamp of an export folder's manifest, or null when it has none. */
+async function createdOf(bucket: ExportBucket, folder: string): Promise<string | null> {
+  const obj = await bucket.get(`${folder}manifest.json`);
+  if (!obj) return null;
+  try {
+    const m = JSON.parse(await new Response(obj.body as BodyInit).text()) as { created?: unknown };
+    return typeof m.created === "string" ? m.created : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The export folder format: 2 since TEMPRA-83, attachments by hash in `attachments.json`. */
+export const EXPORT_FORMAT = 2;
+
 /**
- * Writes one export folder: the bundle at head, the ledger dump and a manifest. Returns the
- * bundle's file count. Used by the nightly run and before a point-in-time restore.
+ * Writes one export folder (format 2, TEMPRA-83; tempra-dev: v2/exports): the bundle's text at
+ * head as `bundle.tar`, its attachments by hash in `attachments.json` (their bytes stay at
+ * blobs/<hash>; a download streams them in, `nightlyBundle`), the ledger dump and a manifest,
+ * written last. Reads no blob, so its memory tracks the library's text. Returns the bundle's file
+ * count, attachments included. Used by the nightly run and before a point-in-time restore.
  */
 export async function writeExport(opts: {
   store: MaintainedStore;
-  blobs: BlobStore;
   bucket: ExportBucket;
   libraryId: string;
   folder: string;
@@ -113,24 +142,47 @@ export async function writeExport(opts: {
 }): Promise<number> {
   const { store, bucket, folder } = opts;
   const seq = store.headSeq();
-  const tar = await bundleTar(store, opts.blobs, seq);
-  await bucket.put(`${folder}bundle.tar`, tar.bytes, {
+  const bundle = store.exportBundle(seq) as {
+    files: {
+      path: string;
+      text?: string;
+      blob?: { hash: string; size: number; media: string | null };
+    }[];
+  };
+  const enc = new TextEncoder();
+  const text: { path: string; bytes: Uint8Array }[] = [];
+  const attachments: ExportAttachment[] = [];
+  for (const f of bundle.files) {
+    if (f.text !== undefined) text.push({ path: f.path, bytes: enc.encode(f.text) });
+    else if (f.blob) {
+      const { hash, size, media } = f.blob;
+      attachments.push({ path: f.path, hash, size, media });
+    }
+  }
+  // The list first: a folder overwritten halfway from the old format is still downloaded whole.
+  await bucket.put(`${folder}attachments.json`, JSON.stringify(attachments), {
+    httpMetadata: { contentType: "application/json" },
+  });
+  await bucket.put(`${folder}bundle.tar`, writeTar(text), {
     httpMetadata: { contentType: "application/x-tar" },
   });
   await bucket.put(`${folder}ledger.jsonl`, store.dump(), {
     httpMetadata: { contentType: "application/x-ndjson" },
   });
+  const files = text.length + attachments.length;
   const manifest = {
     library_id: opts.libraryId,
     seq,
     created: opts.stamp,
-    files: tar.files,
+    files,
+    attachments: attachments.length,
+    format: EXPORT_FORMAT,
     ...(opts.kind ? { kind: opts.kind } : {}),
   };
   await bucket.put(`${folder}manifest.json`, JSON.stringify(manifest, null, 2), {
     httpMetadata: { contentType: "application/json" },
   });
-  return tar.files;
+  return files;
 }
 
 /** Export folders for a library, oldest first. */
@@ -152,11 +204,11 @@ export async function listExports(bucket: ExportBucket, libraryId: string): Prom
  */
 async function pruneExports(
   bucket: ExportBucket,
+  folders: string[],
   libraryId: string,
   now: Date,
   retentionDays: number,
 ): Promise<{ deleted: string[]; kept: string[] }> {
-  const folders = await listExports(bucket, libraryId);
   const cutoff = day(new Date(now.getTime() - retentionDays * DAY_MS));
   const prefix = exportsPrefix(libraryId);
   const old = folders

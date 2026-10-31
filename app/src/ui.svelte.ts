@@ -1,5 +1,5 @@
 import { api } from "./api";
-import { useLoad } from "./load.svelte.ts";
+import { useLoad, WORKSPACE_DATA } from "./load.svelte.ts";
 import type { Me } from "./ui";
 import { copyText } from "./ui";
 
@@ -8,6 +8,8 @@ export function useMe() {
   const me = useLoad(
     () => "me",
     () => api<Me>("/api/v1/me"),
+    [],
+    WORKSPACE_DATA,
   );
   return {
     get current(): Me | null {

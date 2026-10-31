@@ -1,8 +1,10 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
+import { nightlyBundle } from "../src/export-bundle";
 import { runMaintenance } from "../src/maintain";
+import { sha256Hex } from "../src/okf/hash";
 import { LibraryStore } from "../src/store/store";
-import { readTar } from "../src/util/tar";
+import { readTar, writeTar } from "../src/util/tar";
 import { memoryBlobs, memoryBucket, setup } from "./harness";
 import { bunSqlHandle } from "./sqlite";
 
@@ -18,10 +20,8 @@ describe("daily maintainers (spec: Tier 3)", () => {
     const clock = { t: Date.parse("2026-09-30T03:05:00Z") };
     const store = newStore(clock);
     const bucket = memoryBucket();
-    const blobs = memoryBlobs();
     store.apply(ctx(), [{ op: "write", path: "a.md", content: md("A\n") }]);
-    const run = () =>
-      runMaintenance({ store, blobs, bucket, libraryId: "lib-x", now: new Date(clock.t) });
+    const run = () => runMaintenance({ store, bucket, libraryId: "lib-x", now: new Date(clock.t) });
 
     const first = await run();
     expect(first.export).toEqual({ key: "exports/lib-x/2026-09-30/", seq: 1, files: 3 });
@@ -45,18 +45,141 @@ describe("daily maintainers (spec: Tier 3)", () => {
     expect((await run()).export).toMatchObject({ key: "exports/lib-x/2026-10-01/", seq: 2 });
   });
 
+  test("a folder names attachments by hash; its download streams their bytes in (TEMPRA-83)", async () => {
+    const clock = { t: Date.parse("2026-09-30T03:05:00Z") };
+    const store = newStore(clock);
+    const bucket = memoryBucket();
+    const blobs = memoryBlobs();
+    const bytes = new TextEncoder().encode("a,b\n1,2\n");
+    const hash = sha256Hex(bytes);
+    await blobs.put(hash, bytes, "text/csv");
+    const long = `data/${"a-long-name-".repeat(10)}.csv`;
+    store.apply(ctx(), [
+      { op: "write", path: "a.md", content: md("A\n") },
+      { op: "attach", path: "data/x.csv", blob: { hash, size: bytes.length, media: "text/csv" } },
+      { op: "attach", path: long, blob: { hash, size: bytes.length, media: "text/csv" } },
+    ]);
+    const res = await runMaintenance({ store, bucket, libraryId: "lib-x", now: new Date(clock.t) });
+    const folder = "exports/lib-x/2026-09-30/";
+    // a.md, two attachments, index.md, data/index.md and log.md.
+    expect(res.export).toEqual({ key: folder, seq: 3, files: 6 });
+    const stored = readTar(bucket.objects.get(`${folder}bundle.tar`) as Uint8Array);
+    expect(stored.map((f) => f.path).sort()).toEqual([
+      "a.md",
+      "data/index.md",
+      "index.md",
+      "log.md",
+    ]);
+    const text = (k: string) => new TextDecoder().decode(bucket.objects.get(`${folder}${k}`));
+    expect(JSON.parse(text("attachments.json"))).toEqual([
+      { path: long, hash, size: bytes.length, media: "text/csv" },
+      { path: "data/x.csv", hash, size: bytes.length, media: "text/csv" },
+    ]);
+    expect(JSON.parse(text("manifest.json"))).toMatchObject({
+      seq: 3,
+      files: 6,
+      attachments: 1 + 1,
+      format: 2,
+    });
+    // No export object holds the attachment's bytes.
+    for (const [k, v] of bucket.objects) {
+      if (k.endsWith(".json")) continue;
+      expect(readTar(v).some((f) => f.path.endsWith(".csv"))).toBe(false);
+    }
+
+    // The download is the whole bundle, the bytes streamed from blob storage.
+    const download = async () => {
+      const body = await nightlyBundle(folder, (k) => bucket.get(k), blobs);
+      return readTar(new Uint8Array(await new Response(body as BodyInit).arrayBuffer()));
+    };
+    const whole = await download();
+    expect(whole.map((f) => f.path).sort()).toEqual(
+      ["a.md", "data/index.md", "data/x.csv", "index.md", "log.md", long].sort(),
+    );
+    expect(whole.find((f) => f.path === long)?.bytes).toEqual(bytes);
+    expect(whole.find((f) => f.path === "data/x.csv")?.bytes).toEqual(bytes);
+
+    // Overwritten halfway from the old format (bytes inside the tar): not added twice.
+    const old = writeTar([...stored, { path: "data/x.csv", bytes }]);
+    await bucket.put(`${folder}bundle.tar`, old);
+    expect((await download()).filter((f) => f.path === "data/x.csv")).toHaveLength(1);
+
+    // A folder from before TEMPRA-83 (no attachments.json) is served as stored.
+    await bucket.put("exports/lib-x/2026-09-01/bundle.tar", old);
+    expect(await nightlyBundle("exports/lib-x/2026-09-01/", (k) => bucket.get(k), blobs)).toEqual(
+      old,
+    );
+    expect(await nightlyBundle("exports/lib-x/2026-08-01/", (k) => bucket.get(k), blobs)).toBe(
+      null,
+    );
+
+    // Bytes gone: the download fails rather than giving a short bundle.
+    await bucket.put(`${folder}bundle.tar`, writeTar(stored));
+    blobs.map.delete(hash);
+    await expect(download()).rejects.toThrow("missing");
+  });
+
+  test("after a restore the next pass exports again, though the ledger did not move (TEMPRA-83)", async () => {
+    const clock = { t: Date.parse("2026-09-30T03:05:00Z") };
+    let db = new Database(":memory:");
+    let store = new LibraryStore(bunSqlHandle(db), { now: () => new Date(clock.t) });
+    const bucket = memoryBucket();
+    const run = () => runMaintenance({ store, bucket, libraryId: "lib-x", now: new Date(clock.t) });
+    store.apply(ctx(), [{ op: "write", path: "a.md", content: md("A\n") }]);
+    expect((await run()).export).toMatchObject({ seq: 1 });
+    const restorePoint = db.serialize();
+
+    // Later the same day: an attachment, and Export now overwrites the day's folder.
+    clock.t += 3_600_000;
+    store.apply(ctx(), [
+      { op: "attach", path: "x.png", blob: { hash: "f".repeat(64), size: 3, media: null } },
+    ]);
+    expect((await run()).export).toMatchObject({ seq: 2 });
+    const folder = "exports/lib-x/2026-09-30/";
+    const lists = () =>
+      JSON.parse(new TextDecoder().decode(bucket.objects.get(`${folder}attachments.json`)));
+    expect(lists()).toHaveLength(1);
+
+    // Restored to before it: the meta says seq 1 was exported, and the head is seq 1.
+    db = Database.deserialize(restorePoint);
+    store = new LibraryStore(bunSqlHandle(db), { now: () => new Date(clock.t) });
+    expect(store.headSeq()).toBe(1);
+    clock.t += 3_600_000;
+    // The newest folder is not this library's last export, so it is written again.
+    expect((await run()).export).toMatchObject({ key: folder, seq: 1 });
+    expect(lists()).toEqual([]);
+    expect((await run()).export).toEqual({ skipped: "unchanged" });
+  });
+
+  test("a library restored to empty replaces a newer folder with an empty bundle", async () => {
+    const clock = { t: Date.parse("2026-09-30T03:05:00Z") };
+    const store = newStore(clock);
+    const bucket = memoryBucket();
+    await bucket.put("exports/lib-x/2026-09-29/attachments.json", '[{"path":"x.png"}]');
+    await bucket.put(
+      "exports/lib-x/2026-09-29/manifest.json",
+      '{"created":"2026-09-29T00:00:00Z"}',
+    );
+    const res = await runMaintenance({ store, bucket, libraryId: "lib-x", now: new Date(clock.t) });
+    expect(res.export).toMatchObject({ key: "exports/lib-x/2026-09-30/", seq: 0 });
+    const tar = readTar(bucket.objects.get("exports/lib-x/2026-09-30/bundle.tar") as Uint8Array);
+    expect(tar.map((f) => f.path).sort()).toEqual(["index.md", "log.md"]);
+  });
+
   test("retention deletes old exports but always keeps the newest", async () => {
     const bucket = memoryBucket();
+    const created = "2026-09-29T03:00:00Z";
     for (const d of ["2026-06-01", "2026-08-01", "2026-09-29"]) {
       await bucket.put(`exports/lib-x/${d}/bundle.tar`, "x");
-      await bucket.put(`exports/lib-x/${d}/manifest.json`, "{}");
+      await bucket.put(`exports/lib-x/${d}/manifest.json`, JSON.stringify({ created }));
     }
     await bucket.put("exports/other/2026-01-01/bundle.tar", "x");
     const clock = { t: Date.parse("2026-09-30T03:00:00Z") };
     const store = newStore(clock);
+    // The newest folder is the export this library last wrote, so nothing is exported again.
+    store.setMaintenance({ export_seq: "0", export_at: created });
     const res = await runMaintenance({
       store,
-      blobs: memoryBlobs(),
       bucket,
       libraryId: "lib-x",
       now: new Date(clock.t),
@@ -72,7 +195,6 @@ describe("daily maintainers (spec: Tier 3)", () => {
     // Even far past the window, the newest export stays.
     const later = await runMaintenance({
       store,
-      blobs: memoryBlobs(),
       bucket,
       libraryId: "lib-x",
       now: new Date(clock.t + 365 * 86_400_000),
@@ -106,7 +228,6 @@ describe("daily maintainers (spec: Tier 3)", () => {
     expect(usage()).toBe(0);
     await runMaintenance({
       store,
-      blobs: memoryBlobs(),
       bucket: memoryBucket(),
       libraryId: "lib-x",
       now: new Date(clock.t),
@@ -280,7 +401,6 @@ describe("stats, healthz and nightly exports in the UI and API", () => {
 
     await runMaintenance({
       store: s.store(),
-      blobs: s.blobs,
       bucket: s.bucket,
       libraryId: "lib-1",
       now: new Date(),

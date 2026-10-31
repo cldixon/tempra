@@ -98,13 +98,13 @@ export function fetchOnce<T>(
 
 /**
  * Loads a page's data ahead of a likely visit (a link hovered or selected), so the page draws
- * from the cache when it opens. Does nothing when a fresh prefetch is here or one is on its way.
+ * from the cache when it opens. Does nothing when a fresh answer is here or one is on its way.
  */
 export function prefetch<T>(key: string, load: () => Promise<T>) {
   if (cache.fresh(key) || inflight.has(key) || holding()) return;
   const { started, promise } = fetchOnce(key, load);
   promise.then(
-    (data) => cache.put(key, data, started, true),
+    (data) => cache.put(key, data, started),
     () => {},
   );
 }

@@ -6,9 +6,9 @@
   import { Urls } from "../urls";
 
   /**
-   * First run (v2 spec: Onboarding): pick a handle and name the first library, both parts of the
-   * library's address (H-12), then land on the new library's home, which shows how to connect an
-   * agent and waits for its first write.
+   * First run (v2 spec: Onboarding): give a name (optional, TEMPRA-54), pick a handle and name
+   * the first library, both parts of the library's address (H-12), then land on the new
+   * library's home, which shows how to connect an agent and waits for its first write.
    */
   let { me }: { me: Me | null } = $props();
   useTitle(() => "Welcome");
@@ -20,9 +20,11 @@
     if (!m) return;
     const form = e.currentTarget;
     const handle = field(form, "handle");
+    const name = field(form, "name").trim();
     const slug = field(form, "library");
     const starter = field(form, "starter") === "1";
     void action.run(async () => {
+      if (name && name !== (m.name ?? "")) await post("/api/v1/account", { name }, "PATCH");
       if (handle.toLowerCase() !== m.handle)
         await post("/api/v1/account/handle", { handle }, "PUT");
       const lib = await post<{ owner: string; slug: string }>("/api/v1/libraries", {
@@ -41,6 +43,21 @@
   <h1>Welcome</h1>
   {#if action.error}<div class="notice">{action.error}</div>{/if}
   <form onsubmit={submit}>
+    <p>
+      <label>
+        Name
+        <input
+          type="text"
+          name="name"
+          defaultValue={me.name ?? ""}
+          autocomplete="name"
+          maxlength={80}
+          aria-describedby="welcome-name-hint"
+        />
+      </label><span id="welcome-name-hint" class="field-hint">
+        Optional. Your avatar's initials come from it.
+      </span>
+    </p>
     <p>
       <label>
         Handle

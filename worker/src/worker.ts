@@ -1,11 +1,11 @@
 import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { type AgentKey, agentName, connectionAgent, tokenAgent } from "./agents";
 import { actedBy, createApp, type Deps } from "./app";
-import { mcpOp, withCostHeader, withCosts } from "./costs";
 import { imagesService } from "./images";
 import { handleMcp, type McpContext } from "./mcp/server";
 import { notifying, postComment } from "./notify";
 import { type GrantProps, SCOPES } from "./oauth/routes";
+import { mcpOp, withCostHeader, withCosts } from "./op-costs";
 import { RENDER_UNAVAILABLE } from "./render";
 import { OkfError } from "./store/errors";
 import { createLibraryForGrant, grantAgent, grantLibraries } from "./tenancy";

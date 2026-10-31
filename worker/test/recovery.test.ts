@@ -3,7 +3,7 @@ import { runMaintenance } from "../src/maintain";
 import { bookmarkError, checkRestoreTime, prepareRestore } from "../src/recovery";
 import { LibraryStore } from "../src/store/store";
 import { readTar } from "../src/util/tar";
-import { fakeRecovery, memoryBlobs, memoryBucket, setup } from "./harness";
+import { fakeRecovery, memoryBucket, setup } from "./harness";
 import { bunSqlHandle } from "./sqlite";
 
 type S = ReturnType<typeof setup>;
@@ -70,7 +70,6 @@ describe("point-in-time restore (spec: Backups and recovery)", () => {
     const now = new Date("2026-09-30T18:02:11Z");
     const out = await prepareRestore({
       store,
-      blobs: memoryBlobs(),
       bucket,
       recovery,
       libraryId: "lib-x",
@@ -107,7 +106,6 @@ describe("point-in-time restore (spec: Backups and recovery)", () => {
     // The nightly export still sorts after a same-day pre-restore folder, so it counts as newest.
     const nightly = await runMaintenance({
       store,
-      blobs: memoryBlobs(),
       bucket,
       libraryId: "lib-x",
       now,
@@ -123,7 +121,6 @@ describe("point-in-time restore (spec: Backups and recovery)", () => {
     const run = () =>
       prepareRestore({
         store,
-        blobs: memoryBlobs(),
         bucket,
         recovery: fakeRecovery(),
         libraryId: "lib-x",
@@ -144,7 +141,6 @@ describe("point-in-time restore (spec: Backups and recovery)", () => {
     const bucket = memoryBucket();
     const out = await prepareRestore({
       store,
-      blobs: memoryBlobs(),
       bucket,
       recovery: fakeRecovery({ unsupported: true }),
       libraryId: "lib-x",
