@@ -1,8 +1,8 @@
 /*
  * How a rendered concept reads (tempra-dev: app/reader, Reading typography): the body of a
- * concept, in the app now and wherever concepts are shown later (the site, inline MCP Apps views).
- * Scoped to .prose. The app's sans at 17px, about 66 characters to the line, spacing in em so the rhythm
- * scales with the text. Greys, type, spacing and rules only until the palette (TEMPRA-1).
+ * concept, in the app and in the page panel MCP `show` draws in a chat. Scoped to .prose. Inter's
+ * text cut at the reading size (17px), about 66 characters to the line, spacing in em so the
+ * rhythm scales with the text. Greys, type, spacing and rules only until the palette (TEMPRA-1).
  */
 .prose {
   max-width: var(--tempra-measure-reader);
@@ -71,7 +71,7 @@
   text-wrap: balance;
   break-after: avoid;
   /* Clear of the cluster when a contents link scrolls to it. */
-  scroll-margin-top: 72px;
+  scroll-margin-top: var(--tempra-space-72);
 }
 
 .prose h1 {
@@ -208,7 +208,7 @@
 /* Code: the mono a step down, no ligatures; inline on the code grey, blocks scroll sideways. */
 .prose code {
   padding: 0.1em 0.35em;
-  border-radius: var(--tempra-radius);
+  border-radius: var(--tempra-radius-code);
   background: var(--tempra-color-code-bg);
   font-family: var(--tempra-font-mono);
   font-size: 0.86em;
@@ -222,13 +222,13 @@
   position: relative;
   overflow-x: auto;
   overscroll-behavior-x: contain;
-  padding: 14px 18px;
+  padding: var(--tempra-space-14) var(--tempra-space-18);
   border-radius: var(--tempra-radius-row);
   background: var(--tempra-color-code-bg);
   font-family: var(--tempra-font-mono);
   font-size: 0.8em;
   font-variant-ligatures: none;
-  line-height: var(--tempra-line-height);
+  line-height: var(--tempra-leading-base);
   tab-size: 2;
   white-space: pre;
   overflow-wrap: normal;
@@ -243,14 +243,14 @@
 
 /* The fence's language, quietly above the code (generated content: not part of the text). */
 .prose pre[data-lang] {
-  padding-top: 32px;
+  padding-top: var(--tempra-space-32);
 }
 
 .prose pre[data-lang]::before {
   content: attr(data-lang);
   position: absolute;
-  top: 10px;
-  left: 18px;
+  top: var(--tempra-space-10);
+  left: var(--tempra-space-18);
   color: var(--tempra-color-muted);
   font-family: var(--tempra-font-text);
   font-size: var(--tempra-text-label);
@@ -283,7 +283,7 @@
   font-family: var(--tempra-font-text);
   font-size: 0.82em;
   font-variant-numeric: lining-nums tabular-nums;
-  line-height: var(--tempra-line-height);
+  line-height: var(--tempra-leading-base);
 }
 
 .prose th,
@@ -344,7 +344,7 @@
 .prose .image-broken {
   padding: 0 0.3em;
   border: 1px dashed var(--tempra-color-border-strong);
-  border-radius: var(--tempra-radius);
+  border-radius: var(--tempra-radius-code);
 }
 
 /*
@@ -398,15 +398,15 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 12px 16px;
-  padding: 16px 18px;
+  gap: var(--tempra-space-12) var(--tempra-space-16);
+  padding: var(--tempra-space-16) var(--tempra-space-18);
   border: 1px solid var(--tempra-color-border);
   border-radius: var(--tempra-radius-box);
   background: var(--tempra-color-bg);
   color: var(--tempra-color-text);
   font-family: var(--tempra-font-text);
   font-size: var(--tempra-text-ui);
-  line-height: var(--tempra-line-height);
+  line-height: var(--tempra-leading-base);
 }
 
 .figure-pdf > svg {
@@ -416,7 +416,7 @@
 
 .figure-pdf-about {
   display: flex;
-  flex: 1 1 12rem;
+  flex: 1 1 12rem; /* one-off: a PDF card's name, before its actions wrap */
   flex-direction: column;
   min-width: 0;
 }
@@ -434,13 +434,13 @@
 .figure-pdf-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--tempra-space-08);
 }
 
 .figure-pdf-actions a.button {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--tempra-space-06);
   text-decoration: none;
 }
 
@@ -461,15 +461,15 @@
 
 .prose .figure-open:focus-visible {
   outline: var(--tempra-focus-ring);
-  outline-offset: 3px;
+  outline-offset: 3px; /* one-off: clear of the image's edge */
 }
 
 .prose figcaption {
-  margin-top: 8px;
+  margin-top: var(--tempra-space-08);
   color: var(--tempra-color-muted);
   font-family: var(--tempra-font-text);
   font-size: var(--tempra-text-meta);
-  line-height: var(--tempra-line-height);
+  line-height: var(--tempra-leading-base);
   text-wrap: pretty;
   user-select: none;
 }
@@ -503,7 +503,7 @@
 }
 
 .concept .prose figure.figure-wide {
-  --figure-reach: min(var(--tempra-figure-wide), var(--figure-column) - 2 * var(--doc-pad));
+  --figure-reach: min(var(--tempra-size-figure-wide), var(--figure-column) - 2 * var(--doc-pad));
 }
 
 .concept .prose figure.figure-full {
@@ -534,7 +534,7 @@
 .prose .figure-row {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: var(--tempra-figure-gap);
+  gap: var(--tempra-space-figure);
   align-items: start;
 }
 
@@ -553,7 +553,7 @@
 .prose .figure-cell {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: var(--tempra-space-06);
   min-width: 0;
 }
 
@@ -561,7 +561,7 @@
   color: var(--tempra-color-muted);
   font-family: var(--tempra-font-text);
   font-size: var(--tempra-text-meta);
-  line-height: var(--tempra-line-height);
+  line-height: var(--tempra-leading-base);
   user-select: none;
 }
 
@@ -585,9 +585,9 @@
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  min-height: 12rem;
-  padding: 24px;
+  gap: var(--tempra-space-04);
+  min-height: 12rem; /* one-off: a broken image's box */
+  padding: var(--tempra-space-24);
   border: 1px dashed var(--tempra-color-border-strong);
   border-radius: var(--tempra-radius-box);
   background: var(--tempra-color-ground);
@@ -595,13 +595,13 @@
   font-family: var(--tempra-font-text);
   font-size: var(--tempra-text-meta);
   font-style: normal;
-  line-height: var(--tempra-line-height);
+  line-height: var(--tempra-leading-base);
   text-align: center;
   overflow-wrap: anywhere;
 }
 
 .figure-broken svg {
-  margin-bottom: 4px;
+  margin-bottom: var(--tempra-space-04);
   color: var(--tempra-color-faint);
 }
 

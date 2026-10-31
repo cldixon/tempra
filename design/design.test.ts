@@ -56,3 +56,30 @@ test("an SVG figure's text inherits the reader's font from its container, never 
   expect(block(".prose .diagram-svg svg")).not.toContain("font-family");
   expect(block(".lightbox-diagram svg")).not.toContain("font-family");
 });
+
+// Token hygiene (TEMPRA-227): every token a stylesheet reads is defined.
+test("every --tempra-* a stylesheet reads is defined", () => {
+  const src = (f: string) => readFileSync(join(import.meta.dir, "src", f), "utf8");
+  const tokens = src("tokens.css");
+  const names = (text: string) =>
+    new Set([...text.matchAll(/^\s*(--tempra-[a-z0-9-]+):/gm)].map((m) => m[1] as string));
+  const defined = names(tokens);
+  const sheets = [
+    "tokens.css",
+    "fonts.css",
+    "base.css",
+    "prose.css",
+    "reader.css",
+    "workspace.css",
+    "concept.css",
+    "comments.css",
+    "views.css",
+    "public.css",
+    "panel.css",
+  ];
+  for (const f of sheets) {
+    for (const [, name] of src(f).matchAll(/var\((--tempra-[a-z0-9-]+)/g)) {
+      expect(defined.has(name as string), `${f} reads ${name}`).toBe(true);
+    }
+  }
+});

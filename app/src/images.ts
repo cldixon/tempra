@@ -114,7 +114,7 @@ export function imageSource(urls: Urls, ref: ImageRef): ImageSource {
 
 /** The phone's breakpoint (tokens.css, `NARROW` in frame.ts): images span the screen. */
 const PHONE = "(max-width: 900px) 100vw";
-/** The text's column (`--tempra-column-text`) and a wide figure's (`--tempra-figure-wide`). */
+/** The text's column (`--tempra-size-column-text`) and a wide figure's (`--tempra-size-figure-wide`). */
 const COLUMN = 620;
 const WIDE = 960;
 
