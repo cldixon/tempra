@@ -1,48 +1,43 @@
 ---
 import Base from "../layouts/Base.astro";
+import { APP } from "../site";
 
-const APP = "https://app.tempra.dev";
-
-// Placeholder copy (TEMPRA-7): the structure and the core message, not the final words.
-const concepts = [
+// The loop first, then what has shipped, in plain words (TEMPRA-126, W-2 and W-4).
+const features = [
   {
-    title: "Libraries of concepts",
-    body: "Your knowledge lives in libraries: markdown files, one idea each, with frontmatter that says what kind of thing it is. The format is OKF, so it stays portable.",
+    title: "Comments, answered",
+    body: "Select text and comment, or ask for a change. Mention @tempra and it answers in the thread; your own agents pick up what is left open.",
   },
   {
-    title: "Your agents read and write",
-    body: "Connect Claude, Claude Code or any MCP client. Agents browse, search, read and write concepts, as you or as themselves.",
+    title: "Agents at work, live",
+    body: "See which page an agent is reading or writing as it works, and its changes arrive while you read.",
   },
   {
-    title: "Every change in a ledger",
-    body: "Each write is recorded with who made it and why. See the history of any concept, compare versions and undo.",
+    title: "Figures, diagrams and charts",
+    body: "Pages hold images, video and PDFs, and diagrams and charts that agents write as text and Tempra draws.",
   },
   {
-    title: "Trust you can see",
-    body: "Concepts carry their sources, a trust tier and a review date, so agents know what to rely on and what needs another look.",
-  },
-  {
-    title: "Yours to keep",
-    body: "Export a library as a plain bundle at any time. Delete your account and your data goes with it.",
+    title: "History and checking",
+    body: "Every change is kept with who made it. See what changed since you last checked a page, and export a library as plain markdown at any time.",
   },
 ];
 
 const steps = [
-  "Request access with your email (Tempra is in private beta).",
-  "Connect your agent with one URL.",
+  "Request access with your email.",
+  "Connect Claude, Claude Code or any MCP client with one URL.",
   "Ask it to write down what you know.",
 ];
 ---
 
 <Base
-  title="Tempra: a knowledge base your agents can write"
-  description="Tempra keeps your knowledge as markdown concepts that you and your AI agents read and write, with every change recorded."
+  title="Tempra: your agents write it down"
+  description="A knowledge base your AI agents write and you read, comment on and check, with every change kept."
 >
   <section aria-labelledby="hero">
-    <h1 id="hero">A knowledge base your agents can write.</h1>
+    <h1 id="hero">Your agents write it down. You read, comment and check.</h1>
     <p class="lede">
-      Tempra keeps what you know as plain markdown that you and your AI agents read and write
-      together, with every change recorded.
+      Tempra is a knowledge base for you and your AI agents. They write the pages; you read them,
+      comment, and mark what you have checked. Every change is kept.
     </p>
     <p class="public-actions">
       <a class="button primary" href={`${APP}/request-access`}>Request access</a>
@@ -51,14 +46,14 @@ const steps = [
     <p class="muted">Tempra is in private beta.</p>
   </section>
 
-  <section aria-labelledby="concepts">
-    <h2 id="concepts">How it works</h2>
-    <ul class="features">
+  <section aria-labelledby="features">
+    <h2 id="features">What you get</h2>
+    <ul class="features" role="list">
       {
-        concepts.map((c) => (
+        features.map((f) => (
           <li>
-            <h3>{c.title}</h3>
-            <p>{c.body}</p>
+            <h3>{f.title}</h3>
+            <p>{f.body}</p>
           </li>
         ))
       }
@@ -67,7 +62,7 @@ const steps = [
 
   <section aria-labelledby="start">
     <h2 id="start">Start in three steps</h2>
-    <ol class="steps">
+    <ol class="steps" role="list">
       {steps.map((s) => <li>{s}</li>)}
     </ol>
     <p class="public-actions">

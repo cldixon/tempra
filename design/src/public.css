@@ -1,12 +1,16 @@
 /*
- * The public pages (TEMPRA-110): the landing page (site/, tempra.dev) and the app's server pages
- * (sign-in, app consent, the email-change link, error pages). Take 3's look without the
- * workspace: the ground, the wordmark, the page as one sheet with a hairline edge, a quiet foot.
- * Nothing here needs a script.
+ * The public pages (TEMPRA-110; flat since TEMPRA-126): the landing page (site/, tempra.dev) and
+ * the app's server pages (sign-in, app consent, the email-change link, error pages). Flat like the
+ * app's take 4 (tempra-dev decisions/take4-review-answers.md, answer 9): a bar with the wordmark
+ * over a hairline, the page as a plain column on the page's background (no sheet on a ground),
+ * and a quiet foot over a hairline. Nothing here needs a script.
+ *
+ * Markup: body.public (.narrow for a form or a message) > a.skip-link, header.public-head,
+ * main#main.public-main, footer.public-foot > nav > ul.
  */
 
-/* The wordmark: the tile with the initial, as the sidebar's library switcher draws it, and the
-   name. */
+/* The wordmark: the tile with the initial, as the app's top bar draws it, and the name. It links
+   to tempra.dev. */
 .wordmark {
   display: inline-flex;
   align-items: center;
@@ -22,20 +26,41 @@
   color: var(--tempra-color-text);
 }
 
-/* The frame: a column on the ground, the sheet in the middle of it. */
+/* The frame: three bands across the window, their content in one centred column. */
 .public {
+  --public-width: var(--tempra-page-width);
+  --public-inline: max(16px, (100% - var(--public-width)) / 2);
+
   display: flex;
   flex-direction: column;
-  align-items: center;
   min-height: 100dvh;
-  padding: 0 16px var(--tempra-space-4);
+  padding: 0;
+  background: var(--tempra-color-bg);
 }
 
-.public-head,
-.public-foot,
-.public-sheet {
-  width: 100%;
-  max-width: var(--tempra-page-width);
+/* A form or a message (the server pages): a narrower column. */
+.public.narrow {
+  --public-width: 560px;
+}
+
+/* Skip to the page's content: out of sight until the keyboard reaches it. */
+.skip-link {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  z-index: 1;
+  padding: 5px 12px;
+  border: 1px solid var(--tempra-color-border);
+  border-radius: var(--tempra-radius-pill);
+  background: var(--tempra-color-bg);
+  color: var(--tempra-color-text);
+  font-size: var(--tempra-text-ui);
+  text-decoration: none;
+  transform: translateY(calc(-100% - 16px));
+}
+
+.skip-link:focus-visible {
+  transform: none;
 }
 
 .public-head {
@@ -44,8 +69,9 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  min-height: var(--tempra-bar);
-  padding: 8px 4px;
+  min-height: var(--tempra-topbar);
+  padding: 8px var(--public-inline);
+  border-bottom: 1px solid var(--tempra-color-border);
 }
 
 .public-nav {
@@ -64,35 +90,33 @@
   color: var(--tempra-color-text);
 }
 
-.public-sheet {
-  padding: 48px var(--tempra-page-pad) 56px;
-  border: 1px solid var(--tempra-color-border);
-  border-radius: var(--tempra-radius-card);
-  background: var(--tempra-color-bg);
+.public-main {
+  flex: 1;
+  padding: 48px var(--public-inline) 64px;
 }
 
-/* A form or a message (the server pages): a narrower column, the wordmark and foot with it. */
-.public.narrow .public-head,
-.public.narrow .public-foot,
-.public.narrow .public-sheet {
-  max-width: 560px;
-}
-
-.public-sheet > :first-child {
+.public-main > :first-child {
   margin-top: 0;
 }
 
-.public-sheet > :last-child {
+.public-main > :last-child {
   margin-bottom: 0;
 }
 
 .public-foot {
+  padding: 16px var(--public-inline);
+  border-top: 1px solid var(--tempra-color-border);
+  color: var(--tempra-color-muted);
+  font-size: var(--tempra-text-meta);
+}
+
+.public-foot ul {
   display: flex;
   flex-wrap: wrap;
   gap: 4px 16px;
-  padding: 16px 4px;
-  color: var(--tempra-color-muted);
-  font-size: var(--tempra-text-meta);
+  margin: 0;
+  padding: 0;
+  list-style: none;
 }
 
 .public-foot a {
@@ -106,7 +130,7 @@
 
 /* ---------- The landing page ---------- */
 
-.public-sheet section + section {
+.public-main section + section {
   margin-top: 56px;
 }
 
@@ -124,20 +148,20 @@
   gap: 8px;
 }
 
-/* What Tempra does: short cards between hairlines, two to a row where there is room. */
+/* What Tempra does: a list between hairlines, two to a row where there is room. */
 .features {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr));
-  gap: 10px;
+  gap: 0 32px;
   margin: 16px 0 0;
   padding: 0;
+  border-bottom: 1px solid var(--tempra-color-border);
   list-style: none;
 }
 
 .features li {
-  padding: 16px 18px;
-  border: 1px solid var(--tempra-color-border);
-  border-radius: var(--tempra-radius-box);
+  padding: 16px 0;
+  border-top: 1px solid var(--tempra-color-border);
 }
 
 .features h3 {
@@ -153,7 +177,7 @@
   line-height: var(--tempra-line-height);
 }
 
-/* Steps: numbered in the faint grey, one to a line. */
+/* Steps: numbered in the muted grey, one to a line. */
 .steps {
   margin: 16px 0 24px;
   padding: 0;
@@ -180,7 +204,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Terms and privacy: plain text at a comfortable measure. */
+/* Terms and privacy: plain text at a comfortable measure, dated, in numbered sections. */
 .legal {
   max-width: 38em;
 }
@@ -190,12 +214,9 @@
 }
 
 @media (max-width: 640px) {
-  .public {
-    padding: 0 var(--tempra-gutter) var(--tempra-space-3);
-  }
-
-  .public-sheet {
-    padding: 28px 20px 36px;
+  .public-main {
+    padding-top: 28px;
+    padding-bottom: 40px;
   }
 
   .public-nav a:not(.button) {
