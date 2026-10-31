@@ -1,6 +1,7 @@
 import { OAuthProvider } from "@cloudflare/workers-oauth-provider";
 import { type AgentKey, agentName, connectionAgent, tokenAgent } from "./agents";
 import { actedBy, createApp, type Deps } from "./app";
+import { mcpOp, withCostHeader, withCosts } from "./costs";
 import { imagesService } from "./images";
 import { handleMcp, type McpContext } from "./mcp/server";
 import { notifying, postComment } from "./notify";
@@ -112,12 +113,14 @@ export function createWorker(deps: (env: Cloudflare.Env) => Deps): {
             return new Response(null, { status: 401 });
           }
           let write = false;
+          let op = "mcp:";
           if (request.method === "POST") {
             const body = await request
               .clone()
               .json()
               .catch(() => null);
             write = mcpWrites(body);
+            op = mcpOp(body);
             // What the client says about itself, once per session (TEMPRA-75): a claim, kept
             // to tell agents apart and never used to authorize.
             const info = initializeInfo(body);
@@ -136,31 +139,38 @@ export function createWorker(deps: (env: Cloudflare.Env) => Deps): {
             if (e instanceof OkfError) return Response.json(e.toJSON(), { status: e.status });
             throw e;
           }
-          return handleMcp(request, {
-            ...caller,
-            // Reads over MCP are counted as MCP's (TEMPRA-220).
-            open: (t) => notifying(d, t, d.library(t, "mcp"), (p) => ctx.waitUntil(p)),
-            comment: (t, req, action) => postComment(d, t, d.library(t, "mcp"), req, action),
-            about: (id) => d.accounts.about(id),
-            agentNames: async (ids) =>
-              new Map((await d.accounts.agents(ids)).map((a) => [a.id, agentName(a)])),
-            blobs: d.blobs,
-            images: d.images ?? imagesService({ blobs: d.blobs }),
-            meter: (e) => d.meter?.({ ...e, account: who.account }),
-            fetch: d.fetch,
-            // The render tool and read's diagrams (TEMPRA-166), counted per account.
-            render: (req, library) =>
-              d.renderDiagram
-                ? d.renderDiagram(req, { account: who.account, library })
-                : Promise.resolve({ error: { message: RENDER_UNAVAILABLE, line: 0, column: 0 } }),
-            poster: (req, library) =>
-              d.posterFrame
-                ? d.posterFrame(req, { account: who.account, library })
-                : Promise.resolve({ error: RENDER_UNAVAILABLE }),
-            allowRender: async () =>
-              (await d.rateLimit?.("render", `render:${who.account}`)) ?? true,
-            origin,
-          });
+          // What the tool call cost its library's object, metered under its name (TEMPRA-228).
+          const { value: res, cost } = await withCosts(() =>
+            handleMcp(request, {
+              ...caller,
+              // Reads over MCP are counted as MCP's (TEMPRA-220).
+              open: (t) => notifying(d, t, d.library(t, "mcp"), (p) => ctx.waitUntil(p)),
+              comment: (t, req, action) => postComment(d, t, d.library(t, "mcp"), req, action),
+              about: (id) => d.accounts.about(id),
+              agentNames: async (ids) =>
+                new Map((await d.accounts.agents(ids)).map((a) => [a.id, agentName(a)])),
+              blobs: d.blobs,
+              images: d.images ?? imagesService({ blobs: d.blobs }),
+              meter: (e) => d.meter?.({ ...e, account: who.account }),
+              fetch: d.fetch,
+              // The render tool and read's diagrams (TEMPRA-166), counted per account.
+              render: (req, library) =>
+                d.renderDiagram
+                  ? d.renderDiagram(req, { account: who.account, library })
+                  : Promise.resolve({ error: { message: RENDER_UNAVAILABLE, line: 0, column: 0 } }),
+              poster: (req, library) =>
+                d.posterFrame
+                  ? d.posterFrame(req, { account: who.account, library })
+                  : Promise.resolve({ error: RENDER_UNAVAILABLE }),
+              allowRender: async () =>
+                (await d.rateLimit?.("render", `render:${who.account}`)) ?? true,
+              origin,
+            }),
+          );
+          if (cost.calls > 0) {
+            d.meter?.({ kind: "cost", account: who.account, library: who.library, op, cost });
+          }
+          return withCostHeader(request, res, cost);
         },
       },
       defaultHandler: { fetch: (request, env, ctx) => app.fetch(request, env, ctx) },

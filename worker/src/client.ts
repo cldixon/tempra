@@ -1,3 +1,4 @@
+import { recordCost } from "./costs";
 import { type DiagramExport, drawnDiagrams, isDrawnDiagram } from "./diagram-export";
 import type { Caller } from "./feed";
 import { checkAttachment, formatOf, imageInfo } from "./media";
@@ -6,6 +7,7 @@ import { sha256Hex } from "./okf/hash";
 import { normalizePath } from "./okf/paths";
 import { OkfError } from "./store/errors";
 import type { Reading } from "./store/reads";
+import type { RowCost, RowTally } from "./store/sql";
 import type { BlobRef, ImageRef, ImportFile, LibraryStore, WriteOp } from "./store/store";
 import { writeTar } from "./util/tar";
 
@@ -68,10 +70,14 @@ export type LibraryClient = {
     : never;
 };
 
-/** Errors cross the DO boundary as data, since RPC does not keep an Error's fields. */
-export type CallResult =
+/**
+ * Errors cross the DO boundary as data, since RPC does not keep an Error's fields. `cost` is the
+ * rows the call read and wrote, when the object counts them (TEMPRA-228).
+ */
+export type CallResult = (
   | { ok: true; value: unknown }
-  | { ok: false; status: number; code: string; message: string; extra: Record<string, unknown> };
+  | { ok: false; status: number; code: string; message: string; extra: Record<string, unknown> }
+) & { cost?: RowCost };
 
 /**
  * One call to a library. `caller` is who makes it (feed.ts `Caller`): an agent's reads are
@@ -88,7 +94,10 @@ export function makeClient(call: CallFn, caller: Caller | null = null): LibraryC
   const client: Record<string, (...args: unknown[]) => Promise<unknown>> = {};
   for (const m of LIBRARY_METHODS) {
     client[m] = async (...args: unknown[]) => {
+      const t = Date.now();
       const r = await call(m, args, caller);
+      // Added to the request's cost, when it is measured (costs.ts, TEMPRA-228).
+      recordCost(m, args, r.cost, Date.now() - t);
       if (r.ok) return r.value;
       throw new OkfError(r.status, r.code, r.message, r.extra);
     };
@@ -221,8 +230,16 @@ export async function callStore(
     references?: (hashes: string[]) => Promise<void>;
     /** Who reads, for read history (TEMPRA-220); null for the Worker's own calls. */
     reading?: Reading | null;
+    /**
+     * Counts the store's rows (TEMPRA-228): the call's cost, from just before its synchronous
+     * part, comes back with its result.
+     */
+    rows?: RowTally;
   } = {},
 ): Promise<CallResult> {
+  let mark: RowCost | undefined;
+  const costed = <R extends CallResult>(r: R): R =>
+    opts.rows && mark ? { ...r, cost: opts.rows.since(mark) } : r;
   try {
     if (!LIBRARY_METHODS.includes(method)) {
       throw new OkfError(400, "bad_method", `Unknown library method ${method}.`);
@@ -254,10 +271,18 @@ export async function callStore(
       }
     }
     const fn = store[method] as unknown as (...a: unknown[]) => unknown;
-    return { ok: true, value: store.reading(opts.reading ?? null, () => fn.apply(store, args)) };
+    mark = opts.rows?.mark();
+    const value = store.reading(opts.reading ?? null, () => fn.apply(store, args));
+    return costed({ ok: true, value });
   } catch (e) {
     if (e instanceof OkfError) {
-      return { ok: false, status: e.status, code: e.code, message: e.message, extra: e.extra };
+      return costed({
+        ok: false,
+        status: e.status,
+        code: e.code,
+        message: e.message,
+        extra: e.extra,
+      });
     }
     throw e;
   }

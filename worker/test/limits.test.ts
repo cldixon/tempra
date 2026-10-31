@@ -137,7 +137,9 @@ describe("limits (v2 spec: Limits, abuse and metering)", () => {
       body: md("x"),
     });
     await s.req("/tree");
-    expect(s.usage).toEqual([
+    // What each request cost its library is a data point of its own (TEMPRA-228, below).
+    const counted = () => s.usage.filter((e) => e.kind !== "cost");
+    expect(counted()).toEqual([
       { kind: "request", account: "owner", library: "lib-1" },
       { kind: "write", account: "owner", library: "lib-1" },
       { kind: "request", account: "owner", library: "lib-1" },
@@ -146,9 +148,60 @@ describe("limits (v2 spec: Limits, abuse and metering)", () => {
     // API answers its shell carries (TEMPRA-175: the tree and the agents) are, one data point
     // each, as the app's own calls for them would have been.
     await s.app.request(`${UI}/`);
-    expect(s.usage.slice(3)).toEqual(
+    expect(counted().slice(3)).toEqual(
       Array(2).fill({ kind: "request", account: "owner", library: "lib-1" }),
     );
+  });
+
+  test("metering: what each request and tool call cost its library (TEMPRA-228)", async () => {
+    const s = setup();
+    const put = await s.req("/files/a.md", {
+      method: "PUT",
+      headers: { "Content-Type": "text/markdown", "X-Tempra-Cost": "1" },
+      body: md("searchable words"),
+    });
+    expect(put.status).toBe(200);
+    const costs = s.usage.filter((e) => e.kind === "cost");
+    expect(costs.map((e) => [e.op, e.account, e.library])).toEqual([
+      ["PUT /files/*", "owner", "lib-1"],
+    ]);
+    const c = costs[0]?.cost;
+    expect(c?.calls).toBeGreaterThan(0);
+    expect(c?.rowsWritten).toBeGreaterThan(0);
+    // The search index's rows are told apart: a new concept adds its fts row and its rowid.
+    expect(c?.ftsRowsWritten).toBeGreaterThanOrEqual(2);
+    // Asked for, the answer carries it, each DO call by its operation.
+    const header = JSON.parse(put.headers.get("X-Tempra-Cost") ?? "null");
+    expect(header.rows_written).toBe(c?.rowsWritten);
+    expect(header.ops.map((o: { op: string }) => o.op)).toContain("write");
+    // Not asked for, it does not.
+    const tree = await s.req("/tree");
+    expect(tree.headers.get("X-Tempra-Cost")).toBeNull();
+
+    const mcp = (name: string, args: unknown) =>
+      s.anon.request("/mcp", {
+        method: "POST",
+        headers: {
+          Authorization: "Bearer writer",
+          "Content-Type": "application/json",
+          Accept: "application/json, text/event-stream",
+          "X-Tempra-Cost": "1",
+        },
+        body: JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name, arguments: args },
+        }),
+      });
+    const edit = await mcp("edit", {
+      path: "a.md",
+      edits: [{ old: "searchable", new: "findable" }],
+    });
+    const cost = JSON.parse(edit.headers.get("X-Tempra-Cost") ?? "null");
+    expect(cost.ops.map((o: { op: string }) => o.op)).toContain("edit");
+    expect(cost.fts_rows_written).toBeGreaterThan(0);
+    expect(s.usage.filter((e) => e.kind === "cost").at(-1)?.op).toBe("mcp:edit");
   });
 });
 

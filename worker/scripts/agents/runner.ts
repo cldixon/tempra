@@ -27,6 +27,28 @@ export interface CallResult {
   startedAt: number;
 }
 
+/**
+ * What a call cost its library's object, as the Worker's `X-Tempra-Cost` header says
+ * (TEMPRA-228, src/costs.ts): the totals, and each Library DO call by its operation.
+ */
+export interface WireCost {
+  calls: number;
+  rows_read: number;
+  rows_written: number;
+  fts_rows_written: number;
+  read_flush_rows_written: number;
+  ms: number;
+  ops: {
+    op: string;
+    rows_read: number;
+    rows_written: number;
+    fts_rows_written: number;
+    read_flush_rows_written: number;
+    tables: Record<string, number>;
+    ms: number;
+  }[];
+}
+
 /** One timed MCP call, for the report. */
 export interface CallRecord {
   agent: string;
@@ -37,11 +59,15 @@ export interface CallRecord {
   at: number;
   seq: number | null;
   limited: boolean;
+  /** Null when the deployment does not say (one from before TEMPRA-228). */
+  cost: WireCost | null;
 }
 
 /** An MCP client acting as one agent, on one library. */
 export class Agent {
   private client: Client | null = null;
+  /** The cost header of the agent's last answer; its calls are made one at a time. */
+  private lastCost: WireCost | null = null;
 
   constructor(
     readonly spec: AgentSpec,
@@ -59,7 +85,16 @@ export class Agent {
 
   async connect() {
     const transport = new StreamableHTTPClientTransport(new URL("/mcp", this.url), {
-      requestInit: { headers: { Authorization: `Bearer ${this.spec.token}` } },
+      // Each answer says what it cost the library (TEMPRA-228).
+      requestInit: {
+        headers: { Authorization: `Bearer ${this.spec.token}`, "X-Tempra-Cost": "1" },
+      },
+      fetch: async (input, init) => {
+        const res = await fetch(input, init);
+        const cost = res.headers.get("X-Tempra-Cost");
+        if (cost) this.lastCost = JSON.parse(cost) as WireCost;
+        return res;
+      },
     });
     this.client = new Client({ name: `tempra-agents/${this.spec.name}`, version: "1.0.0" });
     await this.client.connect(transport);
@@ -87,6 +122,7 @@ export class Agent {
   private async attempt(tool: string, args: Record<string, unknown>): Promise<CallResult> {
     if (!this.client) throw new Error(`${this.name} is not connected`);
     const t0 = performance.now();
+    this.lastCost = null;
     let result: CallResult;
     try {
       const r = await this.client.callTool({
@@ -127,8 +163,42 @@ export class Agent {
       at: performance.now() - this.started,
       seq: result.seq,
       limited: result.limited,
+      cost: this.lastCost,
     });
     return result;
+  }
+
+  /**
+   * PUTs a file to an upload URL from `prepare_upload`, as an agent's shell would with its curl
+   * line; recorded as the tool `upload`, with what it cost (TEMPRA-228).
+   */
+  async upload(url: string, bytes: Uint8Array, type: string): Promise<boolean> {
+    let wait = 5000;
+    for (;;) {
+      const t0 = performance.now();
+      const res = await fetch(url, {
+        method: "PUT",
+        headers: { "Content-Type": type, "X-Tempra-Cost": "1" },
+        body: bytes,
+      });
+      const cost = res.headers.get("X-Tempra-Cost");
+      await res.arrayBuffer();
+      const limited = res.status === 429;
+      this.record({
+        agent: this.name,
+        tool: "upload",
+        ok: res.ok,
+        ms: performance.now() - t0,
+        at: performance.now() - this.started,
+        seq: null,
+        limited,
+        cost: cost ? (JSON.parse(cost) as WireCost) : null,
+      });
+      // A patient agent waits out a rate limit, as `call` does.
+      if (!limited || !this.patient || wait > 60_000) return res.ok;
+      await sleep(wait);
+      wait *= 2;
+    }
   }
 
   /** The current hash of a file, from `read`. */
@@ -217,6 +287,49 @@ export function summarize(values: number[]) {
     p50: round(at(50)),
     p95: round(at(95)),
     max: round(v[v.length - 1] ?? 0),
+  };
+}
+
+/** Mean cost per call of some calls, rounded to a tenth. */
+export interface CostSummary {
+  /** Calls whose answer said its cost. */
+  n: number;
+  rowsRead: number;
+  rowsWritten: number;
+  ftsRowsWritten: number;
+  readFlushRowsWritten: number;
+  /** Time waiting on the library's object, from the Worker. */
+  doMs: number;
+  /** Rows written per call by table, for the tables written. */
+  tables: Record<string, number>;
+}
+
+/** The mean of what each cost record says. */
+export function meanCost(
+  costs: {
+    rows_read: number;
+    rows_written: number;
+    fts_rows_written: number;
+    read_flush_rows_written: number;
+    ms: number;
+    tables?: Record<string, number>;
+  }[],
+): CostSummary {
+  const n = costs.length;
+  const mean = (f: (c: (typeof costs)[number]) => number) =>
+    n === 0 ? 0 : Math.round((costs.reduce((s, c) => s + f(c), 0) / n) * 10) / 10;
+  const tables: Record<string, number> = {};
+  for (const t of new Set(costs.flatMap((c) => Object.keys(c.tables ?? {})))) {
+    tables[t] = mean((c) => c.tables?.[t] ?? 0);
+  }
+  return {
+    n,
+    rowsRead: mean((c) => c.rows_read),
+    rowsWritten: mean((c) => c.rows_written),
+    ftsRowsWritten: mean((c) => c.fts_rows_written),
+    readFlushRowsWritten: mean((c) => c.read_flush_rows_written),
+    doMs: mean((c) => c.ms),
+    tables,
   };
 }
 
