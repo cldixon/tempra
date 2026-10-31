@@ -1,6 +1,6 @@
 import { isDrawnDiagram } from "./diagram-export";
 import type { Caller } from "./feed";
-import { checkAttachment, formatOf, imageInfo } from "./media";
+import { checkAttachment, formatOf, imageInfo, videoSizeInRanges } from "./media";
 import type { FigureFact } from "./okf/figures";
 import { sha256Hex } from "./okf/hash";
 import { normalizePath } from "./okf/paths";
@@ -339,10 +339,18 @@ export async function describeBlob(
   return { hash, size: bytes.length, ...checkAttachment(bytes, declared, path) };
 }
 
+/** Videos whose frame size their header gives (media.ts `videoSize`; TEMPRA-164, TEMPRA-183). */
+const SIZED_VIDEO = new Set(["video/mp4", "video/webm"]);
+
+/** Whether a file's pixel size can be worked out from its bytes: an image, or an MP4 or WebM video. */
+const sizable = (media: string | null | undefined): media is string =>
+  !!media && (media.startsWith("image/") || SIZED_VIDEO.has(media));
+
 /**
  * An attachment's view with its width and height, worked out once from its bytes for an image
- * stored before dimensions were (TEMPRA-152) and kept with `setDimensions`; an image that does
- * not decode is kept as 0 by 0, so it is not read again. Views of other files pass through.
+ * stored before dimensions were (TEMPRA-152) or a video stored before TEMPRA-164 (TEMPRA-183),
+ * and kept with `setDimensions`; one that does not decode is kept as 0 by 0, so it is never read
+ * again (TEMPRA-185). Views of other files pass through.
  */
 export async function withDimensions<V extends { kind: string }>(
   lib: Pick<LibraryClient, "setDimensions">,
@@ -355,25 +363,46 @@ export async function withDimensions<V extends { kind: string }>(
     media: string | null;
     width?: number | null;
   };
-  if (a.kind !== "attachment" || a.width !== undefined || !a.media?.startsWith("image/")) {
-    return view;
-  }
+  if (a.kind !== "attachment" || a.width !== undefined || !sizable(a.media)) return view;
   const dims = await workOutDimensions(lib, blobs, a.hash, a.media);
   return dims && dims.width > 0 && dims.height > 0 ? { ...view, ...dims } : view;
 }
 
-/** An image's width and height from its bytes, kept with `setDimensions` (0 by 0 if it does not decode). */
+/**
+ * An image's or a video's width and height from its bytes, kept with `setDimensions`, 0 by 0 when
+ * they do not decode, so the next read finds it settled and leaves R2 alone (TEMPRA-185). An image
+ * is read whole; a video only in ranges, its first bytes and, for an MP4, its box headers and
+ * `moov` (`videoSizeInRanges`; TEMPRA-183). Null, and nothing kept, when the bytes are missing.
+ */
 async function workOutDimensions(
   lib: Pick<LibraryClient, "setDimensions">,
   blobs: BlobStore,
   hash: string,
   media: string,
 ): Promise<{ width: number; height: number } | null> {
-  const bytes = await blobBytes(blobs, hash);
-  if (!bytes) return null;
-  const info = imageInfo(bytes, formatOf(media));
-  const width = info?.ok ? info.width : 0;
-  const height = info?.ok ? info.height : 0;
+  let size: { width: number; height: number } | null;
+  if (media.startsWith("video/")) {
+    const stored = await blobs.head(hash);
+    if (!stored) return null;
+    size = await videoSizeInRanges(
+      async (offset, length) => {
+        const obj = await blobs.get(hash, { offset, length });
+        if (!obj) return null;
+        return obj.body instanceof Uint8Array
+          ? obj.body
+          : new Uint8Array(await new Response(obj.body).arrayBuffer());
+      },
+      stored.size,
+      media,
+    );
+  } else {
+    const bytes = await blobBytes(blobs, hash);
+    if (!bytes) return null;
+    const info = imageInfo(bytes, formatOf(media));
+    size = info?.ok ? { width: info.width, height: info.height } : null;
+  }
+  const width = size?.width ?? 0;
+  const height = size?.height ?? 0;
   await lib.setDimensions(hash, width, height);
   return { width, height };
 }
@@ -395,7 +424,7 @@ export async function figuresWithDimensions(
   const todo = new Map<string, string>();
   for (const f of figures) {
     if (f.kind !== "image" || f.status !== "ok" || !f.blob || f.blob.width !== null) continue;
-    if (!f.blob.media?.startsWith("image/")) continue;
+    if (!sizable(f.blob.media)) continue;
     if (todo.size >= FIGURE_DIMENSIONS_PER_READ) break;
     todo.set(f.blob.hash, f.blob.media);
   }
@@ -419,9 +448,9 @@ export async function figuresWithDimensions(
 }
 
 /**
- * A concept's `images` (FileView) with every image's size worked out, as `withDimensions` does for
- * one attachment, so the reader can reserve each image's box (TEMPRA-162). Null when it does not
- * decode.
+ * A concept's `images` (FileView) with every image's and video's size worked out, as
+ * `withDimensions` does for one attachment, so the reader can reserve each one's box (TEMPRA-162,
+ * TEMPRA-183). Null when it does not decode.
  */
 export async function imagesWithDimensions(
   lib: Pick<LibraryClient, "setDimensions">,
@@ -431,7 +460,7 @@ export async function imagesWithDimensions(
   const out: Record<string, ImageRef> = {};
   await Promise.all(
     Object.entries(images).map(async ([path, ref]) => {
-      if (ref.width !== undefined || !ref.media?.startsWith("image/")) {
+      if (ref.width !== undefined || !sizable(ref.media)) {
         out[path] = ref;
         return;
       }

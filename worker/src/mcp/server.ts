@@ -976,6 +976,8 @@ export function buildServer(ctx: McpContext): McpServer {
                     `supplied by: @${view.supplied_by} (${view.origin === "agent" ? "an agent made the file; the person sent it" : "the person sent the file"})`,
                   ]
                 : []),
+              ...(view.poster ? [`poster: /${view.poster.path}`] : []),
+              ...(view.poster_for ? [`poster for: /${view.poster_for}`] : []),
               `versions: ${versions}`,
               `download (15 minutes): ${url}`,
             ].join("\n"),

@@ -218,6 +218,55 @@ export function videoSize(b: Uint8Array, media: string): { width: number; height
   }
 }
 
+/** How much of a video's start is read for its frame size when it was stored without one (TEMPRA-183). */
+export const VIDEO_HEAD_BYTES = 64 * 1024;
+/** An MP4 whose `moov` box is larger than this is left unsized rather than read. */
+const MOOV_MAX_BYTES = 4 * 1024 * 1024;
+/** At most this many top-level MP4 boxes are stepped over looking for `moov`. */
+const TOP_BOXES_MAX = 64;
+
+/**
+ * A stored video's frame size, as `videoSize` finds it, read in ranges rather than whole (a video
+ * from before TEMPRA-164; TEMPRA-183): the first VIDEO_HEAD_BYTES, which hold a WebM's Tracks;
+ * for an MP4, its top-level boxes stepped over by their headers until `moov`, which is read alone
+ * (it often comes after the media data). `read` gives `length` bytes from `offset` of a blob
+ * `size` bytes long. Null when it does not say or does not parse.
+ */
+export async function videoSizeInRanges(
+  read: (offset: number, length: number) => Promise<Uint8Array | null>,
+  size: number,
+  media: string,
+): Promise<{ width: number; height: number } | null> {
+  if (media !== "video/mp4" && media !== "video/webm") return null;
+  const head = await read(0, Math.min(size, VIDEO_HEAD_BYTES));
+  if (!head) return null;
+  if (media === "video/webm") return videoSize(head, media);
+  const slice = async (at: number, n: number) =>
+    at + n <= head.length ? head.subarray(at, at + n) : read(at, n);
+  let at = 0;
+  for (let i = 0; i < TOP_BOXES_MAX && at + 8 <= size; i++) {
+    const h = await slice(at, Math.min(16, size - at));
+    if (!h || h.length < 8) return null;
+    const v = new DataView(h.buffer, h.byteOffset, h.byteLength);
+    let box = v.getUint32(0);
+    const type = ascii(h, 4, 4);
+    let header = 8;
+    if (box === 1) {
+      if (h.length < 16) return null;
+      box = Number(v.getBigUint64(8));
+      header = 16;
+    } else if (box === 0) box = size - at;
+    if (box < header || at + box > size) return null;
+    if (type === "moov") {
+      if (box > MOOV_MAX_BYTES) return null;
+      const moov = await slice(at, box);
+      return moov && moov.length === box ? videoSize(moov, media) : null;
+    }
+    at += box;
+  }
+  return null;
+}
+
 function mp4Size(b: Uint8Array): { width: number; height: number } | null {
   const v = new DataView(b.buffer, b.byteOffset, b.byteLength);
   const moov = boxes(b, 0, b.length).find((x) => x[0] === "moov");

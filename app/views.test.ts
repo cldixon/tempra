@@ -5,6 +5,7 @@ import type { LedgerEvent, LedgerRequest } from "./src/activity";
 import { actorView } from "./src/agents";
 import type { FileJson, HistoryEvent, Json } from "./src/concept/data";
 import StatusPills from "./src/concept/StatusPills.svelte";
+import Attachment from "./src/pages/Attachment.svelte";
 import AttachmentImage from "./src/pages/AttachmentImage.svelte";
 import { describedAs, figureUse, hostOf, sizeText, versionsOf } from "./src/pages/attachment";
 import EmptyLibrary from "./src/pages/EmptyLibrary.svelte";
@@ -18,7 +19,7 @@ import type { ImageFigure } from "./src/reader/prepare";
 import type { OutlineFile } from "./src/tree";
 import { formatSize } from "./src/ui";
 import { Urls } from "./src/urls";
-import { draw } from "./test/dom";
+import { draw, settle } from "./test/dom";
 
 /** A component drawn into the DOM, as markup (Svelte's empty comment anchors left out). */
 // biome-ignore lint/suspicious/noExplicitAny: any component.
@@ -235,6 +236,84 @@ describe("an attachment's image (TEMPRA-162)", () => {
     expect(html).not.toContain("srcset");
     expect(sizeFact(legacy, null)).toBe("1.2 MB");
     expect(sizeFact(legacy, { w: 30, h: 20 })).toBe("1.2 MB · 30 × 20");
+  });
+});
+
+describe("a video's poster on the attachment pages (TEMPRA-182)", () => {
+  const video = {
+    kind: "attachment" as const,
+    path: "media/demo.webm",
+    seq: 9,
+    size: 2542,
+    media: "video/webm",
+    hash: "b".repeat(64),
+    width: 640,
+    height: 360,
+  };
+  const poster = { path: "media/demo.poster.png", hash: "c".repeat(64), media: "image/png" };
+
+  /** Answers the page's own calls (links, history) as an empty library would. */
+  function quiet() {
+    const real = globalThis.fetch;
+    globalThis.fetch = (async (input: RequestInfo | URL) => {
+      const path = new URL(String(input), "http://localhost/").pathname;
+      const body = path.includes("/links/")
+        ? { path: "", inbound: [], outbound: [], broken: [] }
+        : path.includes("/history/")
+          ? { events: [] }
+          : null;
+      if (body === null) return new Response('{"error":"not found"}', { status: 404 });
+      return new Response(JSON.stringify(body), {
+        headers: { "Content-Type": "application/json" },
+      });
+    }) as typeof fetch;
+    return () => {
+      globalThis.fetch = real;
+    };
+  }
+
+  test("a video with a poster beside it shows the poster on its page", async () => {
+    const restore = quiet();
+    try {
+      const { host, destroy } = draw(Attachment, {
+        urls,
+        head: 9,
+        file: { ...video, poster },
+      });
+      await settle();
+      const el = host.querySelector("video");
+      expect(el?.getAttribute("poster")).toBe(`/cl_dixon/tempra-dev/-/image/${poster.hash}`);
+      expect(el?.getAttribute("width")).toBe("640");
+      expect(host.textContent).not.toContain("Poster for");
+      destroy();
+      // Without a poster, none.
+      const bare = draw(Attachment, { urls, head: 9, file: { ...video, poster: null } });
+      await settle();
+      expect(bare.host.querySelector("video")?.hasAttribute("poster")).toBe(false);
+      bare.destroy();
+    } finally {
+      restore();
+    }
+  });
+
+  test("the poster's own page says which video it is the poster for", async () => {
+    const restore = quiet();
+    try {
+      const { host, destroy } = draw(Attachment, {
+        urls,
+        head: 9,
+        file: { ...poster, kind: "attachment", seq: 9, size: 214, poster_for: video.path },
+      });
+      await settle();
+      const fact = [...host.querySelectorAll(".attachment-facts > div")].find(
+        (d) => d.querySelector("dt")?.textContent === "Poster for",
+      );
+      expect(fact?.querySelector("a")?.getAttribute("href")).toBe(urls.file(video.path));
+      expect(fact?.querySelector("a")?.textContent).toBe("demo.webm");
+      destroy();
+    } finally {
+      restore();
+    }
   });
 });
 

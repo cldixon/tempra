@@ -510,6 +510,9 @@ export interface ServedBlob {
 /** The image types a video's poster may be, by the extension after `<name>.poster.`. */
 const POSTER_EXTENSIONS = ["png", "jpg", "jpeg", "webp", "avif"];
 
+/** The extensions a video a poster is named for may have (TEMPRA-182). */
+const VIDEO_EXTENSIONS = ["mp4", "webm", "m4v", "mov", "ogv"];
+
 export type FileView =
   | {
       kind: "concept";
@@ -547,11 +550,16 @@ export type FileView =
       size: number;
       media: string | null;
       /**
-       * An image's size in pixels; null when it has none (not an image, or an SVG that does not
-       * say), absent when never worked out (an attachment from before TEMPRA-152).
+       * An image's or a video's size in pixels; null when it has none (another file, an SVG that
+       * does not say, bytes that do not decode), absent when never worked out (an image from
+       * before TEMPRA-152, a video from before TEMPRA-164).
        */
       width?: number | null;
       height?: number | null;
+      /** A video's poster, the image beside it as `<name>.poster.png` (TEMPRA-182). */
+      poster?: { path: string } & ImageRef;
+      /** For a video's poster, the video's path (TEMPRA-182). */
+      poster_for?: string;
       /** Where this version's bytes were fetched from, when they were (TEMPRA-157). */
       source: AttachSource | null;
       /** What the file shows, in its writer's words (TEMPRA-170). */
@@ -3358,6 +3366,9 @@ export class LibraryStore {
     if (!e) throw this.gone(input, path, snap.seq);
     if (e.kind === "attachment") {
       const info = this.blobInfo(e.hash);
+      // A video and its poster name each other on their pages (TEMPRA-182).
+      const poster = info.media?.startsWith("video/") ? this.posterOf(snap, e.path) : null;
+      const posterFor = info.media?.startsWith("image/") ? this.videoOfPoster(snap, e.path) : null;
       return {
         kind: "attachment",
         path: e.path,
@@ -3366,6 +3377,8 @@ export class LibraryStore {
         size: info.size,
         media: info.media,
         ...(info.dims ?? {}),
+        ...(poster ? { poster: { path: poster.path, ...poster.ref } } : {}),
+        ...(posterFor ? { poster_for: posterFor } : {}),
         ...this.provenance(e.concept_id, e.hash, snap.seq),
       };
     }
@@ -3423,16 +3436,8 @@ export class LibraryStore {
       if (a?.kind !== "attachment") return undefined;
       const ref = this.imageRef(a.hash);
       if (ref.media?.startsWith("video/")) {
-        // A poster beside it: `demo.mp4` -> `demo.poster.png` (or .jpg, .webp, ...).
-        const stem = t.path.replace(/\.[^./]+$/, "");
-        for (const ext of POSTER_EXTENSIONS) {
-          const p = snap.lookup(`${stem}.poster.${ext}`);
-          if (p?.kind !== "attachment") continue;
-          const poster = this.imageRef(p.hash);
-          if (!poster.media?.startsWith("image/")) continue;
-          ref.poster = poster;
-          break;
-        }
+        const poster = this.posterOf(snap, t.path);
+        if (poster) ref.poster = poster.ref;
       }
       out[t.path] = ref;
       return undefined;
@@ -3448,6 +3453,35 @@ export class LibraryStore {
       size: info.size,
       ...(info.dims ? { width: info.dims.width, height: info.dims.height } : {}),
     };
+  }
+
+  /**
+   * A video's poster, the image attached beside it (`demo.mp4` -> `demo.poster.png`, or .jpg,
+   * .jpeg, .webp, .avif; TEMPRA-164), as the reader and the video's own page show it (TEMPRA-182).
+   */
+  private posterOf(snap: View, videoPath: string): { path: string; ref: ImageRef } | null {
+    const stem = videoPath.replace(/\.[^./]+$/, "");
+    for (const ext of POSTER_EXTENSIONS) {
+      const path = `${stem}.poster.${ext}`;
+      const p = snap.lookup(path);
+      if (p?.kind !== "attachment") continue;
+      const ref = this.imageRef(p.hash);
+      if (ref.media?.startsWith("image/")) return { path, ref };
+    }
+    return null;
+  }
+
+  /** The video an image is the poster of, by `posterOf`'s naming, for the poster's page (TEMPRA-182). */
+  private videoOfPoster(snap: View, posterPath: string): string | null {
+    const m = /^(.*)\.poster\.([a-z]+)$/.exec(posterPath);
+    if (!m || !POSTER_EXTENSIONS.includes(m[2] as string)) return null;
+    for (const ext of VIDEO_EXTENSIONS) {
+      const path = `${m[1]}.${ext}`;
+      const v = snap.lookup(path);
+      if (v?.kind !== "attachment" || !this.blobInfo(v.hash).media?.startsWith("video/")) continue;
+      if (this.posterOf(snap, path)?.path === posterPath) return path;
+    }
+    return null;
   }
 
   /** A concept's figures, each attachment from its blob row (no bytes; TEMPRA-154). */
