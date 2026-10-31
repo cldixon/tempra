@@ -1,5 +1,5 @@
 import type { ActedBy } from "./agents";
-import { api } from "./api";
+import { api, cache } from "./api";
 import { type PresenceMessage, PresenceStore } from "./presence";
 import type { Urls } from "./urls";
 
@@ -66,6 +66,9 @@ export const FALLBACK = {
 /** Whether the feed is following the library, or trying to get back to it. */
 export type FeedStatus = "live" | "reconnecting";
 
+/** How many delivered events a feed keeps for pages that catch up (`replay`). */
+const RECENT = 500;
+
 /** Whether the page is out of sight (a background tab): retries wait for it to show again. */
 const pageHidden = () => typeof document !== "undefined" && document.visibilityState === "hidden";
 
@@ -82,6 +85,12 @@ export class LibraryFeed {
   private subs = new Set<Subscription>();
   /** The last sequence handed to listeners. */
   private last: number | null = null;
+  /**
+   * The events handed to listeners lately, every one after `recentFrom` up to `last`, so a page
+   * drawn from the cache catches up from here rather than from the ledger (TEMPRA-103).
+   */
+  private recent: FeedEvent[] = [];
+  private recentFrom: number | null = null;
   private retry = 0;
   private ping: ReturnType<typeof setInterval> | undefined;
   private idle: ReturnType<typeof setTimeout> | undefined;
@@ -245,6 +254,9 @@ export class LibraryFeed {
     if (this.last !== null && m.head < this.last) {
       // The ledger went back (a restore): start again from where it is now.
       this.last = m.head;
+      this.recent = [];
+      this.recentFrom = m.head;
+      cache.wrote();
       for (const sub of this.subs) {
         sub.from = null;
         sub.pending = [];
@@ -257,8 +269,10 @@ export class LibraryFeed {
       this.stopPolling();
       this.refused = 0;
       if (this.failed === 0) this.setStatus("live");
-      if (this.last === null) this.last = m.head;
-      else if (m.head > this.last) void this.catchUp();
+      if (this.last === null) {
+        this.last = m.head;
+        this.recentFrom = m.head;
+      } else if (m.head > this.last) void this.catchUp();
       for (const sub of this.subs) void this.replay(sub);
       return;
     }
@@ -274,11 +288,26 @@ export class LibraryFeed {
   private deliver(events: FeedEvent[]) {
     const fresh = events.filter((e) => this.last === null || e.seq > this.last);
     if (fresh.length === 0) return;
+    // What pages asked for before these writes is no longer fresh: the next to mount asks again.
+    cache.wrote();
+    this.remember(fresh);
     this.last = fresh[fresh.length - 1]?.seq ?? this.last;
     for (const sub of this.subs) {
       // A page catching up hears these after the events it missed.
       if (sub.from === null) sub.listener.events(fresh);
       else sub.pending.push(...fresh);
+    }
+  }
+
+  /** Keeps the events just delivered (they follow `last`), the last RECENT of them. */
+  private remember(fresh: FeedEvent[]) {
+    // Before any hello: the buffer starts at the first of these.
+    if (this.recentFrom === null) this.recentFrom = (fresh[0]?.seq ?? 1) - 1;
+    this.recent.push(...fresh);
+    const over = this.recent.length - RECENT;
+    if (over > 0) {
+      this.recentFrom = this.recent[over - 1]?.seq ?? this.recentFrom;
+      this.recent = this.recent.slice(over);
     }
   }
 
@@ -292,10 +321,18 @@ export class LibraryFeed {
     if (from === null || upTo === null) return;
     let missed: FeedEvent[] = [];
     if (from < upTo) {
-      try {
-        missed = (await this.read(this.urls, from)).filter((e) => e.seq <= upTo);
-      } catch {
-        // Offline: the page reloads on the next event or reconnect.
+      if (this.recentFrom !== null && from >= this.recentFrom) {
+        // Delivered lately: no need to ask the ledger again. Handed on after the caller's
+        // turn, as a read would be, never inside the effect that synced (it would track what
+        // the listener reads and sync again).
+        missed = this.recent.filter((e) => e.seq > from && e.seq <= upTo);
+        await Promise.resolve();
+      } else {
+        try {
+          missed = (await this.read(this.urls, from)).filter((e) => e.seq <= upTo);
+        } catch {
+          // Offline: the page reloads on the next event or reconnect.
+        }
       }
       // Synced again (it reloaded) or gone: that replay takes over.
       if (sub.from !== from || !this.subs.has(sub)) return;

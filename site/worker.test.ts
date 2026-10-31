@@ -21,3 +21,15 @@ test("the apex serves assets with security headers", async () => {
   expect(r.headers.get("Content-Security-Policy")).toContain("default-src 'none'");
   expect(r.headers.get("X-Content-Type-Options")).toBe("nosniff");
 });
+
+test("an SVG may style itself inline, and nothing more", async () => {
+  const svgEnv = {
+    ASSETS: {
+      fetch: async () => new Response("<svg/>", { headers: { "Content-Type": "image/svg+xml" } }),
+    },
+  };
+  const r = await worker.fetch(new Request("https://tempra.dev/_astro/favicon.svg"), svgEnv);
+  expect(r.headers.get("Content-Security-Policy")).toBe(
+    "default-src 'none'; style-src 'unsafe-inline'",
+  );
+});

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, mock, test } from "bun:test";
 import { flushSync } from "svelte";
 import { ApiError, cache } from "./src/api";
 import { LibraryFeed } from "./src/live";
+import { WORKSPACE_DATA } from "./src/load.svelte.ts";
 import { here } from "./src/location.svelte.ts";
 import { lastNavigation, navigate } from "./src/router";
 import { Urls } from "./src/urls";
@@ -108,12 +109,98 @@ describe("useLoad", () => {
     first.calls[0]?.resolve("cached");
     await settle();
     a.stop();
+    // Long enough ago (here: an agent wrote since) that the answer is no longer fresh.
+    cache.wrote();
     const again = loader<string>();
     const b = rootLoad(() => key, again.load);
     stops.push(b.stop);
     expect(b.loaded.data).toBe("cached");
     await settle();
     expect(again.load).toHaveBeenCalledTimes(1);
+  });
+
+  test("a mount within the freshness window asks nothing; reload and the feed still do", async () => {
+    // TEMPRA-103: a page, its panels and the frame sharing a key ask once between them.
+    const key = fresh("window");
+    const first = loader<string>();
+    const a = rootLoad(() => key, first.load);
+    stops.push(a.stop);
+    await settle();
+    first.calls[0]?.resolve("loaded");
+    await settle();
+    const second = loader<string>();
+    const b = rootLoad(() => key, second.load);
+    stops.push(b.stop);
+    await settle();
+    expect(b.loaded.data).toBe("loaded");
+    expect(second.load).toHaveBeenCalledTimes(0);
+    // An explicit reload asks at once, fresh or not.
+    b.loaded.reload();
+    await settle();
+    expect(second.load).toHaveBeenCalledTimes(1);
+    second.calls[0]?.resolve("reloaded");
+    await settle();
+    expect(b.loaded.data).toBe("reloaded");
+    // A write on the feed: the next part to mount asks again.
+    cache.wrote();
+    const third = loader<string>();
+    const c = rootLoad(() => key, third.load);
+    stops.push(c.stop);
+    await settle();
+    expect(third.load).toHaveBeenCalledTimes(1);
+  });
+
+  test("every part showing a key shows the newest answer, whoever asked for it", async () => {
+    // The switcher drew the person's libraries fresh, without asking; the frame's own copy
+    // reloads after an invitation is accepted: the switcher lists the new library too.
+    const key = fresh("shared");
+    const first = loader<{ libraries: string[] }>();
+    const frame = rootLoad(() => key, first.load);
+    stops.push(frame.stop);
+    await settle();
+    first.calls[0]?.resolve({ libraries: ["a"] });
+    await settle();
+    const unused = loader<{ libraries: string[] }>();
+    const switcher = rootLoad(() => key, unused.load);
+    stops.push(switcher.stop);
+    await settle();
+    expect(unused.load).toHaveBeenCalledTimes(0);
+    frame.loaded.reload();
+    await settle();
+    first.calls[1]?.resolve({ libraries: ["a", "b"] });
+    await settle();
+    expect(switcher.loaded.data).toEqual({ libraries: ["a", "b"] });
+    expect(frame.loaded.data).toEqual({ libraries: ["a", "b"] });
+    // An older answer arriving late changes neither.
+    frame.loaded.reload();
+    switcher.loaded.reload();
+    await settle();
+    unused.calls[0]?.resolve({ libraries: ["a", "b", "c"] });
+    await settle();
+    first.calls[2]?.resolve({ libraries: ["a"] });
+    await settle();
+    expect(switcher.loaded.data).toEqual({ libraries: ["a", "b", "c"] });
+    expect(frame.loaded.data).toEqual({ libraries: ["a", "b", "c"] });
+  });
+
+  test("workspace data outlives a library's writes, not an explicit reload", async () => {
+    const key = fresh("workspace");
+    const first = loader<string>();
+    const a = rootLoad(() => key, first.load, WORKSPACE_DATA);
+    stops.push(a.stop);
+    await settle();
+    first.calls[0]?.resolve("libraries");
+    await settle();
+    cache.wrote();
+    const second = loader<string>();
+    const b = rootLoad(() => key, second.load, WORKSPACE_DATA);
+    stops.push(b.stop);
+    await settle();
+    expect(second.load).toHaveBeenCalledTimes(0);
+    expect(b.loaded.data).toBe("libraries");
+    b.loaded.reload();
+    await settle();
+    expect(second.load).toHaveBeenCalledTimes(1);
   });
 
   test("an answer is an error; over the limit, what was shown stays", async () => {

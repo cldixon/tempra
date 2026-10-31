@@ -1,4 +1,3 @@
-import type { BlobStore } from "./client";
 import { type ExportBucket, exportsPrefix, type MaintainedStore, writeExport } from "./maintain";
 
 /**
@@ -104,7 +103,6 @@ export function checkRestoreTime(to: string, now: Date): Date | string {
  */
 export async function prepareRestore(opts: {
   store: MaintainedStore;
-  blobs: BlobStore;
   bucket: ExportBucket;
   recovery: Recovery;
   libraryId: string;

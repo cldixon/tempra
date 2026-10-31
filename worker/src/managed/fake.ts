@@ -9,7 +9,7 @@ import type { ModelClient } from "./turn";
 /**
  * A stand-in for Claude (TEMPRA-222), for local dev and the gate only (`AGENT_MODEL=fake` with
  * `DEV_SIGNIN=1` in worker/.dev.vars): no network, a fixed script over the real tools. It reads
- * the thread's page (or starts, on a library thread), then replies once: a request when the ask
+ * the thread's page (or browses the root, on a library thread), then replies once: a request when the ask
  * says "request", "new page" or "rewrite", otherwise an answer naming what it read; then it ends.
  * Each call waits `delayMs`, so "Tempra is replying…" shows.
  */
@@ -28,7 +28,7 @@ export function fakeModel(delayMs = 1200): ModelClient {
       let content: BetaContentBlock[];
       let stop: BetaMessage["stop_reason"] = "tool_use";
       if (step === 0) {
-        content = [path ? use("read", { path }) : use("start", {})];
+        content = [path ? use("read", { path }) : use("browse", {})];
       } else if (step === 1) {
         const request = /\brequest\b|new page|rewrite/i.test(ask);
         content = [

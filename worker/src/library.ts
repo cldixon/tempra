@@ -322,7 +322,6 @@ export class Library extends DurableObject<Env> {
     if (!this.alarmChecked) await this.ensureAlarm();
     return runMaintenance({
       store: this.store,
-      blobs: r2BlobStore(this.env.BLOBS),
       bucket: this.env.BLOBS,
       libraryId: this.libraryId(),
       now: new Date(),
@@ -340,7 +339,6 @@ export class Library extends DurableObject<Env> {
     return this.ctx.blockConcurrencyWhile(async () => {
       const outcome = await prepareRestore({
         store: this.store,
-        blobs: r2BlobStore(this.env.BLOBS),
         bucket: this.env.BLOBS,
         recovery: {
           bookmarkForTime: (t) => this.ctx.storage.getBookmarkForTime(t),

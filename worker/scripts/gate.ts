@@ -359,7 +359,7 @@ async function openBrowser() {
       const path = new URL(r.url()).pathname.replace(/^\/api\/v1\/libraries\/[^/]+\/[^/]+/, "…");
       counted.push({
         at: Date.now(),
-        what: `${r.method()} ${path.replace(/\/files\/.*/, "/files/*")}`,
+        what: `${r.method()} ${path.replace(/\/(files|page|sources|links|history|read|comments|media)\/.+/, "/$1/*")}`,
       });
     }
   });
@@ -540,6 +540,9 @@ async function openBrowser() {
     const what = [...kinds].sort((a, b) => b[1] - a[1]).map(([k, n]) => `${n} ${k}`);
     return { peak, from: counted[first]?.at ?? 0, what };
   };
+  /** The counted requests sent from `from` (ms since the epoch) to `to`, by kind. */
+  const requestsBetween = (from: number, to = Date.now()) =>
+    counted.filter((c) => c.at >= from && c.at < to).map((c) => c.what);
   return {
     browser,
     context,
@@ -550,6 +553,7 @@ async function openBrowser() {
     signInAs,
     cookie,
     busiestMinute,
+    requestsBetween,
     expect404,
   };
 }
@@ -4282,6 +4286,7 @@ async function browserRenders(
       "a busy minute of browsing stays under a quarter of the session's limit",
       async () => {
         const t0 = Date.now();
+        const perOpen: string[][] = [];
         for (let pass = 0; pass < 4; pass++) {
           // Folders in the tree (not the library's or the person's menus).
           const closed = sidebar
@@ -4303,10 +4308,13 @@ async function browserRenders(
           }
           for (const title of titles) {
             if (Date.now() - t0 >= 60_000) break;
+            const at = Date.now();
             await sidebar.locator(`a[data-path="${title}"]`).click();
             await page.locator(".body .prose").first().waitFor({ timeout: 15_000 });
             // Skimming: a glance at each (someone reading opens one every several seconds).
             await page.waitForTimeout(1500);
+            // What an open costs while no agent writes (the opens before an agent's write).
+            if (opened % 4 !== 3) perOpen.push(b.requestsBetween(at));
             if (++opened % 4 === 0) await agentAppends(`A busy reader's sentence ${opened}.`);
           }
           await sidebar
@@ -4320,6 +4328,13 @@ async function browserRenders(
         const busy = b.busiestMinute(t0);
         const run = b.busiestMinute();
         const pct = (n: number) => Math.round((100 * n) / SESSION_REQUESTS_PER_MINUTE);
+        // TEMPRA-103: what opening a page from the tree costs, once it has been seen before.
+        const counts = perOpen.map((r) => r.length).sort((x, y) => x - y);
+        const median = counts[Math.floor(counts.length / 2)] ?? 0;
+        const sample = perOpen.find((r) => r.length === median) ?? [];
+        console.log(
+          `  opening a page from the tree: median ${median} requests (${counts[0] ?? 0} to ${counts.at(-1) ?? 0} over ${counts.length} opens)\n    ${sample.join(", ")}`,
+        );
         console.log(
           `  a busy minute of browsing (${opened} files opened): ${busy.peak} requests, ${pct(busy.peak)}% of the session limit (${SESSION_REQUESTS_PER_MINUTE}/min)\n    ${busy.what.slice(0, 12).join(", ")}\n  the run's busiest minute (full page loads): ${run.peak} requests, ${pct(run.peak)}%\n    ${run.what.slice(0, 12).join(", ")}`,
         );
@@ -5233,6 +5248,8 @@ async function freshAccountConnects(): Promise<string[]> {
     await b.signInAs("newcomer@localhost", "/");
     await page.waitForURL(`${base}/welcome`);
     await page.getByRole("heading", { level: 1, name: "Welcome" }).waitFor({ timeout: 15_000 });
+    // A name (TEMPRA-54): the avatar's initials come from it ("AL"), not the handle ("NE").
+    await page.locator('input[name="name"]').fill("Ada Lovelace");
     await page.locator('input[name="handle"]').fill("newcomer");
     await page.locator('input[name="library"]').fill("notes");
     // Both fields say they become the library's address, and how they may be written (H-12).
@@ -5273,6 +5290,11 @@ async function freshAccountConnects(): Promise<string[]> {
         }
       },
     );
+    await step("the avatar's initials come from the name given at first run", async () => {
+      const avatar = page.getByRole("button", { name: "Account menu" });
+      const shown = (await avatar.locator('span[aria-hidden="true"]').innerText()).trim();
+      if (shown !== "AL") throw new Error(`the avatar reads "${shown}", not AL`);
+    });
     const connectTab = await b.context.newPage();
     await connectTab.goto(`${lib}/-/settings#connect`);
     await connectTab.getByText("No agent has written yet").waitFor({ timeout: 15_000 });

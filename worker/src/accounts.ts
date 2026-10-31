@@ -80,6 +80,27 @@ export function checkTheme(v: unknown): Theme | null {
   throw new OkfError(400, "bad_theme", "The theme is system, light or dark.");
 }
 
+/** The longest name an account may have, in characters (TEMPRA-54). */
+export const NAME_MAX = 80;
+
+/**
+ * An account's name as given (TEMPRA-54; tempra-dev: v2/accounts, Name): trimmed, each run of
+ * spaces made one, at most NAME_MAX characters, no control characters. Empty or null clears it.
+ */
+export function checkName(v: unknown): string | null {
+  if (v === null || v === undefined) return null;
+  if (typeof v !== "string") throw new OkfError(400, "bad_name", "The name is text.");
+  const name = v.trim().replace(/ {2,}/g, " ").normalize("NFC");
+  if (/[\p{Cc}\p{Zl}\p{Zp}]/u.test(name)) {
+    throw new OkfError(400, "bad_name", "The name cannot hold control characters or line breaks.");
+  }
+  if (name === "") return null;
+  if (Array.from(name).length > NAME_MAX) {
+    throw new OkfError(400, "bad_name", `The name is at most ${NAME_MAX} characters.`);
+  }
+  return name;
+}
+
 export interface User {
   id: string;
   email: string;
@@ -87,6 +108,8 @@ export interface User {
   handle: string;
   /** The person's theme, or null for the system's (not every load carries it). */
   theme?: Theme | null;
+  /** The person's name, or null when they gave none (TEMPRA-54; not every load carries it). */
+  name?: string | null;
 }
 
 /** A bearer token as the Tokens page lists it; the secret itself is never stored. */
@@ -246,6 +269,8 @@ export interface Accounts {
   setHandle(userId: string, handle: string, opts?: { reserved?: "allow" }): Promise<User>;
   /** The person's theme: light, dark, or null for the system's (take 4). */
   setTheme(userId: string, theme: Theme | null): Promise<void>;
+  /** The person's name, checked by `checkName`, or null to clear it (TEMPRA-54). */
+  setName(userId: string, name: string | null): Promise<void>;
   /**
    * Sets a library's title and description (TEMPRA-102): a field given is set (null clears it),
    * one left out keeps its value; the same limits as createLibrary. The route checks the owner.
@@ -406,7 +431,7 @@ export function d1Accounts(db: D1Database): Accounts {
   };
   const byEmail = (email: string) =>
     db
-      .prepare("SELECT id, email, actor, handle, theme FROM users WHERE email = ?")
+      .prepare("SELECT id, email, actor, handle, theme, name FROM users WHERE email = ?")
       .bind(email)
       .first<User>();
   return {
@@ -505,7 +530,7 @@ export function d1Accounts(db: D1Database): Accounts {
     async account(userId) {
       return db
         .prepare(
-          "SELECT id, email, actor, handle, theme FROM users WHERE id = ? AND suspended IS NULL",
+          "SELECT id, email, actor, handle, theme, name FROM users WHERE id = ? AND suspended IS NULL",
         )
         .bind(userId)
         .first<User>();
@@ -581,7 +606,7 @@ export function d1Accounts(db: D1Database): Accounts {
           : ["email", by.email.trim().toLowerCase()];
       return db
         .prepare(
-          `SELECT id, email, actor, handle, theme FROM users WHERE ${col} = ? AND suspended IS NULL`,
+          `SELECT id, email, actor, handle, theme, name FROM users WHERE ${col} = ? AND suspended IS NULL`,
         )
         .bind(value)
         .first<User>();
@@ -835,6 +860,9 @@ export function d1Accounts(db: D1Database): Accounts {
     async setTheme(userId, theme) {
       await db.prepare("UPDATE users SET theme = ?1 WHERE id = ?2").bind(theme, userId).run();
     },
+    async setName(userId, name) {
+      await db.prepare("UPDATE users SET name = ?1 WHERE id = ?2").bind(name, userId).run();
+    },
     async describeLibrary(libraryId, about) {
       const current = await db
         .prepare("SELECT title, description FROM libraries WHERE id = ?")
@@ -962,7 +990,7 @@ export function d1Accounts(db: D1Database): Accounts {
       const handle = checkHandle(handleInput, opts);
       const byId = () =>
         db
-          .prepare("SELECT id, email, actor, handle, theme FROM users WHERE id = ?")
+          .prepare("SELECT id, email, actor, handle, theme, name FROM users WHERE id = ?")
           .bind(userId)
           .first<User>();
       const before = await byId();

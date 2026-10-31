@@ -81,6 +81,8 @@ export interface SweepResult {
   health: { path: string; counts: LibraryHealth["counts"] }[];
   /** Rows the account prune deleted; absent when it did not run. */
   pruned?: PruneResult;
+  /** @tempra's spend this month (costs.ts agentSpendThisMonth); the Worker adds it after sweep(). */
+  agentSpend?: { usd: number; projected: number; turns: number; accounts: number };
 }
 
 export async function sweep(d: SweepDeps): Promise<SweepResult> {
@@ -402,8 +404,18 @@ export function digestText(r: SweepResult): string {
           `Pruned sessions ${r.pruned.sessions}, sign-in links ${r.pruned.sign_in_links}, invitations ${r.pruned.invitations}.`,
         ]
       : []),
+    ...(r.agentSpend ? [agentSpendLine(r.agentSpend)] : []),
     "",
   ].join("\n");
+}
+
+/**
+ * The digest's cost line (TEMPRA-233): @tempra's spend at list price this month. Cloudflare's own
+ * usage needs the Analytics API and a token the Worker does not hold; `bun run costs` reports it (TEMPRA-236).
+ */
+export function agentSpendLine(a: NonNullable<SweepResult["agentSpend"]>): string {
+  const d = (v: number) => `$${v.toFixed(2)}`;
+  return `@tempra this month: ${d(a.usd)} so far, about ${d(a.projected)} projected (${a.turns} turns, ${a.accounts} accounts).`;
 }
 
 /** How long a sign-in link row is kept: past its expiry, it only counts toward rate limits. */

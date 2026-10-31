@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import type {
   BetaContentBlock,
   BetaMessage,
@@ -22,12 +22,16 @@ import {
   changedBlocks,
   citedPaths,
   type ModelClient,
+  pageExcerpt,
   REPLY_MAX_WORDS,
   runTurn,
   SAY,
+  SERVER_ITEMS,
   SYSTEM_PROMPT,
+  serverInstructions,
   type TurnDeps,
 } from "../src/managed/turn";
+import { INSTRUCTIONS } from "../src/mcp/server";
 import { bunD1 } from "./d1";
 import { API, LIB, ORIGIN, OWNER, setup } from "./harness";
 
@@ -303,11 +307,17 @@ describe("a turn", () => {
           }),
         ],
       }),
-      end(),
     ]);
     const d = turnDeps(s, model);
     const out = await runTurn(d, job as AgentJob);
-    expect(out).toMatchObject({ status: "replied", calls: 3, tools: 2 });
+    // Its reply ends the turn: no model call after it only to stop (TEMPRA-231).
+    expect(out).toMatchObject({
+      status: "replied",
+      calls: 2,
+      tools: 2,
+      tokens: { input: 4000, output: 200, cache_read: 20_000, cache_write: 0 },
+    });
+    expect(sent).toHaveLength(2);
     const t = await thread(s, id);
     expect(t.comments).toHaveLength(2);
     expect(t.comments[1]).toMatchObject({ actor: AGENT_ACTOR });
@@ -350,7 +360,7 @@ describe("a turn", () => {
     expect(JSON.stringify(agents)).toContain(`"actor":"${AGENT_ACTOR}"`);
     // What it cost, at list price.
     expect(d.budget.charged.reduce((a, b) => a + b, 0)).toBe(
-      3 * costMicros({ input_tokens: 2000, output_tokens: 100, cache_read_input_tokens: 10_000 }),
+      2 * costMicros({ input_tokens: 2000, output_tokens: 100, cache_read_input_tokens: 10_000 }),
     );
   });
 
@@ -474,16 +484,19 @@ describe("what it may do", () => {
       }),
       () => ({ content: [use("comment", { action: "reply", thread: "another", body: "x" }, "d")] }),
       () => ({
-        content: [use("comment", { action: "reply", body: "Filed.", kind: "request" }, "e")],
+        content: [
+          use("comment", { action: "reply", body: "Filed.", kind: "request" }, "e"),
+          use("comment", { action: "reply", body: "Again." }, "f"),
+        ],
       }),
-      () => ({ content: [use("comment", { action: "reply", body: "Again." }, "f")] }),
       end(),
     ]);
     await runTurn(turnDeps(s, model), job as AgentJob);
     expect(results(sent[1] as MessageCreateParamsNonStreaming).every((r) => r.error)).toBe(true);
     expect(results(sent[2] as MessageCreateParamsNonStreaming)[0]?.error).toBe(true);
     expect(results(sent[3] as MessageCreateParamsNonStreaming)[0]?.error).toBe(true);
-    expect(results(sent[5] as MessageCreateParamsNonStreaming)[0]).toMatchObject({ error: true });
+    // The reply ended the turn; the second one in the same answer did not land.
+    expect(sent).toHaveLength(4);
     // Nothing was written, the churn page stands, and one reply landed, marking a request.
     expect((await s.req("/files/metrics/churn.md")).status).toBe(200);
     expect((await s.req("/files/x.md")).status).toBe(404);
@@ -897,5 +910,160 @@ describe("reply length (TEMPRA-225)", () => {
     const { model } = scripted([reply, reply, end()]);
     await runTurn(turnDeps(s, model), job as AgentJob);
     expect((await thread(s, id)).comments.at(-1)?.body).toBe(long);
+  });
+});
+
+describe("what a reply costs (TEMPRA-231)", () => {
+  test("its tools are only what answering needs, read members' fewer still", () => {
+    for (const gone of ["start", "work", "log", "sources"]) {
+      expect(agentTools(true)).not.toContain(gone);
+    }
+    expect(agentTools(false)).toEqual(agentTools(true).filter((t) => t !== "edit"));
+  });
+
+  test("the server's instructions as far as they apply to a reply, and no further", () => {
+    const kept = serverInstructions();
+    // Each item it keeps is still in the server's instructions (a rename there fails here).
+    for (const item of SERVER_ITEMS) expect(INSTRUCTIONS).toContain(`. ${item}`);
+    expect(kept).toContain("This server holds OKF");
+    expect(kept).toContain("Prefer `edit`");
+    // Not what it never does, or does the other way.
+    expect(kept).not.toContain("Call `start` first");
+    expect(kept).not.toContain("link it by its URL");
+    expect(kept).not.toContain("resolve what you fixed");
+    expect(kept).not.toContain("vega-lite");
+    expect(kept.length).toBeLessThan(INSTRUCTIONS.length / 5);
+    expect(SYSTEM_PROMPT).toContain(kept);
+    expect(SYSTEM_PROMPT).not.toContain(INSTRUCTIONS);
+  });
+
+  test("a long page is an excerpt: its head, the quoted part, and a note", () => {
+    expect(pageExcerpt("short page", null, 100)).toBe("short page");
+    const long = `---\ntitle: T\n---\n# T\n\n${"Filler sentence here. ".repeat(2000)}The quoted part.\n\n${"More. ".repeat(500)}`;
+    const head = pageExcerpt(long, null, 3000);
+    expect(head.startsWith("---\ntitle: T")).toBe(true);
+    expect(head).toContain(`the page is ${long.length} characters`);
+    expect(head.length).toBeLessThan(3200);
+    const quoted = pageExcerpt(long, "The quoted part.", 3000);
+    expect(quoted.startsWith("---\ntitle: T")).toBe(true);
+    expect(quoted).toContain("The quoted part.");
+    expect(quoted).toContain("`read` or `grep` it for the rest");
+    expect(quoted.length).toBeLessThan(3200);
+    // A quote not in the markdown as written: the head.
+    expect(pageExcerpt(long, "nowhere", 3000)).toBe(head);
+  });
+
+  test("every call reads the one before it from the cache: same tools and system, history only appended", async () => {
+    const s = setup();
+    await seed(s);
+    enable(s);
+    const { jobs } = wire(s);
+    const { id, job } = await ask(s, jobs, "@tempra what is margin?");
+    const { model, sent } = scripted([
+      () => ({ content: [use("search", { query: "margin" })] }),
+      () => ({ content: [use("read", { path: "metrics/churn.md" })] }),
+      () => ({
+        content: [use("comment", { action: "reply", thread: id, body: "Revenue less cost." })],
+      }),
+    ]);
+    await runTurn(turnDeps(s, model), job as AgentJob);
+    expect(sent).toHaveLength(3);
+    for (let i = 1; i < sent.length; i++) {
+      const a = sent[i - 1] as MessageCreateParamsNonStreaming;
+      const b = sent[i] as MessageCreateParamsNonStreaming;
+      expect(b.tools).toEqual(a.tools);
+      expect(b.system).toEqual(a.system);
+      expect((b as unknown as { cache_control: unknown }).cache_control).toEqual({
+        type: "ephemeral",
+      });
+      expect(b.messages.slice(0, a.messages.length)).toEqual(a.messages);
+      expect(b.messages.length).toBe(a.messages.length + 2);
+    }
+  });
+
+  test("the page in the prompt and each tool result are capped", async () => {
+    const s = setup();
+    const huge = `# Margin\n\n${Array.from({ length: 400 }, (_, i) => `Paragraph ${i} about margin and how it is computed.`).join("\n\n")}\n`;
+    for (const path of ["metrics/margin.md", "metrics/long.md"]) {
+      const r = await s.req(`/files/${path}`, {
+        method: "PUT",
+        headers: { "Content-Type": "text/markdown" },
+        body: doc("Margin", huge),
+      });
+      expect(r.status).toBeLessThan(300);
+    }
+    enable(s);
+    const { jobs } = wire(s);
+    const { id, job } = await ask(s, jobs, "@tempra what is margin?");
+    const { model, sent } = scripted([
+      () => ({ content: [use("read", { path: "metrics/long.md" })] }),
+      () => ({
+        content: [use("comment", { action: "reply", thread: id, body: "Revenue less cost." })],
+      }),
+    ]);
+    const d = { ...turnDeps(s, model), limits: { pageChars: 4000, toolChars: 5000 } };
+    await runTurn(d, job as AgentJob);
+    const prompt = String(sent[0]?.messages[0]?.content);
+    expect(prompt).toContain("[An excerpt: the page is");
+    expect(prompt.length).toBeLessThan(6000);
+    const read = results(sent[1] as MessageCreateParamsNonStreaming)[0];
+    expect(read?.text).toContain("[cut at 5000 of");
+    expect(read?.text.length).toBeLessThan(5200);
+  });
+
+  test("each model call logs its tokens and cost, and the turn sums them", async () => {
+    const s = setup();
+    await seed(s);
+    enable(s);
+    const { jobs } = wire(s);
+    const { id, job } = await ask(s, jobs, "@tempra what is margin?");
+    const usage = {
+      input_tokens: 30,
+      output_tokens: 120,
+      cache_read_input_tokens: 0,
+      cache_creation_input_tokens: 9000,
+    };
+    const asUsage = (u: typeof usage) => u as unknown as BetaMessage["usage"];
+    const { model } = scripted([
+      () => ({ usage: asUsage(usage), content: [use("search", { query: "margin" })] }),
+      () => ({
+        usage: asUsage({
+          ...usage,
+          cache_read_input_tokens: 9000,
+          cache_creation_input_tokens: 500,
+        }),
+        content: [use("comment", { action: "reply", thread: id, body: "Revenue less cost." })],
+      }),
+    ]);
+    const logged: string[] = [];
+    const log = spyOn(console, "log").mockImplementation((...a: unknown[]) => {
+      logged.push(String(a[0]));
+    });
+    try {
+      const out = await runTurn(turnDeps(s, model), job as AgentJob);
+      expect(out).toMatchObject({
+        status: "replied",
+        calls: 2,
+        tokens: { input: 60, output: 240, cache_read: 9000, cache_write: 9500 },
+      });
+      const calls = logged.flatMap((l) => {
+        try {
+          const j = JSON.parse(l) as { agent_call?: string };
+          return j.agent_call ? [j] : [];
+        } catch {
+          return [];
+        }
+      });
+      expect(calls).toHaveLength(2);
+      expect(calls[0]).toMatchObject({
+        agent_call: id,
+        n: 1,
+        stop: "tool_use",
+        cache_write: 9000,
+        micro_usd: costMicros(usage),
+      });
+    } finally {
+      log.mockRestore();
+    }
   });
 });

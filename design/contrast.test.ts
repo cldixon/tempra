@@ -154,7 +154,7 @@ describe("chart series (TEMPRA-217)", () => {
   });
 
   for (const [mode, i] of Object.entries(scheme)) {
-    const colours = [1, 2, 3, 4, 5, 6, 7, 8].map((n) => pair(`chart-${n}`)[i]);
+    const colours = [1, 2, 3, 4, 5, 6, 7, 8].map((n) => pair(`color-chart-${n}`)[i]);
     const page = pair("color-bg")[i];
 
     test(`${mode}: eight different colours, none of them a grey`, () => {

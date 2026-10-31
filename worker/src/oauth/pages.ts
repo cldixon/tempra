@@ -8,8 +8,9 @@ export const esc = (value: string) => value.replace(/[&<>"']/g, (c) => `&#${c.ch
 
 /**
  * The server pages' shell (sign-in, consent, errors, the email-change link): the public pages'
- * frame (take 3, TEMPRA-110), as the landing page has it: the ground, the wordmark, the page as a
- * sheet, and terms and privacy at the foot. From the design stylesheet alone, with no script.
+ * flat frame (TEMPRA-110, TEMPRA-126), as the landing page has it: a skip link, the wordmark
+ * linking to tempra.dev over a hairline, the page as a narrow column, and terms and privacy at
+ * the foot. From the design stylesheet alone, with no script; sent with PAGE_HEADERS (V-11).
  */
 export function page(title: string, body: string): string {
   return `<!doctype html>
@@ -19,9 +20,10 @@ export function page(title: string, body: string): string {
 <title>${esc(title)} · Tempra</title>
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 <link rel="stylesheet" href="${designHref}"></head>
-<body class="ground public narrow"><header class="public-head"><a class="wordmark" href="/"><span class="wordmark-tile" aria-hidden="true">T</span>Tempra</a></header>
-<main class="public-sheet">${body}</main>
-<footer class="public-foot"><a href="${LEGAL}/terms">Terms</a><a href="${LEGAL}/privacy">Privacy</a></footer></body></html>`;
+<body class="public narrow"><a class="skip-link" href="#main">Skip to content</a>
+<header class="public-head"><a class="wordmark" href="${LEGAL}/"><span class="wordmark-tile" aria-hidden="true">T</span>Tempra</a></header>
+<main id="main" class="public-main">${body}</main>
+<footer class="public-foot"><nav aria-label="Footer"><ul role="list"><li><a href="${LEGAL}/terms">Terms</a></li><li><a href="${LEGAL}/privacy">Privacy</a></li></ul></nav></footer></body></html>`;
 }
 
 /**

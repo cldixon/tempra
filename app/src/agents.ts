@@ -9,6 +9,8 @@ import { who } from "./ui";
 /** Someone who has worked in the library: a person in the app, or one of their agents. */
 export interface Contributor {
   person: string | null;
+  /** The person's name, when they gave one: for their round mark's initials only (TEMPRA-54). */
+  person_name?: string | null;
   agent: { id: string; name: string | null; platform: string | null; client: string | null } | null;
   actor: string;
   requests: number;
@@ -95,6 +97,9 @@ export interface ActorView {
   /** What their round mark's initials come from: the agent's name, or the person's handle
    * (never "You"). */
   mark: string;
+  /** A person's account name, when they gave one: their mark's initials come from it
+   * (TEMPRA-54). Never shown in place of the handle. */
+  fullName?: string | null;
   /** Tempra's own agent, @tempra (TEMPRA-222): its mark is filled with the agent colour. */
   tempra: boolean;
 }
@@ -106,6 +111,13 @@ export const TEMPRA_ACTOR = "tempra/agent";
 export const agentInitial = (name: string) =>
   (Array.from(name.trim().replace(/^[^\p{L}\p{N}]+/u, ""))[0] ?? "?").toUpperCase();
 
+/** Each person's account name by handle, for those who gave one (TEMPRA-54). */
+export function personNames(contributors: Contributor[]): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const c of contributors) if (c.person && c.person_name) out[c.person] = c.person_name;
+  return out;
+}
+
 /** Each agent's contributor entry by its id. */
 export function agentsById(contributors: Contributor[]): Record<string, Contributor> {
   const out: Record<string, Contributor> = {};
@@ -113,12 +125,16 @@ export function agentsById(contributors: Contributor[]): Record<string, Contribu
   return out;
 }
 
-/** An actor as an ActorView, given the library's agents and the signed-in person's actor. */
+/**
+ * An actor as an ActorView, given the library's agents, the signed-in person's actor and the
+ * people's names by handle (`personNames`).
+ */
 export function actorView(
   actor: string,
   by: ActedBy | null | undefined,
   agents: Record<string, Contributor>,
   me: string | null,
+  names: Record<string, string> = {},
 ): ActorView {
   const c = by?.agent ? agents[by.agent] : undefined;
   const human = actor.startsWith("human:") && !by?.agent;
@@ -130,6 +146,7 @@ export function actorView(
       agent: false,
       you,
       mark: who(actor),
+      fullName: names[who(actor)] ?? null,
       tempra: false,
     };
   }

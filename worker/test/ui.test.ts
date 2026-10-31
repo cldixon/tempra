@@ -450,6 +450,14 @@ describe("errors as pages (V-1)", () => {
       const html = await r.text();
       expect(html).toContain("<h1>Not found</h1>");
       expect(html).toContain('<a href="/">Go to your libraries</a>');
+      // The public pages' flat frame (TEMPRA-126): a skip link to the main content, the
+      // wordmark linking to tempra.dev, no sheet, and the foot's links as a list.
+      expect(r.headers.get("Content-Security-Policy")).toContain("default-src 'none'");
+      expect(html).toContain('<a class="skip-link" href="#main">');
+      expect(html).toContain('<main id="main" class="public-main">');
+      expect(html).toContain('<a class="wordmark" href="https://tempra.dev/">');
+      expect(html).not.toContain("public-sheet");
+      expect(html).toContain('<nav aria-label="Footer"><ul role="list">');
     }
     for (const path of ["/api/v1/nope", `${API}/nope`, "/api/nope"]) {
       const r = await s.app.request(path, browser);

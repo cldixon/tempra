@@ -1,29 +1,29 @@
 /*
- * The person's views of a library (take 3, TEMPRA-106; take 4, TEMPRA-115 and 117; tempra-dev:
- * app/home, app/activity, app/workspace): the library's home, Activity, Settings,
- * a folder, an attachment and Not found. Quiet pages in one column: a header, then sections of rows.
+ * The person's views of a library (take 4, TEMPRA-115 and 117; tempra-dev: app/home,
+ * app/activity, app/workspace): the library's home, Activity, Settings, an attachment and Not
+ * found. Quiet pages in one column: a header, then sections of rows.
  */
 
 /* ---------- Shared: a page's header and its sections ---------- */
 
-/* The header: the title (a concept title's look) and a quiet line, a link at the right. */
+/* The header: the title and a quiet line under it; a page's own controls at the right. */
 .view-head {
   display: flex;
   flex-wrap: wrap;
   align-items: flex-end;
-  gap: var(--tempra-space-2) var(--tempra-space-3);
-  margin-bottom: var(--tempra-space-4);
+  gap: var(--tempra-space-08) var(--tempra-space-16);
+  margin-bottom: var(--tempra-space-32);
 }
 
 .view-head-main {
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: var(--tempra-space-1);
+  gap: var(--tempra-space-04);
   min-width: 0;
 }
 
-/* A view is the app, not a document: its title is the app's sans, sized as an h1 (TEMPRA-108). */
+/* A view's title: the display face, sized as an h1 (TEMPRA-108). */
 .view-title {
   font-family: var(--tempra-font-display);
   font-variation-settings: var(--tempra-font-display-settings);
@@ -31,7 +31,7 @@
   font-size: var(--tempra-text-page);
   font-weight: var(--tempra-weight-strong);
   line-height: var(--tempra-leading-tight);
-  letter-spacing: -0.02em;
+  letter-spacing: var(--tempra-tracking-title);
   overflow-wrap: anywhere;
 }
 
@@ -43,31 +43,23 @@
 
 /* Every event, filtered over what is loaded: says how much, over the table. */
 .events-scope {
-  margin-bottom: var(--tempra-space-2);
+  margin-bottom: var(--tempra-space-08);
 }
 
 /* A library's description under its name on the home (TEMPRA-102, take 4). */
 .view-lede {
-  margin: var(--tempra-space-1) 0 0;
+  margin: var(--tempra-space-04) 0 0;
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-reader);
-  line-height: var(--tempra-line-height);
-}
-
-/* A link beside a header or a section's heading: "The full ledger", "All 5", "Activity". */
-.view-aside {
-  margin-left: auto;
-  color: var(--tempra-color-muted);
-  font-size: var(--tempra-text-meta);
-  white-space: nowrap;
+  line-height: var(--tempra-leading-base);
 }
 
 .view-section-head {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: var(--tempra-space-1) var(--tempra-space-2);
-  margin-bottom: var(--tempra-space-2);
+  gap: var(--tempra-space-04) var(--tempra-space-08);
+  margin-bottom: var(--tempra-space-08);
 }
 
 .view-section-title {
@@ -83,7 +75,7 @@
 }
 
 .view-more {
-  margin: var(--tempra-space-3) 0 0;
+  margin: var(--tempra-space-16) 0 0;
 }
 
 /* Filters: pills in a row that wraps. */
@@ -91,8 +83,8 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--tempra-space-2);
-  margin-bottom: var(--tempra-space-4);
+  gap: var(--tempra-space-08);
+  margin-bottom: var(--tempra-space-32);
   font-size: var(--tempra-text-meta);
 }
 
@@ -104,10 +96,10 @@
 /* A segmented control: buttons in one grey pill, the chosen one white. */
 .segmented {
   display: flex;
-  gap: 2px;
+  gap: var(--tempra-space-02);
   min-width: 0;
   margin: 0;
-  padding: 2px;
+  padding: var(--tempra-space-02);
   border: 0;
   border-radius: var(--tempra-radius-pill);
   background: var(--tempra-color-ground);
@@ -137,18 +129,22 @@
 @media (max-width: 900px) {
   .view-filters button,
   .view-filters select {
-    min-height: var(--tempra-touch);
+    min-height: var(--tempra-size-touch);
   }
 
   .segmented button {
-    min-height: calc(var(--tempra-touch) - 4px);
+    min-height: calc(
+      var(--tempra-size-touch) -
+      2 *
+      var(--tempra-space-02)
+    ); /* less the pill's padding */
   }
 }
 
 /* ---------- Home (take 4, TEMPRA-117) ---------- */
 
 .home-section {
-  margin-top: var(--tempra-space-4);
+  margin-top: var(--tempra-space-32);
 }
 
 .home-who a {
@@ -166,8 +162,8 @@
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 0 var(--tempra-space-3);
-  padding: var(--tempra-space-1) 0;
+  gap: 0 var(--tempra-space-16);
+  padding: var(--tempra-space-04) 0;
 }
 
 .home-recent-title {
@@ -191,8 +187,8 @@
 .empty-library {
   display: flex;
   flex-direction: column;
-  gap: var(--tempra-space-3);
-  padding: var(--tempra-space-4);
+  gap: var(--tempra-space-16);
+  padding: var(--tempra-space-32);
   border: 1px solid var(--tempra-color-border);
   border-radius: var(--tempra-radius-card);
 }
@@ -200,7 +196,7 @@
 .empty-steps {
   display: flex;
   flex-direction: column;
-  gap: var(--tempra-space-3);
+  gap: var(--tempra-space-16);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -209,8 +205,8 @@
 
 .empty-steps > li {
   display: grid;
-  grid-template-columns: var(--tempra-avatar) minmax(0, 1fr);
-  gap: var(--tempra-space-2) var(--tempra-space-3);
+  grid-template-columns: var(--tempra-size-avatar) minmax(0, 1fr);
+  gap: var(--tempra-space-08) var(--tempra-space-16);
   align-items: baseline;
   counter-increment: step;
 }
@@ -219,8 +215,8 @@
   content: counter(step);
   display: grid;
   place-items: center;
-  width: var(--tempra-avatar);
-  height: var(--tempra-avatar);
+  width: var(--tempra-size-avatar);
+  height: var(--tempra-size-avatar);
   border: 1px solid var(--tempra-color-border-strong);
   border-radius: 50%;
   color: var(--tempra-color-muted);
@@ -239,8 +235,9 @@
 .copy-field {
   display: flex;
   align-items: center;
-  gap: var(--tempra-space-2);
-  padding: var(--tempra-space-1) var(--tempra-space-1) var(--tempra-space-1) var(--tempra-space-3);
+  gap: var(--tempra-space-08);
+  padding: var(--tempra-space-04) var(--tempra-space-04) var(--tempra-space-04)
+    var(--tempra-space-16);
   border: 1px solid var(--tempra-color-border);
   border-radius: var(--tempra-radius-row);
   background: var(--tempra-color-ground);
@@ -257,23 +254,23 @@
 .empty-wait {
   display: flex;
   align-items: center;
-  gap: var(--tempra-space-2);
+  gap: var(--tempra-space-08);
   margin: 0;
-  padding: var(--tempra-space-3);
+  padding: var(--tempra-space-16);
   border: 1px dashed var(--tempra-color-border-strong);
   border-radius: var(--tempra-radius-row);
   color: var(--tempra-color-muted);
 }
 
 .empty-more {
-  margin: var(--tempra-space-3) 0 0;
+  margin: var(--tempra-space-16) 0 0;
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-ui);
 }
 
 @media (max-width: 900px) {
   .empty-library {
-    padding: var(--tempra-space-3);
+    padding: var(--tempra-space-16);
   }
 }
 
@@ -282,16 +279,16 @@
 .activity-day {
   display: flex;
   flex-direction: column;
-  gap: var(--tempra-space-1);
-  margin-bottom: var(--tempra-space-4);
+  gap: var(--tempra-space-04);
+  margin-bottom: var(--tempra-space-32);
 }
 
-/* An entry: who, what they did, when; new ones carry the solid dot at the right (take 4). */
+/* An entry: who, what they did, when; the live one carries the pulsing dot at the right. */
 .entry {
   display: grid;
-  grid-template-columns: var(--tempra-avatar) minmax(0, 1fr) auto;
-  gap: 12px;
-  padding: 12px 10px;
+  grid-template-columns: var(--tempra-size-avatar) minmax(0, 1fr) auto;
+  gap: var(--tempra-space-12);
+  padding: var(--tempra-space-12) var(--tempra-space-10);
   border-radius: var(--tempra-radius-box);
   font-size: var(--tempra-text-ui);
 }
@@ -309,13 +306,13 @@
 .entry-body {
   display: flex;
   flex-direction: column;
-  gap: var(--tempra-space-1);
+  gap: var(--tempra-space-04);
   min-width: 0;
 }
 
 .entry-line {
   margin: 0;
-  font-size: var(--tempra-font-size);
+  font-size: var(--tempra-text-base);
   overflow-wrap: anywhere;
 }
 
@@ -331,7 +328,7 @@
 /* The request's note, quoted. */
 .entry-note {
   color: var(--tempra-color-muted);
-  font-size: var(--tempra-font-size);
+  font-size: var(--tempra-text-base);
   overflow-wrap: anywhere;
 }
 
@@ -339,8 +336,8 @@
 .entry-touched {
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  margin: var(--tempra-space-1) 0 0;
+  gap: var(--tempra-space-02);
+  margin: var(--tempra-space-04) 0 0;
   padding: 0;
   list-style: none;
 }
@@ -349,13 +346,13 @@
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: 0 10px;
+  gap: 0 var(--tempra-space-10);
   min-width: 0;
 }
 
 .entry-what {
   flex: none;
-  width: 52px;
+  width: 52px; /* one-off: the verb column (Edited, Moved) */
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-label);
 }
@@ -364,7 +361,7 @@
   display: flex;
   flex-direction: column;
   align-items: flex-end;
-  gap: var(--tempra-space-2);
+  gap: var(--tempra-space-08);
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
   white-space: nowrap;
@@ -373,13 +370,13 @@
 /* Activity's controls (take 4, TEMPRA-115): the view switch and the filters, Download at the
    right end of the row. */
 .activity-filters select {
-  max-width: 14rem;
+  max-width: 14rem; /* one-off: a filter's select */
 }
 
 a.activity-download {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--tempra-space-06);
   margin-left: auto;
   font-size: var(--tempra-text-meta);
 }
@@ -387,11 +384,11 @@ a.activity-download {
 /* The text filter: an outlined pill with a search glyph inside it. */
 .activity-find {
   display: flex;
-  flex: 1 1 14rem;
+  flex: 1 1 14rem; /* one-off: the text filter, from 14rem to 24rem */
   align-items: center;
-  gap: 6px;
+  gap: var(--tempra-space-06);
   max-width: 24rem;
-  padding: 0 12px;
+  padding: 0 var(--tempra-space-12);
   border: 1px solid var(--tempra-color-border);
   border-radius: var(--tempra-radius-pill);
   color: var(--tempra-color-muted);
@@ -399,13 +396,13 @@ a.activity-download {
 
 .activity-find:focus-within {
   outline: var(--tempra-focus-ring);
-  outline-offset: 1px;
+  outline-offset: var(--tempra-focus-offset-field);
 }
 
 .activity-find input:not([type="checkbox"], [type="radio"], [type="file"]) {
   flex: 1;
   min-width: 0;
-  padding: 5px 0;
+  padding: 5px 0; /* a field's height inside the pill (--tempra-space-field) */
   border: 0;
   outline: 0;
   background: none;
@@ -421,7 +418,7 @@ a.activity-download {
 .entry-now {
   flex-direction: row;
   align-items: center;
-  gap: 6px;
+  gap: var(--tempra-space-06);
 }
 
 /* Every event: the ledger as a quiet table, hairlines between rows, the path in the mono. */
@@ -432,7 +429,7 @@ a.activity-download {
 }
 
 .events-table th {
-  padding: 8px 10px;
+  padding: var(--tempra-space-08) var(--tempra-space-10);
   border-bottom: 1px solid var(--tempra-color-border);
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
@@ -442,7 +439,7 @@ a.activity-download {
 }
 
 .events-table td {
-  padding: 8px 10px;
+  padding: var(--tempra-space-08) var(--tempra-space-10);
   border-bottom: 1px solid var(--tempra-color-border);
   vertical-align: baseline;
 }
@@ -461,17 +458,17 @@ a.activity-download {
 
 /* The dot sits in the seq column's left gutter, so the numbers line up with or without it. */
 .events-seq .change-dot {
-  margin: 0 8px 0 -14px;
+  margin: 0 var(--tempra-space-08) 0 calc(-1 * var(--tempra-space-14));
 }
 
 .events-table td.events-seq {
-  padding-left: 22px;
+  padding-left: 22px; /* one-off: a gutter for the live dot */
 }
 
 .events-person {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: var(--tempra-space-08);
   white-space: nowrap;
 }
 
@@ -494,7 +491,7 @@ a.activity-download {
 
 .events-note,
 .events-aside {
-  margin-left: 10px;
+  margin-left: var(--tempra-space-10);
   color: var(--tempra-color-muted);
 }
 
@@ -504,78 +501,9 @@ a.activity-download {
 
 @media (max-width: 900px) {
   .entry {
-    gap: 10px;
-    padding: 12px 8px;
+    gap: var(--tempra-space-10);
+    padding: var(--tempra-space-12) var(--tempra-space-08);
   }
-}
-
-/* ---------- Rows of a list (For agents' work queue) ---------- */
-
-/* The folder view that first drew these retired with TEMPRA-138; the work queue keeps its rows. */
-.folder {
-  display: flex;
-  flex-direction: column;
-  gap: var(--tempra-space-3);
-}
-
-.folder-foot {
-  margin: var(--tempra-space-3) 0 0;
-  color: var(--tempra-color-muted);
-  font-size: var(--tempra-text-meta);
-}
-
-.folder-foot a {
-  color: var(--tempra-color-muted);
-}
-
-/* Rows with no rules: a title over its description. */
-.folder-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--tempra-space-1);
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.folder-row {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--tempra-space-3);
-  padding: var(--tempra-space-2) 0;
-  color: var(--tempra-color-text);
-  text-decoration: none;
-}
-
-.folder-row:hover .folder-title {
-  text-decoration: underline;
-}
-
-.folder-main {
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.folder-title {
-  display: flex;
-  align-items: center;
-  gap: var(--tempra-space-2);
-  font-weight: var(--tempra-weight-medium);
-  overflow-wrap: anywhere;
-}
-
-.folder-desc {
-  color: var(--tempra-color-muted);
-  font-size: var(--tempra-text-ui);
-}
-
-.folder-count {
-  flex: none;
-  color: var(--tempra-color-muted);
-  font-size: var(--tempra-text-meta);
-  white-space: nowrap;
 }
 
 /* ---------- An attachment (board 28) ---------- */
@@ -583,8 +511,8 @@ a.activity-download {
 /* The file large on a dark frame; beside it its name, actions and facts. */
 .attachment {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(14rem, 18rem);
-  gap: var(--tempra-space-4);
+  grid-template-columns: minmax(0, 1fr) minmax(14rem, 18rem); /* one-off: the facts beside the file */
+  gap: var(--tempra-space-32);
   align-items: start;
 }
 
@@ -595,8 +523,8 @@ a.activity-download {
 .attachment-frame {
   display: grid;
   place-items: center;
-  min-height: 24rem;
-  padding: var(--tempra-space-4);
+  min-height: 24rem; /* one-off: the frame before the file loads */
+  padding: var(--tempra-space-32);
   border-radius: var(--tempra-radius-card);
   background: var(--tempra-color-frame);
   color: var(--tempra-color-frame-ink);
@@ -608,7 +536,7 @@ a.activity-download {
   display: block;
   max-width: 100%;
   height: auto;
-  max-height: 70vh;
+  max-height: 70vh; /* the file within the window */
   object-fit: contain;
 }
 
@@ -618,13 +546,13 @@ a.activity-download {
   display: block;
   width: 100%;
   height: auto;
-  max-height: 70vh;
+  max-height: 70vh; /* the file within the window */
   object-fit: contain;
 }
 
 .attachment-frame audio {
   display: block;
-  width: min(100%, 32rem);
+  width: min(100%, var(--tempra-size-media));
 }
 
 .attachment-icon {
@@ -635,7 +563,7 @@ a.activity-download {
 .attachment-side {
   display: flex;
   flex-direction: column;
-  gap: var(--tempra-space-3);
+  gap: var(--tempra-space-16);
   min-width: 0;
 }
 
@@ -652,14 +580,14 @@ a.activity-download {
 .attachment-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--tempra-space-2);
+  gap: var(--tempra-space-08);
   margin: 0;
 }
 
 .attachment-actions .button {
   display: inline-flex;
   align-items: center;
-  gap: var(--tempra-space-1);
+  gap: var(--tempra-space-04);
 }
 
 /* Type, Size, Added, Used in: label and value in two columns between hairlines. */
@@ -670,9 +598,9 @@ a.activity-download {
 
 .attachment-facts > div {
   display: grid;
-  grid-template-columns: 5.5rem minmax(0, 1fr);
-  gap: var(--tempra-space-2);
-  padding: var(--tempra-space-2) 0;
+  grid-template-columns: 5.5rem minmax(0, 1fr); /* one-off: the facts' names */
+  gap: var(--tempra-space-08);
+  padding: var(--tempra-space-08) 0;
   border-bottom: 1px solid var(--tempra-color-border);
 }
 
@@ -692,14 +620,14 @@ a.activity-download {
 }
 
 .attachment-used > li + li {
-  margin-top: var(--tempra-space-1);
+  margin-top: var(--tempra-space-04);
 }
 
 /* The name and, under it, what the file shows (TEMPRA-170). */
 .attachment-head {
   display: flex;
   flex-direction: column;
-  gap: var(--tempra-space-1);
+  gap: var(--tempra-space-04);
 }
 
 .attachment-description {
@@ -729,10 +657,10 @@ a.activity-download {
 
 .attachment-history li {
   display: grid;
-  grid-template-columns: 10rem minmax(0, 1fr) 10rem auto;
-  gap: var(--tempra-space-1) var(--tempra-space-3);
+  grid-template-columns: 10rem minmax(0, 1fr) 10rem auto; /* one-off: when, who, size, Download */
+  gap: var(--tempra-space-04) var(--tempra-space-16);
   align-items: baseline;
-  padding: var(--tempra-space-2) 0;
+  padding: var(--tempra-space-08) 0;
   border-bottom: 1px solid var(--tempra-color-border);
 }
 
@@ -740,7 +668,7 @@ a.activity-download {
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
-  gap: var(--tempra-space-1) var(--tempra-space-2);
+  gap: var(--tempra-space-04) var(--tempra-space-08);
 }
 
 .attachment-version-who {
@@ -751,7 +679,7 @@ a.activity-download {
 .attachment-version-download {
   display: inline-flex;
   align-items: center;
-  gap: var(--tempra-space-1);
+  gap: var(--tempra-space-04);
   white-space: nowrap;
 }
 
@@ -761,8 +689,8 @@ a.activity-download {
   }
 
   .attachment-frame {
-    min-height: 14rem;
-    padding: var(--tempra-space-3);
+    min-height: 14rem; /* one-off: the frame, narrower */
+    padding: var(--tempra-space-16);
   }
 }
 
@@ -777,7 +705,7 @@ a.activity-download {
   }
 
   .attachment-version-download {
-    min-height: 44px;
+    min-height: var(--tempra-size-touch);
   }
 }
 
@@ -786,7 +714,7 @@ a.activity-download {
 .not-found {
   display: flex;
   flex-direction: column;
-  gap: var(--tempra-space-3);
+  gap: var(--tempra-space-16);
 }
 
 /* Where it went, in a box with Open at the end. */
@@ -795,9 +723,9 @@ a.activity-download {
   flex-wrap: wrap;
   align-items: baseline;
   justify-content: space-between;
-  gap: var(--tempra-space-2) var(--tempra-space-3);
+  gap: var(--tempra-space-08) var(--tempra-space-16);
   margin: 0;
-  padding: var(--tempra-space-3);
+  padding: var(--tempra-space-16);
   border: 1px solid var(--tempra-color-border);
   border-radius: var(--tempra-radius-card);
   color: var(--tempra-color-muted);
@@ -815,14 +743,14 @@ a.activity-download {
 .not-found-ways {
   display: flex;
   flex-wrap: wrap;
-  gap: var(--tempra-space-2);
+  gap: var(--tempra-space-08);
   margin: 0;
 }
 
 .not-found-ways button {
   display: inline-flex;
   align-items: center;
-  gap: var(--tempra-space-1);
+  gap: var(--tempra-space-04);
 }
 
 /* ---------- Settings: one page of sections, a hairline between them ---------- */
@@ -830,10 +758,10 @@ a.activity-download {
 /* Each section under its own heading (General, Members, …), ruled off from the one before;
    the section's own headings (Invite, Export, …) are h3s under it. */
 .settings-section {
-  margin-top: var(--tempra-space-4);
-  padding-top: var(--tempra-space-4);
+  margin-top: var(--tempra-space-32);
+  padding-top: var(--tempra-space-32);
   border-top: 1px solid var(--tempra-color-border);
-  scroll-margin-top: var(--tempra-space-4);
+  scroll-margin-top: var(--tempra-space-32);
 }
 
 .view-head + .settings-section {
@@ -841,14 +769,14 @@ a.activity-download {
 }
 
 .settings-section > h2 {
-  margin: 0 0 var(--tempra-space-3);
+  margin: 0 0 var(--tempra-space-16);
   font-size: var(--tempra-text-reader);
   font-weight: var(--tempra-weight-strong);
   line-height: var(--tempra-leading-tight);
 }
 
 .settings-section h3 {
-  margin: var(--tempra-space-3) 0 var(--tempra-space-2);
+  margin: var(--tempra-space-16) 0 var(--tempra-space-08);
 }
 
 /* The home's Comments panel (TEMPRA-222): the threads on the library itself, opened from the
@@ -858,11 +786,11 @@ a.activity-download {
 @container page (width >= 1100px) {
   .home-panel .concept-panel {
     position: fixed;
-    top: var(--tempra-topbar);
+    top: var(--tempra-size-topbar);
     right: 0;
     bottom: 0;
     z-index: 5;
-    width: var(--tempra-panel);
+    width: var(--tempra-size-panel);
     height: auto;
     box-shadow: var(--tempra-shadow);
   }

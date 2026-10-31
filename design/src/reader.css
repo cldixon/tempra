@@ -1,8 +1,9 @@
 /*
  * What sits around a concept body in the reader (tempra-dev: app/reader): the hover cards and the
  * selection toolbar (popovers in the top layer, placed by the app through --float-x and
- * --float-y), comment highlights (the CSS Custom Highlight API), the threads in the Comments
- * panel and the stored Markdown view. Lines and greys only (no colour until TEMPRA-1).
+ * --float-y), comment highlights (the CSS Custom Highlight API), diagrams and the full-screen
+ * view of a figure. The threads are comments.css's, the Markdown view concept.css's. Lines and
+ * greys only (no colour until TEMPRA-1).
  */
 
 /* A popover: placed at the coordinates the app gives it, never where the browser centres one. */
@@ -21,8 +22,8 @@
 
 /* Hover cards over footnote markers and links. */
 .tooltip {
-  max-width: 22rem;
-  padding: 8px 12px;
+  max-width: var(--tempra-size-tooltip);
+  padding: var(--tempra-space-08) var(--tempra-space-12);
   border: 1px solid var(--tempra-color-border);
   border-radius: var(--tempra-radius-box);
   background: var(--tempra-color-bg);
@@ -30,7 +31,7 @@
   color: var(--tempra-color-text);
   font-family: var(--tempra-font-text);
   font-size: var(--tempra-text-ui);
-  line-height: var(--tempra-line-height);
+  line-height: var(--tempra-leading-base);
   text-wrap: pretty;
 }
 
@@ -75,8 +76,8 @@
 /* The selection toolbar: a pill above the selected text. */
 .selection-tools > div {
   display: flex;
-  gap: 2px;
-  padding: 3px;
+  gap: var(--tempra-space-02);
+  padding: 3px; /* one-off: the pill's inset around its buttons */
   border: 1px solid var(--tempra-color-border);
   border-radius: var(--tempra-radius-pill);
   background: var(--tempra-color-bg);
@@ -85,7 +86,7 @@
 }
 
 .selection-tools button {
-  padding: 4px 12px;
+  padding: var(--tempra-space-04) var(--tempra-space-12);
   border: 0;
   background: var(--tempra-color-text);
   color: var(--tempra-color-bg);
@@ -143,7 +144,7 @@
 
 .prose .diagram-frame {
   position: relative;
-  padding: 40px 20px 20px;
+  padding: var(--tempra-space-40) var(--tempra-space-20) var(--tempra-space-20);
   border: 1px solid var(--tempra-color-border);
   border-radius: var(--tempra-radius-box);
 }
@@ -172,19 +173,19 @@
 /* Source and Enlarge: small grey pills in the frame's corner. */
 .prose .figure-tools {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: var(--tempra-space-08);
+  right: var(--tempra-space-08);
   display: flex;
-  gap: 2px;
+  gap: var(--tempra-space-02);
   font-family: var(--tempra-font-text);
 }
 
 .prose .figure-tools button {
   display: inline-grid;
   place-items: center;
-  min-width: 24px;
-  height: 24px;
-  padding: 0 10px;
+  min-width: var(--tempra-size-control-mini);
+  height: var(--tempra-size-control-mini);
+  padding: 0 var(--tempra-space-10);
   border: 0;
   background: var(--tempra-color-ground);
   color: var(--tempra-color-muted);
@@ -207,7 +208,7 @@
 }
 
 .prose .diagram-notice {
-  margin: 6px 0 0;
+  margin: var(--tempra-space-06) 0 0;
   color: var(--tempra-color-muted);
   font-family: var(--tempra-font-text);
   font-size: var(--tempra-text-meta);
@@ -216,17 +217,17 @@
 /* On a touch screen the corner controls are full-size targets. */
 @media (pointer: coarse) {
   .prose .diagram-frame {
-    padding-top: 60px;
+    padding-top: 60px; /* one-off: room for the 44px tools above the diagram */
   }
 
   .prose .figure-tools {
-    top: 6px;
-    right: 6px;
+    top: var(--tempra-space-06);
+    right: var(--tempra-space-06);
   }
 
   .prose .figure-tools button {
-    min-width: var(--tempra-touch);
-    height: var(--tempra-touch);
+    min-width: var(--tempra-size-touch);
+    height: var(--tempra-size-touch);
     font-size: var(--tempra-text-meta);
   }
 }
@@ -250,7 +251,7 @@
   color: var(--tempra-color-text);
   font-family: var(--tempra-font-text);
   font-size: var(--tempra-text-ui);
-  line-height: var(--tempra-line-height);
+  line-height: var(--tempra-leading-base);
   overflow: hidden;
 }
 
@@ -267,8 +268,8 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 12px;
-  padding: 16px 20px;
+  gap: var(--tempra-space-08) var(--tempra-space-12);
+  padding: var(--tempra-space-16) var(--tempra-space-20);
 }
 
 .lightbox-where {
@@ -277,20 +278,20 @@
 
 .lightbox-where::after {
   content: "·";
-  margin-left: 12px;
+  margin-left: var(--tempra-space-12);
   color: var(--tempra-color-faint);
 }
 
 .lightbox-actions {
   display: flex;
-  gap: 6px;
+  gap: var(--tempra-space-06);
   margin-left: auto;
 }
 
 .lightbox-actions a {
   display: inline-flex;
   align-items: center;
-  padding: 6px 14px;
+  padding: var(--tempra-space-06) var(--tempra-space-14);
   border: 1px solid var(--tempra-color-border);
   border-radius: var(--tempra-radius-pill);
   background: var(--tempra-color-bg);
@@ -307,7 +308,7 @@
   display: inline-grid;
   flex: none;
   place-items: center;
-  width: 34px;
+  width: 34px; /* one-off: the full-screen view's close */
   height: 34px;
   padding: 0;
   border: 1px solid var(--tempra-color-border);
@@ -318,15 +319,15 @@
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 16px;
+  gap: var(--tempra-space-16);
   min-height: 0;
-  padding: 0 20px;
+  padding: 0 var(--tempra-space-20);
 }
 
 .lightbox-stage .lightbox-prev,
 .lightbox-stage .lightbox-next {
-  width: var(--tempra-touch);
-  height: var(--tempra-touch);
+  width: var(--tempra-size-touch);
+  height: var(--tempra-size-touch);
 }
 
 .lightbox-prev {
@@ -368,23 +369,23 @@
 }
 
 .lightbox-figure > audio {
-  width: min(100%, 32rem);
+  width: min(100%, var(--tempra-size-media));
 }
 
 .lightbox-figure > .figure-pdf {
-  width: min(100%, 32rem);
+  width: min(100%, var(--tempra-size-media));
   box-shadow: var(--tempra-shadow);
 }
 
 .lightbox-figure > .figure-broken {
-  width: min(100%, 32rem);
+  width: min(100%, var(--tempra-size-media));
 }
 
 .lightbox-diagram {
   box-sizing: border-box;
   width: 100%;
   height: 100%;
-  padding: 24px;
+  padding: var(--tempra-space-24);
   border-radius: var(--tempra-radius-card);
   background: var(--tempra-color-bg);
   box-shadow: var(--tempra-shadow);
@@ -402,7 +403,7 @@
   max-width: 100%;
   max-height: 100%;
   margin: 0;
-  padding: 16px 18px;
+  padding: var(--tempra-space-16) var(--tempra-space-18);
   overflow: auto;
   border-radius: var(--tempra-radius-box);
   background: var(--tempra-color-bg);
@@ -414,8 +415,8 @@
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 4px;
-  padding: 18px 20px 26px;
+  gap: var(--tempra-space-04);
+  padding: var(--tempra-space-18) var(--tempra-space-20) 26px; /* one-off: the caption's foot */
   text-align: center;
 }
 
@@ -441,7 +442,7 @@
 /* A phone: smaller gutters, 44px targets, no keyboard hint. */
 @media (max-width: 600px) {
   .lightbox-head {
-    padding: 8px 12px;
+    padding: var(--tempra-space-08) var(--tempra-space-12);
   }
 
   .lightbox-where {
@@ -449,22 +450,22 @@
   }
 
   .lightbox-actions a {
-    min-height: var(--tempra-touch);
-    padding: 0 14px;
+    min-height: var(--tempra-size-touch);
+    padding: 0 var(--tempra-space-14);
   }
 
   .lightbox-round {
-    width: var(--tempra-touch);
-    height: var(--tempra-touch);
+    width: var(--tempra-size-touch);
+    height: var(--tempra-size-touch);
   }
 
   .lightbox-stage {
-    gap: 4px;
-    padding: 0 4px;
+    gap: var(--tempra-space-04);
+    padding: 0 var(--tempra-space-04);
   }
 
   .lightbox-foot {
-    padding: 12px 16px 20px;
+    padding: var(--tempra-space-12) var(--tempra-space-16) var(--tempra-space-20);
   }
 
   .lightbox-hint {

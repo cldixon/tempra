@@ -4,7 +4,7 @@ import { runMaintenance } from "../src/maintain";
 import { fakeRenderer } from "../src/render";
 import { LibraryStore } from "../src/store/store";
 import { readTar, writeTar } from "../src/util/tar";
-import { memoryBlobs, memoryBucket, setup } from "./harness";
+import { memoryBucket, setup } from "./harness";
 import { bunSqlHandle } from "./sqlite";
 
 const doc = (body: string) => `---\ntype: Note\n---\n${body}`;
@@ -146,7 +146,6 @@ describe("exports carry drawn diagrams (TEMPRA-168)", () => {
     const now = new Date();
     const res = await runMaintenance({
       store,
-      blobs: memoryBlobs(),
       bucket,
       libraryId: "lib-x",
       now,

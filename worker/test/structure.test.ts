@@ -16,7 +16,7 @@ import { type ImportFile, LibraryStore } from "../src/store/store";
 import { digestText, sweep } from "../src/sweep";
 import { bunD1 } from "./d1";
 import { BUNDLES, loadBundle, text } from "./fixtures";
-import { memoryBlobs, memoryBucket } from "./harness";
+import { memoryBucket } from "./harness";
 import { bunSqlHandle } from "./sqlite";
 
 const ctx = (actor = "claude-code/test") => ({ actor, request_id: crypto.randomUUID() });
@@ -238,7 +238,6 @@ describe("the health summary (TEMPRA-66)", () => {
 
     const res = await runMaintenance({
       store: s,
-      blobs: memoryBlobs(),
       bucket: memoryBucket(),
       libraryId: "lib-h",
       now: new Date(T0),

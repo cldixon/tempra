@@ -42,7 +42,7 @@
 {/snippet}
 
 <article class="entry">
-  <Avatar name={actor.mark} agent={actor.agent} tempra={actor.tempra} />
+  <Avatar name={actor.mark} fullName={actor.fullName} agent={actor.agent} tempra={actor.tempra} />
   <div class="entry-body">
     <p class="entry-line"><AgentName who={actor} /> {#each e.parts as p}{@render part(p)}{/each}</p>
     {#if e.quote}

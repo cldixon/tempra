@@ -27,22 +27,22 @@
   --panel-border: var(--color-border-primary, var(--tempra-color-border-strong));
   --panel-radius: var(--border-radius-lg, var(--tempra-radius-box));
   margin: 0;
-  padding: 16px;
+  padding: var(--tempra-space-16);
   background: var(--panel-surface);
   color: var(--panel-text);
   font-family: var(--font-sans, system-ui, -apple-system, "Segoe UI", sans-serif);
-  font-size: 14px;
-  line-height: 1.45;
+  font-size: var(--tempra-text-base);
+  line-height: 1.45; /* the hosts' own leading, a little tighter than the app's */
 }
 
 .panel h1 {
-  margin: 0 0 4px;
-  font-size: 15px;
-  font-weight: 600;
+  margin: 0 0 var(--tempra-space-04);
+  font-size: var(--tempra-text-name);
+  font-weight: var(--tempra-weight-strong);
 }
 
 .panel p {
-  margin: 0 0 8px;
+  margin: 0 0 var(--tempra-space-08);
 }
 
 .panel .muted {
@@ -51,16 +51,16 @@
 
 .panel code {
   font-family: var(--font-mono, ui-monospace, "SF Mono", Menlo, monospace);
-  font-size: 0.92em;
+  font-size: var(--tempra-text-code);
   overflow-wrap: anywhere;
 }
 
 /* The drop area: the file input's label, a dashed box that says what to do. */
 .panel .drop {
   display: block;
-  margin: 12px 0 8px;
-  padding: 20px 16px;
-  border: 1.5px dashed var(--panel-border);
+  margin: var(--tempra-space-12) 0 var(--tempra-space-08);
+  padding: var(--tempra-space-20) var(--tempra-space-16);
+  border: 1.5px dashed var(--panel-border); /* one-off: the drop area's edge */
   border-radius: var(--panel-radius);
   background: var(--panel-inset);
   text-align: center;
@@ -74,7 +74,7 @@
 
 .panel .drop .hint {
   display: block;
-  margin-top: 4px;
+  margin-top: var(--tempra-space-04);
 }
 
 .panel .drop.over {
@@ -83,8 +83,8 @@
 }
 
 .panel .drop:focus-within {
-  outline: 2px solid var(--panel-text);
-  outline-offset: 2px;
+  outline: 2px solid var(--panel-text); /* the focus ring, in the host's text colour */
+  outline-offset: var(--tempra-focus-offset);
 }
 
 /* The input stays in the label for the keyboard and screen readers, out of sight. */
@@ -99,21 +99,21 @@
 
 .panel .status {
   min-height: 1.45em;
-  margin: 8px 0 0;
+  margin: var(--tempra-space-08) 0 0;
 }
 
 .panel .actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--tempra-space-08);
   align-items: center;
-  margin-top: 8px;
+  margin-top: var(--tempra-space-08);
 }
 
 .panel button {
-  padding: 6px 14px;
+  padding: var(--tempra-space-06) var(--tempra-space-14);
   border: 1px solid var(--panel-border);
-  border-radius: 999px;
+  border-radius: var(--tempra-radius-pill);
   background: var(--panel-surface);
   color: var(--panel-text);
   font: inherit;
@@ -131,14 +131,14 @@
 }
 
 .panel button:focus-visible {
-  outline: 2px solid var(--panel-text);
-  outline-offset: 2px;
+  outline: 2px solid var(--panel-text); /* the focus ring, in the host's text colour */
+  outline-offset: var(--tempra-focus-offset);
 }
 
 .panel progress {
   width: 100%;
-  height: 6px;
-  margin-top: 8px;
+  height: 6px; /* one-off: the progress bar */
+  margin-top: var(--tempra-space-08);
 }
 
 /* ---------- The page panel (tempra-dev app/page-panel): one page shown in the chat by `show` ----------
@@ -148,28 +148,28 @@
 
 .page-body {
   margin: 0;
-  padding: 20px 20px 24px;
+  padding: var(--tempra-space-20) var(--tempra-space-20) var(--tempra-space-24);
   background: var(--tempra-color-bg);
 }
 
 .page-panel .pp-head {
-  margin-bottom: 24px;
+  margin-bottom: var(--tempra-space-24);
 }
 
 .page-panel .pp-where {
-  margin: 0 0 12px;
+  margin: 0 0 var(--tempra-space-12);
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
 }
 
 .page-panel .pp-title {
-  margin: 0 0 8px;
+  margin: 0 0 var(--tempra-space-08);
   font-family: var(--tempra-font-display);
   font-variation-settings: var(--tempra-font-display-settings);
   font-size: var(--tempra-text-page);
   font-weight: var(--tempra-weight-medium);
   line-height: var(--tempra-leading-tight);
-  letter-spacing: -0.01em;
+  letter-spacing: var(--tempra-tracking-doc);
 }
 
 .page-panel .pp-description {
@@ -182,8 +182,8 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 8px;
-  margin: 12px 0 0;
+  gap: var(--tempra-space-06) var(--tempra-space-08);
+  margin: var(--tempra-space-12) 0 0;
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-ui);
 }
