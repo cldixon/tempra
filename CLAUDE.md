@@ -73,6 +73,7 @@ worker/src/lifecycle.ts  Deleting a library or an account: rows, grants, then th
 worker/src/limits.ts     Per-account limits (libraries, tokens) with overrides in users.limits; storage per library
 worker/src/usage.ts      Rate limits (Rate Limiting bindings) and metering (Analytics Engine) for tokens and apps
 worker/src/sweep.ts      The daily cron: dispatches blob recounts, the blob sweep's delete step (31 days unreferenced, held until every library is counted) and the operator digest; the SWEEP_QUEUE consumer (dispatch pages, recounts, the one-time bucket listing, the drift scan); free of Worker APIs
+worker/src/library-health.ts  Library health rows (TEMPRA-92): each library's pass writes its problems, open work and next pass to D1 `library_health` when they changed; the operator digest reads only those rows with bounded, indexed queries (no loop over libraries, tempra-dev `decisions/no-loops-over-every-library.md`); free of Worker APIs
 worker/src/blobrefs.ts   The blob sweep's D1 (TEMPRA-81, TEMPRA-91; tempra-dev: v2/blob-sweep): blobs_stored (recorded at upload), blob_refs (recorded by the write path before the write commits), blob_ref_libraries (counted, pending a restore's recount), blob_orphans
 worker/src/account-api.ts  The account's API for the app (session only): account, sessions, email and handle changes, delete, connected apps
 worker/src/notify.ts     Notifications in D1 (items, done once opened, the one mail switch), mention resolution, and postComment: the comment path that fans items out

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { d1Accounts } from "../src/accounts";
 import { d1BlobRefs } from "../src/blobrefs";
+import { healthDigest } from "../src/library-health";
 import { d1Sessions } from "../src/session";
 import { digestText, pruneAccounts, sweep } from "../src/sweep";
 import { bunD1 } from "./d1";
@@ -243,13 +244,9 @@ describe("daily account prune (TEMPRA-79)", () => {
     const r = await sweep({
       refs: d1BlobRefs(d1),
       queue: { send: async () => {}, sendBatch: async () => {} },
-      libraries: async () => [],
-      inventory: async () => {
-        throw new Error("no libraries");
-      },
+      health: (t) => healthDigest(d1, t),
       bucket: { delete: (keys) => bucket.delete(keys) },
       prune: () => pruneAccounts(d1, NOW),
-      storageLimitBytes: 1048576,
       now: NOW,
     });
     expect(r.pruned).toEqual({ sessions: 2, sign_in_links: 1, invitations: 3 });
@@ -262,13 +259,11 @@ describe("daily account prune (TEMPRA-79)", () => {
     const r = await sweep({
       refs: d1BlobRefs(d1),
       queue: { send: async () => {}, sendBatch: async () => {} },
-      libraries: async () => [],
-      inventory: async () => ({}) as never,
+      health: (t) => healthDigest(d1, t),
       bucket: { delete: (keys) => bucket.delete(keys) },
       prune: async () => {
         throw new Error("D1 busy");
       },
-      storageLimitBytes: 1048576,
       now: NOW,
     });
     expect(r.pruned).toBeUndefined();

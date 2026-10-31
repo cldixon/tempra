@@ -1,6 +1,6 @@
 import type { BlobRefs } from "./blobrefs";
 import { blobKey } from "./client";
-import type { LibraryHealth } from "./store/store";
+import { DIGEST_HEALTH_LIBRARIES, type HealthCounts, type HealthDigest } from "./library-health";
 
 /**
  * The daily sweep and operator digest (v2 spec: A3; TEMPRA-81, TEMPRA-91; tempra-dev:
@@ -10,7 +10,9 @@ import type { LibraryHealth } from "./store/store";
  * longer than the 30-day point-in-time window, so an undone restore never finds an attachment
  * gone. It lists no bucket and calls no library for the sweep: recounts, the one-time listing and
  * the drift scan are messages on SWEEP_QUEUE, a page or a library each. Deletion waits while any
- * library has not been counted once or has a restore's recount pending. Free of Worker APIs.
+ * library has not been counted once or has a restore's recount pending. The digest calls no
+ * library either: it reads the health rows each library writes from its own pass (TEMPRA-92,
+ * library-health.ts). Free of Worker APIs.
  */
 
 export const GRACE_DAYS = 31;
@@ -40,31 +42,15 @@ export interface SweepQueue {
   sendBatch(messages: SweepMessage[]): Promise<void>;
 }
 
-/** The digest's view of one library (until TEMPRA-92 gives each library a health row). */
-export interface Inventory {
-  bytes: number;
-  stats: {
-    seq: number;
-    maintainers: { export: { lag: number; last_run: string | null } };
-    next_run: string | null;
-  };
-  /** The library's health summary (TEMPRA-66); absent from a library that predates it. */
-  health?: LibraryHealth;
-}
-
 export interface SweepDeps {
   refs: BlobRefs;
   queue: SweepQueue;
   bucket: { delete(keys: string[]): Promise<void> };
-  /** Every library: its id (the Durable Object name) and path, for the digest. */
-  libraries(): Promise<{ id: string; path: string }[]>;
-  inventory(libraryId: string): Promise<Inventory>;
   /**
-   * Records a library's storage in D1 for the account's quota across libraries (TEMPRA-232):
-   * the daily backfill beside each library's own reports after its writes.
+   * The libraries' own health rows (TEMPRA-92, library-health.ts healthDigest): their problems,
+   * overdue passes and open work, read from D1 without calling any library.
    */
-  recordStorage?: (libraryId: string, bytes: number) => Promise<void>;
-  storageLimitBytes: number;
+  health(now: Date): Promise<HealthDigest>;
   /** The account D1's daily prune (pruneAccounts); its counts go in the digest. */
   prune?: () => Promise<PruneResult>;
   now: Date;
@@ -82,8 +68,10 @@ export interface SweepResult {
   held?: string;
   /** Things the operator should look at. */
   attention: string[];
-  /** Libraries with open work, from each one's health summary, the most first. */
-  health: { path: string; counts: LibraryHealth["counts"] }[];
+  /** Libraries with open work, from their health rows, the most first (DIGEST_HEALTH_LIBRARIES). */
+  health: { path: string; counts: HealthCounts }[];
+  /** How many libraries have open work; absent means as many as `health` lists. */
+  healthTotal?: number;
   /** Rows the account prune deleted; absent when it did not run. */
   pruned?: PruneResult;
   /** @tempra's spend this month (costs.ts agentSpendThisMonth); the Worker adds it after sweep(). */
@@ -97,7 +85,7 @@ export async function sweep(d: SweepDeps): Promise<SweepResult> {
   if (held) attention.push(`Blob sweep held: ${held}.`);
   if (more) attention.push("Blob sweep: more expired blobs than a day deletes; the rest wait.");
 
-  const report = await reportLibraries(d);
+  const report = await d.health(d.now);
   attention.push(...report.attention);
 
   let pruned: PruneResult | undefined;
@@ -120,6 +108,7 @@ export async function sweep(d: SweepDeps): Promise<SweepResult> {
     ...(held ? { held } : {}),
     attention,
     health: report.health,
+    healthTotal: report.healthTotal,
     ...(pruned ? { pruned } : {}),
   };
 }
@@ -211,36 +200,6 @@ async function deleteExpired(
     if (due.length < DELETE_PAGE) return { deleted, more: false };
   }
   return { deleted, more: true };
-}
-
-/**
- * The digest's per-library problems and health: one call to each library (until TEMPRA-92). A
- * library that does not answer is reported; it no longer holds back the sweep.
- */
-async function reportLibraries(d: SweepDeps) {
-  const libs = await d.libraries();
-  const attention: string[] = [];
-  const health: SweepResult["health"] = [];
-  for (const lib of libs) {
-    let inv: Inventory;
-    try {
-      inv = await d.inventory(lib.id);
-    } catch (e) {
-      attention.push(`${lib.path}: did not answer (${e instanceof Error ? e.message : String(e)})`);
-      continue;
-    }
-    try {
-      await d.recordStorage?.(lib.id, inv.bytes);
-    } catch (e) {
-      console.error(JSON.stringify({ storage_not_recorded: lib.id, error: String(e) }));
-    }
-    attention.push(...libraryProblems(lib.path, inv, d.storageLimitBytes, d.now));
-    if (inv.health && openWork(inv.health.counts) > 0) {
-      health.push({ path: lib.path, counts: inv.health.counts });
-    }
-  }
-  health.sort((a, b) => openWork(b.counts) - openWork(a.counts) || (a.path < b.path ? -1 : 1));
-  return { libraries: libs.length, attention, health };
 }
 
 export interface SweepConsumerDeps {
@@ -343,39 +302,8 @@ export function isSweepMessage(m: unknown): m is SweepMessage {
   return k === "dispatch" || k === "recount" || k === "list" || k === "scan";
 }
 
-/** A library's export falling behind, its daily alarm not running, or its storage nearly full. */
-export function libraryProblems(
-  path: string,
-  inv: Inventory,
-  limitBytes: number,
-  now: Date,
-): string[] {
-  const out: string[] = [];
-  const exp = inv.stats.maintainers.export;
-  const twoDays = now.getTime() - 2 * DAY_MS;
-  if (exp.lag > 0 && exp.last_run && Date.parse(exp.last_run) < twoDays) {
-    out.push(`${path}: last export ${exp.last_run}, ${exp.lag} events behind`);
-  }
-  if (inv.stats.next_run && Date.parse(inv.stats.next_run) < now.getTime() - DAY_MS) {
-    out.push(`${path}: daily maintenance overdue since ${inv.stats.next_run}`);
-  }
-  if (inv.bytes >= 0.8 * limitBytes) {
-    out.push(
-      `${path}: ${Math.round(inv.bytes / 1048576)} MB of ${Math.round(limitBytes / 1048576)} MB`,
-    );
-  }
-  return out;
-}
-
-/** Open work in a health summary; stale soon looks ahead and is not counted. */
-const openWork = (c: LibraryHealth["counts"]) =>
-  c.stale + c.broken_link + c.lint + (c.external_image ?? 0) + c.structure + c.comment;
-
-/** How many libraries' health the digest lists. */
-export const DIGEST_HEALTH_LIBRARIES = 20;
-
 /** One library's open work for the digest: "owner/slug: stale 2 · lint 1". */
-export function healthLine(path: string, c: LibraryHealth["counts"]): string {
+export function healthLine(path: string, c: HealthCounts): string {
   const parts: [string, number][] = [
     ["stale", c.stale],
     ["stale soon", c.stale_soon],
@@ -402,8 +330,8 @@ export function digestText(r: SweepResult): string {
       ? [
           "Library health (open work):",
           ...shown.map((h) => `- ${healthLine(h.path, h.counts)}`),
-          ...(r.health.length > shown.length
-            ? [`- and ${r.health.length - shown.length} more libraries`]
+          ...((r.healthTotal ?? r.health.length) > shown.length
+            ? [`- and ${(r.healthTotal ?? r.health.length) - shown.length} more libraries`]
             : []),
           "",
         ]

@@ -9,11 +9,12 @@
  * - day 32 (every orphan past its 31 days deleted);
  * - one write's reference, one recount and one library delete.
  *
- * For each: the cron's own time, Durable Object calls, R2 listings and queue messages. The digest's
- * per-library inventory() calls (until TEMPRA-92) are left out: they are the same before and after.
+ * For each: the cron's own time, Durable Object calls, R2 listings and queue messages. The digest
+ * reads the libraries' health rows (TEMPRA-92; none here, so its queries run on an empty table).
  * Times are local SQLite; on D1 each statement or batch adds a network round trip.
  */
 import { d1BlobRefs } from "../src/blobrefs";
+import { healthDigest } from "../src/library-health";
 import { handleSweepMessage, type SweepMessage, sweep } from "../src/sweep";
 import { bunD1 } from "../test/d1";
 
@@ -94,11 +95,7 @@ async function day(now: Date) {
         counters.deletedKeys += keys.length;
       },
     },
-    libraries: async () => [],
-    inventory: async () => {
-      throw new Error("not called");
-    },
-    storageLimitBytes: 1e9,
+    health: (at) => healthDigest(d1, at),
     now,
   });
   const cronMs = Math.round(performance.now() - t);
