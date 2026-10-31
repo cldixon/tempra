@@ -1,11 +1,19 @@
 /*
- * Tempra design tokens: the one place values live (TEMPRA-8). Take 2 of the design (TEMPRA-53,
- * design/handoff/layout-take-2) set structure and type: neutral greys, a type scale, radii and one soft shadow. Take 3 (TEMPRA-106, design/handoff/layout-take-3) set
- * the frame's sizes, squarer corners and the one colour allowed before the palette: a small warm
- * dot for an agent's recent change. Take 4 (TEMPRA-113, design/handoff/layout-take-4) set the top
- * bar, the wider sidebar and the panel, and gave the dot a second, pulsing state. The palette
- * (TEMPRA-1) changes values here and both the app and the site follow. Light and dark come from
- * the system through light-dark(), or from the account's theme on the root (data-theme).
+ * Tempra design tokens: the one place values live (TEMPRA-8). Every name is
+ * --tempra-<group>-<name>: color, focus, font, text (sizes), weight, leading, measure, space,
+ * size, radius, motion, shadow. Take 2 of the design (TEMPRA-53, design/handoff/layout-take-2)
+ * set structure and type: neutral greys, a type scale, radii and one soft shadow. Take 3
+ * (TEMPRA-106) set the frame's sizes and squarer corners, and take 4 (TEMPRA-113,
+ * design/handoff/layout-take-4) the top bar, the wider sidebar and the panel. The one colour before
+ * the palette is the agent's: the change dot that pulses while an agent writes, and its ink. The
+ * palette (TEMPRA-1) changes values here and both the app and the site follow. Light and dark come
+ * from the system through light-dark(), or from the account's theme on the root (data-theme).
+ *
+ * What stays literal in the CSS: 1px (hairlines, and the 1px between rows), 2px rules and
+ * underlines (a quote's rule, the active comment), 50% for a circle, 0, unitless flex and grid
+ * factors, em inside .prose (its rhythm scales with the reading size), and a component's own
+ * one-off dimension, commented where it is used. Breakpoints too: a media or container query
+ * cannot read a token.
  */
 :root {
   color-scheme: light dark;
@@ -29,11 +37,13 @@
   --tempra-color-border-strong: light-dark(#d2d2ce, #3c3c40);
 
   /* Focus (TEMPRA-132): a 2px ring in the text colour on every control focused by keyboard
-     (:focus-visible), until the palette (TEMPRA-1) designs its own */
+     (:focus-visible), until the palette (TEMPRA-1) designs its own. A field's ring sits closer. */
   --tempra-focus-ring: 2px solid var(--tempra-color-text);
   --tempra-focus-offset: 2px;
+  --tempra-focus-offset-field: 1px;
 
-  /* Color: the change dot (the only colour before the palette) */
+  /* Color: the agent's (the only colour before the palette): the change dot, pulsing while an
+     agent writes now (take 4), and Tempra's own agent's round mark */
   --tempra-color-agent: light-dark(#e8722a, #f0884a);
   /* The same colour deep enough to sit in words (TEMPRA-219): the highlight that moves across
      the name of a file an agent is at now, and its static mark under reduced motion. At least
@@ -52,22 +62,22 @@
   --tempra-color-comment-line: light-dark(#7e7e82, #808084);
 
   /* Color: chart series (TEMPRA-217). The agreed exception to "no colour until the palette"
-     besides the change dot, for a Vega-Lite chart's series and categories only: greys cannot tell
+     besides the agent's, for a Vega-Lite chart's series and categories only: greys cannot tell
      two lines apart. Axes, grid and text stay grey. Eight hues in a fixed order, each stepped for
      its scheme, checked against the page (--tempra-color-bg) with the dataviz validator: adjacent
      pairs apart under protanopia and deuteranopia, every pair apart to normal vision; three light
      steps sit under 3:1 on white, so a chart keeps its legend (design/contrast.test.ts). The
      palette (TEMPRA-1) may replace them. */
-  --tempra-chart-1: light-dark(#2a78d6, #3987e5); /* blue */
-  --tempra-chart-2: light-dark(#eb6834, #d95926); /* orange */
-  --tempra-chart-3: light-dark(#1baf7a, #199e70); /* aqua */
-  --tempra-chart-4: light-dark(#eda100, #c98500); /* yellow */
-  --tempra-chart-5: light-dark(#e87ba4, #d55181); /* magenta */
-  --tempra-chart-6: light-dark(#008300, #008300); /* green */
-  --tempra-chart-7: light-dark(#6250d6, #9085e9); /* violet */
-  --tempra-chart-8: light-dark(#e34948, #e66767); /* red */
+  --tempra-color-chart-1: light-dark(#2a78d6, #3987e5); /* blue */
+  --tempra-color-chart-2: light-dark(#eb6834, #d95926); /* orange */
+  --tempra-color-chart-3: light-dark(#1baf7a, #199e70); /* aqua */
+  --tempra-color-chart-4: light-dark(#eda100, #c98500); /* yellow */
+  --tempra-color-chart-5: light-dark(#e87ba4, #d55181); /* magenta */
+  --tempra-color-chart-6: light-dark(#008300, #008300); /* green */
+  --tempra-color-chart-7: light-dark(#6250d6, #9085e9); /* violet */
+  --tempra-color-chart-8: light-dark(#e34948, #e66767); /* red */
 
-  /* Color: a dimmed page behind a sheet or a full-screen view */
+  /* Color: a dimmed page behind an overlaid panel, the phone's drawer or sheet, or a dialog */
   --tempra-color-scrim: light-dark(rgb(20 20 22 / 0.2), rgb(0 0 0 / 0.5));
 
   /* Color: the dark frame an attachment is shown on (take 4, board 28), and a mark on it */
@@ -97,20 +107,19 @@
   --tempra-font-display: var(--tempra-font-text);
   --tempra-font-display-settings: "opsz" 32; /* Inter's display cut, at any size it is used */
   --tempra-font-mono: ui-monospace, "SF Mono", Menlo, monospace;
-  --tempra-font-size: 14px; /* the app's base text */
-  --tempra-measure: 680px; /* the reader's column, with its padding */
-  --tempra-measure-reader: 34em; /* concept text: about 66 characters at the reading size */
 
   /* Type scale: the only pixel sizes in the CSS (inside .prose, sizes are em of the reading size) */
   --tempra-text-initial: 9px; /* an avatar's initials */
   --tempra-text-label: 11px; /* uppercase labels, marks */
   --tempra-text-meta: 12px; /* timestamps, small print */
   --tempra-text-ui: 13px; /* controls, panels, the tree, comments */
+  --tempra-text-base: 14px; /* the app's base text */
   --tempra-text-name: 15px; /* a library's name, dialog heads, the wordmark */
   --tempra-text-reader: 17px; /* a concept's body and description, the landing page's lede */
-  --tempra-text-h2: 22px; /* an attachment's name */
+  --tempra-text-h2: 22px; /* an attachment's name, a compose dialog's name */
   --tempra-text-page: 28px; /* a view's title (h1); a concept's title on a phone */
   --tempra-text-title: 36px; /* a concept's title */
+  --tempra-text-code: 0.92em; /* code, a step under the text around it */
 
   /* Weights: three */
   --tempra-weight-regular: 400; /* text */
@@ -119,52 +128,121 @@
 
   /* Leading: three */
   --tempra-leading-tight: 1.2; /* titles and headings */
-  --tempra-line-height: 1.5; /* the app's text */
+  --tempra-leading-base: 1.5; /* the app's text */
   --tempra-leading-reader: 1.65; /* reading */
 
-  /* Space */
-  --tempra-space-1: 0.25rem;
-  --tempra-space-2: 0.5rem;
-  --tempra-space-3: 1rem;
-  --tempra-space-4: 2rem;
-  --tempra-gutter: 8px; /* the frame's gutter */
-  --tempra-page-pad: 40px; /* a page's side padding in its column */
+  /* Tracking */
+  --tempra-tracking-label: 0.04em; /* uppercase labels */
+  --tempra-tracking-title: -0.02em; /* h1 and a view's title */
+  --tempra-tracking-doc: -0.01em; /* a concept's title */
 
-  /* The frame (take 4): a top bar across the window, the sidebar, one panel beside a concept.
-     The breakpoints are 1100px (the panel overlays the page) and 900px (the phone layout); a
-     media query cannot read a token, so they are written where they are used. */
-  --tempra-topbar: 60px; /* the top bar */
-  --tempra-sidebar: 264px; /* the sidebar's width */
-  --tempra-panel: 360px; /* a concept's panel (Comments, History, Properties) */
-  --tempra-bar: 52px; /* the phone's top bar */
-  --tempra-drawer: min(82vw, 360px); /* the phone's drawer: about four fifths of the screen */
-  --tempra-sheet: 67dvh; /* a panel as the phone's bottom sheet: about two thirds of the screen */
-  --tempra-row: 30px; /* a sidebar row */
-  --tempra-touch: 44px; /* the least touch target on a phone */
-  --tempra-avatar: 22px;
-  --tempra-avatar-small: 20px;
-  --tempra-dot: 6px; /* an agent's change, a reader's unverified state */
+  /* Lines: a link's underline sits this far under the text (inside .prose, in em) */
+  --tempra-line-offset: 2px;
 
-  /* A concept's columns (take 4): the text, centred; on the right its contents, or a panel */
-  --tempra-column-text: 620px;
-  --tempra-contents: 200px;
-  --tempra-figure-wide: 960px; /* a wide figure (`layout=wide`), past the text's measure */
-  --tempra-figure-gap: 12px; /* between a group's images */
-  --tempra-page-width: 760px; /* home, Activity, a folder, the Inbox */
+  /* Measure */
+  --tempra-measure: 680px; /* the reader's column, with its padding: diagrams, captions */
+  --tempra-measure-reader: 34em; /* concept text: about 66 characters at the reading size */
+
+  /* Space: one scale, named by its size in px (take 2 to take 4 used every step below; the
+     palette round may thin it). Only these appear as padding, margin, gap and offsets. */
+  --tempra-space-02: 2px;
+  --tempra-space-04: 4px;
+  --tempra-space-06: 6px;
+  --tempra-space-08: 8px;
+  --tempra-space-10: 10px;
+  --tempra-space-12: 12px;
+  --tempra-space-14: 14px;
+  --tempra-space-16: 16px;
+  --tempra-space-18: 18px;
+  --tempra-space-20: 20px;
+  --tempra-space-24: 24px;
+  --tempra-space-28: 28px;
+  --tempra-space-32: 32px;
+  --tempra-space-40: 40px;
+  --tempra-space-48: 48px;
+  --tempra-space-56: 56px;
+  --tempra-space-72: 72px;
+  --tempra-space-96: 96px;
+  --tempra-space-gutter: var(--tempra-space-08); /* the frame's gutter */
+  --tempra-space-page: var(--tempra-space-40); /* a page's side padding in its column */
+  --tempra-space-figure: var(--tempra-space-12); /* between a group's images */
+  /* Inside a control: a button's, a field's and a chip's padding (their 1px border makes up the
+     rest of a 30px pill at the UI size) */
+  --tempra-space-button: 5px 12px;
+  --tempra-space-field: 5px 10px;
+  --tempra-space-chip: 1px 7px;
+
+  /* Size: the frame (take 4): a top bar across the window, the sidebar, one panel beside a
+     concept. The breakpoints are 1100px (the panel overlays the page) and 900px (the phone
+     layout); a media query cannot read a token, so they are written where they are used. */
+  --tempra-size-topbar: 60px; /* the top bar */
+  --tempra-size-topbar-phone: 52px; /* the phone's top bar */
+  --tempra-size-sidebar: 264px; /* the sidebar's width */
+  --tempra-size-panel: 360px; /* a concept's panel (Comments, History, Properties) */
+  --tempra-size-panel-head: 56px; /* a panel's head; the phone sheet's is taller */
+  --tempra-size-panel-head-phone: 64px;
+  --tempra-size-drawer: min(82vw, 360px); /* the phone's drawer: about four fifths of the screen */
+  --tempra-size-sheet: 67dvh; /* a panel as the phone's bottom sheet: about two thirds of the screen */
+  --tempra-size-row: 30px; /* a sidebar row */
+  --tempra-size-touch: 44px; /* the least touch target on a phone */
+
+  /* Size: a concept's columns (take 4): the text, centred; on the right its contents, or a panel */
+  --tempra-size-column-text: 620px;
+  --tempra-size-contents: 200px;
+  --tempra-size-figure-wide: 960px; /* a wide figure (`layout=wide`), past the text's measure */
+  --tempra-size-page: 760px; /* home, Activity, Settings, the account's pages */
+  --tempra-size-page-wide: 960px; /* a page column that holds a table (the account's Agents) */
+
+  /* Size: controls and marks */
+  --tempra-size-control: 36px; /* the top bar's round buttons and pills */
+  --tempra-size-control-small: 30px; /* a round icon button elsewhere */
+  --tempra-size-control-mini: 24px; /* a figure's corner tools, a comment mark */
+  --tempra-size-icon: 16px; /* a glyph's box: the tree's chevron and file icon */
+  --tempra-size-icon-small: 12px; /* the tree's chevron itself */
+  --tempra-size-avatar: 22px; /* someone's round mark */
+  --tempra-size-avatar-small: 20px; /* in a compact thread */
+  --tempra-size-avatar-menu: 26px; /* the avatar button that opens the account menu */
+  --tempra-size-avatar-large: 32px; /* at the head of the account menu */
+  --tempra-size-tile: 24px; /* a library's initial */
+  --tempra-size-tile-small: 20px; /* in a row: the sidebar, a menu, the bell */
+  --tempra-size-tile-large: 28px; /* the Tempra mark, a library card's cover */
+  --tempra-size-badge: 16px; /* the bell's count */
+  --tempra-size-dot: 6px; /* an agent's change, the agent replying */
+  --tempra-size-fab: 56px; /* a page's actions, floating */
+
+  /* Size: cards and dialogs */
+  --tempra-size-dialog: 32rem;
+  --tempra-size-dialog-wide: 40rem; /* a wide or compose dialog */
+  --tempra-size-media: 32rem; /* audio, a PDF's card and a broken figure in the full-screen view and on an attachment's page */
+  --tempra-size-menu: 13rem; /* a menu's least width */
+  --tempra-size-popover: 360px; /* the bell's panel */
+  --tempra-size-card: 240px; /* a library card's least width, the page's actions menu */
+  --tempra-size-tooltip: 22rem; /* a hover card */
+  --tempra-size-field: 22rem; /* a form field's widest */
 
   /* Shape: squarer than take 2 */
-  --tempra-radius: 5px; /* code */
-  --tempra-radius-mark: 3px;
+  --tempra-radius-code: 5px; /* code */
   --tempra-radius-row: 7px; /* sidebar rows, inputs */
   --tempra-radius-box: 10px; /* cards, list boxes, threads */
   --tempra-radius-card: 10px; /* the public pages' sheet, dialogs */
   --tempra-radius-tile: 6px; /* the library's initial */
   --tempra-radius-pill: 999px;
 
-  /* Motion: the pulse of the change dot while an agent writes */
-  --tempra-pulse: 1.6s;
-  /* Motion: one pass of the shimmer over a name an agent is at now (TEMPRA-219) */
-  --tempra-shimmer: 2s;
+  /* Motion */
+  --tempra-motion-quick: 0.15s; /* a chevron or a + turning */
+  --tempra-motion-pulse: 1.6s; /* the change dot's pulse while an agent writes */
+  --tempra-motion-shimmer: 2s; /* one pass of the shimmer over a name an agent is at now (TEMPRA-219) */
+
+  /* Former names, for public.css alone until TEMPRA-126 moves it to the names above; nothing
+     else may use them (design.test.ts). */
+  --tempra-line-height: var(--tempra-leading-base);
+  --tempra-space-3: 1rem;
+  --tempra-space-4: 2rem;
+  --tempra-gutter: var(--tempra-space-gutter);
+  --tempra-page-pad: var(--tempra-space-page);
+  --tempra-bar: var(--tempra-size-topbar-phone);
+  --tempra-touch: var(--tempra-size-touch);
+  --tempra-page-width: var(--tempra-size-page);
 }
 
 /* The account's theme (take 4): the shell puts it on the root; the tokens above follow. */

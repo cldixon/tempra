@@ -13,7 +13,7 @@
 /* --concept-side is the right column's width in each layout below, so a wide or full figure
    (prose.css, TEMPRA-161) knows the text's column: the page's width (100cqi of `page`) less it. */
 .concept {
-  --concept-side: var(--tempra-panel);
+  --concept-side: var(--tempra-size-panel);
 }
 
 .concept-grid {
@@ -34,20 +34,25 @@
 /* The text, centred in its column, --doc-max wide at most (padding included), --doc-pad from its
    edges; a wide or full figure reads both. */
 .concept .doc {
-  --doc-pad: var(--tempra-page-pad);
-  --doc-max: calc(var(--tempra-column-text) + 2 * var(--tempra-page-pad));
+  --doc-pad: var(--tempra-space-page);
+  --doc-max: calc(var(--tempra-size-column-text) + 2 * var(--tempra-space-page));
   grid-row: 1;
   grid-column: text;
   justify-self: center;
   width: 100%;
   max-width: var(--doc-max);
   min-width: 0;
-  padding: 40px var(--doc-pad) 140px;
+  padding: var(--tempra-space-40) var(--doc-pad) 140px; /* one-off: room under the text for the page's actions */
 }
 
 /* The Markdown view is wider than the text: the file's lines are long. */
 .concept.markdown-on .doc {
-  --doc-max: calc(var(--tempra-measure) + 2 * var(--tempra-page-pad) + 200px);
+  --doc-max: calc(
+    var(--tempra-measure) +
+    2 *
+    var(--tempra-space-page) +
+    var(--tempra-size-contents)
+  );
 }
 
 .concept-side {
@@ -61,10 +66,10 @@
 .concept-contents {
   position: sticky;
   top: 0;
-  max-width: calc(var(--tempra-contents) + 2 * var(--tempra-page-pad));
-  max-height: calc(100dvh - var(--tempra-topbar));
+  max-width: calc(var(--tempra-size-contents) + 2 * var(--tempra-space-page));
+  max-height: calc(100dvh - var(--tempra-size-topbar));
   overflow: auto;
-  padding: 48px var(--tempra-page-pad) 24px 0;
+  padding: var(--tempra-space-48) var(--tempra-space-page) var(--tempra-space-24) 0;
 }
 
 .toc {
@@ -73,20 +78,20 @@
   border-left: 1px solid var(--tempra-color-border);
   list-style: none;
   font-size: var(--tempra-text-meta);
-  line-height: var(--tempra-line-height);
+  line-height: var(--tempra-leading-base);
 }
 
 .toc a {
   display: block;
-  margin-left: -1px;
-  padding: 4px 0 4px 14px;
+  margin-left: -1px; /* over the list's hairline */
+  padding: var(--tempra-space-04) 0 var(--tempra-space-04) var(--tempra-space-14);
   border-left: 1px solid transparent;
   color: var(--tempra-color-muted);
   text-decoration: none;
 }
 
 .toc .sub a {
-  padding-left: 26px;
+  padding-left: 26px; /* one-off: a level in from the 14px above */
 }
 
 .toc a:hover {
@@ -101,7 +106,7 @@
 /* "On this page" under the byline, for when the contents have no column. */
 .toc-inline {
   display: none;
-  margin-top: 20px;
+  margin-top: var(--tempra-space-20);
   border: 1px solid var(--tempra-color-border);
   border-radius: var(--tempra-radius-box);
   font-size: var(--tempra-text-ui);
@@ -112,8 +117,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  min-height: 40px;
-  padding: 0 16px;
+  min-height: 40px; /* one-off: the disclosure's row */
+  padding: 0 var(--tempra-space-16);
   color: var(--tempra-color-text);
   list-style: none;
   cursor: pointer;
@@ -125,7 +130,7 @@
 
 .toc-inline summary svg {
   color: var(--tempra-color-faint);
-  transition: transform 0.15s ease;
+  transition: transform var(--tempra-motion-quick) ease;
 }
 
 .toc-inline[open] summary svg {
@@ -133,7 +138,7 @@
 }
 
 .toc-inline .toc {
-  margin: 0 16px 12px;
+  margin: 0 var(--tempra-space-16) var(--tempra-space-12);
 }
 
 /* ---------- A panel: in the contents' column, its title, a count and × ---------- */
@@ -143,7 +148,7 @@
   top: 0;
   display: flex;
   flex-direction: column;
-  height: calc(100dvh - var(--tempra-topbar));
+  height: calc(100dvh - var(--tempra-size-topbar));
   border-left: 1px solid var(--tempra-color-border);
   background: var(--tempra-color-bg);
   font-size: var(--tempra-text-ui);
@@ -153,9 +158,9 @@
   display: flex;
   flex: none;
   align-items: center;
-  gap: 8px;
-  min-height: 56px;
-  padding: 0 12px 0 20px;
+  gap: var(--tempra-space-08);
+  min-height: var(--tempra-size-panel-head);
+  padding: 0 var(--tempra-space-12) 0 var(--tempra-space-20);
   border-bottom: 1px solid var(--tempra-color-border);
 }
 
@@ -178,27 +183,27 @@
   flex: 1;
   min-height: 0;
   overflow: auto;
-  padding: 16px 20px 32px;
+  padding: var(--tempra-space-16) var(--tempra-space-20) var(--tempra-space-32);
 }
 
 .panel-section {
-  margin-top: 24px;
+  margin-top: var(--tempra-space-24);
 }
 
 .panel-section .label {
-  margin: 0 0 8px;
+  margin: 0 0 var(--tempra-space-08);
 }
 
 .panel-section .actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin: 10px 0 0;
+  gap: var(--tempra-space-08);
+  margin: var(--tempra-space-10) 0 0;
 }
 
 /* Check: Mark as checked, or how much changed since someone checked and Show changes. */
 .check {
-  padding: 12px 14px;
+  padding: var(--tempra-space-12) var(--tempra-space-14);
   border-radius: var(--tempra-radius-box);
   background: var(--tempra-color-ground);
 }
@@ -212,24 +217,24 @@
 }
 
 .doc-head {
-  margin-bottom: 32px;
+  margin-bottom: var(--tempra-space-32);
 }
 
 .doc-title {
   font-family: var(--tempra-font-display);
   font-variation-settings: var(--tempra-font-display-settings);
-  margin: 0 0 12px;
+  margin: 0 0 var(--tempra-space-12);
   font-size: var(--tempra-text-title);
   font-weight: var(--tempra-weight-medium);
   line-height: var(--tempra-leading-tight);
-  letter-spacing: -0.01em;
+  letter-spacing: var(--tempra-tracking-doc);
 }
 
 .doc-tagline {
   margin: 0;
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-reader);
-  line-height: var(--tempra-line-height);
+  line-height: var(--tempra-leading-base);
 }
 
 /* ---------- The byline: who wrote this version, for whom, when; or who is editing now ---------- */
@@ -238,8 +243,8 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px 8px;
-  margin-top: 20px;
+  gap: var(--tempra-space-06) var(--tempra-space-08);
+  margin-top: var(--tempra-space-20);
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-ui);
 }
@@ -251,12 +256,12 @@
 /* What is exceptional about the page, at the byline's end: "Draft", "Stale" (TEMPRA-139). */
 .byline-pills {
   display: inline-flex;
-  gap: 6px;
+  gap: var(--tempra-space-06);
 }
 
 /* Whether a person checked the page: one quiet line under the byline, only when someone has. */
 .doc-checked {
-  margin: 8px 0 0;
+  margin: var(--tempra-space-08) 0 0;
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-ui);
 }
@@ -272,7 +277,7 @@
 .byline-live {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: var(--tempra-space-06);
   color: var(--tempra-color-text);
 }
 
@@ -286,9 +291,9 @@
 
 .versions a.version {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr);
-  gap: 8px;
-  padding: 8px 10px;
+  grid-template-columns: 36px minmax(0, 1fr); /* one-off: the version's number */
+  gap: var(--tempra-space-08);
+  padding: var(--tempra-space-08) var(--tempra-space-10);
   border-radius: var(--tempra-radius-row);
   color: var(--tempra-color-text);
   text-decoration: none;
@@ -325,8 +330,8 @@
 }
 
 .older-versions {
-  margin-top: 12px;
-  padding-left: 10px;
+  margin-top: var(--tempra-space-12);
+  padding-left: var(--tempra-space-10);
   font-size: var(--tempra-text-meta);
   text-decoration: underline;
 }
@@ -335,14 +340,15 @@
 
 .review-bar {
   position: sticky;
-  top: 12px;
+  top: var(--tempra-space-12);
   z-index: 2;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 16px;
-  margin: 0 0 32px;
-  padding: 8px 8px 8px 14px;
+  gap: var(--tempra-space-08) var(--tempra-space-16);
+  margin: 0 0 var(--tempra-space-32);
+  padding: var(--tempra-space-08) var(--tempra-space-08) var(--tempra-space-08)
+    var(--tempra-space-14);
   border: 1px solid var(--tempra-color-border);
   border-radius: var(--tempra-radius-box);
   background: var(--tempra-color-bg);
@@ -350,7 +356,7 @@
 }
 
 .review-what {
-  flex: 1 1 16rem;
+  flex: 1 1 16rem; /* one-off: what the bar says, before it wraps */
   min-width: 0;
 }
 
@@ -362,18 +368,18 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 12px;
+  gap: var(--tempra-space-08) var(--tempra-space-12);
 }
 
 .verify-form {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 6px;
+  gap: var(--tempra-space-06);
 }
 
 .verify-form input {
-  flex: 1 1 10rem;
+  flex: 1 1 10rem; /* one-off: the note's field, before it wraps */
   min-width: 0;
 }
 
@@ -385,8 +391,8 @@
     ins.diff-added,
     del.diff-removed
   ) {
-  margin-left: -16px;
-  padding-left: 15px;
+  margin-left: calc(-1 * var(--tempra-space-16));
+  padding-left: calc(var(--tempra-space-16) - 1px);
   border-left: 1px solid var(--tempra-color-agent);
 }
 
@@ -394,19 +400,19 @@
 
 .doc-sources {
   max-width: var(--tempra-measure-reader);
-  margin-top: 56px;
-  padding-top: 20px;
+  margin-top: var(--tempra-space-56);
+  padding-top: var(--tempra-space-20);
   border-top: 1px solid var(--tempra-color-border);
 }
 
 .doc-sources h2 {
-  margin: 0 0 12px;
+  margin: 0 0 var(--tempra-space-12);
   font-size: var(--tempra-text-ui);
   font-weight: var(--tempra-weight-strong);
 }
 
 .doc-sources h3 {
-  margin: 20px 0 8px;
+  margin: var(--tempra-space-20) 0 var(--tempra-space-08);
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
   font-weight: var(--tempra-weight-medium);
@@ -420,11 +426,11 @@
 
 .sources li {
   display: grid;
-  grid-template-columns: 20px minmax(0, 1fr);
-  gap: 6px;
-  margin-bottom: 10px;
+  grid-template-columns: 20px minmax(0, 1fr); /* one-off: the source's number */
+  gap: var(--tempra-space-06);
+  margin-bottom: var(--tempra-space-10);
   font-size: var(--tempra-text-ui);
-  line-height: var(--tempra-line-height);
+  line-height: var(--tempra-leading-base);
 }
 
 .sources li:target {
@@ -452,8 +458,8 @@
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 12px;
-  margin-bottom: 16px;
+  gap: var(--tempra-space-08) var(--tempra-space-12);
+  margin-bottom: var(--tempra-space-16);
 }
 
 /* Wrap lines, pressed while long lines wrap. */
@@ -473,14 +479,15 @@
    never selected or copied, and stay on their line when long lines wrap (Wrap lines). */
 .raw-file {
   margin: 0;
-  padding: 16px 18px 16px calc(var(--raw-gutter) + 16px);
+  padding: var(--tempra-space-16) var(--tempra-space-18) var(--tempra-space-16)
+    calc(var(--raw-gutter) + var(--tempra-space-16));
   overflow-x: auto;
   border: 1px solid var(--tempra-color-border);
   border-radius: var(--tempra-radius-box);
   background: var(--tempra-color-ground);
   font-family: var(--tempra-font-mono);
   font-size: var(--tempra-text-ui);
-  line-height: var(--tempra-line-height);
+  line-height: var(--tempra-leading-base);
   white-space: pre;
   counter-reset: line;
   --raw-gutter: 4ch;
@@ -499,7 +506,7 @@
 .raw-line::before {
   content: counter(line);
   position: absolute;
-  left: calc(-1 * var(--raw-gutter) - 12px);
+  left: calc(-1 * var(--raw-gutter) - var(--tempra-space-12));
   width: var(--raw-gutter);
   color: var(--tempra-color-muted);
   font-variant-numeric: tabular-nums;
@@ -511,7 +518,7 @@
 
 .facts {
   display: grid;
-  grid-template-columns: 6.5rem minmax(0, 1fr);
+  grid-template-columns: 6.5rem minmax(0, 1fr); /* one-off: the facts' names */
   margin: 0;
   font-size: var(--tempra-text-ui);
 }
@@ -522,9 +529,9 @@
 
 .facts dt,
 .facts dd {
-  padding: 9px 0;
+  padding: 9px 0; /* one-off: a fact's row */
   border-bottom: 1px solid var(--tempra-color-border);
-  line-height: var(--tempra-line-height);
+  line-height: var(--tempra-leading-base);
 }
 
 .facts dt {
@@ -544,11 +551,11 @@
 
 .linked {
   margin: 0;
-  padding-left: 18px;
+  padding-left: var(--tempra-space-18);
 }
 
 .linked li {
-  margin-bottom: 8px;
+  margin-bottom: var(--tempra-space-08);
   font-size: var(--tempra-text-meta);
 }
 
@@ -580,11 +587,11 @@
 
   .concept-panel {
     position: fixed;
-    top: var(--tempra-topbar);
+    top: var(--tempra-size-topbar);
     right: 0;
     bottom: 0;
     z-index: 5;
-    width: min(var(--tempra-panel), 100vw);
+    width: min(var(--tempra-size-panel), 100vw);
     height: auto;
     box-shadow: var(--tempra-shadow);
   }
@@ -597,11 +604,14 @@
    and the text moves over for it. */
 @container page (700px <= width < 1100px) {
   .concept:not(.panel-open):not(.markdown-on) {
-    --concept-side: calc(var(--tempra-contents) + 24px);
+    --concept-side: calc(var(--tempra-size-contents) + var(--tempra-space-24));
   }
 
   .concept:not(.panel-open):not(.markdown-on) .concept-grid {
-    grid-template-columns: [text] minmax(0, 1fr) [side] calc(var(--tempra-contents) + 24px);
+    grid-template-columns: [text] minmax(0, 1fr) [side] calc(
+        var(--tempra-size-contents) +
+        var(--tempra-space-24)
+      );
   }
 
   .concept:not(.panel-open):not(.markdown-on) .concept-side {
@@ -610,7 +620,7 @@
 
   .concept:not(.panel-open) .concept-contents {
     display: block;
-    padding-right: 24px;
+    padding-right: var(--tempra-space-24);
   }
 
   .concept:not(.panel-open):not(.markdown-on) .toc-inline {
@@ -618,7 +628,7 @@
   }
 
   .concept .doc {
-    --doc-pad: 32px;
+    --doc-pad: var(--tempra-space-32);
   }
 }
 
@@ -636,11 +646,11 @@
    (On this page included) runs under it. Narrower than this, it overlays. */
 @container page (960px <= width < 1100px) {
   .concept.panel-open {
-    --concept-side: var(--tempra-panel);
+    --concept-side: var(--tempra-size-panel);
   }
 
   .concept.panel-open .concept-grid {
-    grid-template-columns: [text] minmax(0, 1fr) [side] var(--tempra-panel);
+    grid-template-columns: [text] minmax(0, 1fr) [side] var(--tempra-size-panel);
   }
 
   .concept.panel-open .concept-side {
@@ -654,7 +664,7 @@
     bottom: auto;
     z-index: auto;
     width: auto;
-    height: calc(100dvh - var(--tempra-topbar));
+    height: calc(100dvh - var(--tempra-size-topbar));
     box-shadow: none;
   }
 }
@@ -664,8 +674,8 @@
 .doc-crumbs {
   display: none;
   flex-wrap: wrap;
-  gap: 6px;
-  margin-bottom: 12px;
+  gap: var(--tempra-space-06);
+  margin-bottom: var(--tempra-space-12);
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-ui);
 }
@@ -678,9 +688,9 @@
    disclosure under the byline, and a panel as a sheet from the bottom, the page dimmed behind. */
 @media (max-width: 900px) {
   .concept .doc {
-    --doc-pad: 16px;
-    padding-top: 16px;
-    padding-bottom: 96px;
+    --doc-pad: var(--tempra-space-16);
+    padding-top: var(--tempra-space-16);
+    padding-bottom: var(--tempra-space-96);
   }
 
   .doc-crumbs {
@@ -696,13 +706,13 @@
   }
 
   .toc-inline summary {
-    min-height: var(--tempra-touch);
+    min-height: var(--tempra-size-touch);
     font-size: var(--tempra-text-name);
   }
 
   .toc-inline .toc a {
-    padding-top: 8px;
-    padding-bottom: 8px;
+    padding-top: var(--tempra-space-08);
+    padding-bottom: var(--tempra-space-08);
   }
 
   .concept-panel {
@@ -712,7 +722,7 @@
     left: 0;
     z-index: 7;
     width: auto;
-    height: var(--tempra-sheet);
+    height: var(--tempra-size-sheet);
     border-top: 1px solid var(--tempra-color-border);
     border-left: 0;
     border-radius: var(--tempra-radius-card) var(--tempra-radius-card) 0 0;
@@ -726,8 +736,8 @@
 
   .panel-head {
     position: relative;
-    min-height: 64px;
-    padding: 12px 8px 0 20px;
+    min-height: var(--tempra-size-panel-head-phone);
+    padding: var(--tempra-space-12) var(--tempra-space-08) 0 var(--tempra-space-20);
     touch-action: none;
   }
 
@@ -738,9 +748,9 @@
   /* The drag handle, centred at the sheet's top edge. */
   .panel-grip {
     position: absolute;
-    top: 8px;
+    top: var(--tempra-space-08);
     left: 50%;
-    width: 36px;
+    width: 36px; /* one-off: the drag handle */
     height: 4px;
     border-radius: var(--tempra-radius-pill);
     background: var(--tempra-color-border-strong);
@@ -748,7 +758,7 @@
   }
 
   .panel-body {
-    padding: 16px 16px 24px;
+    padding: var(--tempra-space-16) var(--tempra-space-16) var(--tempra-space-24);
     overscroll-behavior: contain;
   }
 }
@@ -767,8 +777,8 @@
    page, so an overlaid panel or the phone's drawer dims it with the rest; under their scrims. */
 .page-actions {
   position: fixed;
-  right: max(28px, env(safe-area-inset-right));
-  bottom: max(28px, env(safe-area-inset-bottom));
+  right: max(var(--tempra-space-28), env(safe-area-inset-right));
+  bottom: max(var(--tempra-space-28), env(safe-area-inset-bottom));
   z-index: 3;
 }
 
@@ -780,8 +790,8 @@
   position: relative;
   display: grid;
   place-items: center;
-  width: 56px;
-  height: 56px;
+  width: var(--tempra-size-fab);
+  height: var(--tempra-size-fab);
   padding: 0;
   border: 0;
   border-radius: 50%;
@@ -796,7 +806,7 @@
 }
 
 .page-fab svg {
-  transition: transform 0.15s ease;
+  transition: transform var(--tempra-motion-quick) ease;
 }
 
 /* Open, the + turns into × over its menu. */
@@ -808,9 +818,9 @@
    the button's corner. Greys only. */
 .page-fab-dot {
   position: absolute;
-  top: 2px;
-  right: 2px;
-  width: 12px;
+  top: var(--tempra-space-02);
+  right: var(--tempra-space-02);
+  width: 12px; /* one-off: the ringed dot */
   height: 12px;
   box-sizing: border-box;
   border: 2px solid var(--tempra-color-text);
@@ -819,12 +829,12 @@
 }
 
 .page-actions-list {
-  min-width: 240px;
+  min-width: 240px; /* one-off: Review changes and its count on one line */
 }
 
 .menu-list .menu-count {
   margin-left: auto;
-  padding-left: 12px;
+  padding-left: var(--tempra-space-12);
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
 }
@@ -832,14 +842,14 @@
 /* Who checked the page, when there is nothing to do about it. */
 .menu-list .menu-line {
   margin: 0;
-  padding: 6px 10px;
+  padding: var(--tempra-space-06) var(--tempra-space-10);
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
 }
 
 @media (max-width: 900px) {
   .page-actions {
-    right: max(16px, env(safe-area-inset-right));
-    bottom: max(24px, env(safe-area-inset-bottom));
+    right: max(var(--tempra-space-16), env(safe-area-inset-right));
+    bottom: max(var(--tempra-space-24), env(safe-area-inset-bottom));
   }
 }

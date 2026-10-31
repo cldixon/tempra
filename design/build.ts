@@ -122,14 +122,16 @@ export function generatePele(): string {
   const theme = (scheme: "light" | "dark") =>
     Object.fromEntries([...pele].map(([name, value]) => [name, resolve(value, scheme)]));
   const themes = { light: theme("light"), dark: theme("dark") };
-  // The chart series (`--tempra-chart-*`, TEMPRA-217), in their order, for Vega-Lite's categories.
+  // The chart series (`--tempra-color-chart-*`, TEMPRA-217), in their order, for Vega-Lite's categories.
   const chartNames = [...tokens.keys()]
-    .filter((k) => /^--tempra-chart-\d+$/.test(k))
+    .filter((k) => /^--tempra-color-chart-\d+$/.test(k))
     .sort(
       (a, b) =>
-        Number(a.slice("--tempra-chart-".length)) - Number(b.slice("--tempra-chart-".length)),
+        Number(a.slice("--tempra-color-chart-".length)) -
+        Number(b.slice("--tempra-color-chart-".length)),
     );
-  if (chartNames.length < 8) throw new Error("tokens.css has fewer than 8 --tempra-chart-* series");
+  if (chartNames.length < 8)
+    throw new Error("tokens.css has fewer than 8 --tempra-color-chart-* series");
   const series = (scheme: "light" | "dark") =>
     chartNames.map((k) => resolve(tokens.get(k) as string, scheme));
   const charts = { light: series("light"), dark: series("dark") };
@@ -141,7 +143,7 @@ export function generatePele(): string {
 export const peleThemes: Record<"light" | "dark", Record<string, string>> = ${JSON.stringify(themes, null, 2)};
 
 /**
- * The chart series (\`--tempra-chart-*\` in tokens.css, TEMPRA-217), resolved for light and for
+ * The chart series (\`--tempra-color-chart-*\` in tokens.css, TEMPRA-217), resolved for light and for
  * dark, in their fixed order: a Vega-Lite chart's categories (@tempra/editor \`chartConfig\`).
  */
 export const chartSeries: Record<"light" | "dark", string[]> = ${JSON.stringify(charts, null, 2)};

@@ -47,7 +47,7 @@ export const peleThemes: Record<"light" | "dark", Record<string, string>> = {
 };
 
 /**
- * The chart series (`--tempra-chart-*` in tokens.css, TEMPRA-217), resolved for light and for
+ * The chart series (`--tempra-color-chart-*` in tokens.css, TEMPRA-217), resolved for light and for
  * dark, in their fixed order: a Vega-Lite chart's categories (@tempra/editor `chartConfig`).
  */
 export const chartSeries: Record<"light" | "dark", string[]> = {
