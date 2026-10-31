@@ -373,17 +373,6 @@
   --tempra-motion-quick: 0.15s; /* a chevron or a + turning */
   --tempra-motion-pulse: 1.6s; /* the change dot's pulse while an agent writes */
   --tempra-motion-shimmer: 2s; /* one pass of the shimmer over a name an agent is at now (TEMPRA-219) */
-
-  /* Former names, for public.css alone until TEMPRA-126 moves it to the names above; nothing
-     else may use them (design.test.ts). */
-  --tempra-line-height: var(--tempra-leading-base);
-  --tempra-space-3: 1rem;
-  --tempra-space-4: 2rem;
-  --tempra-gutter: var(--tempra-space-gutter);
-  --tempra-page-pad: var(--tempra-space-page);
-  --tempra-bar: var(--tempra-size-topbar-phone);
-  --tempra-touch: var(--tempra-size-touch);
-  --tempra-page-width: var(--tempra-size-page);
 }
 
 /* The account's theme (take 4): the shell puts it on the root; the tokens above follow. */
@@ -5526,7 +5515,7 @@ a.activity-download {
 .wordmark {
   display: inline-flex;
   align-items: center;
-  gap: 10px;
+  gap: var(--tempra-space-10);
   color: var(--tempra-color-text);
   font-size: var(--tempra-text-name);
   font-weight: var(--tempra-weight-strong);
@@ -5540,8 +5529,8 @@ a.activity-download {
 
 /* The frame: three bands across the window, their content in one centred column. */
 .public {
-  --public-width: var(--tempra-page-width);
-  --public-inline: max(16px, (100% - var(--public-width)) / 2);
+  --public-width: var(--tempra-size-page);
+  --public-inline: max(var(--tempra-space-16), (100% - var(--public-width)) / 2);
 
   display: flex;
   flex-direction: column;
@@ -5552,23 +5541,23 @@ a.activity-download {
 
 /* A form or a message (the server pages): a narrower column. */
 .public.narrow {
-  --public-width: 560px;
+  --public-width: 560px; /* one-off: the public pages' reading column */
 }
 
 /* Skip to the page's content: out of sight until the keyboard reaches it. */
 .skip-link {
   position: absolute;
-  top: 8px;
-  left: 8px;
+  top: var(--tempra-space-08);
+  left: var(--tempra-space-08);
   z-index: 1;
-  padding: 5px 12px;
+  padding: var(--tempra-space-button);
   border: 1px solid var(--tempra-color-border);
   border-radius: var(--tempra-radius-pill);
   background: var(--tempra-color-bg);
   color: var(--tempra-color-text);
   font-size: var(--tempra-text-ui);
   text-decoration: none;
-  transform: translateY(calc(-100% - 16px));
+  transform: translateY(calc(-100% - var(--tempra-space-16)));
 }
 
 .skip-link:focus-visible {
@@ -5580,16 +5569,16 @@ a.activity-download {
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
-  min-height: var(--tempra-topbar);
-  padding: 8px var(--public-inline);
+  gap: var(--tempra-space-12);
+  min-height: var(--tempra-size-topbar);
+  padding: var(--tempra-space-08) var(--public-inline);
   border-bottom: 1px solid var(--tempra-color-border);
 }
 
 .public-nav {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: var(--tempra-space-16);
   font-size: var(--tempra-text-ui);
 }
 
@@ -5604,7 +5593,7 @@ a.activity-download {
 
 .public-main {
   flex: 1;
-  padding: 48px var(--public-inline) 64px;
+  padding: var(--tempra-space-48) var(--public-inline) 64px; /* one-off: room above the foot */
 }
 
 .public-main > :first-child {
@@ -5616,7 +5605,7 @@ a.activity-download {
 }
 
 .public-foot {
-  padding: 16px var(--public-inline);
+  padding: var(--tempra-space-16) var(--public-inline);
   border-top: 1px solid var(--tempra-color-border);
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-meta);
@@ -5625,7 +5614,7 @@ a.activity-download {
 .public-foot ul {
   display: flex;
   flex-wrap: wrap;
-  gap: 4px 16px;
+  gap: var(--tempra-space-04) var(--tempra-space-16);
   margin: 0;
   padding: 0;
   list-style: none;
@@ -5643,41 +5632,41 @@ a.activity-download {
 /* ---------- The landing page ---------- */
 
 .public-main section + section {
-  margin-top: 56px;
+  margin-top: var(--tempra-space-56);
 }
 
 .lede {
   max-width: 34em;
-  margin: 12px 0 24px;
+  margin: var(--tempra-space-12) 0 var(--tempra-space-24);
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-reader);
-  line-height: var(--tempra-line-height);
+  line-height: var(--tempra-leading-base);
 }
 
 .public-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: var(--tempra-space-08);
 }
 
 /* What Tempra does: a list between hairlines, two to a row where there is room. */
 .features {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 16rem), 1fr));
-  gap: 0 32px;
-  margin: 16px 0 0;
+  gap: 0 var(--tempra-space-32);
+  margin: var(--tempra-space-16) 0 0;
   padding: 0;
   border-bottom: 1px solid var(--tempra-color-border);
   list-style: none;
 }
 
 .features li {
-  padding: 16px 0;
+  padding: var(--tempra-space-16) 0;
   border-top: 1px solid var(--tempra-color-border);
 }
 
 .features h3 {
-  margin: 0 0 4px;
+  margin: 0 0 var(--tempra-space-04);
   font-size: var(--tempra-text-ui);
   font-weight: var(--tempra-weight-strong);
 }
@@ -5686,12 +5675,12 @@ a.activity-download {
   margin: 0;
   color: var(--tempra-color-muted);
   font-size: var(--tempra-text-ui);
-  line-height: var(--tempra-line-height);
+  line-height: var(--tempra-leading-base);
 }
 
 /* Steps: numbered in the muted grey, one to a line. */
 .steps {
-  margin: 16px 0 24px;
+  margin: var(--tempra-space-16) 0 var(--tempra-space-24);
   padding: 0;
   list-style: none;
   counter-reset: step;
@@ -5699,8 +5688,8 @@ a.activity-download {
 
 .steps li {
   display: flex;
-  gap: 12px;
-  padding: 10px 0;
+  gap: var(--tempra-space-12);
+  padding: var(--tempra-space-10) 0;
   border-top: 1px solid var(--tempra-color-border);
   counter-increment: step;
 }
@@ -5722,18 +5711,18 @@ a.activity-download {
 }
 
 .legal li + li {
-  margin-top: 8px;
+  margin-top: var(--tempra-space-08);
 }
 
 @media (max-width: 640px) {
   .public-main {
-    padding-top: 28px;
-    padding-bottom: 40px;
+    padding-top: var(--tempra-space-28);
+    padding-bottom: var(--tempra-space-40);
   }
 
   .public-nav a:not(.button) {
     display: inline-flex;
     align-items: center;
-    min-height: var(--tempra-touch);
+    min-height: var(--tempra-size-touch);
   }
 }

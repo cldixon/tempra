@@ -57,16 +57,13 @@ test("an SVG figure's text inherits the reader's font from its container, never 
   expect(block(".lightbox-diagram svg")).not.toContain("font-family");
 });
 
-// Token hygiene (TEMPRA-227): every token a stylesheet reads is defined, and the former names kept
-// at the end of tokens.css are read by public.css alone, until TEMPRA-126 moves it over.
-test("every --tempra-* a stylesheet reads is defined; former names only in public.css", () => {
+// Token hygiene (TEMPRA-227): every token a stylesheet reads is defined.
+test("every --tempra-* a stylesheet reads is defined", () => {
   const src = (f: string) => readFileSync(join(import.meta.dir, "src", f), "utf8");
   const tokens = src("tokens.css");
   const names = (text: string) =>
     new Set([...text.matchAll(/^\s*(--tempra-[a-z0-9-]+):/gm)].map((m) => m[1] as string));
   const defined = names(tokens);
-  const former = names(tokens.slice(tokens.indexOf("/* Former names")));
-  expect(former.size).toBeGreaterThan(0);
   const sheets = [
     "tokens.css",
     "fonts.css",
@@ -83,7 +80,6 @@ test("every --tempra-* a stylesheet reads is defined; former names only in publi
   for (const f of sheets) {
     for (const [, name] of src(f).matchAll(/var\((--tempra-[a-z0-9-]+)/g)) {
       expect(defined.has(name as string), `${f} reads ${name}`).toBe(true);
-      if (f !== "public.css") expect(former.has(name as string), `${f} reads ${name}`).toBe(false);
     }
   }
 });

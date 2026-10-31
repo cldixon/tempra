@@ -233,17 +233,6 @@
   --tempra-motion-quick: 0.15s; /* a chevron or a + turning */
   --tempra-motion-pulse: 1.6s; /* the change dot's pulse while an agent writes */
   --tempra-motion-shimmer: 2s; /* one pass of the shimmer over a name an agent is at now (TEMPRA-219) */
-
-  /* Former names, for public.css alone until TEMPRA-126 moves it to the names above; nothing
-     else may use them (design.test.ts). */
-  --tempra-line-height: var(--tempra-leading-base);
-  --tempra-space-3: 1rem;
-  --tempra-space-4: 2rem;
-  --tempra-gutter: var(--tempra-space-gutter);
-  --tempra-page-pad: var(--tempra-space-page);
-  --tempra-bar: var(--tempra-size-topbar-phone);
-  --tempra-touch: var(--tempra-size-touch);
-  --tempra-page-width: var(--tempra-size-page);
 }
 
 /* The account's theme (take 4): the shell puts it on the root; the tokens above follow. */
