@@ -27,6 +27,7 @@ import {
 import { callerOf, Presence, type PresenceMessage, readingOf } from "../src/feed";
 import { d1Notifications } from "../src/notify";
 import { sha256Hex } from "../src/okf/hash";
+import { Quota, QuotaCounter, quotaBackend, quotaGuarded } from "../src/quota";
 import type { RestoreRecord } from "../src/recovery";
 import { d1Sessions, SESSION_COOKIE } from "../src/session";
 import type { ReadSurface } from "../src/store/reads";
@@ -336,6 +337,34 @@ export function setup() {
    */
   const web = new Map<string, (init?: RequestInit) => Response | Promise<Response>>();
   const fetched: string[] = [];
+  /**
+   * The monthly quotas (TEMPRA-232) as the Worker runs them, with each account's object a
+   * QuotaCounter on bun:sqlite. Every count flushes at once, so tests see exact totals; `clock`
+   * moves the quotas' time (a month on, for the reset).
+   */
+  const clock = { now: () => Date.now() };
+  const counters = new Map<string, QuotaCounter>();
+  const counter = (account: string) => {
+    let c = counters.get(account);
+    if (!c) {
+      c = new QuotaCounter(bunSqlHandle());
+      counters.set(account, c);
+    }
+    const it = c;
+    return {
+      quotaAdd: async (month: string, add: { writes: number; requests: number }) =>
+        it.add(month, add),
+      quotaMark: async (month: string, keys: string[]) => it.mark(month, keys),
+    };
+  };
+  const quota = new Quota(
+    quotaBackend(d1, counter, {
+      async send(msg) {
+        outbox.push(msg);
+      },
+    }),
+    { origin: ORIGIN, now: () => clock.now(), flushMs: 0, refreshMs: 0 },
+  );
   const deps: Deps = {
     fetch: async (url, init) => {
       fetched.push(url);
@@ -435,7 +464,9 @@ export function setup() {
     },
     meter: (e) => usage.push(e),
     blobs: recordingBlobStore(blobs, d1BlobRefs(d1)),
-    library: (token, surface) => clientFor(token.library.do_id, token, surface),
+    quota,
+    library: (token, surface) =>
+      quotaGuarded(quota, token, clientFor(token.library.do_id, token, surface)),
     libraryByDoId: async (doId) =>
       db.query("SELECT 1 FROM libraries WHERE do_id = ?").get(doId) ? clientFor(doId) : null,
   };
@@ -542,6 +573,11 @@ export function setup() {
     fetched,
     usage,
     limits,
+    quota,
+    clock,
+    counters,
+    /** The account layer's D1 (bun:sqlite behind D1's API). */
+    d1,
     stranger,
     sessionFor,
     /** Presence the libraries' objects would have sent, in order (TEMPRA-219). */

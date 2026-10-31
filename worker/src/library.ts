@@ -24,6 +24,7 @@ import {
   MaintenanceSchedule,
   runMaintenance,
 } from "./maintain";
+import { recordStorage, StorageReport } from "./quota";
 import { prepareRestore, type RestoreOutcome, type RestoreTarget } from "./recovery";
 import { doSqlHandle } from "./store/sql";
 import { type LibraryHealth, LibraryStore } from "./store/store";
@@ -38,6 +39,10 @@ export class Library extends DurableObject<Env> {
   private alarmChecked = false;
   /** Writes the reads counted in memory a few seconds after the first of them (TEMPRA-87). */
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  /** The library's storage in D1, for the account's quota across libraries (TEMPRA-232). */
+  private readonly storage = new StorageReport((bytes) =>
+    recordStorage(this.env.DB, this.libraryId(), bytes),
+  );
   private readonly schedule = new MaintenanceSchedule(
     {
       getAlarm: () => this.ctx.storage.getAlarm(),
@@ -146,6 +151,7 @@ export class Library extends DurableObject<Env> {
       } catch (e) {
         console.error("maintenance alarm failed", e);
       }
+      if (this.store.headSeq() > before) this.storage.changed(() => this.store.storageBytes());
     }
     if (this.store.pendingReads() > 0) this.flushSoon();
     return result;

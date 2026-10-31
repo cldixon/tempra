@@ -15,13 +15,30 @@ export interface Limits {
    * the operator turns it on with `bun run admin limits --email … --set agent_daily_usd=5`.
    */
   agent_daily_usd: number;
+  /**
+   * Monthly quotas (TEMPRA-232, tempra-dev: v2/limits, Monthly quotas), per UTC calendar month:
+   * the writes and the requests (MCP tool calls and the REST API) an account's agents make, and
+   * storage across the libraries it owns, in MB. Generous until plans exist (TEMPRA-229): far above
+   * what any account makes today, and 1 GB, the ten libraries of 100 MB the other defaults allow.
+   */
+  writes_month: number;
+  requests_month: number;
+  storage_mb: number;
 }
 
-export const DEFAULT_LIMITS: Limits = { libraries: 10, tokens: 50, agent_daily_usd: 0 };
+export const DEFAULT_LIMITS: Limits = {
+  libraries: 10,
+  tokens: 50,
+  agent_daily_usd: 0,
+  writes_month: 100_000,
+  requests_month: 1_000_000,
+  storage_mb: 1024,
+};
 
 /**
  * Per-minute rate limits are per deployment, in the Rate Limiting bindings (cloudflare.config.ts):
- * 60 writes per account and 600 requests per token or connected app.
+ * 60 writes per account and 600 requests per token or connected app. The monthly quotas above
+ * are counted and checked in quota.ts.
  */
 
 /** Storage per library, SQLite plus its attachments; set per deployment (LIBRARY_STORAGE_MB). */

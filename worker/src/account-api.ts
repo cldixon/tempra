@@ -42,10 +42,15 @@ export function registerAccountApi(
     const { d, user } = await person(c);
     const secret = readCookie(c.req.raw, SESSION_COOKIE);
     const current = secret ? sessionId(secret) : null;
-    const [sessions, usage, limits] = await Promise.all([
+    const [sessions, usage, limits, month] = await Promise.all([
       d.sessions.list(user.id),
       d.accounts.usage(user.id),
       d.accounts.limits(user.id),
+      // This month against the monthly quotas (TEMPRA-232); the page goes on without it.
+      d.quota?.usage(user.handle).catch((e) => {
+        console.error(JSON.stringify({ quota_usage_failed: user.handle, error: String(e) }));
+        return null;
+      }) ?? null,
     ]);
     return c.json({
       email: user.email,
@@ -55,6 +60,7 @@ export function registerAccountApi(
       sessions: sessions.map((s) => ({ ...s, current: s.id === current })),
       usage,
       limits,
+      month,
     });
   });
 

@@ -1,5 +1,6 @@
 import type { TokenInfo } from "./auth";
 import { sha256Hex } from "./okf/hash";
+import type { Quota } from "./quota";
 import { OkfError } from "./store/errors";
 
 /**
@@ -34,6 +35,8 @@ export interface UsageDeps {
   rateLimit?: (kind: "write" | "request" | "session" | "render", key: string) => Promise<boolean>;
   /** Records a data point; never throws, never blocks. */
   meter?: (e: UsageEvent) => void;
+  /** The monthly quotas (quota.ts, TEMPRA-232); absent means none. One per isolate. */
+  quota?: Quota;
 }
 
 /** MCP tools that change a library. */
@@ -89,6 +92,8 @@ export async function admit(
       "Too many writes to this account in the last minute; slow down.",
     );
   }
+  // The month's count (TEMPRA-232): in memory, flushed every few seconds; refusals are quota.ts's.
+  if (limited) await d.quota?.count(account, write);
   d.meter?.({ kind: "request", account, library });
   if (write) d.meter?.({ kind: "write", account, library });
 }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { chosenLibrary } from "./src/pages/account";
+import { chosenLibrary, monthLines } from "./src/pages/account";
 import ConnectSteps from "./src/pages/ConnectSteps.svelte";
 import Invitations from "./src/pages/Invitations.svelte";
 import { slugFrom } from "./src/pages/libraries";
@@ -32,6 +32,23 @@ afterEach(() => {
   restore?.();
   restore = null;
   document.body.innerHTML = "";
+});
+
+describe("the Account page's month (TEMPRA-232)", () => {
+  test("each quota in people's words", () => {
+    const lines = monthLines({
+      month: "2026-11",
+      resets: "2026-12-01T00:00:00.000Z",
+      writes: { used: 1203, limit: 100_000 },
+      requests: { used: 15_000, limit: 1_000_000 },
+      storage: { used: 12 * 1048576, limit: 1024 * 1048576 },
+    });
+    expect(lines.map((l) => `${l.label}: ${l.text}`)).toEqual([
+      "Writes this month: 1,203 of 100,000",
+      "Tool calls and API requests this month: 15,000 of 1,000,000",
+      "Storage: 12 MB of 1024 MB",
+    ]);
+  });
 });
 
 describe("slugFrom", () => {

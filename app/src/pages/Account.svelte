@@ -8,9 +8,9 @@
   import Status from "../Status.svelte";
   import ThemeChoice from "../ThemeChoice.svelte";
   import { useTheme } from "../theme.svelte.ts";
-  import { localTime } from "../ui";
+  import { day, localTime } from "../ui";
   import { useScrollToHash, useTitle } from "../ui.svelte.ts";
-  import { type AccountData, DONE, LEGAL } from "./account";
+  import { type AccountData, DONE, LEGAL, monthLines } from "./account";
   import EmailSwitch from "./EmailSwitch.svelte";
 
   /**
@@ -123,11 +123,20 @@
         </p>
       </form>
       <p class="small muted">Your handle is in every library's address.</p>
-      <h2>Limits</h2>
+      <h2 id="usage">Limits</h2>
       <p>
         Libraries: {a.usage.libraries} of {a.limits.libraries}. Active tokens:
         {a.usage.tokens} of {a.limits.tokens}.
       </p>
+      {#if a.month}
+        {#each monthLines(a.month) as line (line.label)}
+          <p>{line.label}: {line.text}.</p>
+        {/each}
+        <p class="small muted">
+          Your agents' writes and requests start again on {day(a.month.resets, "UTC")}. Past a
+          limit, they can still read, but not write.
+        </p>
+      {/if}
       <h2>Appearance</h2>
       <p class="field-row">
         <span>Theme</span><ThemeChoice value={theme.current} onChange={theme.choose} />
