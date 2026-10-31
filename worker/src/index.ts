@@ -4,6 +4,7 @@ import type { Deps } from "./app";
 import { d1Authenticate } from "./auth";
 import { d1BlobRefs } from "./blobrefs";
 import { makeClient, r2BlobStore, recordingBlobStore } from "./client";
+import { agentSpendThisMonth } from "./costs";
 import { type Caller, callerOf, FEED_SOCKETS_PER_ACCOUNT } from "./feed";
 import { deleteVariants, imagesService, r2VariantCache } from "./images";
 import { type Library, refuseFeed } from "./library";
@@ -322,6 +323,12 @@ export default {
       storageLimitBytes: storageLimitBytes(env),
       now: new Date(),
     });
+    // @tempra's spend this month (TEMPRA-233); a failed read only leaves the line out.
+    try {
+      result.agentSpend = await agentSpendThisMonth(env.DB, new Date());
+    } catch (e) {
+      console.error(JSON.stringify({ agent_spend: String(e) }));
+    }
     // The waitlist (v2 spec: Accounts and sign-in): the digest counts who waits, past the notice cap.
     const waiting = (await d1Accounts(env.DB).waitlist()).length;
     if (waiting) result.attention.push(`${waiting} waiting on the waitlist: /waitlist`);
