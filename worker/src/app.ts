@@ -5,6 +5,7 @@ import { registerAccountApi } from "./account-api";
 import { type Accounts, checkNewToken, humanActor, type MemberRole, type User } from "./accounts";
 import { tokenAgent } from "./agents";
 import type { Authenticate, TokenInfo } from "./auth";
+import type { AuthCache } from "./authcache";
 import {
   type BlobStore,
   bundleFiles,
@@ -84,6 +85,11 @@ export interface Deps extends UsageDeps {
   accounts: Accounts;
   /** Magic links and browser sessions (v2 spec: Accounts and sign-in). */
   sessions: Sessions;
+  /**
+   * The isolate's auth cache (authcache.ts, TEMPRA-84), which `sessions`, `authenticate` and
+   * `accounts` share in a deployment; absent, every request asks D1.
+   */
+  authCache?: AuthCache;
   /** Sends sign-in emails; without one, only local dev with DEV_SIGNIN=1 can sign in. */
   mailer?: Mailer | null;
   /**
@@ -853,11 +859,7 @@ export function createApp(deps: (env: Cloudflare.Env) => Deps) {
         a,
       ]),
     );
-    const people = new Map<string, { handle: string; name: string | null } | null>();
-    for (const id of new Set(rows.map((r) => r.person))) {
-      const a = await accounts.account(id);
-      people.set(id, a ? { handle: a.handle, name: a.name ?? null } : null);
-    }
+    const people = await accounts.people(rows.map((r) => r.person));
     return c.json({
       contributors: rows.map((r) => {
         const a = r.agent ? agents.get(r.agent) : undefined;

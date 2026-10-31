@@ -1,5 +1,6 @@
 import { bytesToHex, randomBytes } from "@noble/hashes/utils.js";
 import type { LibraryRef, MemberRole, User } from "./accounts";
+import { type AuthCache, libraryTag, sessionTag, userTag } from "./authcache";
 import { sha256Hex } from "./okf/hash";
 
 /**
@@ -142,7 +143,27 @@ interface SessionRow {
   theme: string | null;
 }
 
-export function d1Sessions(db: D1Database, now = () => Date.now()): Sessions {
+/** A copy of a kept answer, so no caller can change what the next request is served. */
+const copyAccess = (a: SessionAccess): SessionAccess => ({
+  user: { ...a.user },
+  library: a.library ? { ...a.library } : null,
+  memberRole: a.memberRole,
+});
+
+export function d1Sessions(
+  db: D1Database,
+  now = () => Date.now(),
+  /**
+   * The isolate's auth cache (TEMPRA-84, tempra-dev: v2/tenancy): a live session's person, and
+   * its access to a library when that access lets it in, are kept for up to the cache's 30 s
+   * (never past the session's own expiry), so a warm isolate answers with no D1 query. Ending a
+   * session here drops them at once; anywhere else they last out their 30 s at most.
+   */
+  cache?: AuthCache,
+): Sessions {
+  /** How long an entry may be kept: the cache's window, cut short by the session's expiry. */
+  const keepFor = (row: SessionRow) =>
+    cache ? Math.min(cache.ms, Date.parse(row.expires) - now()) : 0;
   /**
    * A live session's row and person, with what `columns` and `joins` add to the one query;
    * `last_seen` (and the idle expiry) is moved on at most every TOUCH_MS.
@@ -179,6 +200,36 @@ export function d1Sessions(db: D1Database, now = () => Date.now()): Sessions {
       theme: row.theme === "light" || row.theme === "dark" ? row.theme : null,
     };
     return { row, user };
+  }
+
+  /** `access` from D1: the same conditions as `user`, `Accounts.library` and `memberRole`, joined. */
+  async function access(
+    secret: string,
+    owner: string,
+    slug: string,
+  ): Promise<{ row: SessionRow; result: SessionAccess } | null> {
+    const got = await live(
+      secret,
+      `, l.id AS lib_id, l.slug AS lib_slug, l.do_id AS lib_do_id, o.handle AS lib_owner,
+         o.id AS lib_owner_id, m.role AS member_role`,
+      `LEFT JOIN users o ON o.handle = ?3 AND o.suspended IS NULL
+       LEFT JOIN libraries l ON l.owner = o.id AND l.slug = ?4
+       LEFT JOIN library_members m ON m.library = l.id AND m.user = u.id`,
+      [owner, slug],
+    );
+    if (!got) return null;
+    const r = got.row as SessionRow & LibraryColumns;
+    const library =
+      r.lib_id === null
+        ? null
+        : {
+            id: r.lib_id,
+            slug: r.lib_slug as string,
+            do_id: r.lib_do_id as string,
+            owner: r.lib_owner as string,
+            ownerId: r.lib_owner_id as string,
+          };
+    return { row: got.row, result: { user: got.user, library, memberRole: r.member_role } };
   }
 
   return {
@@ -286,41 +337,51 @@ export function d1Sessions(db: D1Database, now = () => Date.now()): Sessions {
     },
 
     async user(secret) {
-      return (await live(secret))?.user ?? null;
+      const h = hash(secret);
+      const key = `user\n${h}`;
+      const hit = cache?.sessions.get(key) as User | undefined;
+      if (hit) return { ...hit };
+      const since = cache?.sessions.drops;
+      const got = await live(secret);
+      if (!got) return null;
+      const tags = [sessionTag(h), userTag(got.user.id)];
+      cache?.sessions.set(key, got.user, keepFor(got.row), tags, since);
+      return { ...got.user };
     },
 
     async access(secret, owner, slug) {
-      // The same conditions as `user`, `Accounts.library` and `Accounts.memberRole`, joined.
-      const got = await live(
-        secret,
-        `, l.id AS lib_id, l.slug AS lib_slug, l.do_id AS lib_do_id, o.handle AS lib_owner,
-           o.id AS lib_owner_id, m.role AS member_role`,
-        `LEFT JOIN users o ON o.handle = ?3 AND o.suspended IS NULL
-         LEFT JOIN libraries l ON l.owner = o.id AND l.slug = ?4
-         LEFT JOIN library_members m ON m.library = l.id AND m.user = u.id`,
-        [owner, slug],
-      );
-      if (!got) return null;
-      const r = got.row as SessionRow & LibraryColumns;
-      const library =
-        r.lib_id === null
-          ? null
-          : {
-              id: r.lib_id,
-              slug: r.lib_slug as string,
-              do_id: r.lib_do_id as string,
-              owner: r.lib_owner as string,
-              ownerId: r.lib_owner_id as string,
-            };
-      return { user: got.user, library, memberRole: r.member_role };
+      const h = hash(secret);
+      const key = `access\n${h}\n${owner}\n${slug}`;
+      const hit = cache?.sessions.get(key) as SessionAccess | undefined;
+      if (hit) return copyAccess(hit);
+      const since = cache?.sessions.drops;
+      const found = await access(secret, owner, slug);
+      if (!found) return null;
+      // Only an answer that lets the person in is kept: a denial is asked again each time, so a
+      // library shared with them, or made under that name, shows at once.
+      const { result } = found;
+      const lib = result.library;
+      if (lib && (lib.ownerId === result.user.id || result.memberRole)) {
+        cache?.sessions.set(
+          key,
+          result,
+          keepFor(found.row),
+          [sessionTag(h), userTag(result.user.id), userTag(lib.ownerId), libraryTag(lib.id)],
+          since,
+        );
+      }
+      return copyAccess(result);
     },
 
     async end(secret) {
-      await db.prepare("DELETE FROM sessions WHERE hash = ?").bind(hash(secret)).run();
+      const h = hash(secret);
+      await db.prepare("DELETE FROM sessions WHERE hash = ?").bind(h).run();
+      cache?.drop(sessionTag(h));
     },
 
     async endAll(userId) {
       await db.prepare("DELETE FROM sessions WHERE user = ?").bind(userId).run();
+      cache?.drop(userTag(userId));
     },
 
     async list(userId) {
@@ -337,6 +398,7 @@ export function d1Sessions(db: D1Database, now = () => Date.now()): Sessions {
 
     async endById(userId, id) {
       await db.prepare("DELETE FROM sessions WHERE user = ? AND hash = ?").bind(userId, id).run();
+      cache?.drop(sessionTag(id));
     },
   };
 }

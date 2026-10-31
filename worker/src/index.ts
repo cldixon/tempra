@@ -2,6 +2,7 @@ import type { AccountFeeds } from "./account-feeds";
 import { d1Accounts } from "./accounts";
 import type { Deps } from "./app";
 import { d1Authenticate } from "./auth";
+import { AuthCache, invalidatingAccounts } from "./authcache";
 import { d1BlobRefs } from "./blobrefs";
 import { makeClient, r2BlobStore, recordingBlobStore } from "./client";
 import { agentSpendThisMonth } from "./costs";
@@ -110,10 +111,15 @@ function agentModel(env: Env): ModelClient | null {
 const storageLimitBytes = (env: Env) =>
   (Number(env.LIBRARY_STORAGE_MB) || DEFAULT_STORAGE_MB) * 1048576;
 
+/**
+ * What authorization read from D1 in this isolate, up to 30 s old (authcache.ts, TEMPRA-84):
+ * tokens, sessions and app connections, dropped by the changes this isolate makes.
+ */
+const authCache = new AuthCache();
 let authenticate: ReturnType<typeof d1Authenticate> | undefined;
 
 const depsFor = (env: Env): Deps => {
-  authenticate ??= d1Authenticate(env.DB);
+  authenticate ??= d1Authenticate(env.DB, Date.now, authCache.ms, authCache.tokens);
   // `caller` is the agent behind the calls, for presence on the feed (TEMPRA-219); null for a
   // person, and for the Worker's own calls (downloads, maintenance).
   const client = (doId: string, caller: Caller | null = null) => {
@@ -134,8 +140,9 @@ const depsFor = (env: Env): Deps => {
   };
   return {
     authenticate,
-    accounts: d1Accounts(env.DB),
-    sessions: d1Sessions(env.DB),
+    accounts: invalidatingAccounts(d1Accounts(env.DB), authCache),
+    sessions: d1Sessions(env.DB, Date.now, authCache),
+    authCache,
     mailer: mailerFor(env),
     notifications: d1Notifications(env.DB),
     managed: managedDeps(env),
