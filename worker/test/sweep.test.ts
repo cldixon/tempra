@@ -447,6 +447,7 @@ describe("blob sweep (TEMPRA-81, TEMPRA-91)", () => {
 
   test("the digest flags stale exports, overdue maintenance and full libraries", async () => {
     const { d1 } = bunD1();
+    const recorded: Record<string, number> = {};
     const libs: Record<string, Inventory> = {
       ok: inv(),
       stale: inv({
@@ -464,9 +465,14 @@ describe("blob sweep (TEMPRA-81, TEMPRA-91)", () => {
       bucket: { delete: async () => {} },
       libraries: async () => Object.keys(libs).map((id) => ({ id, path: `owner/${id}` })),
       inventory: async (id) => libs[id] as Inventory,
+      // The daily backfill of each library's storage for the account quota (TEMPRA-232).
+      recordStorage: async (id, bytes) => {
+        recorded[id] = bytes;
+      },
       storageLimitBytes: 100 * 1048576,
       now: T0,
     });
+    expect(recorded).toEqual({ ok: 1000, stale: 1000, full: 90 * 1048576 });
     expect(r.attention.filter((a) => !a.startsWith("Blob sweep held"))).toEqual([
       "owner/stale: last export 2026-09-25T03:00:00Z, 4 events behind",
       "owner/stale: daily maintenance overdue since 2026-09-26T03:00:00Z",

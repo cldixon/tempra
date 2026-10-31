@@ -18,6 +18,7 @@ import { fakeModel } from "./managed/fake";
 import type { ModelClient } from "./managed/turn";
 import { d1Notifications } from "./notify";
 import { devMailer, flushMail } from "./notify-mail";
+import { counterName, Quota, quotaBackend, quotaGuarded, recordStorage } from "./quota";
 import { listRestores, RESTORE_ID, restoresPrefix } from "./recovery";
 import { type RenderService, servicePoster, serviceRenderer } from "./render";
 import { d1Sessions } from "./session";
@@ -117,9 +118,24 @@ const storageLimitBytes = (env: Env) =>
  */
 const authCache = new AuthCache();
 let authenticate: ReturnType<typeof d1Authenticate> | undefined;
+/** The monthly quotas' tally (TEMPRA-232): one per isolate, so it outlives a request. */
+let quota: Quota | undefined;
 
 const depsFor = (env: Env): Deps => {
   authenticate ??= d1Authenticate(env.DB, Date.now, authCache.ms, authCache.tokens);
+  quota ??= new Quota(
+    quotaBackend(
+      env.DB,
+      // The account's AccountFeeds object by user id, apart from its feed leases (by handle).
+      (userId) => {
+        const ns = env.ACCOUNT_FEEDS as DurableObjectNamespace<AccountFeeds>;
+        return ns.get(ns.idFromName(counterName(userId)));
+      },
+      env.DEV_SIGNIN === "1" ? devMailer : mailerFor(env),
+      d1Notifications(env.DB),
+    ),
+    { origin: env.APP_ORIGIN },
+  );
   // `caller` is the agent behind the calls, for presence on the feed (TEMPRA-219); null for a
   // person, and for the Worker's own calls (downloads, maintenance).
   const client = (doId: string, caller: Caller | null = null) => {
@@ -255,7 +271,10 @@ const depsFor = (env: Env): Deps => {
         return obj ? { body: obj.body, size: obj.size } : null;
       },
     },
-    library: (token, surface) => client(token.library.do_id, callerOf(token, surface)),
+    quota,
+    // Every surface's writes pass the monthly quotas first (TEMPRA-232); reads go straight on.
+    library: (token, surface) =>
+      quotaGuarded(quota, token, client(token.library.do_id, callerOf(token, surface))),
     feed: async (doId, request, { prefix, account }) => {
       // A place under the account's cap first (feed-leases.ts), then the library's own cap.
       const lease = crypto.randomUUID();
@@ -325,6 +344,8 @@ export default {
           ).all<{ id: string; path: string }>()
         ).results,
       inventory: (id) => libraryStub(env, id).inventory(),
+      // A library not written since storage_bytes arrived is counted from the first cron.
+      recordStorage: (id, bytes) => recordStorage(env.DB, id, bytes),
       prune: () => pruneAccounts(env.DB, new Date()),
       storageLimitBytes: storageLimitBytes(env),
       now: new Date(),

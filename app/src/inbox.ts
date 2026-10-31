@@ -9,14 +9,18 @@ import { urlsOf } from "./urls";
  * done: opened, or answered.
  */
 
-/** What a person is told of (TEMPRA-173): an invitation, a mention and a reply, nothing else. */
-type InboxKind = "reply" | "mention" | "invitation";
+/**
+ * What a person is told of (TEMPRA-173): an invitation, a mention and a reply; and, about their
+ * account, a monthly quota at 80% and at 100% (`quota`, TEMPRA-232, the decision's addendum of
+ * 2026-10-31).
+ */
+type InboxKind = "reply" | "mention" | "invitation" | "quota";
 
 /** One item, as `GET /api/v1/inbox` describes it. */
 export interface InboxItem {
   id: string;
   kind: InboxKind;
-  /** The library as owner/slug. */
+  /** The library as owner/slug; "" for a `quota` item, which is on the account. */
   library: string;
   library_title: string | null;
   path: string | null;
@@ -65,9 +69,10 @@ const pageName = (path: string) => path.replace(/\.md$/, "").split("/").pop() ??
  * the owner after it when it is not the person's own (`me` is their handle).
  */
 export function itemLibrary(
-  i: Pick<InboxItem, "library" | "library_title">,
+  i: Pick<InboxItem, "library" | "library_title"> & { kind?: InboxKind },
   me: string | null,
 ): string {
+  if (i.kind === "quota") return "Your account";
   const { owner, slug } = urlsOf(i.library);
   return libraryLabel({
     owner,
@@ -79,6 +84,8 @@ export function itemLibrary(
 
 /** What the item is about: the page, or the library for an invitation or an access change. */
 export function itemTitle(i: InboxItem, titles: PageTitles = {}): string {
+  // A monthly quota (TEMPRA-232): "Writes this month".
+  if (i.kind === "quota") return i.title || "Your account";
   if (i.path) return i.title || titles[`${i.library} ${i.path}`] || pageName(i.path);
   return i.library_title || urlsOf(i.library).slug;
 }
