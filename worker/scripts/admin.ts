@@ -281,6 +281,8 @@ async function meteredThisMonth(handle: string, month: string): Promise<Record<s
   if (!account || !token) throw new Error("CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN unset");
   const dataset = deploymentFor(MODE).usage ?? "tempra_usage";
   if (!/^[a-z_]+$/.test(dataset)) throw new Error(`odd dataset name ${dataset}`);
+  // usagePoint's layout (usage.ts): blob1 the kind, index1 the account. Only `request` and
+  // `write` points count; `cost` points (TEMPRA-228, the op in blob4) are left out.
   const sql = `SELECT blob1 AS kind, SUM(_sample_interval) AS n FROM ${dataset}
     WHERE index1 = ${q(handle.slice(0, 96))} AND blob1 IN ('request', 'write')
       AND timestamp >= toDateTime(${q(`${month}-01 00:00:00`)})
