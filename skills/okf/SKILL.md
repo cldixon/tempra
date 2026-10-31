@@ -52,7 +52,7 @@ Gross margin equals recognized [revenue](/metrics/revenue.md) minus full COGS.[^
 
 - A non-empty `type` that says what kind of thing this is (`Metric`, `BigQuery Table`, `Decision`, `Playbook`). Every file is a concept, so `concept`, `page`, `note` or `doc` tell a reader nothing: pick the kind a reader would filter by. Reuse the types already in the library (`start` lists them).
 - A `description` of one sentence: it is what `browse` and indexes show.
-- Absolute links (`/dir/file.md`). A link to a concept that does not exist yet is allowed; it shows up in `work` as a broken link until someone writes it.
+- Absolute links (`/dir/file.md`). A link to a concept that does not exist yet is allowed; it shows up in `work` as a broken link until someone writes it. Links, `sources` resources in the library and footnotes are checked on every write and again daily, so a page broken by someone else's move or delete shows in `work` too.
 - Every footnote label matches a `sources[].id`, and every `[^id]` in the text has a `[^id]: …` definition line at the end of the body (without one, renderers show it as literal text).
 - Images and diagrams: see [Figures and media](#figures-and-media).
 - Timestamps (`stale_after`, `sources[].last_modified`) are ISO 8601 datetimes with an offset (`2026-06-30T14:00:00Z`). A plain date such as `2026-12-31` is flagged.

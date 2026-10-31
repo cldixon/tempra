@@ -43,6 +43,7 @@ import { figureLint } from "../okf/figure-lint";
 import { type FigureFact, figureFacts } from "../okf/figures";
 import { sha256Hex } from "../okf/hash";
 import { IMAGE_TARGET_CODES, imageLinks, imageLint, imageTargetLint } from "../okf/images";
+import { danglingFootnotes, FOOTNOTE_CODES, sameLint, sameTargets } from "../okf/link-health";
 import { lintFields } from "../okf/lint";
 import { scanDoc } from "../okf/markdown";
 import {
@@ -5126,6 +5127,196 @@ export class LibraryStore {
     });
   }
 
+  /** A maintainer's cursor: the ledger seq its last complete run reached, or -1 before any. */
+  private cursorOf(maintainer: string): number {
+    return (
+      this.sql.all<{ seq: number }>("SELECT seq FROM cursors WHERE maintainer = ?", maintainer)[0]
+        ?.seq ?? -1
+    );
+  }
+
+  private setCursor(maintainer: string, seq: number) {
+    this.sql.run(
+      `INSERT INTO cursors (maintainer, seq) VALUES (?, ?)
+       ON CONFLICT(maintainer) DO UPDATE SET seq = excluded.seq`,
+      maintainer,
+      seq,
+    );
+  }
+
+  /**
+   * The link-health process (TEMPRA-65; tempra-dev: v2/maintainers): checks concepts' links,
+   * source resources and footnotes again from their stored trees, as a reader sees them now, and
+   * brings the `broken_link` flags and the footnote lint in line where they drifted from that.
+   * The write path keeps both current for what a request touches; this catches what it cannot
+   * see. Each run checks the concepts changed since its cursor and the concepts that link to
+   * them, then continues a full walk if one is under way (the first run, a new version of the
+   * checks, or more changes than one pass checks), at most LINK_BUDGET concepts a pass, in path
+   * order, resuming where the last pass stopped. Writes only derived state: flags, the links
+   * index, stored lint, its cursor and meta; never content or the ledger.
+   */
+  maintainLinks(budget = LINK_BUDGET): LinksRun {
+    const now = this.clock();
+    return this.sql.transaction(() => {
+      const seq = this.headSeq();
+      const m = this.maintenance();
+      const cursor = this.cursorOf("links");
+      // Where a full walk resumes (after this path), or null when none is under way.
+      let walk: string | null = m.links_walk ? (JSON.parse(m.links_walk) as string | null) : null;
+      if (cursor < 0 || m.links_version !== String(LINK_CHECKS_VERSION)) walk = "";
+      const snap = this.snapshot();
+      const queue: { id: string; path: string }[] = [];
+      const seen = new Set<string>();
+      const add = (id: string) => {
+        const e = snap.byId.get(id);
+        if (e?.kind !== "concept" || seen.has(id)) return;
+        seen.add(id);
+        queue.push({ id, path: e.path });
+      };
+      if (cursor >= 0 && cursor < seq) {
+        const changed = this.linksChangedSince(cursor);
+        // More than a pass checks: walk the whole library from the start instead.
+        if (changed.length > budget) walk = "";
+        else for (const id of changed) add(id);
+      }
+      queue.sort((a, b) => (a.path < b.path ? -1 : 1));
+      const skipped = queue.length === 0 && walk === null;
+      if (walk !== null) {
+        const room = Math.max(budget - queue.length, 0);
+        const next = this.sql.all<{ concept_id: string; path: string }>(
+          "SELECT concept_id, path FROM paths WHERE kind = 'concept' AND path > ? ORDER BY path LIMIT ?",
+          walk,
+          room + 1,
+        );
+        for (const r of next.slice(0, room)) add(r.concept_id);
+        if (next.length <= room) walk = null;
+        else if (room > 0) walk = next[room - 1]?.path ?? walk;
+      }
+      const repaired: string[] = [];
+      for (const q of queue) if (this.recheckLinks(snap, q.id)) repaired.push(q.path);
+      // A concept gone keeps no broken-link flag (unindex drops them; this is a safety net).
+      this.sql.run(
+        "DELETE FROM flags WHERE kind = 'broken_link' AND concept_id NOT IN (SELECT concept_id FROM paths)",
+      );
+      this.setCursor("links", seq);
+      const count = (q: string) => this.sql.all<{ n: number }>(q)[0]?.n ?? 0;
+      const run: LinksRun = {
+        skipped,
+        checked: queue.length,
+        repaired: repaired.sort(),
+        broken_link: count(
+          `SELECT COUNT(*) AS n FROM flags f JOIN paths p ON p.concept_id = f.concept_id
+           WHERE f.kind = 'broken_link'`,
+        ),
+        footnote: count(
+          `SELECT COUNT(*) AS n FROM flags f JOIN paths p ON p.concept_id = f.concept_id
+           WHERE f.kind = 'lint' AND (f.detail LIKE '%"footnote_unmatched"%'
+             OR f.detail LIKE '%"footnote_undefined"%')`,
+        ),
+        pending: walk !== null,
+      };
+      this.setMaintenance({
+        links_at: iso(now),
+        links_walk: JSON.stringify(walk),
+        links_version: String(LINK_CHECKS_VERSION),
+        links_counts: JSON.stringify({
+          checked: run.checked,
+          repaired: run.repaired.length,
+          broken_link: run.broken_link,
+          footnote: run.footnote,
+        }),
+      });
+      return run;
+    });
+  }
+
+  /**
+   * The concepts whose links may read differently since `cursor`: every concept a content event
+   * since then wrote, moved, reverted or deleted, and every concept linking to one of them by ID,
+   * by one of their paths, or through a redirect from one.
+   */
+  private linksChangedSince(cursor: number): string[] {
+    const rows = this.sql.all<{ concept_id: string; path: string }>(
+      "SELECT DISTINCT concept_id, path FROM events WHERE seq > ? AND op <> 'comment' AND concept_id <> ''",
+      cursor,
+    );
+    const ids = JSON.stringify([...new Set(rows.map((r) => r.concept_id))]);
+    const paths = JSON.stringify(
+      [...new Set(rows.map((r) => r.path))].flatMap((p) => [
+        p,
+        p.endsWith(".md") ? p.slice(0, -3) : `${p}.md`,
+      ]),
+    );
+    const linking = this.sql.all<{ from_id: string }>(
+      `SELECT DISTINCT from_id FROM links
+       WHERE to_id IN (SELECT value FROM json_each(?)) OR to_path IN (SELECT value FROM json_each(?))`,
+      ids,
+      paths,
+    );
+    return [...new Set([...rows.map((r) => r.concept_id), ...linking.map((r) => r.from_id)])];
+  }
+
+  /**
+   * One concept's links and footnotes checked again from its stored tree. Broken links are what
+   * `links()` shows a reader (no target by ID, by path or through a redirect); when the stored
+   * flag or lint says otherwise, the concept's rows in the links index are rebuilt from its
+   * record and its flag and lint refreshed as a write would. Dangling footnotes replace the
+   * stored ones when they differ. Returns whether anything was repaired.
+   */
+  private recheckLinks(snap: View, id: string): boolean {
+    const e = snap.byId.get(id);
+    if (e?.kind !== "concept") return false;
+    const r = this.record(e.hash);
+    const lintOf = () =>
+      JSON.parse(
+        this.sql.all<{ lint: string | null }>(
+          "SELECT lint FROM concepts WHERE concept_id = ?",
+          id,
+        )[0]?.lint ?? "[]",
+      ) as LintWarning[];
+    let repaired = false;
+    const graph = linkGraph(r);
+    const targets = graph.map(([l]) => this.targetAt(snap, l));
+    const broken = graph.flatMap(([l], i) => (targets[i] ? [] : [l.path]));
+    const flag = this.sql.all<{ detail: string }>(
+      "SELECT detail FROM flags WHERE concept_id = ? AND kind = 'broken_link'",
+      id,
+    )[0];
+    const flagged = flag ? (JSON.parse(flag.detail) as string[]) : [];
+    const linted = lintOf()
+      .filter((l) => l.code === "broken_link")
+      .map((l) => l.target ?? "");
+    if (!sameTargets(broken, flagged) || !sameTargets(broken, linted)) {
+      this.sql.run("DELETE FROM links WHERE from_id = ?", id);
+      graph.forEach(([l, kind], i) => {
+        this.sql.run(
+          "INSERT INTO links (from_id, to_id, to_path, anchor, form, raw, kind) VALUES (?, ?, ?, ?, ?, ?, ?)",
+          id,
+          targets[i]?.concept_id ?? null,
+          l.path,
+          l.anchor,
+          l.form,
+          l.raw,
+          kind,
+        );
+      });
+      this.refreshBroken(id);
+      repaired = true;
+    }
+    if (r.raw_fm === null) {
+      const current = lintOf();
+      const want = danglingFootnotes(r.fm, r.generated, r.doc, e.path);
+      const have = current.filter((l) => FOOTNOTE_CODES.has(l.code));
+      if (!sameLint(want, have)) {
+        const all = [...current.filter((l) => !FOOTNOTE_CODES.has(l.code)), ...want];
+        this.sql.run("UPDATE concepts SET lint = ? WHERE concept_id = ?", JSON.stringify(all), id);
+        this.setLintFlag(id, all, e.seq);
+        repaired = true;
+      }
+    }
+    return repaired;
+  }
+
   /**
    * The library's health summary (TEMPRA-66), worked out now: open work by kind, the concepts
    * changed since anyone last verified them (the newest first), and when. No model involved.
@@ -5216,6 +5407,8 @@ export class LibraryStore {
       usageExpiry: oldestRead
         ? Date.parse(`${oldestRead}T00:00:00Z`) + USAGE_WINDOW_DAYS * 86_400_000
         : null,
+      // A link-health walk under way (TEMPRA-65): the next slot continues it.
+      processPending: linksWalking(m),
     };
   }
 
@@ -5349,6 +5542,16 @@ export class LibraryStore {
             directories: number;
             codes: Record<string, number>;
           }),
+        },
+        links: {
+          kind: "process",
+          cursor: Math.max(this.cursorOf("links"), 0),
+          lag: seq - Math.max(this.cursorOf("links"), 0),
+          last_run: m.links_at ?? null,
+          pending: linksWalking(m),
+          ...(JSON.parse(
+            m.links_counts ?? '{"checked":0,"repaired":0,"broken_link":0,"footnote":0}',
+          ) as { checked: number; repaired: number; broken_link: number; footnote: number }),
         },
         health: {
           kind: "process",
@@ -5675,6 +5878,40 @@ export interface StructureRun {
   became: string[];
 }
 
+/**
+ * What one run of the link-health process (TEMPRA-65) did, and the counts after it: concepts
+ * with broken links (body links and internal source resources) and with dangling footnotes.
+ */
+export interface LinksRun {
+  /** Nothing was written since the last run and no walk was under way: nothing was checked. */
+  skipped: boolean;
+  /** Concepts checked in this pass (at most the pass's budget). */
+  checked: number;
+  /** Concepts whose flags or lint the pass corrected, by path. */
+  repaired: string[];
+  broken_link: number;
+  footnote: number;
+  /** A full walk is under way and the next pass continues it. */
+  pending: boolean;
+}
+
+/**
+ * How many concepts one link-health pass checks again at most (TEMPRA-65), so a pass stays a
+ * small, bounded share of the object's time on a large library: about 85 ms for 1,000 on the
+ * 5,000-concept bench (`scripts/links-bench.ts`), so a full walk there takes five daily passes.
+ */
+export const LINK_BUDGET = 1000;
+
+/**
+ * The link-health checks' version: a pass that finds another version stored walks the whole
+ * library again, so a change to the checks reaches every concept, a budget at a time.
+ */
+export const LINK_CHECKS_VERSION = 1;
+
+/** Whether a link-health walk is under way, from the maintenance meta. */
+const linksWalking = (m: Record<string, string>) =>
+  m.links_walk !== undefined && m.links_walk !== "null";
+
 /** How many of the newest unverified changes the health summary names. */
 /** What a library's next maintenance pass would have to do, and when (TEMPRA-82); times in ms. */
 export interface MaintenanceDue {
@@ -5686,6 +5923,8 @@ export interface MaintenanceDue {
   staleAt: number | null;
   /** When the oldest read count leaves the usage window. */
   usageExpiry: number | null;
+  /** A process has budgeted work left over (a link-health walk): the next slot runs it. */
+  processPending?: boolean;
 }
 
 export const HEALTH_NEWEST = 5;

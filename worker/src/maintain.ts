@@ -1,5 +1,11 @@
 import type { ExportAttachment } from "./export-bundle";
-import type { LibraryHealth, MaintenanceDue, StalenessRun, StructureRun } from "./store/store";
+import type {
+  LibraryHealth,
+  LinksRun,
+  MaintenanceDue,
+  StalenessRun,
+  StructureRun,
+} from "./store/store";
 import { writeTar } from "./util/tar";
 
 /**
@@ -37,6 +43,8 @@ export interface MaintainedStore {
   pruneUsage(): number;
   maintainStaleness(): StalenessRun;
   maintainStructure(): StructureRun;
+  /** Link health (TEMPRA-65); how a process is written and added: tempra-dev v2/maintainers. */
+  maintainLinks(): LinksRun;
   maintainHealth(): LibraryHealth;
   maintenance(): Record<string, string>;
   setMaintenance(values: Record<string, string>): void;
@@ -49,6 +57,7 @@ export interface MaintenanceResult {
   pruned: number;
   staleness: StalenessRun;
   structure: StructureRun;
+  links: LinksRun;
   health: LibraryHealth;
 }
 
@@ -106,8 +115,9 @@ export async function runMaintenance(opts: {
   store.setMaintenance({ usage_at: stamp });
   const staleness = store.maintainStaleness();
   const structure = store.maintainStructure();
+  const links = store.maintainLinks();
   const health = store.maintainHealth();
-  return { export: exported, deleted, pruned, staleness, structure, health };
+  return { export: exported, deleted, pruned, staleness, structure, links, health };
 }
 
 /** The `created` stamp of an export folder's manifest, or null when it has none. */
@@ -252,7 +262,7 @@ export function slotAtOrAfter(t: number, libraryId: string): Date {
 export function nextMaintenance(now: Date, libraryId: string, due: MaintenanceDue): Date {
   const after = now.getTime() + 1;
   const times = [now.getTime() + MAX_SLEEP_DAYS * DAY_MS];
-  if (due.exportPending) times.push(after);
+  if (due.exportPending || due.processPending) times.push(after);
   for (const t of [due.exportExpiry, due.staleAt, due.usageExpiry]) {
     if (t !== null) times.push(Math.max(t, after));
   }
