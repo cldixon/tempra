@@ -7,6 +7,7 @@
 import { parseArgs } from "node:util";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { localFetch } from "./local-fetch";
 
 /** A 1×1 grey PNG, a real image for the upload step. */
 const PIXEL_PNG = Uint8Array.from(
@@ -25,6 +26,7 @@ export async function mcpSmoke(opts: {
 }): Promise<boolean> {
   const log = opts.log ?? console.log;
   const transport = new StreamableHTTPClientTransport(new URL("/mcp", opts.url), {
+    fetch: localFetch,
     requestInit: { headers: { Authorization: `Bearer ${opts.token}` } },
   });
   const client = new Client({ name: "okf-smoke", version: "1.0.0" });
@@ -49,7 +51,7 @@ export async function mcpSmoke(opts: {
   if (tools.includes("work")) await call("work");
   if (tools.includes("export")) {
     const url = /(https?:\/\/\S+)/.exec(await call("export"))?.[1];
-    const res = url ? await fetch(url) : null;
+    const res = url ? await localFetch(url) : null;
     const ok = res?.status === 200 && res.headers.get("Content-Type") === "application/x-tar";
     if (!ok) failed = true;
     log(`${ok ? "ok  " : "FAIL"} mcp export download (${res?.status})`);
@@ -78,10 +80,10 @@ export async function mcpSmoke(opts: {
     const file = `_smoke/pixel-${Date.now()}.png`;
     const prep = await call("prepare_upload", { path: file, note: "mcp smoke upload" });
     const url = /^curl -sS -T \S+ '(\S+)'$/m.exec(prep)?.[1];
-    const put = url ? await fetch(url, { method: "PUT", body: png }) : null;
+    const put = url ? await localFetch(url, { method: "PUT", body: png }) : null;
     const res = put ? ((await put.json().catch(() => null)) as { hash?: string } | null) : null;
     const back = /download \(15 minutes\): (\S+)/.exec(await call("read", { path: file }))?.[1];
-    const got = back ? new Uint8Array(await (await fetch(back)).arrayBuffer()) : null;
+    const got = back ? new Uint8Array(await (await localFetch(back)).arrayBuffer()) : null;
     const uploaded =
       put?.status === 200 && res?.hash === sha && got !== null && Bun.deepEquals(got, png);
     if (!uploaded) failed = true;
