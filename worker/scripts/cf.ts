@@ -6,7 +6,7 @@
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import config from "../cloudflare.config";
+import config, { deploymentFor } from "../cloudflare.config";
 import { retryDelayMs, transientCfError } from "./cf-retry";
 
 export const WORKER_DIR = new URL("..", import.meta.url).pathname;
@@ -44,6 +44,25 @@ export async function ensureQueues(): Promise<void> {
     console.log(`Creating Queue ${name}`);
     await cf(["queues", "create", "--queue-name", name]);
   }
+}
+
+/**
+ * Sets the account database's read replication to what cloudflare.config.ts says for this
+ * deployment (TEMPRA-85), so the setting lives in the config like the bindings: `bun run deploy`
+ * calls it after the migrations. Does nothing when the config leaves it unset or it already
+ * matches; safe to repeat.
+ */
+export async function ensureReadReplication(): Promise<void> {
+  const want = deploymentFor(MODE).readReplication;
+  if (!want) return;
+  const db = accountsDb();
+  const info = JSON.parse(await cf(["d1", "get", db.id])) as {
+    read_replication?: { mode?: string };
+  };
+  const have = info.read_replication?.mode ?? "disabled";
+  if (have === want) return;
+  console.log(`D1 read replication for ${db.name}: ${have} -> ${want}`);
+  await cf(["d1", "edit", db.id, "--read-replication-mode", want]);
 }
 
 /** The account database (binding DB). */
