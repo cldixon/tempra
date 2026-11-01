@@ -65,6 +65,99 @@ export async function ensureReadReplication(): Promise<void> {
   await cf(["d1", "edit", db.id, "--read-replication-mode", want]);
 }
 
+interface RoutingRule {
+  id: string;
+  name?: string;
+  enabled?: boolean;
+  matchers?: { type: string; field?: string; value?: string }[];
+  actions?: { type: string; value?: string[] }[];
+}
+
+/**
+ * Makes the zone's incoming mail match `inboundMail` in cloudflare.config.ts for this deployment:
+ * Email Routing enabled, each destination registered (Cloudflare mails it a verification link the
+ * first time, and refuses a rule to it until the link is clicked, so the rules come on the first
+ * run after that), and one rule per address forwarding to it, created or corrected. `"operator"` resolves to OPERATOR_EMAIL; without it the step is skipped.
+ * Never deletes a rule or an address it does not manage. A failure here (a token without Email
+ * Routing permission, say) is a warning, not a failed deploy: the rules already in place keep
+ * working. Safe to repeat.
+ */
+export async function ensureEmailRouting(): Promise<void> {
+  const inbound = deploymentFor(MODE).inboundMail;
+  if (!inbound) return;
+  const operator = process.env.OPERATOR_EMAIL?.trim();
+  if (!operator) {
+    console.log("Email Routing: OPERATOR_EMAIL is not set; skipped.");
+    return;
+  }
+  const z = ["-z", inbound.zone];
+  try {
+    const settings = JSON.parse(await cf(["email-routing", "settings", "get", ...z])) as {
+      enabled?: boolean;
+    };
+    if (!settings.enabled) {
+      console.log(`Email Routing: enabling on ${inbound.zone}`);
+      await cf(["email-routing", "enable", ...z]);
+    }
+    const addresses = JSON.parse(await cf(["email-routing", "addresses", "list"])) as {
+      email: string;
+      verified?: string | null;
+    }[];
+    const known = new Map(addresses.map((a) => [a.email.toLowerCase(), a]));
+    if (!known.has(operator.toLowerCase())) {
+      console.log(
+        "Email Routing: registered the operator's address; Cloudflare mails it a verification link, and the next deploy forwards to it once it is clicked",
+      );
+      await cf(["email-routing", "addresses", "create", "--email", operator]);
+      return;
+    }
+    // Cloudflare refuses a rule to an unverified destination, so the rules wait for the link.
+    if (!known.get(operator.toLowerCase())?.verified) {
+      console.log(
+        "Email Routing: the operator's address is not verified yet (the link Cloudflare mailed it); rules are left for the next deploy",
+      );
+      return;
+    }
+    const rules = JSON.parse(
+      await cf(["email-routing", "rules", "list-account", ...z]),
+    ) as RoutingRule[];
+    for (const route of inbound.routes) {
+      const to = route.to === "operator" ? operator : route.to;
+      const matchers = [{ type: "literal", field: "to", value: route.address }];
+      const actions = [{ type: "forward", value: [to] }];
+      const rule = rules.find((r) =>
+        r.matchers?.some(
+          (m) => m.type === "literal" && m.field === "to" && m.value === route.address,
+        ),
+      );
+      const fields = [
+        "--name",
+        `${route.address} to ${route.to}`,
+        "--enabled",
+        "true",
+        "--matchers",
+        JSON.stringify(matchers),
+        "--actions",
+        JSON.stringify(actions),
+      ];
+      if (!rule) {
+        console.log(`Email Routing: forwarding ${route.address} to the ${route.to}`);
+        await cf(["email-routing", "rules", "create", ...z, ...fields]);
+      } else if (
+        !rule.enabled ||
+        rule.actions?.length !== 1 ||
+        rule.actions[0]?.type !== "forward" ||
+        JSON.stringify(rule.actions[0]?.value ?? []) !== JSON.stringify([to])
+      ) {
+        console.log(`Email Routing: correcting the rule for ${route.address}`);
+        await cf(["email-routing", "rules", "update", rule.id, ...z, ...fields]);
+      }
+    }
+  } catch (e) {
+    console.log(`::warning::Email Routing not applied: ${(e as Error).message.split("\n")[0]}`);
+  }
+}
+
 /** The account database (binding DB). */
 export function accountsDb(): { name: string; id: string } {
   const db = worker?.env?.DB as { type?: string; name?: string; id?: string } | undefined;
