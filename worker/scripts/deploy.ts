@@ -19,7 +19,8 @@ if (!args.includes("--mode")) args.push("--mode", "production");
 const i = args.indexOf("--mode");
 if (args[i + 1]) process.env.TEMPRA_MODE = args[i + 1];
 // Imported after TEMPRA_MODE is set: it reads the config for that deployment.
-const { accountsDb, applyMigrations, ensureQueues, WORKER_DIR } = await import("./cf");
+const { accountsDb, applyMigrations, ensureQueues, ensureReadReplication, WORKER_DIR } =
+  await import("./cf");
 const { PROPAGATION_DELAYS_MS, workerNotYetVisible } = await import("./cf-retry");
 
 if (!args.includes("--dry-run")) {
@@ -28,6 +29,8 @@ if (!args.includes("--dry-run")) {
   console.log((await applyMigrations()).trim());
   // The Queues the Worker binds, made if missing (a Worker binding a missing Queue fails to deploy).
   await ensureQueues();
+  // The account database's read replication, as the config sets it (TEMPRA-85).
+  await ensureReadReplication();
 }
 /** Runs `cf deploy` once in `cwd`, streaming its output to the log; resolves to its exit code and output. */
 async function deployOnce(cwd: string): Promise<{ code: number; output: string }> {

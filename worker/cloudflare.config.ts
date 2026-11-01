@@ -20,6 +20,12 @@ export interface Deployment {
   /** The custom domain that serves everything: /app, /api, /mcp and OAuth. */
   host: string;
   d1: { name: string; id: string };
+  /**
+   * The account database's read replication (TEMPRA-85, tempra-dev `v2/read-replication.md`), a
+   * setting on the database rather than a binding: `bun run deploy` applies it when it differs
+   * (scripts/cf.ts `ensureReadReplication`). Unset leaves the database as it is (previews).
+   */
+  readReplication?: "auto" | "disabled";
   r2: string;
   kv: string;
   /** The blob sweep's Queue (TEMPRA-81): recounts, the bucket listing and the drift scan. */
@@ -50,6 +56,7 @@ const PRODUCTION: Deployment = {
   render: "tempra-render",
   host: "app.tempra.dev",
   d1: { name: "tempra-accounts", id: "60dcce9c-4a20-44db-8d49-1ee040225c4d" },
+  readReplication: "auto",
   r2: "tempra-blobs",
   kv: "9e57232de5b940e4b2319f31da509f42",
   queue: "tempra-sweep",
@@ -64,6 +71,7 @@ const STAGING: Deployment = {
   render: "tempra-render-staging",
   host: "staging.tempra.dev",
   d1: { name: "tempra-accounts-staging", id: "d66e1ceb-591e-419d-ba51-9cc32b87f658" },
+  readReplication: "auto",
   r2: "tempra-blobs-staging",
   kv: "b63bffc9b65743a99783013effb89324",
   queue: "tempra-sweep-staging",
