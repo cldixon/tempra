@@ -154,7 +154,13 @@ export async function ensureEmailRouting(): Promise<void> {
       }
     }
   } catch (e) {
-    console.log(`::warning::Email Routing not applied: ${(e as Error).message.split("\n")[0]}`);
+    // cf's own reason (an API error such as "[10000] Authentication error") is a later line of
+    // its output; the first line only names the command.
+    const lines = (e as Error).message.split("\n").map((l) => l.replace(/^[│┌└\s]+/, "").trim());
+    const reason = lines.find((l) => /\[\d+\]/.test(l)) ?? lines.find(Boolean) ?? "unknown error";
+    console.log(
+      `::warning::Email Routing not applied (${reason}). The token needs Email Routing Rules and Addresses permissions; the rules in place keep working.`,
+    );
   }
 }
 
