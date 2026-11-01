@@ -39,6 +39,15 @@ export interface Deployment {
   mailQueue: string;
   /** The address sign-in links and the digest come from (Cloudflare Email Service). */
   mailFrom: string;
+  /**
+   * Incoming mail (Cloudflare Email Routing on the zone): each address forwarded to a mailbox.
+   * `"operator"` is the operator's own address, read from OPERATOR_EMAIL when `bun run deploy`
+   * runs (CI passes it from a secret), so no personal address is in the repository. Deploy
+   * enables routing on the zone, registers the destination (Cloudflare mails it a verification
+   * link, once) and creates or corrects each rule (scripts/cf.ts `ensureEmailRouting`). Unset: no
+   * incoming mail is managed (staging and previews share the production zone's routing).
+   */
+  inboundMail?: { zone: string; routes: { address: string; to: "operator" }[] };
   /** Analytics Engine dataset for metering; tempra_usage unless set. */
   usage?: string;
   /**
@@ -64,6 +73,8 @@ const PRODUCTION: Deployment = {
   mailQueue: "tempra-mail",
   // mail.tempra.dev is onboarded for Cloudflare Email Sending.
   mailFrom: "noreply@mail.tempra.dev",
+  // The contact address on the landing page's Terms and Privacy.
+  inboundMail: { zone: "tempra.dev", routes: [{ address: "hello@tempra.dev", to: "operator" }] },
 };
 
 const STAGING: Deployment = {

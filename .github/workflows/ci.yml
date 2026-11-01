@@ -277,6 +277,9 @@ jobs:
         run: bun install --frozen-lockfile
       - if: steps.tip.outputs.deploy == 'true'
         working-directory: worker
+        env:
+          # Where incoming mail to the config's addresses is forwarded (inboundMail, hello@tempra.dev).
+          OPERATOR_EMAIL: ${{ secrets.PREVIEW_EMAIL }}
         run: bun run deploy --mode production --message "${{ github.sha }}"
       - if: steps.tip.outputs.deploy == 'true'
         name: Set the agent's key
