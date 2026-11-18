@@ -64,6 +64,7 @@ import type {
 // biome-ignore lint/complexity/noBannedTypes: Svelte's own default for a component's exports.
 type NoExports = {};
 
+export { type AgentBrand, BRAND_PATHS, BRAND_VIEWBOX } from "./brands";
 export { type Glyph, ICONS } from "./icons";
 export { MARK_PATHS, MARK_VIEWBOX, type MarkPaths, markSvg } from "./mark";
 export { modal } from "./modal";

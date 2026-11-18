@@ -1,3 +1,4 @@
+import type { AgentBrand } from "@tempra/design/components";
 import { who } from "./ui";
 
 /**
@@ -102,6 +103,47 @@ export interface ActorView {
   fullName?: string | null;
   /** Tempra's own agent, @tempra (TEMPRA-222): its mark is filled with the agent colour. */
   tempra: boolean;
+  /** An agent's brand, its mark's glyph (an experiment); null for a person, @tempra or unknown. */
+  brand?: AgentBrand | null;
+}
+
+/**
+ * The brand an agent's round mark shows (an experiment): the company behind the platform it
+ * works from, read only from what the server can vouch for. A connection's platform is the domain
+ * its sign-in returns to (only claude.ai receives at claude.ai); a token's is the app half of the
+ * actor its person chose. A local or unnamed app (`local/…`, `app/…`) names itself, which is a
+ * claim, and an app that can run any model (Cursor, a script) has no brand: both keep the letter.
+ */
+const BRAND_DOMAINS: Record<string, AgentBrand> = {
+  "claude.ai": "anthropic",
+  "claude.com": "anthropic",
+  "chatgpt.com": "openai",
+  "chat.openai.com": "openai",
+  "gemini.google.com": "google",
+};
+const BRAND_APPS: Record<string, AgentBrand> = {
+  claude: "anthropic",
+  "claude-ai": "anthropic",
+  "claude-code": "anthropic",
+  "claude-desktop": "anthropic",
+  chatgpt: "openai",
+  codex: "openai",
+  openai: "openai",
+  gemini: "google",
+  "gemini-cli": "google",
+};
+
+export function platformBrand(platform: string | null | undefined): AgentBrand | null {
+  if (!platform) return null;
+  if (platform.startsWith("token/")) return BRAND_APPS[platform.slice("token/".length)] ?? null;
+  if (platform.includes("/")) return null;
+  return BRAND_DOMAINS[platform] ?? null;
+}
+
+/** A brand from an actor alone, for an agent the library's list does not know (yet): a token's. */
+export function actorBrand(actor: string): AgentBrand | null {
+  if (actor.startsWith("human:") || actor.startsWith("process:")) return null;
+  return BRAND_APPS[(actor.split("/")[0] ?? "").toLowerCase()] ?? null;
 }
 
 /** The managed agent's actor, as the Worker's `AGENT_ACTOR` (TEMPRA-222). */
@@ -161,5 +203,6 @@ export function actorView(
     you: false,
     mark: name,
     tempra: actor === TEMPRA_ACTOR,
+    brand: actor === TEMPRA_ACTOR ? null : c ? platformBrand(c.agent?.platform) : actorBrand(actor),
   };
 }

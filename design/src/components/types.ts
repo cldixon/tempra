@@ -5,7 +5,9 @@
  * Where a component takes "other attributes", they go to its element: a class beside its own,
  * `aria-*`, `data-*`, `title`, an attachment.
  */
+
 import type { Snippet } from "svelte";
+import type { AgentBrand } from "./brands";
 import type { Glyph } from "./icons";
 
 export type { Glyph };
@@ -128,6 +130,8 @@ export type AvatarMarkProps = {
   kind?: "person" | "agent" | "tempra";
   initials: string;
   size?: "default" | "small";
+  /** An agent's brand (an experiment): its glyph in place of the letter, `.avatar-mark.brand`. */
+  brand?: AgentBrand | null;
 };
 
 export type TileProps = {

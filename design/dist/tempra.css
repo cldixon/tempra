@@ -2607,6 +2607,13 @@ body.ground {
   color: var(--tempra-color-bg);
 }
 
+/* An agent's brand glyph (an experiment): the platform's mark in place of its letter, in the
+   same ink, so it stays in the palette. */
+.avatar-mark.brand svg {
+  width: 58%;
+  height: 58%;
+}
+
 /* Tempra's own agent, @tempra (TEMPRA-223): its letter on the agent colour, the one place the
    colour fills a mark; other agents stay on ink. */
 .avatar-mark.agent.tempra {

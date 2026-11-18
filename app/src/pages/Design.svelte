@@ -239,6 +239,9 @@
     <AvatarMark initials="AN" />
     <AvatarMark kind="agent" initials="C" />
     <AvatarMark kind="tempra" initials="T" />
+    <AvatarMark kind="agent" initials="C" brand="anthropic" />
+    <AvatarMark kind="agent" initials="C" brand="openai" />
+    <AvatarMark kind="agent" initials="G" brand="google" />
     <AvatarMark initials="AN" size="small" />
   {/snippet}
   {@render item("AvatarMark", avatars)}

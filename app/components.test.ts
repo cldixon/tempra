@@ -4,6 +4,7 @@ import { join } from "node:path";
 import {
   AvatarMark,
   Badge,
+  BRAND_PATHS,
   Button,
   ChangeRow,
   Chip,
@@ -416,6 +417,25 @@ describe("marks and labels", () => {
     const s = draw(AvatarMark, { initials: "A", size: "small" });
     expect(one(s.host, "span").className).toBe("avatar-mark small");
     s.destroy();
+  });
+
+  test("AvatarMark: an agent's brand glyph in place of its letter, agents only", () => {
+    for (const brand of ["anthropic", "openai", "google"] as const) {
+      const d = draw(AvatarMark, { kind: "agent", initials: "C", brand });
+      const m = one(d.host, "span");
+      expect(m.className).toBe("avatar-mark agent brand");
+      expect(m.textContent).toBe("");
+      expect(m.querySelector("svg path")?.getAttribute("d")).toBe(BRAND_PATHS[brand].d);
+      expect(m.querySelector("svg")?.getAttribute("fill")).toBe("currentColor");
+      d.destroy();
+    }
+    // A person or @tempra keeps its letters whatever it is given.
+    for (const kind of ["person", "tempra"] as const) {
+      const d = draw(AvatarMark, { kind, initials: "T", brand: "anthropic" });
+      expect(one(d.host, "span").textContent).toBe("T");
+      expect(one(d.host, "span").querySelector("svg")).toBeNull();
+      d.destroy();
+    }
   });
 
   test("Tile: its letter; small, large, shared", () => {
