@@ -105,6 +105,9 @@ export interface ActorView {
   tempra: boolean;
   /** An agent's brand, its mark's glyph (an experiment); null for a person, @tempra or unknown. */
   brand?: AgentBrand | null;
+  /** For an agent whose person is known, that person, for their mark beside the agent's (an
+   * experiment, "person via agent"); null otherwise. */
+  person?: { handle: string; fullName: string | null } | null;
 }
 
 /**
@@ -204,5 +207,6 @@ export function actorView(
     mark: name,
     tempra: actor === TEMPRA_ACTOR,
     brand: actor === TEMPRA_ACTOR ? null : c ? platformBrand(c.agent?.platform) : actorBrand(actor),
+    person: person ? { handle: person, fullName: names[person] ?? null } : null,
   };
 }

@@ -135,6 +135,15 @@ export type AvatarMarkProps = {
   brand?: AgentBrand | null;
 };
 
+export type AvatarPairProps = {
+  /** The person the agent acts for: their initials. */
+  personInitials: string;
+  /** The agent's letter, shown when it has no brand. */
+  agentInitials: string;
+  brand?: AgentBrand | null;
+  size?: "default" | "small";
+};
+
 export type TileProps = {
   letter: string;
   size?: "small" | "default" | "large";

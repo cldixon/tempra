@@ -29,7 +29,7 @@
         {@const folder = dirOf(c.path)}
         <li>
           <ChangeRow>
-            {#snippet lead()}<Avatar name={who.mark} fullName={who.fullName} agent={who.agent} tempra={who.tempra} brand={who.brand} />{/snippet}
+            {#snippet lead()}<Avatar name={who.mark} fullName={who.fullName} agent={who.agent} tempra={who.tempra} brand={who.brand} person={who.person} />{/snippet}
             <a class="home-recent-title" href={urls.file(c.path)}>{c.title}</a>
             {#snippet detail()}<span class="change-row-meta">{#if folder}{`${folderName(folder)} · `}{/if}{who.name}{who.for ? ` for ${who.for}` : ""}</span>{/snippet}
             {#snippet when()}<Moment ts={c.ts} />{/snippet}

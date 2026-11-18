@@ -57,7 +57,7 @@
   <div class="byline"><StatusPills status={props.status ?? null} stale={props.page.stale} /></div>
 {:else}
   <div class="byline"
-    ><Avatar name={who.mark} fullName={who.fullName} agent={who.agent} tempra={who.tempra} brand={who.brand} />{@render name(who, atIsAuthor)}{#if other}<span class="byline-and">&amp;</span
-      ><Avatar name={other.mark} fullName={other.fullName} agent={other.agent} tempra={other.tempra} brand={other.brand} />{@render name(other, true)}{/if}{@render sep()}<span class="muted">edited <Moment ts={author.ts} /></span
+    ><Avatar name={who.mark} fullName={who.fullName} agent={who.agent} tempra={who.tempra} brand={who.brand} person={who.person} />{@render name(who, atIsAuthor)}{#if other}<span class="byline-and">&amp;</span
+      ><Avatar name={other.mark} fullName={other.fullName} agent={other.agent} tempra={other.tempra} brand={other.brand} person={other.person} />{@render name(other, true)}{/if}{@render sep()}<span class="muted">edited <Moment ts={author.ts} /></span
     ><StatusPills status={props.status ?? null} stale={props.page.stale} /></div>
 {/if}

@@ -221,6 +221,7 @@
 
   /* Type scale: the only pixel sizes in the CSS (inside .prose, sizes are em of the reading size) */
   --tempra-text-initial: 9px; /* an avatar's initials */
+  --tempra-text-initial-badge: 7px; /* an agent's letter in its badge on a person's mark */
   --tempra-text-label: 11px; /* uppercase labels, marks */
   --tempra-text-meta: 12px; /* timestamps, small print */
   --tempra-text-ui: 13px; /* controls, panels, the tree, comments */
@@ -330,6 +331,7 @@
   --tempra-size-icon-small: 12px; /* the tree's chevron itself */
   --tempra-size-avatar: 22px; /* someone's round mark */
   --tempra-size-avatar-small: 20px; /* in a compact thread */
+  --tempra-size-avatar-badge: 13px; /* an agent's badge on its person's mark */
   --tempra-size-avatar-menu: 26px; /* the avatar button that opens the account menu */
   --tempra-size-avatar-large: 32px; /* at the head of the account menu */
   --tempra-size-tile: 24px; /* a library's initial */

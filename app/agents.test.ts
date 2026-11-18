@@ -151,6 +151,14 @@ describe("agent brands", () => {
     expect(view("tempra/agent", { person: "u1", agent: "agt_t" }).brand).toBeNull();
     expect(view("human:ann", null).brand).toBeUndefined();
   });
+
+  test("an agent carries its person for the pair; one the list does not know yet does not", () => {
+    const known = actorView("claude-ai/connector", { person: "u1", agent: "agt_ann" }, byId, null);
+    expect(known.person).toEqual({ handle: "ann", fullName: null });
+    const fresh = actorView("claude-code/x", { person: "u9", agent: "agt_new" }, byId, null);
+    expect(fresh.person).toBeNull();
+    expect(actorView("human:ann", null, byId, null).person).toBeUndefined();
+  });
 });
 
 // One way to name a library (TEMPRA-131): the title, else the slug; the owner only when shared.
