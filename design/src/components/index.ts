@@ -9,6 +9,7 @@
  */
 import type { Component } from "svelte";
 import AvatarMarkC from "./AvatarMark.svelte";
+import AvatarPairC from "./AvatarPair.svelte";
 import BadgeC from "./Badge.svelte";
 import ButtonC from "./Button.svelte";
 import ChangeRowC from "./ChangeRow.svelte";
@@ -35,6 +36,7 @@ import TileC from "./Tile.svelte";
 import ToolPillC from "./ToolPill.svelte";
 import type {
   AvatarMarkProps,
+  AvatarPairProps,
   BadgeProps,
   ButtonProps,
   ChangeRowProps,
@@ -64,12 +66,14 @@ import type {
 // biome-ignore lint/complexity/noBannedTypes: Svelte's own default for a component's exports.
 type NoExports = {};
 
+export { type AgentBrand, BRAND_PATHS, BRAND_VIEWBOX } from "./brands";
 export { type Glyph, ICONS } from "./icons";
 export { MARK_PATHS, MARK_VIEWBOX, type MarkPaths, markSvg } from "./mark";
 export { modal } from "./modal";
 export type * from "./types";
 
 export const AvatarMark = AvatarMarkC as Component<AvatarMarkProps>;
+export const AvatarPair = AvatarPairC as Component<AvatarPairProps>;
 export const Badge = BadgeC as Component<BadgeProps>;
 export const Button = ButtonC as Component<ButtonProps>;
 export const ChangeRow = ChangeRowC as Component<ChangeRowProps>;

@@ -1,6 +1,7 @@
 <script lang="ts">
   import {
     AvatarMark,
+    AvatarPair,
     Badge,
     Button,
     ChangeRow,
@@ -239,9 +240,21 @@
     <AvatarMark initials="AN" />
     <AvatarMark kind="agent" initials="C" />
     <AvatarMark kind="tempra" initials="T" />
+    <AvatarMark kind="agent" initials="C" brand="anthropic" />
+    <AvatarMark kind="agent" initials="C" brand="openai" />
+    <AvatarMark kind="agent" initials="G" brand="google" />
     <AvatarMark initials="AN" size="small" />
   {/snippet}
   {@render item("AvatarMark", avatars)}
+
+  {#snippet pairs()}
+    <AvatarPair personInitials="DE" agentInitials="C" brand="anthropic" />
+    <AvatarPair personInitials="DE" agentInitials="C" brand="openai" />
+    <AvatarPair personInitials="DE" agentInitials="G" brand="google" />
+    <AvatarPair personInitials="DE" agentInitials="X" />
+    <AvatarPair personInitials="DE" agentInitials="C" brand="anthropic" size="small" />
+  {/snippet}
+  {@render item("AvatarPair", pairs)}
 
   {#snippet tiles()}
     <Tile letter="D" size="small" />

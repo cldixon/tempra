@@ -5,6 +5,7 @@
  * the text in the reader's typography (`.prose`), and its contents beside it, or "On this page"
  * on a phone. Its sections are given here so the contents and the headings' anchors agree.
  */
+import { markSvg } from "@tempra/design/mark";
 import { LEGAL_UPDATED } from "../site";
 import Base from "./Base.astro";
 
@@ -26,7 +27,7 @@ const chevron =
       <h1 id="title" class="doc-title">{title}</h1>
       <p class="doc-tagline">{description}</p>
       <p class="landing-byline">
-        <span class="avatar-mark agent tempra" aria-hidden="true">T</span>
+        <span class="avatar-mark agent tempra" aria-hidden="true"><Fragment set:html={markSvg({ small: true, finish: "on-orange" })} /></span>
         <span>Tempra</span>
         <span class="muted" aria-hidden="true">·</span>
         <span class="muted">updated <time datetime={LEGAL_UPDATED.iso}>{LEGAL_UPDATED.text}</time></span>

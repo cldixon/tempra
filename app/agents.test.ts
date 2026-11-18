@@ -2,12 +2,14 @@ import { describe, expect, test } from "bun:test";
 import AgentName from "./src/AgentName.svelte";
 import {
   actorAgentName,
+  actorBrand,
   actorLabel,
   actorText,
   actorView,
   agentLabel,
   agentNames,
   type Contributor,
+  platformBrand,
   readableName,
 } from "./src/agents";
 import { itemLibrary, itemWho } from "./src/inbox";
@@ -112,6 +114,50 @@ describe("AgentName's words", () => {
       '<span class="agent-name"><b>Claude Code</b><span class="agent-for"> for @dev</span></span>',
     );
     expect(html({ name: "You", for: null })).toBe('<span class="agent-name"><b>You</b></span>');
+  });
+});
+
+// An agent's brand glyph (an experiment): from what the server vouches for, never a self-chosen name.
+describe("agent brands", () => {
+  const byId = Object.fromEntries(
+    contributors.filter((c) => c.agent).map((c) => [c.agent?.id as string, c]),
+  );
+
+  test("a connection's domain and a token's app name the brand; claims and other apps do not", () => {
+    expect(platformBrand("claude.ai")).toBe("anthropic");
+    expect(platformBrand("chatgpt.com")).toBe("openai");
+    expect(platformBrand("gemini.google.com")).toBe("google");
+    expect(platformBrand("token/claude-code")).toBe("anthropic");
+    expect(platformBrand("token/codex")).toBe("openai");
+    expect(platformBrand("token/cursor")).toBeNull();
+    // A local or unregistered app names itself: a claim, so no brand.
+    expect(platformBrand("local/claude")).toBeNull();
+    expect(platformBrand("app/chatgpt")).toBeNull();
+    expect(platformBrand("cursor.com")).toBeNull();
+    expect(platformBrand(null)).toBeNull();
+    expect(actorBrand("claude-code/laptop")).toBe("anthropic");
+    expect(actorBrand("human:ann")).toBeNull();
+    expect(actorBrand("process:nightly-export")).toBeNull();
+  });
+
+  test("an ActorView carries it for agents only, never for @tempra", () => {
+    const view = (actor: string, by: { person: string; agent?: string } | null) =>
+      actorView(actor, by, byId, null);
+    expect(view("claude-ai/connector", { person: "u1", agent: "agt_ann" }).brand).toBe("anthropic");
+    // Known to the list with no platform: no brand, even if its actor would say one.
+    expect(view("claude-code/x", { person: "u1", agent: "agt_gone" }).brand).toBeNull();
+    // Unknown to the list: from its token's actor.
+    expect(view("codex/ci", { person: "u9", agent: "agt_new" }).brand).toBe("openai");
+    expect(view("tempra/agent", { person: "u1", agent: "agt_t" }).brand).toBeNull();
+    expect(view("human:ann", null).brand).toBeUndefined();
+  });
+
+  test("an agent carries its person for the pair; one the list does not know yet does not", () => {
+    const known = actorView("claude-ai/connector", { person: "u1", agent: "agt_ann" }, byId, null);
+    expect(known.person).toEqual({ handle: "ann", fullName: null });
+    const fresh = actorView("claude-code/x", { person: "u9", agent: "agt_new" }, byId, null);
+    expect(fresh.person).toBeNull();
+    expect(actorView("human:ann", null, byId, null).person).toBeUndefined();
   });
 });
 

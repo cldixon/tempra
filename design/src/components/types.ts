@@ -5,7 +5,9 @@
  * Where a component takes "other attributes", they go to its element: a class beside its own,
  * `aria-*`, `data-*`, `title`, an attachment.
  */
+
 import type { Snippet } from "svelte";
+import type { AgentBrand } from "./brands";
 import type { Glyph } from "./icons";
 
 export type { Glyph };
@@ -125,8 +127,20 @@ export type SegmentedProps<V extends string = string> = {
 export type NoticeProps = { tone?: "error" | "ok"; children: Snippet };
 
 export type AvatarMarkProps = {
+  /** `tempra`, @tempra, draws the Tempra mark on orange (`Mark` `finish="on-orange"`), not initials. */
   kind?: "person" | "agent" | "tempra";
   initials: string;
+  size?: "default" | "small";
+  /** An agent's brand (an experiment): its glyph in place of the letter, `.avatar-mark.brand`. */
+  brand?: AgentBrand | null;
+};
+
+export type AvatarPairProps = {
+  /** The person the agent acts for: their initials. */
+  personInitials: string;
+  /** The agent's letter, shown when it has no brand. */
+  agentInitials: string;
+  brand?: AgentBrand | null;
   size?: "default" | "small";
 };
 
@@ -143,7 +157,14 @@ export type MarkProps = {
   small?: boolean;
   /** Names the mark (role="img"); without it, it is decorative. */
   label?: string;
+  /**
+   * The plates' colours: `default` follows the scheme (graphite in light, silver in dark);
+   * `on-orange` is white and two orange tints, for a mark on `--tempra-color-mark-on-orange`.
+   */
+  finish?: MarkFinish;
 } & Rest;
+
+export type MarkFinish = "default" | "on-orange";
 
 export type MenuProps = {
   /** The button's content. */

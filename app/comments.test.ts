@@ -60,7 +60,7 @@ describe("a comment author's round mark", () => {
     expect(agentInitial("")).toBe("?");
   });
 
-  test("drawn decorative: a person's initials, an agent on ink, Tempra's own on the agent colour", () => {
+  test("drawn decorative: a person's initials, an agent on ink, Tempra's own the mark on orange", () => {
     const mark = (props: {
       name: string;
       fullName?: string | null;
@@ -86,9 +86,10 @@ describe("a comment author's round mark", () => {
       text: "C",
       hidden: "true",
     });
+    // @tempra: the Tempra mark in its on-orange finish, no letter.
     expect(mark({ name: "Tempra", agent: true, tempra: true })).toEqual({
       cls: "avatar-mark agent tempra",
-      text: "T",
+      text: "",
       hidden: "true",
     });
   });

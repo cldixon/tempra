@@ -9,8 +9,10 @@
  *
  * `small` is for 24px and under: a wider gap (2.6 units against 1.75), so the plates stay apart.
  * Colours are the design CSS's (`.mark-front`, `.mark-mid`, `.mark-back` over the
- * `--tempra-color-mark-*` roles: graphite in light, silver in dark); a favicon, which cannot read a
- * stylesheet, has its own copy (design/favicon.svg).
+ * `--tempra-color-mark-*` roles: graphite in light, silver in dark; `.mark.on-orange`, the Brand
+ * Logo page's on-orange finish, white and two orange tints over `--tempra-color-mark-on-orange-*`,
+ * for a mark on the brand's orange); a favicon, which cannot read a stylesheet, has its own copy
+ * (design/favicon.svg).
  */
 
 export const MARK_VIEWBOX = "0 0 45 50";
@@ -35,10 +37,17 @@ export const MARK_PATHS: { standard: MarkPaths; small: MarkPaths } = {
  * site, a panel built from the DOM). Decorative unless `label` names it.
  */
 export function markSvg(
-  opts: { small?: boolean; className?: string; label?: string } = {},
+  opts: {
+    small?: boolean;
+    className?: string;
+    label?: string;
+    finish?: "default" | "on-orange";
+  } = {},
 ): string {
   const p = MARK_PATHS[opts.small ? "small" : "standard"];
-  const cls = ["mark", opts.className].filter(Boolean).join(" ");
+  const cls = ["mark", opts.finish === "on-orange" ? "on-orange" : "", opts.className]
+    .filter(Boolean)
+    .join(" ");
   const named = opts.label
     ? ` role="img" aria-label="${opts.label.replace(/[&"<>]/g, (c) => `&#${c.charCodeAt(0)};`)}"`
     : ' aria-hidden="true"';
