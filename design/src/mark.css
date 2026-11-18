@@ -29,6 +29,20 @@
   fill: var(--tempra-color-mark-back);
 }
 
+/* The on-orange finish (`finish="on-orange"`): white and the two orange tints, for a mark on
+   --tempra-color-mark-on-orange (@tempra's round mark). */
+.mark.on-orange .mark-front {
+  fill: var(--tempra-color-mark-on-orange-front);
+}
+
+.mark.on-orange .mark-mid {
+  fill: var(--tempra-color-mark-on-orange-mid);
+}
+
+.mark.on-orange .mark-back {
+  fill: var(--tempra-color-mark-on-orange-back);
+}
+
 /* A mark and a name on one baseline (the top bar's, the public pages' wordmark). */
 .mark-lockup {
   display: flex;

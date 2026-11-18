@@ -14,6 +14,7 @@ import {
   Field,
   Icon,
   IconButton,
+  MARK_PATHS,
   Mark,
   markSvg,
   Notice,
@@ -405,7 +406,6 @@ describe("marks and labels", () => {
     for (const [kind, cls] of [
       ["person", "avatar-mark"],
       ["agent", "avatar-mark agent"],
-      ["tempra", "avatar-mark agent tempra"],
     ] as const) {
       const d = draw(AvatarMark, { kind, initials: "AN" });
       const m = one(d.host, "span");
@@ -414,6 +414,15 @@ describe("marks and labels", () => {
       expect(m.getAttribute("aria-hidden")).toBe("true");
       d.destroy();
     }
+    // @tempra: the Tempra mark's small cut in its on-orange finish, no letters.
+    const t = draw(AvatarMark, { kind: "tempra", initials: "T" });
+    const m = one(t.host, "span");
+    expect(m.className).toBe("avatar-mark agent tempra");
+    expect(m.textContent).toBe("");
+    const mark = one(m, "svg");
+    expect(mark.getAttribute("class")).toBe("mark on-orange");
+    expect(mark.querySelector(".mark-back")?.getAttribute("d")).toBe(MARK_PATHS.small.back);
+    t.destroy();
     const s = draw(AvatarMark, { initials: "A", size: "small" });
     expect(one(s.host, "span").className).toBe("avatar-mark small");
     s.destroy();
@@ -429,13 +438,14 @@ describe("marks and labels", () => {
       expect(m.querySelector("svg")?.getAttribute("fill")).toBe("currentColor");
       d.destroy();
     }
-    // A person or @tempra keeps its letters whatever it is given.
-    for (const kind of ["person", "tempra"] as const) {
-      const d = draw(AvatarMark, { kind, initials: "T", brand: "anthropic" });
-      expect(one(d.host, "span").textContent).toBe("T");
-      expect(one(d.host, "span").querySelector("svg")).toBeNull();
-      d.destroy();
-    }
+    // A person keeps its letters, and @tempra its own mark, whatever brand it is given.
+    const p = draw(AvatarMark, { kind: "person", initials: "T", brand: "anthropic" });
+    expect(one(p.host, "span").textContent).toBe("T");
+    expect(one(p.host, "span").querySelector("svg")).toBeNull();
+    p.destroy();
+    const t = draw(AvatarMark, { kind: "tempra", initials: "T", brand: "anthropic" });
+    expect(one(t.host, "svg").getAttribute("class")).toBe("mark on-orange");
+    t.destroy();
   });
 
   test("Tile: its letter; small, large, shared", () => {
@@ -477,6 +487,12 @@ describe("marks and labels", () => {
     expect(html).toContain('aria-label="A &#34;b&#34;"');
     expect(html).toContain('class="mark-front"');
     expect(markSvg()).toContain('aria-hidden="true"');
+    // The on-orange finish (the Brand Logo page's): a class on the svg, the colours still the CSS's.
+    const o = draw(Mark, { small: true, finish: "on-orange" });
+    expect(one(o.host, "svg").getAttribute("class")).toBe("mark on-orange");
+    expect(one(o.host, "svg").querySelector("[fill], [style]")).toBeNull();
+    o.destroy();
+    expect(markSvg({ finish: "on-orange", className: "x" })).toContain('class="mark on-orange x"');
   });
 
   test("Badge: the count, 99+ past 99, nothing at 0", () => {

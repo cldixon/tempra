@@ -61,6 +61,11 @@
   --tempra-orange-624: #de5600;
   --tempra-orange-520: #ac430e;
 
+  /* Palette: the mark's two orange tints, its on-orange finish's middle and back plates (the
+     Paper file's Brand Logo page; kept as brand colours when the mark moved onto the palette) */
+  --tempra-orange-876: #ffc9a8;
+  --tempra-orange-768: #f49a68;
+
   /* Palette: blue, the focus ring's in dark (the light ring is the chart's blue-575) */
   --tempra-blue-720: #6aa7f4;
 
@@ -116,15 +121,12 @@
   --tempra-focus-offset-field: 1px;
 
   /* Color: the agent's, the palette's orange (TEMPRA-1): the change dot, pulsing while an
-     agent writes now (take 4), and Tempra's own agent's round mark */
+     agent writes now (take 4) */
   --tempra-color-agent: light-dark(var(--tempra-orange-624), var(--tempra-orange-730));
   /* The same colour deep enough to sit in words (TEMPRA-219): the highlight that moves across
      the name of a file an agent is at now, and its static mark under reduced motion. At least
      4.5:1 on every surface, as text is (design/contrast.test.ts). */
   --tempra-color-agent-ink: light-dark(var(--tempra-orange-520), var(--tempra-orange-730));
-  /* A letter on the agent colour: Tempra's own agent's round mark (TEMPRA-223). Dark in both
-     schemes, at least 4.5:1 on the colour (design/contrast.test.ts). */
-  --tempra-color-on-agent: light-dark(var(--tempra-grey-201), var(--tempra-grey-201));
 
   /* Color: commented text in a page's body (TEMPRA-223), greys only: an open thread's quote on
      a soft fill over a solid mid-grey underline, the thread in focus on a deeper fill with an ink
@@ -176,6 +178,18 @@
   --tempra-color-mark-front: light-dark(var(--tempra-grey-201), var(--tempra-grey-956));
   --tempra-color-mark-mid: light-dark(var(--tempra-grey-601), var(--tempra-grey-720));
   --tempra-color-mark-back: light-dark(var(--tempra-grey-797), var(--tempra-grey-500));
+
+  /* Color: the mark's on-orange finish (the Brand Logo page's `finish=on-orange`, the orange app
+     icon): a white front plate and the two orange tints on the agent's light orange, the same in
+     both schemes (730, the dark agent colour, is too saturated under the tints). Where the brand
+     is loud on purpose: @tempra's round mark. */
+  --tempra-color-mark-on-orange: light-dark(var(--tempra-orange-624), var(--tempra-orange-624));
+  --tempra-color-mark-on-orange-front: light-dark(var(--tempra-white), var(--tempra-white));
+  --tempra-color-mark-on-orange-mid: light-dark(var(--tempra-orange-876), var(--tempra-orange-876));
+  --tempra-color-mark-on-orange-back: light-dark(
+    var(--tempra-orange-768),
+    var(--tempra-orange-768)
+  );
 
   /* Color: links are text, underlined in running text (no colour until the palette) */
   --tempra-color-link: var(--tempra-color-text);

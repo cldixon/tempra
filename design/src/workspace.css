@@ -337,11 +337,15 @@ body.ground {
   height: 58%;
 }
 
-/* Tempra's own agent, @tempra (TEMPRA-223): its letter on the agent colour, the one place the
-   colour fills a mark; other agents stay on ink. */
+/* Tempra's own agent, @tempra (TEMPRA-223): the Tempra mark in its on-orange finish, the orange
+   app icon in a circle, the one place orange fills a round mark; other agents stay on ink. The
+   plates are 55% of the circle, as they are of the app icon's tile. */
 .avatar-mark.agent.tempra {
-  background: var(--tempra-color-agent);
-  color: var(--tempra-color-on-agent);
+  background: var(--tempra-color-mark-on-orange);
+}
+
+.avatar-mark.tempra .mark {
+  height: 55%; /* one-off: the plates in the circle, as on the app icon */
 }
 
 /* A dialog (a confirmation, a compose dialog, a new token's secret): a card in the top layer. */

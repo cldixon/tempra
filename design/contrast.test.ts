@@ -69,12 +69,13 @@ describe("text contrast (WCAG AA)", () => {
     }
   }
 
-  // Tempra's own agent's round mark (TEMPRA-223): its letter on the agent colour.
+  // Tempra's own agent's round mark (TEMPRA-223): the mark's on-orange finish, its white front
+  // plate a graphic on the orange, at least 3:1 in both schemes.
   for (const [mode, i] of Object.entries(scheme)) {
-    test(`color-on-agent on color-agent, ${mode}: at least 4.5:1`, () => {
-      expect(contrast(pair("color-on-agent")[i], pair("color-agent")[i])).toBeGreaterThanOrEqual(
-        4.5,
-      );
+    test(`color-mark-on-orange-front on color-mark-on-orange, ${mode}: at least 3:1`, () => {
+      expect(
+        contrast(pair("color-mark-on-orange-front")[i], pair("color-mark-on-orange")[i]),
+      ).toBeGreaterThanOrEqual(3);
     });
   }
 
