@@ -324,6 +324,11 @@
   --tempra-orange-624: #de5600;
   --tempra-orange-520: #ac430e;
 
+  /* Palette: the mark's two orange tints, its on-orange finish's middle and back plates (the
+     Paper file's Brand Logo page; kept as brand colours when the mark moved onto the palette) */
+  --tempra-orange-876: #ffc9a8;
+  --tempra-orange-768: #f49a68;
+
   /* Palette: blue, the focus ring's in dark (the light ring is the chart's blue-575) */
   --tempra-blue-720: #6aa7f4;
 
@@ -379,15 +384,12 @@
   --tempra-focus-offset-field: 1px;
 
   /* Color: the agent's, the palette's orange (TEMPRA-1): the change dot, pulsing while an
-     agent writes now (take 4), and Tempra's own agent's round mark */
+     agent writes now (take 4) */
   --tempra-color-agent: light-dark(var(--tempra-orange-624), var(--tempra-orange-730));
   /* The same colour deep enough to sit in words (TEMPRA-219): the highlight that moves across
      the name of a file an agent is at now, and its static mark under reduced motion. At least
      4.5:1 on every surface, as text is (design/contrast.test.ts). */
   --tempra-color-agent-ink: light-dark(var(--tempra-orange-520), var(--tempra-orange-730));
-  /* A letter on the agent colour: Tempra's own agent's round mark (TEMPRA-223). Dark in both
-     schemes, at least 4.5:1 on the colour (design/contrast.test.ts). */
-  --tempra-color-on-agent: light-dark(var(--tempra-grey-201), var(--tempra-grey-201));
 
   /* Color: commented text in a page's body (TEMPRA-223), greys only: an open thread's quote on
      a soft fill over a solid mid-grey underline, the thread in focus on a deeper fill with an ink
@@ -440,6 +442,18 @@
   --tempra-color-mark-mid: light-dark(var(--tempra-grey-601), var(--tempra-grey-720));
   --tempra-color-mark-back: light-dark(var(--tempra-grey-797), var(--tempra-grey-500));
 
+  /* Color: the mark's on-orange finish (the Brand Logo page's `finish=on-orange`, the orange app
+     icon): a white front plate and the two orange tints on the agent's light orange, the same in
+     both schemes (730, the dark agent colour, is too saturated under the tints). Where the brand
+     is loud on purpose: @tempra's round mark. */
+  --tempra-color-mark-on-orange: light-dark(var(--tempra-orange-624), var(--tempra-orange-624));
+  --tempra-color-mark-on-orange-front: light-dark(var(--tempra-white), var(--tempra-white));
+  --tempra-color-mark-on-orange-mid: light-dark(var(--tempra-orange-876), var(--tempra-orange-876));
+  --tempra-color-mark-on-orange-back: light-dark(
+    var(--tempra-orange-768),
+    var(--tempra-orange-768)
+  );
+
   /* Color: links are text, underlined in running text (no colour until the palette) */
   --tempra-color-link: var(--tempra-color-text);
   --tempra-color-link-visited: var(--tempra-color-text);
@@ -470,6 +484,7 @@
 
   /* Type scale: the only pixel sizes in the CSS (inside .prose, sizes are em of the reading size) */
   --tempra-text-initial: 9px; /* an avatar's initials */
+  --tempra-text-initial-badge: 7px; /* an agent's letter in its badge on a person's mark */
   --tempra-text-label: 11px; /* uppercase labels, marks */
   --tempra-text-meta: 12px; /* timestamps, small print */
   --tempra-text-ui: 13px; /* controls, panels, the tree, comments */
@@ -579,6 +594,7 @@
   --tempra-size-icon-small: 12px; /* the tree's chevron itself */
   --tempra-size-avatar: 22px; /* someone's round mark */
   --tempra-size-avatar-small: 20px; /* in a compact thread */
+  --tempra-size-avatar-badge: 13px; /* an agent's badge on its person's mark */
   --tempra-size-avatar-menu: 26px; /* the avatar button that opens the account menu */
   --tempra-size-avatar-large: 32px; /* at the head of the account menu */
   --tempra-size-tile: 24px; /* a library's initial */
@@ -1129,6 +1145,20 @@ details > summary {
 
 .mark-back {
   fill: var(--tempra-color-mark-back);
+}
+
+/* The on-orange finish (`finish="on-orange"`): white and the two orange tints, for a mark on
+   --tempra-color-mark-on-orange (@tempra's round mark). */
+.mark.on-orange .mark-front {
+  fill: var(--tempra-color-mark-on-orange-front);
+}
+
+.mark.on-orange .mark-mid {
+  fill: var(--tempra-color-mark-on-orange-mid);
+}
+
+.mark.on-orange .mark-back {
+  fill: var(--tempra-color-mark-on-orange-back);
 }
 
 /* A mark and a name on one baseline (the top bar's, the public pages' wordmark). */
@@ -2607,11 +2637,50 @@ body.ground {
   color: var(--tempra-color-bg);
 }
 
-/* Tempra's own agent, @tempra (TEMPRA-223): its letter on the agent colour, the one place the
-   colour fills a mark; other agents stay on ink. */
+/* An agent's brand glyph (an experiment): the platform's mark in place of its letter, in the
+   same ink, so it stays in the palette. */
+.avatar-mark.brand svg {
+  width: 58%;
+  height: 58%;
+}
+
+/* A person's agent (an experiment): the person's mark, the agent's as a badge at its foot,
+   overhanging the corner a little, with a ring of the page around it. */
+.avatar-pair {
+  position: relative;
+  display: inline-grid;
+  flex: none;
+}
+
+/* The person's initials sit left of centre, clear of the badge. */
+.avatar-pair > .avatar-mark:first-child {
+  padding-inline-end: var(--tempra-space-06);
+}
+
+.avatar-pair > .avatar-mark + .avatar-mark {
+  position: absolute;
+  right: calc(var(--tempra-space-06) * -1);
+  bottom: calc(var(--tempra-space-04) * -1);
+  width: var(--tempra-size-avatar-badge);
+  height: var(--tempra-size-avatar-badge);
+  box-shadow: 0 0 0 var(--tempra-space-02) var(--tempra-color-bg);
+  font-size: var(--tempra-text-initial-badge);
+}
+
+.avatar-pair > .avatar-mark.brand svg {
+  width: 66%;
+  height: 66%;
+}
+
+/* Tempra's own agent, @tempra (TEMPRA-223): the Tempra mark in its on-orange finish, the orange
+   app icon in a circle, the one place orange fills a round mark; other agents stay on ink. The
+   plates are 55% of the circle, as they are of the app icon's tile. */
 .avatar-mark.agent.tempra {
-  background: var(--tempra-color-agent);
-  color: var(--tempra-color-on-agent);
+  background: var(--tempra-color-mark-on-orange);
+}
+
+.avatar-mark.tempra .mark {
+  height: 55%; /* one-off: the plates in the circle, as on the app icon */
 }
 
 /* A dialog (a confirmation, a compose dialog, a new token's secret): a card in the top layer. */
@@ -6747,6 +6816,30 @@ a.activity-page-title:hover {
   margin-bottom: var(--tempra-space-12);
 }
 
+/* Tempra's one accent on its own pages (and in its mail, mail-template.ts): a short rule in the
+   agent's orange over the title, as Tempra's own avatar is orange. Nothing else here is coloured. */
+.public.narrow .public-main > h1::before {
+  content: "";
+  display: block;
+  width: var(--tempra-space-24);
+  height: var(--tempra-space-02);
+  margin-bottom: var(--tempra-space-20);
+  background: var(--tempra-color-agent);
+}
+
+/* A message page's onward link, drawn as the one action (a pill). */
+.public.narrow .public-actions {
+  margin-top: var(--tempra-space-28);
+}
+
+.public .public-actions a.button {
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--tempra-size-control);
+  padding: 0 var(--tempra-space-18);
+  font-size: var(--tempra-text-base);
+}
+
 /* What the page is for, under its title: muted, a line or two. */
 .public-lead {
   margin: 0 0 var(--tempra-space-28);
@@ -6801,6 +6894,20 @@ a.activity-page-title:hover {
   display: flex;
   flex-wrap: wrap;
   gap: var(--tempra-space-08);
+}
+
+/* A code to type from an email (Check your email): the mono, large and spaced, as the email
+   shows it, so the two read alike; the caret in the accent. */
+.public.narrow .field input.code-input {
+  height: auto;
+  padding: var(--tempra-space-08) var(--tempra-space-14);
+  font-family: var(--tempra-font-mono);
+  font-size: var(--tempra-text-h2);
+  font-weight: var(--tempra-weight-medium);
+  letter-spacing: 0.16em; /* one-off: the code's spacing, as the email's */
+  line-height: var(--tempra-leading-tight);
+  text-transform: uppercase;
+  caret-color: var(--tempra-color-agent);
 }
 
 /* ---------- The site (tempra.dev): its frame and the landing page ---------- */
@@ -6993,14 +7100,89 @@ a.activity-page-title:hover {
   }
 }
 
-/* Terms and privacy: drawn as a Tempra page is (its title and a dated line as the head, the
-   text in the reader's typography, .prose), so they read as the documents they are. */
-.legal {
-  max-width: var(--tempra-size-column-text);
+/* Terms and privacy (site/src/layouts/Legal.astro): drawn as a Tempra page is in the app, the
+   title, its description and a byline by Tempra over a hairline, the text in the reader's
+   typography (.prose), and the contents beside it, sticky, as a page's are. */
+.public.site.doc {
+  --public-width: calc(
+    var(--tempra-size-column-text) +
+    var(--tempra-space-96) +
+    var(--tempra-size-contents)
+  );
 }
 
-.legal .doc-head {
+.legal-doc {
+  display: grid;
+  grid-template-columns: minmax(0, var(--tempra-size-column-text)) var(--tempra-size-contents);
+  column-gap: var(--tempra-space-96);
+  align-items: start;
+}
+
+.legal-doc .doc-title {
+  margin-bottom: var(--tempra-space-10);
+}
+
+.legal-doc .landing-byline {
   margin-bottom: var(--tempra-space-32);
+}
+
+.legal-doc .toc-inline {
+  display: none;
+}
+
+.legal-contents {
+  position: sticky;
+  top: var(--tempra-space-24);
+  padding-top: var(--tempra-space-12);
+}
+
+.legal-doc .prose h2 {
+  scroll-margin-top: var(--tempra-space-24);
+}
+
+/* Not found on the site: a message as the server pages draw one, in their narrow column. */
+.site-message {
+  max-width: var(--tempra-size-field);
+  margin: max(var(--tempra-space-40), 10vh) auto 0;
+}
+
+.site-message h1 {
+  margin-bottom: var(--tempra-space-12);
+}
+
+.site-message .public-actions {
+  margin-top: var(--tempra-space-28);
+}
+
+@media (max-width: 900px) {
+  .legal-doc {
+    display: block;
+  }
+
+  .legal-contents {
+    display: none;
+  }
+
+  .legal-doc .landing-byline {
+    margin-bottom: 0;
+  }
+
+  .legal-doc .toc-inline {
+    display: block;
+    margin: var(--tempra-space-18) 0 var(--tempra-space-28);
+    border-width: 1px 0;
+    border-radius: 0;
+  }
+
+  .legal-doc .toc-inline summary {
+    min-height: var(--tempra-size-touch);
+    padding: 0;
+    color: var(--tempra-color-muted);
+  }
+
+  .legal-doc .toc-inline .toc {
+    margin: 0 0 var(--tempra-space-12);
+  }
 }
 
 @media (max-width: 640px) {

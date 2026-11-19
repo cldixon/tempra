@@ -4969,23 +4969,27 @@ async function managedAgent(owner: string, slug: string, token: string): Promise
       await comments.locator(".thread-replying").waitFor({ state: "detached", timeout: 10_000 });
     });
     await step("its reply is by Tempra's own mark, and the thread stays open", async () => {
-      // Its comment carries Tempra's round mark: a T on the agent colour (TEMPRA-223).
+      // Its comment carries Tempra's round mark: the Tempra mark in its on-orange finish, no
+      // letter (TEMPRA-223; the orange app icon in a circle).
       const said = comments.locator(".said", { hasText: "A stand-in answer" });
       const mark = said.locator(".said-by .avatar-mark.agent.tempra");
       await mark.waitFor({ timeout: 5000 });
       if (
-        (await mark.innerText()).trim() !== "T" ||
+        (await mark.innerText()).trim() !== "" ||
+        (await mark.locator("svg.mark.on-orange").count()) !== 1 ||
         (await mark.getAttribute("aria-hidden")) !== "true"
       ) {
-        throw new Error(`Tempra's mark reads ${JSON.stringify(await mark.innerText())}`);
+        throw new Error(
+          `Tempra's mark is not the on-orange Tempra mark: ${JSON.stringify(await mark.innerHTML())}`,
+        );
       }
-      // Its fill is the agent colour, read against the token itself (a script string: this file
-      // has no DOM types).
+      // Its fill is the on-orange ground, read against the token itself (a script string: this
+      // file has no DOM types).
       const [fill, agentColour] = await page.evaluate<string[]>(`(() => {
         const el = document.querySelector("#panel-comments .avatar-mark.agent.tempra");
         const probe = document.createElement("span");
         el.after(probe);
-        probe.style.backgroundColor = "var(--tempra-color-agent)";
+        probe.style.backgroundColor = "var(--tempra-color-mark-on-orange)";
         const fill = getComputedStyle(el).backgroundColor;
         const want = getComputedStyle(probe).backgroundColor;
         probe.remove();
@@ -5001,7 +5005,9 @@ async function managedAgent(owner: string, slug: string, token: string): Promise
         return c;
       })()`);
       if (!fill || fill !== agentColour || fill === plain) {
-        throw new Error(`Tempra's mark is filled ${fill}, not the agent colour (${agentColour})`);
+        throw new Error(
+          `Tempra's mark is filled ${fill}, not the on-orange ground (${agentColour})`,
+        );
       }
       // The person's own comment has their mark beside it too.
       await comments.locator(".said .avatar-mark:not(.agent)").first().waitFor({ timeout: 5000 });

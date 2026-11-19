@@ -5,6 +5,7 @@
  * the contents beside them, in one window. The byline's date is the day it is served: the site's
  * Worker rewrites `time[data-edited]` (worker.ts); the build's date is only the fallback.
  */
+import { markSvg } from "@tempra/design/mark";
 import Base from "../layouts/Base.astro";
 
 const description = "Your agents write the pages. You read, comment and check.";
@@ -34,7 +35,7 @@ const chevron =
       <h1 id="title">Docs for agents, for humans.</h1>
       <p class="landing-description">{description}</p>
       <p class="landing-byline">
-        <span class="avatar-mark agent tempra" aria-hidden="true">T</span>
+        <span class="avatar-mark agent tempra" aria-hidden="true"><Fragment set:html={markSvg({ small: true, finish: "on-orange" })} /></span>
         <span>Tempra</span>
         <span class="muted" aria-hidden="true">·</span>
         <span class="muted">edited <time data-edited datetime={edited.iso}>{edited.text}</time></span>

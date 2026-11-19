@@ -330,11 +330,50 @@ body.ground {
   color: var(--tempra-color-bg);
 }
 
-/* Tempra's own agent, @tempra (TEMPRA-223): its letter on the agent colour, the one place the
-   colour fills a mark; other agents stay on ink. */
+/* An agent's brand glyph (an experiment): the platform's mark in place of its letter, in the
+   same ink, so it stays in the palette. */
+.avatar-mark.brand svg {
+  width: 58%;
+  height: 58%;
+}
+
+/* A person's agent (an experiment): the person's mark, the agent's as a badge at its foot,
+   overhanging the corner a little, with a ring of the page around it. */
+.avatar-pair {
+  position: relative;
+  display: inline-grid;
+  flex: none;
+}
+
+/* The person's initials sit left of centre, clear of the badge. */
+.avatar-pair > .avatar-mark:first-child {
+  padding-inline-end: var(--tempra-space-06);
+}
+
+.avatar-pair > .avatar-mark + .avatar-mark {
+  position: absolute;
+  right: calc(var(--tempra-space-06) * -1);
+  bottom: calc(var(--tempra-space-04) * -1);
+  width: var(--tempra-size-avatar-badge);
+  height: var(--tempra-size-avatar-badge);
+  box-shadow: 0 0 0 var(--tempra-space-02) var(--tempra-color-bg);
+  font-size: var(--tempra-text-initial-badge);
+}
+
+.avatar-pair > .avatar-mark.brand svg {
+  width: 66%;
+  height: 66%;
+}
+
+/* Tempra's own agent, @tempra (TEMPRA-223): the Tempra mark in its on-orange finish, the orange
+   app icon in a circle, the one place orange fills a round mark; other agents stay on ink. The
+   plates are 55% of the circle, as they are of the app icon's tile. */
 .avatar-mark.agent.tempra {
-  background: var(--tempra-color-agent);
-  color: var(--tempra-color-on-agent);
+  background: var(--tempra-color-mark-on-orange);
+}
+
+.avatar-mark.tempra .mark {
+  height: 55%; /* one-off: the plates in the circle, as on the app icon */
 }
 
 /* A dialog (a confirmation, a compose dialog, a new token's secret): a card in the top layer. */
