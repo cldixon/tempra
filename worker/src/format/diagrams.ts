@@ -12,6 +12,7 @@ import {
   chartDataPaths,
   type Doc,
   fenceAttr,
+  fencePlacement,
   findFigures,
   idOf,
   parseChart,
@@ -20,6 +21,7 @@ import {
 } from "@tempra/editor/doc";
 import type { Code } from "mdast";
 import { checkChartSpec } from "./chart-schema";
+import { colorFailsIn } from "./svg-color";
 import type { LintWarning } from "./types";
 
 /** The fences drawn as diagrams: a code block whose language is `mermaid`. */
@@ -295,6 +297,14 @@ export function svgLint(code: Code, name: string): LintWarning[] {
       block,
     });
   }
+  const colors = svgColorProblems(r.colors, r.unknownVars);
+  if (colors) {
+    out.push({
+      code: "svg_color",
+      message: `${name} ${colors} Use \`currentColor\` for ink and the palette for the rest (\`var(--muted)\`, \`var(--faint)\`, \`var(--bg)\`, \`var(--surface)\`, \`var(--surface-2)\`, \`var(--accent)\`, \`var(--series-1)\` to \`var(--series-8)\`), which follow light and dark.`,
+      block,
+    });
+  }
   if (!fenceAttr(code.meta, "alt") && !r.title) {
     out.push({
       code: "image_no_alt",
@@ -303,6 +313,50 @@ export function svgLint(code: Code, name: string): LintWarning[] {
     });
   }
   return out;
+}
+
+/** The most colours one `svg_color` names. */
+const COLORS_NAMED = 5;
+
+/**
+ * What `svg_color` says of a fence (TEMPRA-315): its fixed colours that fail a theme (under 3:1
+ * against the page there), and the `var()` names outside the palette it used; null when none.
+ */
+export function svgColorProblems(colors: string[], unknownVars: string[]): string | null {
+  const parts: string[] = [];
+  const failing = colors.flatMap((c) => {
+    const themes = colorFailsIn(c);
+    return themes.length > 0 ? [`${c} (${themes.join(" and ")})`] : [];
+  });
+  if (failing.length > 0) {
+    const more = failing.length > COLORS_NAMED ? ` and ${failing.length - COLORS_NAMED} more` : "";
+    parts.push(
+      `paints with ${failing.length === 1 ? "a colour" : "colours"} that will not read on the page in a theme: ${failing.slice(0, COLORS_NAMED).join(", ")}${more}.`,
+    );
+  }
+  if (unknownVars.length > 0) {
+    parts.push(
+      `uses ${unknownVars.map((v) => `var(${v})`).join(", ")}, which ${unknownVars.length === 1 ? "is" : "are"} not in the palette and ${unknownVars.length === 1 ? "is" : "are"} taken out (a fallback, when given, is kept).`,
+    );
+  }
+  return parts.length > 0 ? parts.join(" It also ") : null;
+}
+
+/**
+ * `figure_invalid` for a rendered-media fence's `width=` or `layout=` that is not one (TEMPRA-315),
+ * said as figure markup's are; the fence draws as if it were not there.
+ */
+export function placementLint(code: Code, name: string): LintWarning[] {
+  const { problems } = fencePlacement((n) => fenceAttr(code.meta, n));
+  return problems.length > 0
+    ? [
+        {
+          code: "figure_invalid",
+          message: `${name} has ${problems.join("; ")}.`,
+          block: idOf(code),
+        },
+      ]
+    : [];
 }
 
 /** The fences drawn as charts (TEMPRA-207): a code block whose language is `vega-lite`. */
@@ -448,16 +502,19 @@ export function diagramLint(doc: Doc): LintWarning[] {
   walk(doc, (node) => {
     if (isSvgFence(node)) {
       const code = node as Code;
-      out.push(...svgLint(code, fenceName(code, numbers.get(code))));
+      const name = fenceName(code, numbers.get(code));
+      out.push(...svgLint(code, name), ...placementLint(code, name));
       return false;
     }
     if (isChartFence(node)) {
       const code = node as Code;
-      out.push(...chartLint(code, fenceName(code, numbers.get(code))));
+      const name = fenceName(code, numbers.get(code));
+      out.push(...chartLint(code, name), ...placementLint(code, name));
       return false;
     }
     if (!isDiagram(node)) return undefined;
     const code = node as Code;
+    out.push(...placementLint(code, fenceName(code, numbers.get(code))));
     const problem = checkDiagram(code.value);
     if (problem) out.push(diagramWarning(code, numbers.get(code), problem));
     return false;
@@ -498,6 +555,37 @@ export function checkedFences(doc: Doc): CheckedFence[] {
     return false;
   });
   return out;
+}
+
+/**
+ * The measuring's version in an SVG fence's verdict key (TEMPRA-315): moved when what tempra-render
+ * reports as overflow changes, so every fence is measured again.
+ */
+export const SVG_MEASURE_VERSION = 1;
+
+/** The SVG fences that sanitize, for the render service to measure (TEMPRA-315). */
+export function checkedSvgs(doc: Doc): CheckedFence[] {
+  const out: CheckedFence[] = [];
+  const numbers = figureNumbers(doc);
+  walk(doc, (node) => {
+    if (!isSvgFence(node)) return undefined;
+    const code = node as Code;
+    if (sanitizeSvg(code.value).ok) {
+      out.push({ n: numbers.get(code), code, block: idOf(code), source: code.value });
+    }
+    return false;
+  });
+  return out;
+}
+
+/** What tempra-render measured as overflowing in an SVG fence: `svg_overflow` (TEMPRA-315). */
+export function svgOverflowWarning(f: CheckedFence, e: RenderFailure): LintWarning {
+  return {
+    code: "svg_overflow",
+    message: `${fenceName(f.code, f.n)} overflows as drawn: ${e.message.trim().replace(/[.…]?$/, ".")} Make the shapes bigger, the labels shorter or the viewBox larger (\`render\` previews it); agents cannot measure text, so leave room.`,
+    block: f.block,
+    rendered: true,
+  };
 }
 
 /** Where Pele failed and why, at a 1-based line and column of the fence (0 when it names none). */

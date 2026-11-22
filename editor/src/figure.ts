@@ -97,6 +97,43 @@ function imageRuns(n: RootContent): ImageRun[] | null {
 const PX = /^([1-9]\d{0,4})$/;
 const SHARE = /^([1-9]\d?|100)%$/;
 
+/** A width as figure markup takes it (`480`, `60%`), or null when it is not one. */
+export function figureWidth(value: string): FigureWidth | null {
+  const px = PX.exec(value);
+  if (px) return { value: Number(px[1]), unit: "px" };
+  const share = SHARE.exec(value);
+  return share ? { value: Number(share[1]), unit: "%" } : null;
+}
+
+/** Where a rendered-media fence sits: its `width=` and `layout=` (TEMPRA-315), as `:::figure`'s. */
+export interface FencePlacement {
+  width: FigureWidth | null;
+  layout: FigureLayout;
+  /** What is wrong with them, said as `checkFigure` says it (`figure_invalid`); each is ignored. */
+  problems: string[];
+}
+
+/** A fence's `width=` and `layout=` from what follows its language (`fenceAttr`'s values). */
+export function fencePlacement(attr: (name: string) => string | null): FencePlacement {
+  const problems: string[] = [];
+  let width: FigureWidth | null = null;
+  let layout: FigureLayout = "column";
+  const w = attr("width");
+  if (w !== null) {
+    width = figureWidth(w);
+    if (!width)
+      problems.push(
+        `width=${w} is not a width: give pixels (width=480) or a share of the column (width=60%)`,
+      );
+  }
+  const l = attr("layout");
+  if (l !== null) {
+    if ((FIGURE_LAYOUTS as readonly string[]).includes(l)) layout = l as FigureLayout;
+    else problems.push(`layout=${l} is not a layout: use column, wide or full`);
+  }
+  return { width, layout, problems };
+}
+
 /** Parses a figure's markup: what it says, or what is wrong with it. */
 export function checkFigure(node: ContainerDirective): FigureCheck {
   const problems: string[] = [];
@@ -108,11 +145,8 @@ export function checkFigure(node: ContainerDirective): FigureCheck {
     if (raw === null || raw === undefined) continue;
     const value = String(raw);
     if (key === "width") {
-      const px = PX.exec(value);
-      const share = SHARE.exec(value);
-      if (px) width = { value: Number(px[1]), unit: "px" };
-      else if (share) width = { value: Number(share[1]), unit: "%" };
-      else
+      width = figureWidth(value);
+      if (!width)
         problems.push(
           `width=${value || '""'} is not a width: give pixels (width=480) or a share of the column (width=60%)`,
         );

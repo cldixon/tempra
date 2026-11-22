@@ -74,13 +74,49 @@ Gross margin equals recognized [revenue](/metrics/revenue.md) minus full COGS.[^
 
 **When a figure helps.** A screenshot of what the page describes; a chart of data the page discusses; a diagram of an architecture or a flow. Leave out pictures that only decorate.
 
-**Two kinds of media.** *Rendered media* is code in the page that the app draws: a chart as a Vega-Lite spec, a Mermaid diagram, or a drawing in an `svg` fence. *Files* are images (PNG, JPEG, GIF, WebP, AVIF, SVG), video, audio and PDF, stored beside the page. For a chart or a flow, prefer rendered media to a picture: it is a few hundred tokens of text, diffs like text, and needs no upload.
+**Two kinds of media.** *Rendered media* is code in the page that the app draws: a chart as a Vega-Lite spec, a drawing in an `svg` fence, or a Mermaid diagram. *Files* are images (PNG, JPEG, GIF, WebP, AVIF, SVG), video, audio and PDF, stored beside the page. For a chart or a flow, prefer rendered media to a picture: it is a few hundred tokens of text, diffs like text, and needs no upload.
 
-**Diagrams** are Mermaid in a `mermaid` fence. Before writing a non-trivial one, preview it with `render` (`source`: the fence's body or the whole fence, its language told from the source or given as `lang`; or `path` and `figure` for one already written): it returns the drawing as an image, or Pele's error with line and column, writes nothing, and allows 60 renders a minute per account. On a write, `diagram_invalid` lint (an unknown type, nothing after the header, a bracket or quote left open) and `diagram_unrendered` lint (Pele, the renderer, could not draw it; in the write result, or only in `work` and the next `read`) both mean: fix the fence. Either is saved anyway, and the app shows its source. Lint on any fence (Mermaid, SVG or chart) names it as `read`'s Figures list numbers it ("Figure 4 (mermaid, `flowchart LR`, block b7)"), the number `render` and `read` take with `figure` and `figures`.
+**Diagrams** are SVG in an `svg` fence first (below): you choose the layout, so it shows the system's shape (layers, regions, what sits beside what) and looks the same in every release. Use Mermaid in a `mermaid` fence where its automatic layout earns it: a sequence, a long flow, a state machine. Before writing a non-trivial one, preview it with `render` (`source`: the fence's body or the whole fence, its language told from the source or given as `lang`; or `path` and `figure` for one already written): it returns the drawing as an image, or Pele's error with line and column, writes nothing, and allows 60 renders a minute per account. On a write, `diagram_invalid` lint (an unknown type, nothing after the header, a bracket or quote left open) and `diagram_unrendered` lint (Pele, the renderer, could not draw it; in the write result, or only in `work` and the next `read`) both mean: fix the fence. Either is saved anyway, and the app shows its source. Lint on any fence (Mermaid, SVG or chart) names it as `read`'s Figures list numbers it ("Figure 4 (mermaid, `flowchart LR`, block b7)"), the number `render` and `read` take with `figure` and `figures`.
 
 **Charts** are Vega-Lite specs (JSON, Vega-Lite 6) in a `vega-lite` fence: `` ```vega-lite alt="what it shows" title="Caption" ``. Write a chart this way rather than making a picture of one: it is drawn in the reader's greys in light and dark, diffs like text and needs no upload. Its data is inline (`"data": {"values": [...]}`, or CSV text with `"format": {"type": "csv"}`) or a CSV, TSV or JSON file in this library named by `data.url` (`"data": {"url": "/data/sales.csv"}`, put beside the page with `attach` or `prepare_upload`); nothing else is fetched. `chart_invalid` lint means it is not JSON, names data from elsewhere, does not fit Vega-Lite's schema (in the write result, at its path in the spec: `encoding.x.type: "bogus" is not one of "quantitative", …`), or Vega could not draw it (with Vega's message, from after the write); no `alt="…"` and no `description` in the spec is `image_no_alt`. `render` previews one before you write it, with what the write would report (`chart_invalid`, and `image_no_alt` when you pass the whole fence).
 
-**SVG fences** are drawings written as SVG in an `svg` fence: `` ```svg alt="what it shows" title="Caption" ``. Use plain shapes and text, and `currentColor` for ink, which follows the reader's light and dark themes; up to 50 KB. The app draws it sanitized: scripts, event handlers, `<style>` elements (use attributes), images, links, animation and references outside the SVG are taken out and named as `svg_unsafe` lint; one that does not parse is `svg_invalid` lint with its line and column; no `alt="…"` and no `<title>` is `image_no_alt`. `render` previews one before you write it, with what the write would report (`svg_unsafe` naming what it takes out, `svg_invalid`, and `image_no_alt` when you pass the whole fence).
+**SVG fences** are drawings written as SVG in an `svg` fence: `` ```svg alt="what it shows" title="Caption" ``, up to 50 KB. How to draw one well:
+
+- **Size.** Give a `viewBox` at the size you mean and no `width`: one unit is one CSS pixel, so `viewBox="0 0 640 180"` is drawn 640 px wide, shrinking only to fit the column (the text column is about 680 px). On the fence, `width=480` or `width=60%` sets another width, and `layout=wide` or `layout=full` lets a big drawing reach past the text.
+- **Type and lines.** Text at `font-size="14"`, small labels at 12; the reader's Inter unless you set a `font-family`. Strokes 1.5, rounded corners `rx="8"`, 16 between things, and room around every label: you cannot measure text, so allow about 8 px a character at 14 and make boxes wider than you think.
+- **Colour.** `currentColor` for ink (lines, text). For the rest, the palette, which follows light and dark: `var(--muted)` (secondary text and lines), `var(--faint)` (rules, grid), `var(--bg)` (the page, behind a label that crosses a line), `var(--surface)` and `var(--surface-2)` (quiet box fills), `var(--accent)` (the agent orange, for the one thing to see), `var(--series-1)` to `var(--series-8)` (categories). Never a fixed black or white: it vanishes in one theme.
+- **Say what it shows.** `alt="…"` on the fence (or a `<title>` first in the SVG), a caption as `title="…"`, and a `<desc>` for a longer description, which screen readers hear.
+- **Plain SVG only.** Shapes, paths, text, markers, gradients and filters. HTML entities such as `&nbsp;`, `&mdash;` and `&rarr;` are fine.
+
+```svg alt="An agent's write passing through the Worker to the library and out to readers" title="How a write lands"
+<svg viewBox="0 0 640 140" xmlns="http://www.w3.org/2000/svg" font-size="14">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+    </marker>
+  </defs>
+  <g fill="var(--surface)" stroke="currentColor" stroke-width="1.5">
+    <rect x="8" y="40" width="128" height="48" rx="8"/>
+    <rect x="184" y="40" width="128" height="48" rx="8"/>
+    <rect x="360" y="40" width="128" height="48" rx="8" stroke="var(--accent)"/>
+    <rect x="536" y="40" width="96" height="48" rx="8"/>
+  </g>
+  <g stroke="currentColor" stroke-width="1.5" marker-end="url(#arrow)">
+    <line x1="136" y1="64" x2="182" y2="64"/>
+    <line x1="312" y1="64" x2="358" y2="64"/>
+    <line x1="488" y1="64" x2="534" y2="64"/>
+  </g>
+  <g fill="currentColor" text-anchor="middle">
+    <text x="72" y="69">Agent</text>
+    <text x="248" y="69">Worker</text>
+    <text x="424" y="69">Library</text>
+    <text x="584" y="69">Readers</text>
+  </g>
+  <text x="424" y="112" text-anchor="middle" font-size="12" fill="var(--muted)">page, ledger, snapshot</text>
+</svg>
+```
+
+The app draws it sanitized: scripts, event handlers, `<style>` elements (use attributes), images, links, animation and references outside the SVG are taken out and named as `svg_unsafe` lint, and classes are dropped; one that does not parse is `svg_invalid` lint with its line and column; `svg_color` names a fixed colour that will not read on the page in light or dark, or a `var()` outside the palette; `svg_overflow` (from the renderer's browser, after the write) names a label wider than its shape or anything drawn past the `viewBox`; no `alt="…"` and no `<title>` is `image_no_alt`. `render` previews one before you write it, with what the write would report (`svg_unsafe`, `svg_color`, `svg_invalid`, `svg_overflow` as measured, and `image_no_alt` when you pass the whole fence): render every SVG before you write it.
 
 **Adding a file.** A file comes in only two ways, and never as bytes you type into a call:
 

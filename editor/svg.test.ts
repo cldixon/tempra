@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { fenceAttr, SVG_MAX_SOURCE, sanitizeSvg } from "./src/svg";
+import { fenceAttr, resolvePalette, SVG_MAX_SOURCE, sanitizeSvg } from "./src/svg";
 
 const ok = (src: string, idPrefix?: string) => {
   const r = sanitizeSvg(src, { idPrefix });
@@ -26,7 +26,7 @@ describe("SVG fences (TEMPRA-206)", () => {
       '<?xml version="1.0"?>\n<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "x.dtd">\n<!-- made by hand --><svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="x" inkscape:version="1" viewBox="0 0 2 2"><metadata>x</metadata><sodipodi:namedview/><circle r="1"/></svg>',
     );
     expect(r.svg).toBe(
-      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2 2"><circle r="1"/></svg>',
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2 2" width="2" height="2"><circle r="1"/></svg>',
     );
     expect(r.removed).toEqual([]);
   });
@@ -49,7 +49,7 @@ describe("SVG fences (TEMPRA-206)", () => {
       ].join(""),
     );
     expect(r.svg).toBe(
-      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="1" height="1"/><rect style="stroke:black"/><path d="M0 0"/></svg>',
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" width="10" height="10"><rect width="1" height="1"/><rect style="stroke:black"/><path d="M0 0"/></svg>',
     );
     expect(r.removed.sort()).toEqual(
       [
@@ -102,7 +102,7 @@ describe("SVG fences (TEMPRA-206)", () => {
       '<svg viewBox="0 0 10 10" font-family="Georgia, serif"><text>a</text><text font-family="Menlo">b</text><text style="font-family:&quot;Inter&quot;, sans-serif">c</text></svg>',
     );
     expect(r.svg).toContain(
-      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" font-family="Georgia, serif">',
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10" font-family="Georgia, serif" width="10" height="10">',
     );
     expect(r.svg).toContain('<text font-family="Menlo">b</text>');
     expect(r.svg).toContain("font-family:");
@@ -115,7 +115,18 @@ describe("SVG fences (TEMPRA-206)", () => {
       ["<svg>\n  <rect width=10/>\n</svg>", "width's value must be quoted", 2, 15],
       ['<svg><rect x="1" x="2"/></svg>', "x is given twice", 1, 20],
       ["<svg><text>AT&T</text></svg>", '"&" must start an entity such as &amp;', 1, 14],
-      ["<svg><text>&nbsp;</text></svg>", "unknown entity &nbsp;", 1, 12],
+      [
+        "<svg><text>&bogus;</text></svg>",
+        "unknown entity &bogus; (write the character itself)",
+        1,
+        12,
+      ],
+      [
+        "<svg><text>&constructor;</text></svg>",
+        "unknown entity &constructor; (write the character itself)",
+        1,
+        12,
+      ],
       ["<svg>", "<svg> is not closed", 1, 6],
       ["<html></html>", "the top element is <html>, not <svg>", 1, 1],
       ["", "no <svg> element", 1, 1],
@@ -128,6 +139,82 @@ describe("SVG fences (TEMPRA-206)", () => {
     }
     const big = sanitizeSvg(`<svg>${" ".repeat(SVG_MAX_SOURCE)}</svg>`);
     expect(big).toMatchObject({ ok: false, line: 0 });
+  });
+
+  test("HTML's common entities read as their characters (TEMPRA-315)", () => {
+    const r = ok(
+      "<svg><text>a&nbsp;b &mdash; c &rarr; d&hellip; 3&times;4 &le; 20&deg; &ldquo;q&rdquo; &alpha;&#x2192;</text></svg>",
+    );
+    expect(r.svg).toContain(
+      "<text>a\u00a0b \u2014 c \u2192 d\u2026 3\u00d74 \u2264 20\u00b0 \u201cq\u201d \u03b1\u2192</text>",
+    );
+    expect(ok(r.svg).svg).toBe(r.svg);
+  });
+
+  test("a drawing is its viewBox's size, one unit a pixel, unless it gives its own (TEMPRA-315)", () => {
+    expect(ok('<svg viewBox="0 0 300 120"/>').svg).toBe(
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 120" width="300" height="120"/>',
+    );
+    expect(ok('<svg viewBox="-10,-10 640,180"/>').svg).toContain('width="640" height="180"');
+    expect(ok('<svg viewBox="0 0 300 120" width="100%"/>').svg).not.toContain('height="120"');
+    expect(ok('<svg viewBox="0 0 0 0"/>').svg).not.toContain("width=");
+    expect(ok("<svg/>").svg).toBe('<svg xmlns="http://www.w3.org/2000/svg"/>');
+  });
+
+  test("classes go quietly: no stylesheet reaches a fence (TEMPRA-315)", () => {
+    const r = ok('<svg><rect class="box accent" width="2" height="2"/></svg>');
+    expect(r.svg).toBe(
+      '<svg xmlns="http://www.w3.org/2000/svg"><rect width="2" height="2"/></svg>',
+    );
+    expect(r.removed).toEqual([]);
+  });
+
+  test("the palette's names stay; another var() goes, or becomes its fallback (TEMPRA-315)", () => {
+    const r = ok(
+      [
+        '<svg><rect fill="var(--accent)" stroke="var( --ink , #000)"/>',
+        '<rect style="fill:var(--series-3);stroke:var(--tempra-color-agent)"/>',
+        '<rect fill="var(--brand, #336699)"/>',
+        '<rect fill="var(--x)" stroke="black"/></svg>',
+      ].join(""),
+    );
+    expect(r.svg).toBe(
+      '<svg xmlns="http://www.w3.org/2000/svg"><rect fill="var(--accent)" stroke="var(--ink)"/><rect style="fill:var(--series-3)"/><rect fill="#336699"/><rect stroke="black"/></svg>',
+    );
+    expect(r.unknownVars.sort()).toEqual(["--brand", "--tempra-color-agent", "--x"]);
+    expect(r.removed).toEqual([]);
+  });
+
+  test("fixed paint colours are noted for the colour lint, nothing else (TEMPRA-315)", () => {
+    const r = ok(
+      [
+        '<svg color="#222"><rect fill="#000" stroke="none"/><text fill="currentColor" style="fill:WHITE">t</text>',
+        '<linearGradient id="g"><stop stop-color="rgb(10, 20, 30)"/></linearGradient>',
+        '<rect fill="url(#g)" stroke="var(--muted)" width="#fff"/><rect fill="#000"/></svg>',
+      ].join(""),
+    );
+    expect(r.colors.sort()).toEqual(["#000", "#222", "WHITE", "rgb(10, 20, 30)"].sort());
+  });
+
+  test("the root's title and desc are read for the figure's name and description", () => {
+    const r = ok(
+      "<svg><title>Write path</title><desc>An agent's write goes  through the Worker.</desc></svg>",
+    );
+    expect(r.title).toBe("Write path");
+    expect(r.desc).toBe("An agent's write goes through the Worker.");
+  });
+
+  test("resolvePalette writes one theme's values in, and the text colour on the root", () => {
+    const pal = { "--ink": "#111", "--accent": "#f60" };
+    expect(
+      resolvePalette(
+        '<svg xmlns="http://www.w3.org/2000/svg"><rect fill="var(--accent)" style="stroke:var(--ink)"/><rect fill="var(--muted)"/></svg>',
+        pal,
+      ),
+    ).toBe(
+      '<svg color="#111" xmlns="http://www.w3.org/2000/svg"><rect fill="#f60" style="stroke:#111"/><rect fill="var(--muted)"/></svg>',
+    );
+    expect(resolvePalette('<svg color="red"/>', pal)).toBe('<svg color="red"/>');
   });
 
   test("fence attributes: title and alt, quoted or not", () => {

@@ -168,6 +168,7 @@ export function serviceRenderer(
           width: req.width,
           theme: req.theme,
           png: req.png === true,
+          ...(req.measure && req.lang === "svg" ? { measure: true } : {}),
         }),
         new Promise<RenderResult>((resolve) => {
           timer = setTimeout(

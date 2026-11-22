@@ -1981,6 +1981,32 @@ details > summary {
   border-radius: var(--tempra-radius-box);
 }
 
+/*
+ * The SVG palette (TEMPRA-315; tempra-dev app/diagrams, SVG fences): the names an svg fence may
+ * paint with, `var(--ink)` and the rest (`SVG_PALETTE` in @tempra/editor), on what holds a drawing
+ * in the page and in the full-screen view. design/build.ts resolves this block for light and dark
+ * into `svgPalettes` (@tempra/design/pele), which tempra-render sets on an SVG's root and exports
+ * write in, so a drawing looks the same everywhere.
+ */
+.lightbox-diagram,
+.diagram-svg {
+  --ink: var(--tempra-color-text);
+  --muted: var(--tempra-color-muted);
+  --faint: var(--tempra-color-faint);
+  --bg: var(--tempra-color-bg);
+  --surface: var(--tempra-color-ground);
+  --surface-2: var(--tempra-color-hover);
+  --accent: var(--tempra-color-agent);
+  --series-1: var(--tempra-color-chart-1);
+  --series-2: var(--tempra-color-chart-2);
+  --series-3: var(--tempra-color-chart-3);
+  --series-4: var(--tempra-color-chart-4);
+  --series-5: var(--tempra-color-chart-5);
+  --series-6: var(--tempra-color-chart-6);
+  --series-7: var(--tempra-color-chart-7);
+  --series-8: var(--tempra-color-chart-8);
+}
+
 /* The font is set here, on the figure's container, not on the svg: an SVG fence's text with no
    font-family of its own inherits the reader's Inter, and an author's font-family on the root or
    on a text element still wins (TEMPRA-216). */
@@ -1991,11 +2017,32 @@ details > summary {
   font-size: var(--tempra-text-ui);
 }
 
+/*
+ * A drawing at its own size (an SVG fence's width from its viewBox, TEMPRA-315), shrinking to fit
+ * the column; on a narrow screen no further than three quarters of it (`--diagram-width`, its
+ * width in pixels, set through the CSSOM), past which the frame scrolls sideways. A fence's
+ * `width=` (`--figure-width`, as `:::figure`'s) sets the drawing's width instead.
+ */
 .prose .diagram-svg svg {
   display: block;
   max-width: 100%;
   height: auto;
   margin: 0 auto;
+}
+
+.prose figure.diagram.figure-sized .diagram-svg {
+  max-width: min(100%, var(--figure-width));
+  margin-inline: auto;
+}
+
+.prose figure.diagram.figure-sized .diagram-svg svg {
+  width: 100%;
+}
+
+@media (max-width: 900px) {
+  .prose .diagram-svg svg {
+    min-width: calc(var(--diagram-width, 0) * 0.75px);
+  }
 }
 
 .prose .diagram-frame pre.diagram-source {
