@@ -1944,7 +1944,7 @@ async function browserRenders(
           "---\ntype: Note\ntitle: Gate SVG\ndescription: An SVG fence.\n---",
           "Before.\n",
           '```svg alt="A box and a dot" title="Drawn from source"',
-          '<svg viewBox="0 0 120 40" onload="window.__svgRan=1"><script>window.__svgRan=1</script><rect x="2" y="2" width="50" height="36" fill="none" stroke="currentColor" style="stroke-width:2"/><circle cx="90" cy="20" r="10" fill="currentColor"/><text x="60" y="38">Gate</text></svg>',
+          '<svg viewBox="0 0 120 40" onload="window.__svgRan=1"><script>window.__svgRan=1</script><rect x="2" y="2" width="50" height="36" fill="none" stroke="currentColor" style="stroke-width:2"/><circle cx="90" cy="20" r="10" fill="var(--accent)"/><text x="60" y="38">Gate</text></svg>',
           "```\n",
           "After.\n",
         ].join("\n"),
@@ -1969,6 +1969,22 @@ async function browserRenders(
             "",
         );
       if (width !== "2px" && width !== "2") throw new Error(`the SVG's style: ${width}`);
+      // At its own size, one viewBox unit a pixel, not stretched to the column (TEMPRA-315).
+      const drawnWidth = await svg.evaluate((el) => el.getBoundingClientRect().width);
+      if (Math.round(drawnWidth) !== 120) throw new Error(`the SVG is drawn ${drawnWidth}px wide`);
+      // The palette resolves in the page: var(--accent) is the agent's colour (TEMPRA-315).
+      const paint = await svg.locator("circle").evaluate((el) => {
+        const view = el.ownerDocument.defaultView;
+        const probe = el.ownerDocument.createElement("span");
+        probe.style.setProperty("color", "var(--tempra-color-agent)");
+        el.ownerDocument.body.append(probe);
+        const agent = view?.getComputedStyle(probe).color ?? "";
+        probe.remove();
+        return { fill: view?.getComputedStyle(el).fill ?? "", agent };
+      });
+      if (paint.fill !== paint.agent) {
+        throw new Error(`var(--accent) drew ${paint.fill}, not the agent's ${paint.agent}`);
+      }
       if (await page.locator(".body script").count()) throw new Error("a script reached the page");
       if (await page.evaluate(() => (globalThis as { __svgRan?: number }).__svgRan)) {
         throw new Error("the SVG's script ran");

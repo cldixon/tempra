@@ -4,7 +4,7 @@
  * width and again when that changes; an `svg` fence sanitized (./svg-fence.ts, TEMPRA-206), which
  * scales by its viewBox. Each is an attachment on the host element.
  */
-import { fenceAttr } from "@tempra/editor/doc";
+import { fenceAttr, fencePlacement, sanitizeSvg } from "@tempra/editor/doc";
 import type { Attachment } from "svelte/attachments";
 
 /** The fence languages drawn as figures, as the registry maps them. */
@@ -59,6 +59,39 @@ export function fenceAlt(
 ): string | null {
   if (lang === "mermaid") return null;
   return fenceAttr(meta, "alt") ?? (lang === "svg" ? svgTitle(source) : chartDescription(source));
+}
+
+/** An SVG fence's `<desc>`, its longer description (TEMPRA-315), as the sanitizer reads it. */
+export function svgDesc(lang: FigureLang, source: string): string | null {
+  if (lang !== "svg") return null;
+  const r = sanitizeSvg(source);
+  return r.ok ? r.desc : null;
+}
+
+/**
+ * A fence's placement (TEMPRA-315): its classes, as figure markup's (prose.css), and its width
+ * for `--figure-width`; a value that is not one is left out (the Worker lints it).
+ */
+export function fenceLayout(meta: string | null | undefined): {
+  classes: string;
+  width: string | null;
+} {
+  const p = fencePlacement((name) => fenceAttr(meta, name));
+  const width = p.width ? `${p.width.value}${p.width.unit}` : null;
+  return {
+    classes: [p.layout !== "column" ? `figure-${p.layout}` : "", width ? "figure-sized" : ""]
+      .filter(Boolean)
+      .join(" "),
+    width,
+  };
+}
+
+/** Sets `--figure-width` on a figure through the CSSOM (no style attribute; CSP). */
+export function figureWidthProperty(width: string | null): Attachment<HTMLElement> {
+  return (el) => {
+    if (width) el.style.setProperty("--figure-width", width);
+    else el.style.removeProperty("--figure-width");
+  };
 }
 
 /** Pele's error, in a line. */

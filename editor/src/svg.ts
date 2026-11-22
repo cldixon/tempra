@@ -17,6 +17,40 @@ export const SVG_MAX_SOURCE = 50_000;
 
 const SVG_NS = "http://www.w3.org/2000/svg";
 
+/**
+ * The palette an SVG fence may paint with (TEMPRA-315; tempra-dev app/diagrams, SVG fences):
+ * `var(--name)` in any attribute or style, beside `currentColor`. A contract with agents: add
+ * names, never rename or remove one. Their values per theme are `svgPalettes` in
+ * `@tempra/design/pele`, generated from reader.css; the reader resolves them through its CSS,
+ * tempra-render sets them on the root, and an export writes them in (`resolvePalette`).
+ */
+export const SVG_PALETTE: readonly string[] = [
+  "--ink",
+  "--muted",
+  "--faint",
+  "--bg",
+  "--surface",
+  "--surface-2",
+  "--accent",
+  "--series-1",
+  "--series-2",
+  "--series-3",
+  "--series-4",
+  "--series-5",
+  "--series-6",
+  "--series-7",
+  "--series-8",
+];
+
+const PALETTE = new Set(SVG_PALETTE);
+
+/** The properties that paint, where a fixed colour must hold in both themes (`svg_color`). */
+const PAINT = new Set(["fill", "stroke", "color", "stop-color", "flood-color", "lighting-color"]);
+
+/** Paint values that are no fixed colour. */
+const NOT_A_COLOR =
+  /^(none|transparent|currentcolor|inherit|initial|unset|context-fill|context-stroke)$/i;
+
 /** Elements kept, by their name in the SVG namespace. */
 const KEEP = new Set([
   "svg",
@@ -105,6 +139,12 @@ export type SvgCheck =
       removed: string[];
       /** The root's `<title>`, for alt text when the fence gives none. */
       title: string | null;
+      /** The root's `<desc>`, its longer description (TEMPRA-315). */
+      desc: string | null;
+      /** The fixed colours it paints with, each once, as written (`svg_color`, TEMPRA-315). */
+      colors: string[];
+      /** The `var()` names outside the palette it used, each once; taken out (TEMPRA-315). */
+      unknownVars: string[];
     }
   | {
       ok: false;
@@ -129,7 +169,149 @@ class XmlError extends Error {
   }
 }
 
-const ENTITIES: Record<string, string> = { lt: "<", gt: ">", amp: "&", quot: '"', apos: "'" };
+/**
+ * XML's five entities, and the HTML entities agents write in labels (TEMPRA-315): spaces and
+ * dashes, quotes, arrows, maths, marks and a few letters. Another name is refused with a line that
+ * says to write the character itself; HTML's full table (over 2,000 names) is not worth its size.
+ */
+const ENTITIES: Record<string, string> = {
+  lt: "<",
+  gt: ">",
+  amp: "&",
+  quot: '"',
+  apos: "'",
+  nbsp: "\u00a0",
+  ensp: "\u2002",
+  emsp: "\u2003",
+  thinsp: "\u2009",
+  zwnj: "\u200c",
+  zwj: "\u200d",
+  shy: "\u00ad",
+  ndash: "\u2013",
+  mdash: "\u2014",
+  minus: "\u2212",
+  hellip: "\u2026",
+  bull: "\u2022",
+  middot: "\u00b7",
+  lsquo: "\u2018",
+  rsquo: "\u2019",
+  sbquo: "\u201a",
+  ldquo: "\u201c",
+  rdquo: "\u201d",
+  bdquo: "\u201e",
+  laquo: "\u00ab",
+  raquo: "\u00bb",
+  lsaquo: "\u2039",
+  rsaquo: "\u203a",
+  prime: "\u2032",
+  Prime: "\u2033",
+  larr: "\u2190",
+  uarr: "\u2191",
+  rarr: "\u2192",
+  darr: "\u2193",
+  harr: "\u2194",
+  crarr: "\u21b5",
+  lArr: "\u21d0",
+  uArr: "\u21d1",
+  rArr: "\u21d2",
+  dArr: "\u21d3",
+  hArr: "\u21d4",
+  times: "\u00d7",
+  divide: "\u00f7",
+  plusmn: "\u00b1",
+  le: "\u2264",
+  ge: "\u2265",
+  ne: "\u2260",
+  asymp: "\u2248",
+  equiv: "\u2261",
+  infin: "\u221e",
+  sum: "\u2211",
+  prod: "\u220f",
+  radic: "\u221a",
+  part: "\u2202",
+  nabla: "\u2207",
+  isin: "\u2208",
+  notin: "\u2209",
+  sub: "\u2282",
+  sup: "\u2283",
+  sube: "\u2286",
+  supe: "\u2287",
+  cap: "\u2229",
+  cup: "\u222a",
+  and: "\u2227",
+  or: "\u2228",
+  not: "\u00ac",
+  forall: "\u2200",
+  exist: "\u2203",
+  empty: "\u2205",
+  there4: "\u2234",
+  ang: "\u2220",
+  perp: "\u22a5",
+  sdot: "\u22c5",
+  lowast: "\u2217",
+  deg: "\u00b0",
+  micro: "\u00b5",
+  permil: "\u2030",
+  frac12: "\u00bd",
+  frac14: "\u00bc",
+  frac34: "\u00be",
+  sup1: "\u00b9",
+  sup2: "\u00b2",
+  sup3: "\u00b3",
+  copy: "\u00a9",
+  reg: "\u00ae",
+  trade: "\u2122",
+  sect: "\u00a7",
+  para: "\u00b6",
+  dagger: "\u2020",
+  Dagger: "\u2021",
+  loz: "\u25ca",
+  spades: "\u2660",
+  clubs: "\u2663",
+  hearts: "\u2665",
+  diams: "\u2666",
+  cent: "\u00a2",
+  pound: "\u00a3",
+  yen: "\u00a5",
+  euro: "\u20ac",
+  curren: "\u00a4",
+  iexcl: "\u00a1",
+  iquest: "\u00bf",
+  Alpha: "\u0391",
+  Beta: "\u0392",
+  Gamma: "\u0393",
+  Delta: "\u0394",
+  Theta: "\u0398",
+  Lambda: "\u039b",
+  Pi: "\u03a0",
+  Sigma: "\u03a3",
+  Phi: "\u03a6",
+  Psi: "\u03a8",
+  Omega: "\u03a9",
+  alpha: "\u03b1",
+  beta: "\u03b2",
+  gamma: "\u03b3",
+  delta: "\u03b4",
+  epsilon: "\u03b5",
+  zeta: "\u03b6",
+  eta: "\u03b7",
+  theta: "\u03b8",
+  kappa: "\u03ba",
+  lambda: "\u03bb",
+  mu: "\u03bc",
+  pi: "\u03c0",
+  rho: "\u03c1",
+  sigma: "\u03c3",
+  tau: "\u03c4",
+  phi: "\u03c6",
+  chi: "\u03c7",
+  psi: "\u03c8",
+  omega: "\u03c9",
+  check: "\u2713",
+  cross: "\u2717",
+  star: "\u2606",
+  starf: "\u2605",
+};
 
 function decode(s: string, at: number): string {
   return s.replace(
@@ -144,7 +326,9 @@ function decode(s: string, at: number): string {
         return String.fromCodePoint(n);
       }
       const v = ENTITIES[e];
-      if (v === undefined) throw new XmlError(`unknown entity ${m}`, at + i);
+      if (v === undefined || !Object.hasOwn(ENTITIES, e)) {
+        throw new XmlError(`unknown entity ${m} (write the character itself)`, at + i);
+      }
       return v;
     },
   );
@@ -274,8 +458,43 @@ function internalUrls(value: string, idPrefix: string): string | null {
   return bad || /url\(/i.test(out.replace(/url\(#[\w.:-]+\)/g, "")) ? null : out;
 }
 
+/** What sanitizing found besides what it removed (TEMPRA-315). */
+interface Found {
+  colors: Set<string>;
+  unknownVars: Set<string>;
+}
+
+/**
+ * A value's `var()`s against the palette: a palette name kept as `var(--name)`; another name its
+ * fallback when it gives one, else null (the attribute or declaration goes), each noted.
+ */
+function paletteVars(value: string, found: Found): string | null {
+  let dropped = false;
+  const out = value.replace(
+    /var\(\s*(--[\w-]*)\s*(?:,\s*([^()]*(?:\([^()]*\)[^()]*)*))?\)/gi,
+    (_m, name: string, fallback: string | undefined) => {
+      if (PALETTE.has(name)) return `var(${name})`;
+      found.unknownVars.add(name);
+      if (fallback?.trim()) return fallback.trim();
+      dropped = true;
+      return "";
+    },
+  );
+  // A var() the pattern could not read (nested, unclosed) is not kept either.
+  const rest = out.replace(/var\((--[\w-]+)\)/g, (m, name: string) => (PALETTE.has(name) ? "" : m));
+  return dropped || /var\(/i.test(rest) ? null : out;
+}
+
+/** Notes a paint's fixed colour (not none, currentColor, a palette name or a reference). */
+function noteColor(prop: string, value: string, found: Found): void {
+  if (!PAINT.has(prop.toLowerCase())) return;
+  const v = value.trim();
+  if (!v || NOT_A_COLOR.test(v) || /var\(|url\(/i.test(v)) return;
+  found.colors.add(v);
+}
+
 /** A style attribute kept declaration by declaration; what loads anything is dropped. */
-function cleanStyle(css: string, idPrefix: string, removed: Set<string>): string {
+function cleanStyle(css: string, idPrefix: string, removed: Set<string>, found: Found): string {
   const kept: string[] = [];
   for (const part of css.split(";")) {
     const colon = part.indexOf(":");
@@ -299,12 +518,23 @@ function cleanStyle(css: string, idPrefix: string, removed: Set<string>): string
       }
       value = v;
     }
+    if (/var\(/i.test(value)) {
+      const v = paletteVars(value, found);
+      if (v === null) continue;
+      value = v;
+    }
+    noteColor(prop, value, found);
     kept.push(`${prop}:${value}`);
   }
   return kept.join(";");
 }
 
-function cleanAttrs(el: El, idPrefix: string, removed: Set<string>): [string, string][] {
+function cleanAttrs(
+  el: El,
+  idPrefix: string,
+  removed: Set<string>,
+  found: Found,
+): [string, string][] {
   const out: [string, string][] = [];
   for (const [rawName, rawValue] of el.attrs) {
     let n = rawName;
@@ -315,6 +545,8 @@ function cleanAttrs(el: El, idPrefix: string, removed: Set<string>): [string, st
     else if (p === "xml" && (local(n) === "space" || local(n) === "lang")) {
       // kept as is
     } else if (p) continue; // editors' own (inkscape:, sodipodi:, …)
+    // No stylesheet reaches a fence, so a class means nothing (TEMPRA-315): the palette does.
+    if (n === "class") continue;
     if (/^on/i.test(n)) {
       removed.add("event handlers");
       continue;
@@ -332,8 +564,10 @@ function cleanAttrs(el: El, idPrefix: string, removed: Set<string>): [string, st
     } else if (n === "id") {
       v = `${idPrefix}${v}`;
     } else if (n === "style") {
-      v = cleanStyle(v, idPrefix, removed);
+      v = cleanStyle(v, idPrefix, removed, found);
       if (!v) continue;
+      out.push([n, v]);
+      continue;
     } else if (/url\(/i.test(v)) {
       const u = internalUrls(v, idPrefix);
       if (u === null) {
@@ -345,18 +579,26 @@ function cleanAttrs(el: El, idPrefix: string, removed: Set<string>): [string, st
       removed.add("references outside the SVG");
       continue;
     }
+    if (/var\(/i.test(v)) {
+      const kept = paletteVars(v, found);
+      if (kept === null) continue;
+      v = kept;
+    }
+    noteColor(n, v, found);
     out.push([n, v]);
   }
   return out;
 }
 
-function clean(el: El, idPrefix: string, removed: Set<string>): (El | string)[] {
+function clean(el: El, idPrefix: string, removed: Set<string>, found: Found): (El | string)[] {
   const n = local(el.name);
   const ns = prefix(el.name);
   if (ns && ns !== "svg") return [];
   if (n === "a") {
     removed.add("links (their contents are kept)");
-    return el.children.flatMap((c) => (typeof c === "string" ? [c] : clean(c, idPrefix, removed)));
+    return el.children.flatMap((c) =>
+      typeof c === "string" ? [c] : clean(c, idPrefix, removed, found),
+    );
   }
   const unsafe = UNSAFE[n];
   if (unsafe) {
@@ -368,7 +610,7 @@ function clean(el: El, idPrefix: string, removed: Set<string>): (El | string)[] 
     removed.add(`unknown elements (<${n}>)`);
     return [];
   }
-  const attrs = cleanAttrs(el, idPrefix, removed);
+  const attrs = cleanAttrs(el, idPrefix, removed, found);
   // A <use> that names nothing in this SVG draws nothing; dropped with its reference.
   if (n === "use" && !attrs.some(([k]) => k === "href")) return [];
   return [
@@ -376,7 +618,7 @@ function clean(el: El, idPrefix: string, removed: Set<string>): (El | string)[] 
       name: n,
       attrs,
       children: el.children.flatMap((c) =>
-        typeof c === "string" ? [c] : clean(c, idPrefix, removed),
+        typeof c === "string" ? [c] : clean(c, idPrefix, removed, found),
       ),
     },
   ];
@@ -437,19 +679,38 @@ export function sanitizeSvg(
     };
   }
   const removed = new Set<string>();
-  const [cleaned] = clean(root, opts.idPrefix ?? "", removed) as [El];
+  const found: Found = { colors: new Set(), unknownVars: new Set() };
+  const [cleaned] = clean(root, opts.idPrefix ?? "", removed, found) as [El];
   const attrs = cleaned.attrs.filter(([k]) => k !== "xmlns");
   // Sized by its viewBox, so it scales to the column; one from width and height when it has none.
   const has = (k: string) => attrs.find(([a]) => a === k)?.[1];
   const w = Number.parseFloat(has("width") ?? "");
   const h = Number.parseFloat(has("height") ?? "");
   if (!has("viewBox") && w > 0 && h > 0) attrs.push(["viewBox", `0 0 ${w} ${h}`]);
+  // And its own size from its viewBox when it gives none: one unit is one CSS pixel, so a small
+  // drawing is never stretched to the column, nor its text with it (TEMPRA-315).
+  const box = (has("viewBox") ?? "")
+    .trim()
+    .split(/[\s,]+/)
+    .map(Number);
+  const [bw, bh] = [box[2] ?? 0, box[3] ?? 0];
+  if (has("width") === undefined && has("height") === undefined && bw > 0 && bh > 0) {
+    attrs.push(["width", String(bw)], ["height", String(bh)]);
+  }
   cleaned.attrs = [["xmlns", SVG_NS], ...attrs];
-  const titleEl = cleaned.children.find(
-    (c): c is El => typeof c !== "string" && c.name === "title",
-  );
-  const title = titleEl ? textOf(titleEl).replace(/\s+/g, " ").trim() || null : null;
-  return { ok: true, svg: serialize(cleaned), removed: [...removed], title };
+  const first = (name: string) => {
+    const el = cleaned.children.find((c): c is El => typeof c !== "string" && c.name === name);
+    return el ? textOf(el).replace(/\s+/g, " ").trim() || null : null;
+  };
+  return {
+    ok: true,
+    svg: serialize(cleaned),
+    removed: [...removed],
+    title: first("title"),
+    desc: first("desc"),
+    colors: [...found.colors],
+    unknownVars: [...found.unknownVars],
+  };
 }
 
 /** A fence's attribute after its language, `name="…"` (or `'…'`, or one word). */
@@ -457,4 +718,19 @@ export function fenceAttr(meta: string | null | undefined, name: string): string
   const m = new RegExp(`(?:^|\\s)${name}=(?:"([^"]*)"|'([^']*)'|(\\S+))`).exec(meta ?? "");
   const t = (m?.[1] ?? m?.[2] ?? m?.[3] ?? "").trim();
   return t || null;
+}
+
+/**
+ * A sanitized SVG standing alone, for a file (exports, TEMPRA-315): each palette `var()` written
+ * as its value in `palette` (one theme's, `svgPalettes` in `@tempra/design/pele`), and the text
+ * colour as the root's `color`, so `currentColor` reads as on the page, unless the root sets one.
+ */
+export function resolvePalette(svg: string, palette: Record<string, string>): string {
+  const out = svg.replace(/var\((--[\w-]+)\)/g, (m, name: string) =>
+    PALETTE.has(name) && palette[name] ? palette[name] : m,
+  );
+  const ink = palette["--ink"];
+  const open = /^<svg\b[^>]*>/.exec(out)?.[0];
+  if (!ink || !open || / color="/.test(open)) return out;
+  return out.replace(/^<svg\b/, `<svg color="${escAttr(ink)}"`);
 }

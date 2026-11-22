@@ -19,11 +19,15 @@ import { PELE_MESSAGE_FORMAT } from "../../render/src/message";
 import { PELE_VERSION, VEGA_LITE_VERSION } from "../../render/src/version";
 import { type LogRequest, renderIndex, renderLog } from "../format/derived";
 import {
+  type CheckedFence,
   chartRenderWarning,
   checkedCharts,
   checkedFences,
+  checkedSvgs,
   diagramLint,
   type RenderFailure,
+  SVG_MEASURE_VERSION,
+  svgOverflowWarning,
   unrenderedWarning,
 } from "../format/diagrams";
 import { unifiedDiff, unifiedDiffExcept } from "../format/diff";
@@ -310,8 +314,8 @@ export interface RenderJob {
   page_id: string;
   path: string;
   hash: string;
-  /** Each with its language when it is not Mermaid (a chart, TEMPRA-207). */
-  diagrams: { key: string; source: string; lang?: "vega-lite" }[];
+  /** Each with its language when it is not Mermaid (a chart, TEMPRA-207; an SVG, TEMPRA-315). */
+  diagrams: { key: string; source: string; lang?: "vega-lite" | "svg" }[];
 }
 
 /** Pele's verdict on a diagram's source: null when it draws, else where and why it failed. */
@@ -2978,18 +2982,23 @@ export class LibraryStore {
   ): LintWarning[] {
     // Mermaid by Pele, and charts by Vega (TEMPRA-207), each verdict kept by its renderer's
     // version and the source's hash.
-    const fences = [
+    const fences: { f: CheckedFence; lang: "vega-lite" | "svg" | undefined }[] = [
       ...checkedFences(doc).map((f) => ({ f, lang: undefined })),
       ...checkedCharts(doc).map((f) => ({ f, lang: "vega-lite" as const })),
+      // SVG fences, measured for what overflows (TEMPRA-315).
+      ...checkedSvgs(doc).map((f) => ({ f, lang: "svg" as const })),
     ];
     if (fences.length === 0) return [];
     const out: LintWarning[] = [];
     const unknown: RenderJob["diagrams"] = [];
     for (const { f, lang } of fences) {
       // The message's format too (TEMPRA-184): a verdict kept in an older shape is asked again.
-      const key = lang
-        ? `vl-${VEGA_LITE_VERSION}:${sha256Hex(f.source)}`
-        : `${this.peleVersion}:m${PELE_MESSAGE_FORMAT}:${sha256Hex(f.source)}`;
+      const key =
+        lang === "vega-lite"
+          ? `vl-${VEGA_LITE_VERSION}:${sha256Hex(f.source)}`
+          : lang === "svg"
+            ? `svg-${SVG_MEASURE_VERSION}:${sha256Hex(f.source)}`
+            : `${this.peleVersion}:m${PELE_MESSAGE_FORMAT}:${sha256Hex(f.source)}`;
       const row = this.sql.all<{ error: string | null }>(
         "SELECT error FROM diagram_renders WHERE key = ?",
         key,
@@ -3000,7 +3009,13 @@ export class LibraryStore {
         }
       } else if (row.error) {
         const e = JSON.parse(row.error) as RenderFailure;
-        out.push(lang ? chartRenderWarning(f, e) : unrenderedWarning(f, e));
+        out.push(
+          lang === "vega-lite"
+            ? chartRenderWarning(f, e)
+            : lang === "svg"
+              ? svgOverflowWarning(f, e)
+              : unrenderedWarning(f, e),
+        );
       }
     }
     if (w && unknown.length > 0) {

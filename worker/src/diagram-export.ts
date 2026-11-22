@@ -8,7 +8,14 @@
  * without a word: the export never fails for a diagram. Bounded by MAX_EXPORT_DIAGRAMS, a time
  * budget and a few renders at a time. Free of Worker APIs.
  */
-import { FIGURE_FENCES, findFigures, parseMarkdown, sanitizeSvg } from "@tempra/editor/doc";
+import { svgPalettes } from "@tempra/design/pele";
+import {
+  FIGURE_FENCES,
+  findFigures,
+  parseMarkdown,
+  resolvePalette,
+  sanitizeSvg,
+} from "@tempra/editor/doc";
 import { chartForRender } from "./chart-data";
 import { splitFrontmatter } from "./format/page";
 import { RENDER_WIDTH, type RenderContext, type RenderDiagram } from "./render";
@@ -89,11 +96,12 @@ export async function drawnDiagrams(
   const jobs = diagramJobs(files).slice(0, opts.max ?? MAX_EXPORT_DIAGRAMS);
   if (jobs.length === 0) return [];
   const drawn: (string | undefined)[] = new Array(jobs.length);
-  // SVG fences need no renderer: their sanitized SVG is the drawing.
+  // SVG fences need no renderer: their sanitized SVG is the drawing, with the palette's light
+  // values written in so the file stands alone (TEMPRA-315).
   for (const [i, job] of jobs.entries()) {
     if (job.lang !== "svg") continue;
     const r = sanitizeSvg(job.source);
-    if (r.ok) drawn[i] = r.svg;
+    if (r.ok) drawn[i] = resolvePalette(r.svg, svgPalettes.light);
   }
   const render = opts.render;
   const queue = render

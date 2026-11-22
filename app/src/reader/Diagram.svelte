@@ -15,7 +15,14 @@
   import { Button, Icon } from "@tempra/design/components";
   import type { Code } from "mdast";
   import Caption from "./Caption.svelte";
-  import { drawDiagram, fenceAlt, figureLang } from "./diagram";
+  import {
+    drawDiagram,
+    fenceAlt,
+    fenceLayout,
+    figureLang,
+    figureWidthProperty,
+    svgDesc,
+  } from "./diagram";
   import { useOpenFigure } from "./open-figure";
   import type { BlockProps } from "./registry";
 
@@ -25,10 +32,14 @@
   let failed = $state.raw<{ source: string; message: string } | null>(null);
   const failure = $derived(failed?.source === node.value ? failed.message : null);
   const captionId = $props.id();
+  const descId = `${captionId}-desc`;
   const lang = $derived(figureLang(node.lang));
   // An SVG or a chart says what it shows (its alt); a Mermaid diagram is named by its caption (C-28).
   const alt = $derived(fenceAlt(lang, node.meta, node.value));
   const kind = $derived(lang === "svg" ? "SVG" : lang === "vega-lite" ? "Chart" : "Diagram");
+  // An SVG's <desc> describes it beside its name (TEMPRA-315); its width= and layout= place it.
+  const desc = $derived(svgDesc(lang, node.value));
+  const place = $derived(fenceLayout(node.meta));
   const fail = (source: string, message: string) => {
     failed = { source, message };
   };
@@ -42,7 +53,11 @@
     >{#if figure}<Caption {figure} id={captionId} />{/if}</figure
   >
 {:else}
-  <figure class="diagram" data-block={id} data-opaque=""
+  <figure
+    class={["diagram", place.classes].filter(Boolean).join(" ")}
+    data-block={id}
+    data-opaque=""
+    {@attach figureWidthProperty(place.width)}
     ><div class="diagram-frame"
       >{#if showSource}<pre class="diagram-source" data-lang={lang}><code>{node.value}</code></pre
         >{:else}<!-- One image to a screen reader, named by its caption ("Figure 2. The flow"; C-28). --><div
@@ -50,9 +65,10 @@
             role="img"
             aria-labelledby={figure && !alt ? captionId : undefined}
             aria-label={alt ?? (figure ? undefined : kind)}
+            aria-describedby={desc ? descId : undefined}
             {@attach drawDiagram(node.value, `d${id ?? ""}-`, fail, lang, figure?.kind === "diagram" ? figure.chart : undefined)}
           ></div
-        >{/if}<span class="figure-tools" data-skip=""
+        >{#if desc}<span class="visually-hidden" id={descId} data-skip="">{desc}</span>{/if}{/if}<span class="figure-tools" data-skip=""
         ><Button aria-pressed={showSource} onclick={(e) => {
             e.stopPropagation();
             showSource = !showSource;

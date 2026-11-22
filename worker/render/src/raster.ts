@@ -6,7 +6,7 @@
  * page's own data: URLs is aborted.
  */
 import puppeteer from "@cloudflare/puppeteer";
-import type { Rasterizer } from "./render";
+import { LAYOUT_SCRIPT, type Rasterizer, type SvgLayout } from "./render";
 
 /** How long an idle session stays open for the next render (Browser Rendering's maximum is 10 min). */
 const KEEP_ALIVE_MS = 600_000;
@@ -51,6 +51,25 @@ export function browserRasterizer(binding: BrowserBinding): Rasterizer {
       } finally {
         await page.close().catch(() => {});
         // Leave the session open for the next render; keep_alive closes it when idle.
+        await browser.disconnect().catch(() => {});
+      }
+    },
+    // An SVG fence laid out to find what overflows (TEMPRA-315), on the same locked-down page.
+    async layout(html, { width, height }) {
+      const browser = await browserFor(binding);
+      const page = await browser.newPage();
+      try {
+        await page.setRequestInterception(true);
+        page.on("request", (r) => {
+          if (r.url().startsWith("data:")) r.continue();
+          else r.abort();
+        });
+        await page.setViewport({ width, height, deviceScaleFactor: 1 });
+        await page.setContent(html, { waitUntil: "load" });
+        await page.evaluate("document.fonts.ready.then(() => true)");
+        return (await page.evaluate(LAYOUT_SCRIPT)) as SvgLayout;
+      } finally {
+        await page.close().catch(() => {});
         await browser.disconnect().catch(() => {});
       }
     },

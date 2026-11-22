@@ -6,8 +6,18 @@
 import { describe, expect, test } from "bun:test";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { FONT, pageFor, type RenderCache, renderDiagram, svgFigure } from "../render/src/render";
-import { type RenderService, serviceRenderer } from "../src/render";
+import { svgPalettes } from "@tempra/design/pele";
+import { SVG_PALETTE } from "@tempra/editor/doc";
+import {
+  FONT,
+  overflowFindings,
+  pageFor,
+  type RenderCache,
+  renderDiagram,
+  svgFigure,
+} from "../render/src/render";
+import { colorFailsIn, contrast, parseColor } from "../src/format/svg-color";
+import { fakeRenderer, type RenderService, serviceRenderer } from "../src/render";
 import { readTar } from "../src/util/tar";
 import { setup } from "./harness";
 
@@ -95,8 +105,10 @@ describe("SVG fences (TEMPRA-206)", () => {
     // The render Worker is sent the sanitized SVG, never the fence as written.
     expect(sent.at(-1)).toMatchObject({
       lang: "svg",
-      source: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2 2"><circle r="1"/></svg>',
+      source:
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2 2" width="2" height="2"><circle r="1"/></svg>',
       png: true,
+      measure: true,
     });
     const byFigure = await call("render", { path: "f.md", figure: 1 });
     expect(byFigure.content[0]).toMatchObject({ type: "text" });
@@ -143,7 +155,8 @@ describe("SVG fences (TEMPRA-206)", () => {
     await render({ source: UNSAFE, lang: "svg", theme: "light" }, { account: "a" });
     expect(seen).toEqual([
       {
-        source: '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2 2"><circle r="1"/></svg>',
+        source:
+          '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2 2" width="2" height="2"><circle r="1"/></svg>',
         lang: "svg",
         theme: "light",
         width: undefined,
@@ -193,7 +206,10 @@ describe("SVG fences (TEMPRA-206)", () => {
     expect(r.error).toBeUndefined();
     expect(r.svg).toStartWith('<svg width="680" height="100" color="');
     expect(pages[0]).toMatchObject({ width: 680, height: 100 });
-    expect([...objects.keys()].every((k) => k.includes("/svg-2/"))).toBe(true);
+    expect([...objects.keys()].every((k) => k.includes("/svg-3/"))).toBe(true);
+    // The palette's values for the theme on its root (TEMPRA-315), as the reader's CSS gives them.
+    expect(r.svg).toContain(`--accent:${svgPalettes.dark["--accent"]}`);
+    expect(r.svg?.match(/ style="/g)).toHaveLength(1);
     expect(() => svgFigure("<svg><script>x()</script></svg>", "light", 0)).toThrow("not sanitized");
   });
 
@@ -232,8 +248,195 @@ describe("SVG fences (TEMPRA-206)", () => {
     );
     // Figure 1 is the image, 2 the SVG fence; the Mermaid one needs the renderer it lacks.
     expect([...out.keys()].filter((p) => p.includes(".diagrams/"))).toEqual(["n/a.diagrams/2.svg"]);
+    // The palette's light values and the ink written in, so the file stands alone (TEMPRA-315).
     expect(out.get("n/a.diagrams/2.svg")).toBe(
-      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2 2"><circle r="1"/></svg>',
+      '<svg color="#282a2f" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2 2" width="2" height="2"><circle r="1"/></svg>',
+    );
+  });
+});
+
+describe("SVG-first diagrams (TEMPRA-315)", () => {
+  test("the palette's names are the design's, with a value in each theme", () => {
+    for (const theme of ["light", "dark"] as const) {
+      expect(Object.keys(svgPalettes[theme])).toEqual([...SVG_PALETTE]);
+      for (const v of Object.values(svgPalettes[theme])) expect(v).toMatch(/^#[0-9a-f]{6}$/);
+    }
+  });
+
+  test("colours: parsed as CSS reads them, and judged against the page in both themes", () => {
+    expect(parseColor("#fff")).toEqual([255, 255, 255, 1]);
+    expect(parseColor("#00000080")?.[3]).toBeCloseTo(0.5);
+    expect(parseColor("rgb(255 0 0 / 50%)")).toEqual([255, 0, 0, 0.5]);
+    expect(parseColor("hsl(120, 100%, 25%)")).toEqual([0, 127.5, 0, 1]);
+    expect(parseColor("RebeccaPurple")).toEqual([102, 51, 153, 1]);
+    expect(parseColor("toString")).toBeNull();
+    expect(parseColor("oklch(0.5 0.1 200)")).toBeNull();
+    expect(contrast([0, 0, 0, 1], [255, 255, 255, 1])).toBeCloseTo(21);
+    expect(colorFailsIn("black")).toEqual(["dark"]);
+    expect(colorFailsIn("#fff")).toEqual(["light"]);
+    expect(colorFailsIn("#f0f0f0")).toEqual(["light"]);
+    expect(colorFailsIn("#808080")).toEqual([]);
+    expect(colorFailsIn("rgba(0,0,0,0.1)")).toEqual([]);
+    expect(colorFailsIn("bogus")).toEqual([]);
+    // The palette itself holds on its own page.
+    expect(colorFailsIn(svgPalettes.light["--muted"] as string)).not.toContain("light");
+  });
+
+  test("lint on write: svg_color names fixed colours and foreign var()s; the palette passes", async () => {
+    const s = setup();
+    const { call } = await connect(s.app);
+    const write = async (path: string, body: string) =>
+      (await call("write", { path, content: doc(body), note: "svg" })).text;
+    const good = await write(
+      "good.md",
+      fence(
+        '<svg viewBox="0 0 20 10"><title>t</title><rect fill="var(--surface)" stroke="var(--muted)"/><text fill="currentColor">a</text><rect fill="#808080"/></svg>',
+      ),
+    );
+    expect(good).toContain("Lint: none");
+    const bad = await write(
+      "bad.md",
+      fence(
+        '<svg viewBox="0 0 20 10"><title>t</title><text fill="black">a</text><rect fill="#fafafa" stroke="var(--tempra-color-agent)"/></svg>',
+      ),
+    );
+    expect(bad).toContain("svg_color");
+    expect(bad).toContain("black (dark), #fafafa (light)");
+    expect(bad).toContain("var(--tempra-color-agent), which is not in the palette");
+    expect(bad).not.toContain("svg_unsafe");
+  });
+
+  test("lint on write: a fence's width= and layout= that are not one are figure_invalid", async () => {
+    const s = setup();
+    const { call } = await connect(s.app);
+    const ok = await call("write", {
+      path: "ok.md",
+      content: doc(fence(SVG, "width=480 layout=wide")),
+      note: "svg",
+    });
+    expect(ok.text).toContain("Lint: none");
+    const bad = await call("write", {
+      path: "bad.md",
+      content: doc(`\`\`\`mermaid width=huge layout=side\nflowchart LR\n  A --> B\n\`\`\`\n`),
+      note: "m",
+    });
+    expect(bad.text).toContain("figure_invalid");
+    expect(bad.text).toContain("width=huge is not a width");
+    expect(bad.text).toContain("layout=side is not a layout");
+  });
+
+  test("overflow: a label wider than its box and drawing past the viewBox, found from a layout", () => {
+    const found = overflowFindings({
+      width: 300,
+      height: 100,
+      items: [
+        { tag: "rect", x: 0, y: 0, w: 300, h: 100 },
+        { tag: "rect", x: 10, y: 30, w: 80, h: 40 },
+        { tag: "text", text: "A much longer label", x: 5, y: 42, w: 120, h: 16 },
+        { tag: "rect", x: 150, y: 30, w: 100, h: 40 },
+        { tag: "text", text: "Fits", x: 185, y: 42, w: 30, h: 16 },
+        { tag: "text", text: "Edge", x: 270, y: 80, w: 44, h: 16 },
+        { tag: "path", x: -6, y: 10, w: 20, h: 2 },
+      ],
+    });
+    expect(found).toEqual([
+      "“A much longer label” is 40 px wider than the <rect> around it",
+      "“Edge” runs 14 px past the right edge of the viewBox",
+      "a <path> runs 6 px past the left edge of the viewBox",
+    ]);
+    const many = overflowFindings({
+      width: 10,
+      height: 10,
+      items: Array.from({ length: 8 }, (_, i) => ({ tag: "circle", x: 20 + i, y: 0, w: 5, h: 5 })),
+    });
+    expect(many).toHaveLength(6);
+    expect(many.at(-1)).toBe("3 more");
+  });
+
+  test("overflow: measured by the render Worker when it can, cached, and kept as svg_overflow lint", async () => {
+    // The render Worker with a rasterizer that lays out: what it answers is the overflow.
+    const objects = new Map<string, string | Uint8Array>();
+    let layouts = 0;
+    const deps = {
+      cache: {
+        async get(key: string) {
+          const v = objects.get(key);
+          return v === undefined
+            ? null
+            : {
+                text: async () => (typeof v === "string" ? v : new TextDecoder().decode(v)),
+                arrayBuffer: async () => new ArrayBuffer(0),
+              };
+        },
+        async put(key: string, value: string | Uint8Array) {
+          objects.set(key, value);
+        },
+      } satisfies RenderCache,
+      rasterizer: {
+        async png() {
+          return new Uint8Array([0x89]);
+        },
+        async layout() {
+          layouts++;
+          return {
+            width: 20,
+            height: 10,
+            items: [{ tag: "text", text: "Wide", x: 2, y: 2, w: 30, h: 6 }],
+          };
+        },
+      },
+    };
+    const source =
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 10" width="20" height="10"><text>Wide</text></svg>';
+    const one = await renderDiagram({ source, lang: "svg", theme: "light", measure: true }, deps);
+    expect(one.overflow).toEqual(["“Wide” runs 12 px past the right edge of the viewBox"]);
+    const again = await renderDiagram({ source, lang: "svg", theme: "light", measure: true }, deps);
+    expect(again.overflow).toEqual(one.overflow);
+    expect(layouts).toBe(1);
+    // A rasterizer that cannot measure answers no overflow at all.
+    const blind = await renderDiagram(
+      { source: `${source} `, lang: "svg", theme: "light", measure: true },
+      { cache: deps.cache, rasterizer: { png: deps.rasterizer.png } },
+    );
+    expect(blind.overflow).toBeUndefined();
+
+    // After a write: the verdict becomes svg_overflow lint on the page.
+    const s = setup();
+    const render = fakeRenderer((req) =>
+      req.lang === "svg"
+        ? {
+            svg: req.source,
+            overflow: req.measure ? ["“Wide” runs 12 px past the right edge of the viewBox"] : [],
+          }
+        : { svg: "<svg/>" },
+    );
+    s.deps.renderDiagram = render;
+    s.deps.renderBudgetMs = 5_000;
+    const { call } = await connect(s.app);
+    const w = await call("write", {
+      path: "o.md",
+      content: doc(fence('<svg viewBox="0 0 20 10"><title>t</title><text>Wide</text></svg>')),
+      note: "svg",
+    });
+    expect(w.text).toContain("svg_overflow: o.md: Figure 1 (svg, block");
+    expect(w.text).toContain(
+      "overflows as drawn: “Wide” runs 12 px past the right edge of the viewBox.",
+    );
+    expect(render.calls.find((c) => c.lang === "svg")).toMatchObject({ measure: true, png: false });
+    expect((await call("read", { path: "o.md" })).text).toContain("svg_overflow");
+  });
+
+  test("render says what the browser measured, as a write would", async () => {
+    const s = setup();
+    s.deps.renderDiagram = fakeRenderer((req) => ({
+      svg: req.source,
+      png: new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+      ...(req.measure ? { overflow: ["“X” is 4 px wider than the <rect> around it"] } : {}),
+    }));
+    const { call } = await connect(s.app);
+    const r = await call("render", { source: SVG, lang: "svg" });
+    expect(r.text).toContain(
+      "A write would report:\n- svg_overflow: “X” is 4 px wider than the <rect> around it.",
     );
   });
 });

@@ -53,6 +53,20 @@ export async function lintRenders(
       if (!chart.ok) return null;
       source = chart.source;
     }
+    if (g.lang === "svg") {
+      // An SVG draws (it was sanitized); its verdict is what overflows (TEMPRA-315), and a render
+      // Worker that cannot measure gives none.
+      const r = await render(
+        { source, lang: "svg", theme: "light", png: false, measure: true },
+        ctx,
+      );
+      if (!r.overflow) return null;
+      return {
+        key: g.key,
+        error:
+          r.overflow.length > 0 ? { message: r.overflow.join("; "), line: 0, column: 0 } : null,
+      };
+    }
     const r = await render(
       { source, ...(g.lang ? { lang: g.lang } : {}), theme: "light", png: false },
       ctx,

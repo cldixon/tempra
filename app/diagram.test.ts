@@ -204,6 +204,43 @@ describe("SVG fences (TEMPRA-206)", () => {
     expect(host.querySelector(".diagram-svg")?.getAttribute("aria-label")).toBe("A dot & a line");
   });
 
+  test("drawn at its own size, its width a property for narrow screens (TEMPRA-315)", async () => {
+    const { host } = await drawn(svgBody('<svg viewBox="0 0 300 120"><title>t</title></svg>'));
+    const svg = host.querySelector(".diagram-svg svg") as SVGSVGElement;
+    expect(svg.getAttribute("width")).toBe("300");
+    expect(svg.getAttribute("height")).toBe("120");
+    expect(svg.style.getPropertyValue("--diagram-width")).toBe("300");
+  });
+
+  test("width= and layout= on the fence place it as figure markup does (TEMPRA-315)", async () => {
+    const { host } = await drawn(
+      svgBody('<svg viewBox="0 0 20 10"><title>t</title></svg>', "width=60% layout=wide"),
+    );
+    const figure = host.querySelector("figure.diagram") as HTMLElement;
+    expect(figure.className).toBe("diagram figure-wide figure-sized");
+    expect(figure.style.getPropertyValue("--figure-width")).toBe("60%");
+    const plain = await drawn(svgBody('<svg viewBox="0 0 20 10"/>', "width=huge layout=side"));
+    const f = plain.host.querySelector("figure.diagram") as HTMLElement;
+    expect(f.className).toBe("diagram");
+    expect(f.style.getPropertyValue("--figure-width")).toBe("");
+  });
+
+  test("its <desc> describes it, out of the text (TEMPRA-315)", async () => {
+    const { host } = await drawn(
+      svgBody(
+        '<svg viewBox="0 0 20 10"><title>Flow</title><desc>Three steps, left to right.</desc></svg>',
+        'alt="The flow"',
+      ),
+    );
+    const image = host.querySelector(".diagram-svg") as HTMLElement;
+    const id = image.getAttribute("aria-describedby");
+    expect(id).toBeTruthy();
+    const desc = host.querySelector(`[id="${id}"]`);
+    expect(desc?.textContent).toBe("Three steps, left to right.");
+    expect(desc?.className).toBe("visually-hidden");
+    expect(desc?.hasAttribute("data-skip")).toBe(true);
+  });
+
   test("one that does not parse shows its source, with where", async () => {
     const src = "<svg><rect></svg>";
     const { host } = await drawn(svgBody(src));
