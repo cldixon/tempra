@@ -28,6 +28,7 @@
  */
 import { parseArgs } from "node:util";
 import { deploymentFor } from "../cloudflare.config";
+import { aeDataset, aeSql } from "../src/ae";
 import { checkHandle, HANDLE_HOLD_DAYS } from "../src/handles";
 import { DEFAULT_LIMITS, type Limits, limitsFrom } from "../src/limits";
 import { monthOf, monthResets } from "../src/quota";
@@ -278,22 +279,16 @@ async function printMonth(
 
 /** The month's metered requests and writes for an account, from Analytics Engine's SQL API. */
 async function meteredThisMonth(handle: string, month: string): Promise<Record<string, number>> {
-  const account = process.env.CLOUDFLARE_ACCOUNT_ID;
+  const accountId = process.env.CLOUDFLARE_ACCOUNT_ID;
   const token = process.env.CLOUDFLARE_API_TOKEN;
-  if (!account || !token) throw new Error("CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN unset");
-  const dataset = deploymentFor(MODE).usage ?? "tempra_usage";
-  if (!/^[a-z_]+$/.test(dataset)) throw new Error(`odd dataset name ${dataset}`);
+  if (!accountId || !token) throw new Error("CLOUDFLARE_ACCOUNT_ID and CLOUDFLARE_API_TOKEN unset");
+  const dataset = aeDataset(deploymentFor(MODE).usage ?? "tempra_usage");
   // usagePoint's layout (usage.ts): blob1 the kind, index1 the account. Only `request` and
   // `write` points count; `cost` points (TEMPRA-228, the op in blob4) are left out.
   const sql = `SELECT blob1 AS kind, SUM(_sample_interval) AS n FROM ${dataset}
     WHERE index1 = ${q(handle.slice(0, 96))} AND blob1 IN ('request', 'write')
       AND timestamp >= toDateTime(${q(`${month}-01 00:00:00`)})
-    GROUP BY kind FORMAT JSON`;
-  const res = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${account}/analytics_engine/sql`,
-    { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: sql },
-  );
-  if (!res.ok) throw new Error(`${res.status} ${(await res.text()).slice(0, 200)}`);
-  const body = (await res.json()) as { data?: { kind: string; n: number | string }[] };
-  return Object.fromEntries((body.data ?? []).map((r) => [r.kind, Number(r.n)]));
+    GROUP BY kind`;
+  const rows = await aeSql<{ kind: string; n: number | string }>({ accountId, token }, sql);
+  return Object.fromEntries(rows.map((r) => [r.kind, Number(r.n)]));
 }

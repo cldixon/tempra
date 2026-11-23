@@ -9,13 +9,21 @@
  * Needs CLOUDFLARE_API_TOKEN (Account Analytics read, Workers read, D1 read) and
  * CLOUDFLARE_ACCOUNT_ID. Prices and the arithmetic are in src/costs.ts.
  *
- * Follow-up (TEMPRA-236): cost per account needs TEMPRA-228's per-call rows and DO time in
- * `tempra_usage`, and the digest's Cloudflare line needs an Analytics read the Worker lacks.
+ * Cost per account (TEMPRA-236): TEMPRA-228's `cost` points and the `request` points in the
+ * deployment's Analytics Engine dataset, read with the SQL API (src/ae.ts), joined to D1 for
+ * library owners, stored bytes and @tempra; priced by accountCosts() in src/costs.ts. The
+ * operator's account (`--operator <handle>`, or OPERATOR_EMAIL's) is left out of cost per active
+ * account. The digest's lines wait on the app Worker's ANALYTICS_TOKEN.
  */
 import { parseArgs } from "node:util";
 import { deploymentFor } from "../cloudflare.config";
+import { aeDataset, aeSql, aeString } from "../src/ae";
 import {
+  type AccountReport,
   type AgentSpend,
+  accountCosts,
+  accountsText,
+  type CostMeter,
   costReport,
   dateChunks,
   monthWindow,
@@ -31,6 +39,7 @@ const { values } = parseArgs({
     month: { type: "string" },
     mode: { type: "string" },
     json: { type: "boolean" },
+    operator: { type: "string" },
   },
 });
 const mode = values.mode ?? "production";
@@ -239,7 +248,6 @@ const agent: AgentSpend[] = rows.map((r) => ({
 const notes = [
   `Workers ${scripts.join(", ")}; Durable Object namespaces ${namespaces.length}; D1 ${d.d1.name}; R2 ${d.r2}; Queues ${queueNames.join(", ")} (${queues.length} found); KV ${d.kv}; dataset ${dataset}.`,
   'Included amounts are the account\'s, shared with other projects: "cost" is this deployment alone on the plan, a lower bound; "none included" is the upper bound.',
-  "Cost per account and the most expensive accounts wait for TEMPRA-228's per-call metering (TEMPRA-236).",
 ];
 if (now.getTime() - Date.parse(`${w.from}T00:00:00Z`) > 31 * 86_400_000) {
   notes.push(
@@ -247,4 +255,80 @@ if (now.getTime() - Date.parse(`${w.from}T00:00:00Z`) > 31 * 86_400_000) {
   );
 }
 const report = costReport(d.name, w, usage, agent, notes);
-console.log(values.json ? JSON.stringify(report, null, 2) : reportText(report));
+
+// Cost per account (TEMPRA-236): the month's `cost` and `request` points from Analytics Engine.
+const nextMonth = new Date(Date.parse(`${w.from}T00:00:00Z`));
+nextMonth.setUTCMonth(nextMonth.getUTCMonth() + 1);
+const within = `timestamp >= toDateTime(${aeString(`${w.from} 00:00:00`)})
+    AND timestamp < toDateTime(${aeString(`${nextMonth.toISOString().slice(0, 10)} 00:00:00`)})`;
+const ae = { accountId: account, token };
+const ds = aeDataset(dataset);
+let accounts: AccountReport | null = null;
+let accountsError: string | null = null;
+try {
+  // usagePoint's layout (src/usage.ts): blob1 the kind, index1 the account, blob3 the library;
+  // double3 DO calls, double4 rows read, double5 rows written, double8 round-trip ms.
+  const costRows = await aeSql<Record<string, string | number>>(
+    ae,
+    `SELECT index1 AS account, blob3 AS library, SUM(_sample_interval) AS points,
+    SUM(_sample_interval * double3) AS do_calls, SUM(_sample_interval * double4) AS rows_read,
+    SUM(_sample_interval * double5) AS rows_written, SUM(_sample_interval * double8) AS ms
+  FROM ${ds} WHERE blob1 = 'cost' AND ${within}
+  GROUP BY account, library`,
+  );
+  const requestRows = await aeSql<Record<string, string | number>>(
+    ae,
+    `SELECT index1 AS account, SUM(_sample_interval) AS n FROM ${ds}
+  WHERE blob1 = 'request' AND ${within} GROUP BY account`,
+  );
+  const meters: CostMeter[] = costRows.map((r) => ({
+    account: String(r.account ?? ""),
+    library: String(r.library ?? ""),
+    points: Number(r.points) || 0,
+    doCalls: Number(r.do_calls) || 0,
+    rowsRead: Number(r.rows_read) || 0,
+    rowsWritten: Number(r.rows_written) || 0,
+    ms: Number(r.ms) || 0,
+  }));
+  const requests: Record<string, number> = {};
+  for (const r of requestRows) requests[String(r.account ?? "")] = Number(r.n) || 0;
+
+  // Library owners and stored bytes by owner (one SELECT), and the operator's handle.
+  const libs = await d1Raw(
+    d.d1.id,
+    `SELECT l.id, COALESCE(u.handle, ''), l.storage_bytes FROM libraries l LEFT JOIN users u ON u.id = l.owner`,
+  );
+  const owners: Record<string, string> = {};
+  const storage: Record<string, number> = {};
+  for (const r of libs.rows) {
+    const handle = String(r[1]);
+    if (!handle) continue;
+    owners[String(r[0])] = handle;
+    storage[handle] = (storage[handle] ?? 0) + (Number(r[2]) || 0);
+  }
+  let operator = values.operator?.replace(/^@/, "");
+  const operatorEmail = process.env.OPERATOR_EMAIL;
+  if (!operator && operatorEmail) {
+    const op = await d1Raw(
+      d.d1.id,
+      `SELECT handle FROM users WHERE email = ${q(operatorEmail.toLowerCase())}`,
+    );
+    operator = op.rows[0] ? String(op.rows[0][0]) : undefined;
+  }
+  accounts = accountCosts({ meters, requests, owners, storage, agent, operator }, report);
+  if (!operator) {
+    report.notes.push(
+      "No operator account given (--operator or OPERATOR_EMAIL): cost per active account counts every account.",
+    );
+  }
+} catch (e) {
+  accountsError = String(e);
+  report.notes.push(`Cost per account unavailable: ${accountsError}`);
+}
+
+if (values.json) {
+  console.log(JSON.stringify({ ...report, accounts }, null, 2));
+} else {
+  console.log(reportText(report));
+  if (accounts) console.log(accountsText(accounts));
+}

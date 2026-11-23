@@ -555,6 +555,235 @@ export function reportText(r: CostReport): string {
   ].join("\n");
 }
 
+/**
+ * One row of `cost` points from Analytics Engine, summed (sample interval weighted) per index1 and
+ * library (usage.ts): the account a call was metered under, or "" for the object's own read flush.
+ */
+export interface CostMeter {
+  account: string;
+  library: string;
+  /** Points: metered calls (a read flush's point is not a call). */
+  points: number;
+  doCalls: number;
+  rowsRead: number;
+  rowsWritten: number;
+  /** The Worker's round trips to the object, ms: the share of DO duration each account takes. */
+  ms: number;
+}
+
+export interface AccountInputs {
+  meters: CostMeter[];
+  /** `request` points per account handle: Workers requests, and who was active. */
+  requests: Record<string, number>;
+  /** Library id to its owner's handle (D1 `libraries`, `users`). */
+  owners: Record<string, string>;
+  /** Stored bytes per owner handle (D1 `libraries.storage_bytes`, as last recorded). */
+  storage: Record<string, number>;
+  agent: AgentSpend[];
+  /** The operator's handle: kept in the table, left out of cost per active account. */
+  operator?: string;
+}
+
+export interface AccountCost {
+  handle: string;
+  /** Metered calls, DO calls billed as requests, rows, Workers requests and stored bytes. */
+  calls: number;
+  doCalls: number;
+  rowsRead: number;
+  rowsWritten: number;
+  requests: number;
+  storageBytes: number;
+  /** The account's share of DO duration, GB-s (by round-trip ms). */
+  durationGbs: number;
+  /** Cloudflare at list price with nothing included: so far and projected. */
+  cloudflareList: number;
+  cloudflareProjected: number;
+  /** @tempra, already at list price: so far and projected. */
+  agentUsd: number;
+  agentProjected: number;
+  /** Cloudflare and @tempra: so far and projected. */
+  list: number;
+  projected: number;
+  /**
+   * Its share of the projected bill: the Cloudflare cost after included amounts, split by this
+   * account's share of the projected list cost, plus its @tempra.
+   */
+  shareOfBill: number;
+  active: boolean;
+  operator: boolean;
+}
+
+export interface AccountReport {
+  accounts: AccountCost[];
+  /** What no account takes: the rest of the report's Cloudflare total (cron, sweep, mail, R2, KV). */
+  unattributed: { cloudflareProjectedList: number; shareOfBill: number };
+  /** Accounts with at least one `request` point this month, the operator's left out. */
+  active: number;
+  /** Projected list cost (Cloudflare and @tempra) of every account but the operator's, per active one. */
+  perActive: number | null;
+  /** The same with the bill's after-included cost. */
+  perActiveBill: number | null;
+}
+
+const listOf = (key: CostKey, usage: number) => costOf(PRICES[key], usage).list;
+
+/**
+ * Cost per account (TEMPRA-236): each account's metered calls priced at list with nothing included
+ * (the bill at today's scale is nearly all inside the plan's included amounts, so it says little
+ * per account), plus its share of the real bill. `r` is the deployment's report for the same window,
+ * for DO duration (shared by round-trip ms) and the totals the shares split.
+ */
+export function accountCosts(input: AccountInputs, r: CostReport): AccountReport {
+  const w = r.window;
+  const by = new Map<string, AccountCost>();
+  const unattributedHandle = "";
+  const row = (handle: string): AccountCost => {
+    let a = by.get(handle);
+    if (!a) {
+      a = {
+        handle,
+        calls: 0,
+        doCalls: 0,
+        rowsRead: 0,
+        rowsWritten: 0,
+        requests: 0,
+        storageBytes: 0,
+        durationGbs: 0,
+        cloudflareList: 0,
+        cloudflareProjected: 0,
+        agentUsd: 0,
+        agentProjected: 0,
+        list: 0,
+        projected: 0,
+        shareOfBill: 0,
+        active: false,
+        operator: handle !== "" && handle === input.operator,
+      };
+      by.set(handle, a);
+    }
+    return a;
+  };
+
+  // Calls: a library id stands in for an account on grants from before A1, and a read flush has
+  // no account at all; both belong to the library's owner.
+  let msTotal = 0;
+  for (const m of input.meters) {
+    const flush = m.account === "";
+    const handle = flush
+      ? (input.owners[m.library] ?? unattributedHandle)
+      : (input.owners[m.account] ?? m.account);
+    const a = row(handle);
+    a.rowsRead += m.rowsRead;
+    a.rowsWritten += m.rowsWritten;
+    if (!flush) {
+      // The flush is the object's own timer, not a request to it.
+      a.calls += m.points;
+      a.doCalls += m.doCalls;
+    }
+    a.durationGbs += m.ms;
+    msTotal += m.ms;
+  }
+  for (const [handle, n] of Object.entries(input.requests)) {
+    const a = row(input.owners[handle] ?? handle);
+    a.requests += n;
+    if (n > 0 && a.handle !== unattributedHandle) a.active = true;
+  }
+  for (const [handle, bytes] of Object.entries(input.storage)) row(handle).storageBytes += bytes;
+  for (const s of input.agent) {
+    const a = row(s.handle === "?" ? unattributedHandle : s.handle);
+    a.agentUsd += s.micro / 1e6;
+  }
+
+  const gbs = r.lines.find((l) => l.key === "do.duration_gbs")?.usage ?? 0;
+  for (const a of by.values()) {
+    a.durationGbs = msTotal > 0 ? (gbs * a.durationGbs) / msTotal : 0;
+    const counted =
+      listOf("do.rows_written", a.rowsWritten) +
+      listOf("do.rows_read", a.rowsRead) +
+      listOf("do.requests", a.doCalls) +
+      listOf("workers.requests", a.requests) +
+      listOf("do.duration_gbs", a.durationGbs);
+    // Storage is a level: a whole GB-month at the month's end, its elapsed share so far.
+    const storageMonth = listOf("do.storage_gb_month", a.storageBytes / GB);
+    a.cloudflareList = counted + (storageMonth * Math.min(w.elapsed, w.days)) / w.days;
+    a.cloudflareProjected = projected(counted, w) + storageMonth;
+    a.agentProjected = projected(a.agentUsd, w);
+    a.list = a.cloudflareList + a.agentUsd;
+    a.projected = a.cloudflareProjected + a.agentProjected;
+  }
+
+  const unattributed = by.get(unattributedHandle);
+  by.delete(unattributedHandle);
+  const accounts = [...by.values()];
+  const attributedList = accounts.reduce((t, a) => t + a.cloudflareProjected, 0);
+  const totalList = r.cloudflare.projectedList;
+  const split = (list: number) => (totalList > 0 ? (r.cloudflare.projected * list) / totalList : 0);
+  for (const a of accounts) a.shareOfBill = split(a.cloudflareProjected) + a.agentProjected;
+  const restList = totalList - attributedList;
+  accounts.sort((a, b) => b.projected - a.projected || a.handle.localeCompare(b.handle));
+
+  const others = accounts.filter((a) => !a.operator);
+  const active = others.filter((a) => a.active).length;
+  const sum = (f: (a: AccountCost) => number) => others.reduce((t, a) => t + f(a), 0);
+  return {
+    accounts,
+    unattributed: {
+      cloudflareProjectedList: restList,
+      shareOfBill: split(restList) + (unattributed?.agentProjected ?? 0),
+    },
+    active,
+    perActive: active ? sum((a) => a.projected) / active : null,
+    perActiveBill: active ? sum((a) => a.shareOfBill) / active : null,
+  };
+}
+
+/** The per-account table under the report, most expensive first. */
+export function accountsText(a: AccountReport, limit = Number.POSITIVE_INFINITY): string {
+  const header = [
+    "account",
+    "calls",
+    "rows written",
+    "rows read",
+    "@tempra",
+    "list",
+    "projected",
+    "share of bill",
+  ];
+  const rows = a.accounts
+    .slice(0, limit)
+    .map((x) => [
+      `@${x.handle}${x.operator ? " (operator)" : ""}`,
+      amount(x.calls),
+      amount(x.rowsWritten),
+      amount(x.rowsRead),
+      usd(x.agentUsd),
+      usd(x.list),
+      usd(x.projected),
+      usd(x.shareOfBill),
+    ]);
+  const widths = header.map((h, i) =>
+    Math.max(h.length, ...rows.map((row) => (row[i] ?? "").length)),
+  );
+  const fmt = (row: string[]) =>
+    row.map((c, i) => (i === 0 ? c.padEnd(widths[i] ?? 0) : c.padStart(widths[i] ?? 0))).join("  ");
+  const rest = a.unattributed.cloudflareProjectedList;
+  return [
+    `Cost per account: list price with nothing included (projected to month end), and each account's share of the bill.`,
+    "",
+    fmt(header),
+    ...rows.map(fmt),
+    ...(a.accounts.length > limit ? [`  … ${a.accounts.length - limit} more`] : []),
+    "",
+    rest >= 0
+      ? `Unattributed (cron, sweep, mail, R2, KV and the rest): ${usd(rest)} projected at list, ${usd(a.unattributed.shareOfBill)} of the bill.`
+      : `Unattributed: none; the accounts' metered list cost is ${usd(-rest)} above Cloudflare's own count (metering and Analytics differ).`,
+    a.perActive === null
+      ? "Cost per active account: no active accounts this month."
+      : `Cost per active account: ${usd(a.perActive)} at list, ${usd(a.perActiveBill ?? 0)} of the bill (${a.active} active, the operator's left out).`,
+    "",
+  ].join("\n");
+}
+
 /** @tempra's spend this month (UTC), from D1, for the operator digest. */
 export async function agentSpendThisMonth(
   db: D1Database,
